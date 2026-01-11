@@ -1,0 +1,92 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+release/
+out/
+build/
+*.tsbuildinfo
+
+# Electron specific
+*.asar
+
+# Environment files
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+electron-debug.log*
+pnpm-debug.log*
+lerna-debug.log*
+
+# Editor directories and files
+.idea/
+.vscode/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+*.swp
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+Thumbs.db
+ehthumbs.db
+Desktop.ini
+
+# Test coverage
+coverage/
+.nyc_output/
+
+# Cache directories
+.cache/
+.parcel-cache/
+.eslintcache
+*.tscache
+
+# Temporary files
+tmp/
+temp/
+*.tmp
+*.temp
+
+# Claude Code
+.claude/
+
+# Local development files
+myfiles/
+
+# Package lock files (optional - uncomment if you prefer not to commit)
+# package-lock.json
+# yarn.lock
+# pnpm-lock.yaml
+
+# NAXML test/sample files (don't commit actual POS data)
+*.xml
+!src/**/*.xml
+
+# Electron store config (contains user settings/secrets)
+config.json
+bmad/
+bmad
+NUL
+nul
+NULL
+NUL
+dashboard
