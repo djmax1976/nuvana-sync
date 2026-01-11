@@ -9,7 +9,7 @@
  * @security DB-006: Store-scoped for tenant isolation
  */
 
-import { StoreBasedDAL, type StoreEntity, type PaginatedResult } from './base.dal';
+import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -126,7 +126,11 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
       businessDate: data.business_date,
     });
 
-    return this.findById(shiftId)!;
+    const created = this.findById(shiftId);
+    if (!created) {
+      throw new Error(`Failed to retrieve created shift: ${shiftId}`);
+    }
+    return created;
   }
 
   /**

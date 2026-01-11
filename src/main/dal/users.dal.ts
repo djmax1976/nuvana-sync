@@ -157,7 +157,11 @@ export class UsersDAL extends StoreBasedDAL<User> {
       role: data.role,
     });
 
-    return this.findById(userId)!;
+    const created = this.findById(userId);
+    if (!created) {
+      throw new Error(`Failed to retrieve created user: ${userId}`);
+    }
+    return created;
   }
 
   /**
@@ -306,7 +310,11 @@ export class UsersDAL extends StoreBasedDAL<User> {
       stmt.run(data.role, data.name, data.pin_hash, now, now, data.cloud_user_id);
 
       log.info('User updated from cloud', { cloudUserId: data.cloud_user_id });
-      return this.findByCloudId(data.cloud_user_id)!;
+      const updated = this.findByCloudId(data.cloud_user_id);
+      if (!updated) {
+        throw new Error(`Failed to retrieve updated user from cloud: ${data.cloud_user_id}`);
+      }
+      return updated;
     }
 
     // Create new user
@@ -336,7 +344,11 @@ export class UsersDAL extends StoreBasedDAL<User> {
       cloudUserId: data.cloud_user_id,
     });
 
-    return this.findById(userId)!;
+    const created = this.findById(userId);
+    if (!created) {
+      throw new Error(`Failed to retrieve created user from cloud: ${userId}`);
+    }
+    return created;
   }
 
   /**
@@ -376,7 +388,7 @@ export class UsersDAL extends StoreBasedDAL<User> {
    * @returns User without sensitive fields
    */
   static toSafeUser(user: User): SafeUser {
-    const { pin_hash, ...safeUser } = user;
+    const { pin_hash: _pin_hash, ...safeUser } = user;
     return safeUser;
   }
 }

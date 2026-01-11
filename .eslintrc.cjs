@@ -31,7 +31,10 @@ module.exports = {
   rules: {
     // Relax rules for early-stage development
     // These can be tightened as the project matures
-    '@typescript-eslint/no-unused-vars': ['warn', { argsIgnorePattern: '^_' }],
+    '@typescript-eslint/no-unused-vars': [
+      'warn',
+      { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
+    ],
     '@typescript-eslint/no-explicit-any': 'warn',
     'react/react-in-jsx-scope': 'off', // Not needed with React 17+
     'react/prop-types': 'off', // Using TypeScript for prop validation

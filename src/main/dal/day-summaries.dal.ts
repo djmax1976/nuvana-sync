@@ -117,7 +117,11 @@ export class DaySummariesDAL extends StoreBasedDAL<DaySummary> {
       businessDate: data.business_date,
     });
 
-    return this.findById(summaryId)!;
+    const created = this.findById(summaryId);
+    if (!created) {
+      throw new Error(`Failed to retrieve created day summary: ${summaryId}`);
+    }
+    return created;
   }
 
   /**

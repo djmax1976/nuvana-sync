@@ -99,7 +99,11 @@ export class StoresDAL extends BaseDAL<Store> {
 
     log.info('Store created', { storeId: data.store_id, name: data.name });
 
-    return this.findById(data.store_id)!;
+    const created = this.findById(data.store_id);
+    if (!created) {
+      throw new Error(`Failed to retrieve created store: ${data.store_id}`);
+    }
+    return created;
   }
 
   /**
@@ -199,11 +203,15 @@ export class StoresDAL extends BaseDAL<Store> {
     const existing = this.findById(data.store_id);
 
     if (existing) {
-      return this.update(data.store_id, {
+      const updated = this.update(data.store_id, {
         name: data.name,
         timezone: data.timezone,
         status: data.status,
-      })!;
+      });
+      if (!updated) {
+        throw new Error(`Failed to update store from cloud: ${data.store_id}`);
+      }
+      return updated;
     }
 
     return this.create(data);

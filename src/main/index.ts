@@ -14,11 +14,7 @@ import { FileWatcherService } from './services/file-watcher.service';
 import { ConfigService } from './services/config.service';
 import { SyncService } from './services/sync.service';
 import { createLogger } from './utils/logger';
-import {
-  type NuvanaSyncConfig,
-  safeValidateConfigUpdate,
-  safeValidateConfig,
-} from '../shared/types/config.types';
+import { safeValidateConfigUpdate, safeValidateConfig } from '../shared/types/config.types';
 
 const log = createLogger('main');
 
@@ -32,14 +28,13 @@ if (!gotTheLock) {
   let mainWindow: BrowserWindow | null = null;
   let tray: Tray | null = null;
   let fileWatcher: FileWatcherService | null = null;
-  let configService: ConfigService;
   let syncService: SyncService | null = null;
 
   // Initialize services
-  configService = new ConfigService();
+  const configService = new ConfigService();
   log.info('Application starting');
 
-  function createWindow(): void {
+  const createWindow = (): void => {
     log.info('Creating main window');
 
     mainWindow = new BrowserWindow({
@@ -82,9 +77,9 @@ if (!gotTheLock) {
       mainWindow.loadFile(join(__dirname, '../renderer/index.html'));
       log.info('Loaded production build');
     }
-  }
+  };
 
-  function createTray(): void {
+  const createTray = (): void => {
     log.info('Creating system tray');
 
     // Create tray icon (use a placeholder for now)
@@ -136,9 +131,9 @@ if (!gotTheLock) {
     tray.on('double-click', () => {
       mainWindow?.show();
     });
-  }
+  };
 
-  function startFileWatcher(): void {
+  const startFileWatcher = (): void => {
     const config = configService.getConfig();
 
     if (!config.watchPath || !config.apiUrl || !config.apiKey) {
@@ -177,12 +172,12 @@ if (!gotTheLock) {
     });
 
     fileWatcher.start();
-  }
+  };
 
   /**
    * SEC-014: Validate IPC input before processing
    */
-  function setupIpcHandlers(): void {
+  const setupIpcHandlers = (): void => {
     log.info('Setting up IPC handlers');
 
     // Get current config
@@ -326,7 +321,7 @@ if (!gotTheLock) {
     });
 
     log.info('IPC handlers registered');
-  }
+  };
 
   // App lifecycle
   app.whenReady().then(() => {

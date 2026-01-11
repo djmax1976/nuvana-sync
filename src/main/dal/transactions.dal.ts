@@ -265,7 +265,10 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
         }
       }
 
-      const transaction = this.findById(transactionId)!;
+      const transaction = this.findById(transactionId);
+      if (!transaction) {
+        throw new Error(`Failed to retrieve created transaction: ${transactionId}`);
+      }
 
       log.info('Transaction created', {
         transactionId,

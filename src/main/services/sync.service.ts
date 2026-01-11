@@ -15,7 +15,6 @@ import {
   type UploadPayload,
   type UploadResponse,
   type TestConnectionResponse,
-  validateUploadPayload,
   safeValidateUploadPayload,
   validateUploadResponse,
   TestConnectionResponseSchema,

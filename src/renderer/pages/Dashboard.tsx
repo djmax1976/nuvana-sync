@@ -224,7 +224,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Stats */}
         <div className="bg-white rounded-xl p-6 border border-gray-200 mb-6">
-          <h2 className="text-sm font-medium text-gray-500 mb-4">Today's Activity</h2>
+          <h2 className="text-sm font-medium text-gray-500 mb-4">Today&apos;s Activity</h2>
           <div className="grid grid-cols-2 gap-6">
             <div>
               <div className="text-3xl font-bold text-gray-900">{stats.filesProcessed}</div>

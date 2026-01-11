@@ -32,7 +32,7 @@ export const ApiKeySchema = z
   .string()
   .min(1, 'API Key is required')
   .max(500, 'API Key too long')
-  .regex(/^[a-zA-Z0-9_\-\.]+$/, 'API Key contains invalid characters');
+  .regex(/^[a-zA-Z0-9_\-.]+$/, 'API Key contains invalid characters');
 
 /**
  * Store ID validation schema

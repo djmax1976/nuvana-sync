@@ -9,7 +9,7 @@
  * @security DB-001: ORM/prepared statement patterns
  */
 
-import { getDatabase, type DatabaseInstance } from './database.service';
+import { getDatabase } from './database.service';
 import { createLogger } from '../utils/logger';
 import fs from 'fs';
 import path from 'path';

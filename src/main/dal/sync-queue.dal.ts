@@ -143,7 +143,11 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       operation: data.operation,
     });
 
-    return this.findById(id)!;
+    const created = this.findById(id);
+    if (!created) {
+      throw new Error(`Failed to retrieve created sync queue item: ${id}`);
+    }
+    return created;
   }
 
   /**

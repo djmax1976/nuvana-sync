@@ -20,7 +20,6 @@ import {
   type FileRecord,
   type SyncStats,
   type NAXMLDocumentType,
-  NAXMLDocumentTypeSchema,
 } from '../../shared/types/sync.types';
 import type { SyncService } from './sync.service';
 

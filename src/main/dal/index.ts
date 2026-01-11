@@ -90,3 +90,66 @@ export {
   type CreateProcessedFileData,
   type FileProcessingStats,
 } from './processed-files.dal';
+
+// Movement DALs (NAXML data)
+export {
+  FuelGradeMovementsDAL,
+  fuelGradeMovementsDAL,
+  type FuelGradeMovement,
+  type CreateFuelGradeMovementData,
+  type NAXMLFGMInput,
+  type FuelGradeAggregation,
+} from './fuel-grade-movements.dal';
+
+export {
+  FuelProductMovementsDAL,
+  fuelProductMovementsDAL,
+  type FuelProductMovement,
+  type CreateFuelProductMovementData,
+  type NAXMLFPMInput,
+} from './fuel-product-movements.dal';
+
+export {
+  MiscellaneousSummariesDAL,
+  miscellaneousSummariesDAL,
+  type MiscellaneousSummary,
+  type CreateMiscellaneousSummaryData,
+  type NAXMLMSMInput,
+  type SummaryTypeAggregation,
+} from './miscellaneous-summaries.dal';
+
+export {
+  MerchandiseMovementsDAL,
+  merchandiseMovementsDAL,
+  type MerchandiseMovement,
+  type CreateMerchandiseMovementData,
+  type NAXMLMCMInput,
+  type DepartmentAggregation,
+} from './merchandise-movements.dal';
+
+export {
+  TaxLevelMovementsDAL,
+  taxLevelMovementsDAL,
+  type TaxLevelMovement,
+  type CreateTaxLevelMovementData,
+  type NAXMLTLMInput,
+  type TaxLevelAggregation,
+} from './tax-level-movements.dal';
+
+export {
+  ItemSalesMovementsDAL,
+  itemSalesMovementsDAL,
+  type ItemSalesMovement,
+  type CreateItemSalesMovementData,
+  type NAXMLISMInput,
+  type TopSellingItem,
+} from './item-sales-movements.dal';
+
+export {
+  TenderProductMovementsDAL,
+  tenderProductMovementsDAL,
+  type TenderProductMovement,
+  type CreateTenderProductMovementData,
+  type NAXMLTPMInput,
+  type TenderAggregation,
+} from './tender-product-movements.dal';

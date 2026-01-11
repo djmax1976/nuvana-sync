@@ -115,7 +115,7 @@ const FilePatternSchema = z
   .string()
   .min(1, 'File pattern cannot be empty')
   .max(100, 'File pattern too long')
-  .regex(/^[\w\*\?\.\-\[\]]+$/i, 'Invalid file pattern characters');
+  .regex(/^[\w*?.\-[\]]+$/i, 'Invalid file pattern characters');
 
 /**
  * Path validation (security: prevent path traversal)
@@ -322,7 +322,7 @@ const CronExpressionSchema = z
   .min(9, 'Cron expression too short')
   .max(50, 'Cron expression too long')
   .regex(
-    /^(\*|\*\/[0-9]+|[0-9,\-\/]+)\s+(\*|\*\/[0-9]+|[0-9,\-\/]+)\s+(\*|\*\/[0-9]+|[0-9,\-\/]+)\s+(\*|\*\/[0-9]+|[0-9,\-\/]+)\s+(\*|\*\/[0-9]+|[0-9,\-\/]+)$/,
+    /^(\*|\*\/[0-9]+|[0-9,\-/]+)\s+(\*|\*\/[0-9]+|[0-9,\-/]+)\s+(\*|\*\/[0-9]+|[0-9,\-/]+)\s+(\*|\*\/[0-9]+|[0-9,\-/]+)\s+(\*|\*\/[0-9]+|[0-9,\-/]+)$/,
     'Invalid cron expression format. Use: minute hour day month weekday'
   );
 
@@ -333,7 +333,7 @@ const TimezoneSchema = z
   .string()
   .min(1, 'Timezone cannot be empty')
   .max(50, 'Timezone too long')
-  .regex(/^[A-Za-z_\/]+$/, 'Invalid timezone format');
+  .regex(/^[A-Za-z_/]+$/, 'Invalid timezone format');
 
 /**
  * Create scheduled export request schema

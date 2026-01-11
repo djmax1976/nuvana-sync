@@ -44,14 +44,14 @@ interface LogEntry {
  */
 const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   // API keys
-  { pattern: /Bearer\s+[a-zA-Z0-9\-_\.]+/gi, replacement: 'Bearer [REDACTED]' },
-  { pattern: /sk_[a-zA-Z0-9_\-\.]+/gi, replacement: '[REDACTED_API_KEY]' },
-  { pattern: /pk_[a-zA-Z0-9_\-\.]+/gi, replacement: '[REDACTED_API_KEY]' },
-  { pattern: /api[_-]?key["\s:=]+[a-zA-Z0-9\-_\.]+/gi, replacement: 'apiKey: "[REDACTED]"' },
+  { pattern: /Bearer\s+[a-zA-Z0-9\-_.]+/gi, replacement: 'Bearer [REDACTED]' },
+  { pattern: /sk_[a-zA-Z0-9_\-.]+/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /pk_[a-zA-Z0-9_\-.]+/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /api[_-]?key["\s:=]+[a-zA-Z0-9\-_.]+/gi, replacement: 'apiKey: "[REDACTED]"' },
   // Passwords
   { pattern: /password["\s:=]+[^\s",}]+/gi, replacement: 'password: "[REDACTED]"' },
   // Tokens
-  { pattern: /token["\s:=]+[a-zA-Z0-9\-_\.]+/gi, replacement: 'token: "[REDACTED]"' },
+  { pattern: /token["\s:=]+[a-zA-Z0-9\-_.]+/gi, replacement: 'token: "[REDACTED]"' },
   // Authorization headers
   { pattern: /Authorization["\s:=]+[^\s",}]+/gi, replacement: 'Authorization: "[REDACTED]"' },
 ];
@@ -182,7 +182,7 @@ class Logger {
 
     // Add redacted context
     if (context) {
-      const { service, ...rest } = context;
+      const { service: _service, ...rest } = context;
       if (Object.keys(rest).length > 0) {
         entry.context = this.redactObject(rest) as Record<string, unknown>;
       }

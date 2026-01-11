@@ -29,7 +29,6 @@ import {
   StoreBasedDAL,
   type BaseEntity,
   type StoreEntity,
-  type PaginatedResult,
 } from '../../src/main/dal/base.dal';
 
 // Test implementations

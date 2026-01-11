@@ -141,7 +141,11 @@ export class ProcessedFilesDAL extends StoreBasedDAL<ProcessedFile> {
       status: data.status || 'SUCCESS',
     });
 
-    return this.findById(id)!;
+    const created = this.findById(id);
+    if (!created) {
+      throw new Error(`Failed to retrieve created processed file record: ${id}`);
+    }
+    return created;
   }
 
   /**
