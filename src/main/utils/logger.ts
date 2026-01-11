@@ -8,13 +8,13 @@
  * @security LM-001: Structured logging with secret redaction
  */
 
-import { app } from "electron";
+import { app } from 'electron';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogContext {
   /** Unique request/operation ID for tracing */
@@ -44,9 +44,9 @@ interface LogEntry {
  */
 const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   // API keys
-  { pattern: /Bearer\s+[a-zA-Z0-9\-_\.]+/gi, replacement: "Bearer [REDACTED]" },
-  { pattern: /sk_[a-zA-Z0-9_\-\.]+/gi, replacement: "[REDACTED_API_KEY]" },
-  { pattern: /pk_[a-zA-Z0-9_\-\.]+/gi, replacement: "[REDACTED_API_KEY]" },
+  { pattern: /Bearer\s+[a-zA-Z0-9\-_\.]+/gi, replacement: 'Bearer [REDACTED]' },
+  { pattern: /sk_[a-zA-Z0-9_\-\.]+/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /pk_[a-zA-Z0-9_\-\.]+/gi, replacement: '[REDACTED_API_KEY]' },
   { pattern: /api[_-]?key["\s:=]+[a-zA-Z0-9\-_\.]+/gi, replacement: 'apiKey: "[REDACTED]"' },
   // Passwords
   { pattern: /password["\s:=]+[^\s",}]+/gi, replacement: 'password: "[REDACTED]"' },
@@ -60,16 +60,16 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
  * Keys to redact from context objects
  */
 const SENSITIVE_KEYS = new Set([
-  "password",
-  "apiKey",
-  "apikey",
-  "api_key",
-  "secret",
-  "token",
-  "authorization",
-  "auth",
-  "credential",
-  "credentials",
+  'password',
+  'apiKey',
+  'apikey',
+  'api_key',
+  'secret',
+  'token',
+  'authorization',
+  'auth',
+  'credential',
+  'credentials',
 ]);
 
 // ============================================================================
@@ -88,10 +88,10 @@ class Logger {
     error: 3,
   };
 
-  constructor(serviceName: string = "nuvana-sync") {
+  constructor(serviceName: string = 'nuvana-sync') {
     this.serviceName = serviceName;
-    this.version = app?.getVersion?.() || "1.0.0";
-    this.minLevel = process.env.NODE_ENV === "development" ? "debug" : "info";
+    this.version = app?.getVersion?.() || '1.0.0';
+    this.minLevel = process.env.NODE_ENV === 'development' ? 'debug' : 'info';
   }
 
   /**
@@ -117,17 +117,17 @@ class Logger {
    */
   private redactObject(obj: unknown, depth: number = 0): unknown {
     // Prevent infinite recursion
-    if (depth > 10) return "[MAX_DEPTH_EXCEEDED]";
+    if (depth > 10) return '[MAX_DEPTH_EXCEEDED]';
 
     if (obj === null || obj === undefined) {
       return obj;
     }
 
-    if (typeof obj === "string") {
+    if (typeof obj === 'string') {
       return this.redactString(obj);
     }
 
-    if (typeof obj === "number" || typeof obj === "boolean") {
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
       return obj;
     }
 
@@ -147,11 +147,11 @@ class Logger {
       return obj.map((item) => this.redactObject(item, depth + 1));
     }
 
-    if (typeof obj === "object") {
+    if (typeof obj === 'object') {
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
         if (SENSITIVE_KEYS.has(key.toLowerCase())) {
-          result[key] = "[REDACTED]";
+          result[key] = '[REDACTED]';
         } else {
           result[key] = this.redactObject(value, depth + 1);
         }
@@ -159,7 +159,7 @@ class Logger {
       return result;
     }
 
-    return "[UNKNOWN_TYPE]";
+    return '[UNKNOWN_TYPE]';
   }
 
   /**
@@ -192,16 +192,16 @@ class Logger {
     const output = JSON.stringify(entry);
 
     switch (level) {
-      case "debug":
+      case 'debug':
         console.debug(output);
         break;
-      case "info":
+      case 'info':
         console.info(output);
         break;
-      case "warn":
+      case 'warn':
         console.warn(output);
         break;
-      case "error":
+      case 'error':
         console.error(output);
         break;
     }
@@ -211,28 +211,28 @@ class Logger {
    * Log debug message
    */
   debug(message: string, context?: LogContext): void {
-    this.log("debug", message, context);
+    this.log('debug', message, context);
   }
 
   /**
    * Log info message
    */
   info(message: string, context?: LogContext): void {
-    this.log("info", message, context);
+    this.log('info', message, context);
   }
 
   /**
    * Log warning message
    */
   warn(message: string, context?: LogContext): void {
-    this.log("warn", message, context);
+    this.log('warn', message, context);
   }
 
   /**
    * Log error message
    */
   error(message: string, context?: LogContext): void {
-    this.log("error", message, context);
+    this.log('error', message, context);
   }
 
   /**

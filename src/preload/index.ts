@@ -8,18 +8,18 @@
  * @security SEC-014: Type-safe IPC communication
  */
 
-import { contextBridge, ipcRenderer, IpcRendererEvent } from "electron";
+import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron';
 import {
   type SyncStats,
   type FileRecord,
   type SyncStatusEvent,
   SyncStatusEventSchema,
-} from "../shared/types/sync.types";
+} from '../shared/types/sync.types';
 import {
   type NuvanaSyncConfig,
   type NuvanaSyncConfigUpdate,
   type TestConnectionResult,
-} from "../shared/types/config.types";
+} from '../shared/types/config.types';
 
 /**
  * Configuration response from main process
@@ -81,7 +81,7 @@ function validateSyncStatusEvent(data: unknown): SyncStatusEvent | null {
   if (result.success) {
     return result.data;
   }
-  console.error("[preload] Invalid sync status event received:", result.error);
+  console.error('[preload] Invalid sync status event received:', result.error);
   return null;
 }
 
@@ -89,15 +89,15 @@ function validateSyncStatusEvent(data: unknown): SyncStatusEvent | null {
  * SEC-014: Validate navigation path
  */
 function validateNavigationPath(path: unknown): string | null {
-  if (typeof path !== "string") {
-    console.error("[preload] Invalid navigation path received:", path);
+  if (typeof path !== 'string') {
+    console.error('[preload] Invalid navigation path received:', path);
     return null;
   }
 
   // SEC-014: Only allow known navigation paths
-  const allowedPaths = ["/settings", "/dashboard", "/setup"];
+  const allowedPaths = ['/settings', '/dashboard', '/setup'];
   if (!allowedPaths.includes(path)) {
-    console.error("[preload] Unknown navigation path:", path);
+    console.error('[preload] Unknown navigation path:', path);
     return null;
   }
 
@@ -105,27 +105,24 @@ function validateNavigationPath(path: unknown): string | null {
 }
 
 // Expose the API to the renderer
-contextBridge.exposeInMainWorld("nuvanaSyncAPI", {
+contextBridge.exposeInMainWorld('nuvanaSyncAPI', {
   // Config
-  getConfig: (): Promise<ConfigResponse> => ipcRenderer.invoke("config:get"),
+  getConfig: (): Promise<ConfigResponse> => ipcRenderer.invoke('config:get'),
 
   saveConfig: (config: NuvanaSyncConfigUpdate): Promise<SaveConfigResult> =>
-    ipcRenderer.invoke("config:save", config),
+    ipcRenderer.invoke('config:save', config),
 
   testConnection: (config: Partial<NuvanaSyncConfig>): Promise<TestConnectionResult> =>
-    ipcRenderer.invoke("config:test-connection", config),
+    ipcRenderer.invoke('config:test-connection', config),
 
   // Sync
-  getStats: (): Promise<SyncStats> => ipcRenderer.invoke("sync:get-stats"),
+  getStats: (): Promise<SyncStats> => ipcRenderer.invoke('sync:get-stats'),
 
-  getRecentFiles: (): Promise<FileRecord[]> =>
-    ipcRenderer.invoke("sync:get-recent-files"),
+  getRecentFiles: (): Promise<FileRecord[]> => ipcRenderer.invoke('sync:get-recent-files'),
 
-  triggerSync: (): Promise<TriggerSyncResult> =>
-    ipcRenderer.invoke("sync:trigger"),
+  triggerSync: (): Promise<TriggerSyncResult> => ipcRenderer.invoke('sync:trigger'),
 
-  togglePause: (): Promise<TogglePauseResult> =>
-    ipcRenderer.invoke("sync:toggle-pause"),
+  togglePause: (): Promise<TogglePauseResult> => ipcRenderer.invoke('sync:toggle-pause'),
 
   // Events - with validation
   onSyncStatus: (callback: (data: SyncStatusEvent) => void): (() => void) => {
@@ -135,8 +132,8 @@ contextBridge.exposeInMainWorld("nuvanaSyncAPI", {
         callback(validated);
       }
     };
-    ipcRenderer.on("sync-status", handler);
-    return () => ipcRenderer.removeListener("sync-status", handler);
+    ipcRenderer.on('sync-status', handler);
+    return () => ipcRenderer.removeListener('sync-status', handler);
   },
 
   onNavigate: (callback: (path: string) => void): (() => void) => {
@@ -146,8 +143,8 @@ contextBridge.exposeInMainWorld("nuvanaSyncAPI", {
         callback(validated);
       }
     };
-    ipcRenderer.on("navigate", handler);
-    return () => ipcRenderer.removeListener("navigate", handler);
+    ipcRenderer.on('navigate', handler);
+    return () => ipcRenderer.removeListener('navigate', handler);
   },
 } satisfies NuvanaSyncAPI);
 

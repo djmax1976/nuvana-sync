@@ -1,0 +1,94 @@
+name: CI
+
+# Trigger: PRs to main and direct pushes to main (if they happen by mistake)
+# Pushes to development do not trigger CI
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+# Cancel in-progress runs for the same PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint, Type Check, Test & Build
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      # Type checking - validates TypeScript compiles correctly
+      # This is critical - catches type errors before they hit production
+      - name: Type check
+        run: npm run typecheck
+
+      # Formatting check - ensures consistent code style
+      - name: Check formatting
+        run: npm run format:check
+
+      # Linting - code quality and security checks
+      # Includes eslint-plugin-security for security vulnerability detection
+      - name: Lint
+        run: npm run lint
+
+      # Unit tests - run tests with coverage report
+      - name: Run tests
+        run: npm run test:run
+
+      # Build validation - ensures Electron app compiles
+      # This builds main process, preload scripts, and renderer
+      - name: Build
+        run: npm run build
+
+      # Dependency audit - check for known vulnerabilities
+      # Using --audit-level=high to fail only on high/critical issues
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+  # Security scanning with Semgrep SAST
+  security:
+    name: Semgrep Security Scan
+    runs-on: ubuntu-latest
+
+    permissions:
+      contents: read
+      security-events: write # Required for uploading SARIF results
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Run Semgrep SAST
+        uses: semgrep/semgrep-action@v1
+        with:
+          config: >-
+            p/javascript
+            p/typescript
+            p/nodejs
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten
+        env:
+          SEMGREP_RULES: >-
+            p/javascript
+            p/typescript
+            p/nodejs
+            p/security-audit
+            p/secrets
+            p/owasp-top-ten

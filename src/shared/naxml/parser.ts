@@ -8,7 +8,7 @@
  * @security XXE prevention via disabled external entities
  */
 
-import { XMLParser, XMLValidator } from "fast-xml-parser";
+import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import {
   DEFAULT_NAXML_PARSER_OPTIONS,
   type NAXMLDocument,
@@ -60,43 +60,43 @@ import {
   type NAXMLFuelProductMovementData,
   type NAXMLFPMDetail,
   type NAXMLFPMNonResettableTotals,
-} from "./types";
+} from './types';
 import {
   NAXMLFuelGradeMovementDataSchema,
   NAXMLMiscellaneousSummaryMovementDataSchema,
   NAXMLFuelProductMovementDataSchema,
-} from "./schema";
+} from './schema';
 
 // ============================================================================
 // Error Codes
 // ============================================================================
 
 export const NAXML_PARSER_ERROR_CODES = {
-  INVALID_XML: "NAXML_INVALID_XML",
-  UNSUPPORTED_VERSION: "NAXML_UNSUPPORTED_VERSION",
-  UNKNOWN_DOCUMENT_TYPE: "NAXML_UNKNOWN_DOCUMENT_TYPE",
-  MISSING_REQUIRED_FIELD: "NAXML_MISSING_REQUIRED_FIELD",
-  INVALID_FIELD_VALUE: "NAXML_INVALID_FIELD_VALUE",
-  PARSE_ERROR: "NAXML_PARSE_ERROR",
+  INVALID_XML: 'NAXML_INVALID_XML',
+  UNSUPPORTED_VERSION: 'NAXML_UNSUPPORTED_VERSION',
+  UNKNOWN_DOCUMENT_TYPE: 'NAXML_UNKNOWN_DOCUMENT_TYPE',
+  MISSING_REQUIRED_FIELD: 'NAXML_MISSING_REQUIRED_FIELD',
+  INVALID_FIELD_VALUE: 'NAXML_INVALID_FIELD_VALUE',
+  PARSE_ERROR: 'NAXML_PARSE_ERROR',
   // FGM-specific error codes
-  FGM_MISSING_FUEL_GRADE_ID: "FGM_MISSING_FUEL_GRADE_ID",
-  FGM_INVALID_TENDER_CODE: "FGM_INVALID_TENDER_CODE",
-  FGM_INVALID_SALES_VOLUME: "FGM_INVALID_SALES_VOLUME",
-  FGM_INVALID_SALES_AMOUNT: "FGM_INVALID_SALES_AMOUNT",
-  FGM_INVALID_REPORT_PERIOD: "FGM_INVALID_REPORT_PERIOD",
-  FGM_MISSING_MOVEMENT_HEADER: "FGM_MISSING_MOVEMENT_HEADER",
-  FGM_VALIDATION_FAILED: "FGM_VALIDATION_FAILED",
+  FGM_MISSING_FUEL_GRADE_ID: 'FGM_MISSING_FUEL_GRADE_ID',
+  FGM_INVALID_TENDER_CODE: 'FGM_INVALID_TENDER_CODE',
+  FGM_INVALID_SALES_VOLUME: 'FGM_INVALID_SALES_VOLUME',
+  FGM_INVALID_SALES_AMOUNT: 'FGM_INVALID_SALES_AMOUNT',
+  FGM_INVALID_REPORT_PERIOD: 'FGM_INVALID_REPORT_PERIOD',
+  FGM_MISSING_MOVEMENT_HEADER: 'FGM_MISSING_MOVEMENT_HEADER',
+  FGM_VALIDATION_FAILED: 'FGM_VALIDATION_FAILED',
   // MSM-specific error codes
-  MSM_MISSING_MOVEMENT_HEADER: "MSM_MISSING_MOVEMENT_HEADER",
-  MSM_MISSING_SUMMARY_CODES: "MSM_MISSING_SUMMARY_CODES",
-  MSM_INVALID_TENDER_CODE: "MSM_INVALID_TENDER_CODE",
-  MSM_VALIDATION_FAILED: "MSM_VALIDATION_FAILED",
+  MSM_MISSING_MOVEMENT_HEADER: 'MSM_MISSING_MOVEMENT_HEADER',
+  MSM_MISSING_SUMMARY_CODES: 'MSM_MISSING_SUMMARY_CODES',
+  MSM_INVALID_TENDER_CODE: 'MSM_INVALID_TENDER_CODE',
+  MSM_VALIDATION_FAILED: 'MSM_VALIDATION_FAILED',
   // FPM-specific error codes
-  FPM_MISSING_MOVEMENT_HEADER: "FPM_MISSING_MOVEMENT_HEADER",
-  FPM_MISSING_PRODUCT_ID: "FPM_MISSING_PRODUCT_ID",
-  FPM_MISSING_POSITION_ID: "FPM_MISSING_POSITION_ID",
-  FPM_INVALID_METER_READING: "FPM_INVALID_METER_READING",
-  FPM_VALIDATION_FAILED: "FPM_VALIDATION_FAILED",
+  FPM_MISSING_MOVEMENT_HEADER: 'FPM_MISSING_MOVEMENT_HEADER',
+  FPM_MISSING_PRODUCT_ID: 'FPM_MISSING_PRODUCT_ID',
+  FPM_MISSING_POSITION_ID: 'FPM_MISSING_POSITION_ID',
+  FPM_INVALID_METER_READING: 'FPM_INVALID_METER_READING',
+  FPM_VALIDATION_FAILED: 'FPM_VALIDATION_FAILED',
 } as const;
 
 export type NAXMLParserErrorCode =
@@ -113,13 +113,9 @@ export class NAXMLParserError extends Error {
   readonly code: NAXMLParserErrorCode;
   readonly details?: Record<string, unknown>;
 
-  constructor(
-    code: NAXMLParserErrorCode,
-    message: string,
-    details?: Record<string, unknown>,
-  ) {
+  constructor(code: NAXMLParserErrorCode, message: string, details?: Record<string, unknown>) {
     super(message);
-    this.name = "NAXMLParserError";
+    this.name = 'NAXMLParserError';
     this.code = code;
     this.details = details;
     Object.setPrototypeOf(this, NAXMLParserError.prototype);
@@ -140,9 +136,9 @@ function createSecureXMLParser(options: NAXMLParserOptions): XMLParser {
     // Note: fast-xml-parser does not support external entities by default,
     // but we explicitly configure it for defense in depth
     ignoreAttributes: false,
-    attributeNamePrefix: "@_",
-    textNodeName: "#text",
-    cdataPropName: "#cdata",
+    attributeNamePrefix: '@_',
+    textNodeName: '#text',
+    cdataPropName: '#cdata',
     // Parsing options - keep attributes as strings to preserve leading zeros in codes (e.g., Code="001")
     parseAttributeValue: false,
     // Keep tag values as strings to preserve leading zeros in codes (e.g., "001")
@@ -155,8 +151,8 @@ function createSecureXMLParser(options: NAXMLParserOptions): XMLParser {
     // Tag name transformation
     tagValueProcessor: (_tagName: string, tagValue: string) => {
       // Handle boolean values
-      if (tagValue === "Y" || tagValue === "true") return true;
-      if (tagValue === "N" || tagValue === "false") return false;
+      if (tagValue === 'Y' || tagValue === 'true') return true;
+      if (tagValue === 'N' || tagValue === 'false') return false;
       return tagValue;
     },
   });
@@ -168,27 +164,27 @@ function createSecureXMLParser(options: NAXMLParserOptions): XMLParser {
  */
 const ARRAY_ELEMENT_NAMES = [
   // Standard NAXML elements
-  "LineItem",
-  "Tender",
-  "Tax",
-  "Department",
-  "Item",
-  "Employee",
-  "TaxRate",
-  "ModifierCode",
-  "Error",
+  'LineItem',
+  'Tender',
+  'Tax',
+  'Department',
+  'Item',
+  'Employee',
+  'TaxRate',
+  'ModifierCode',
+  'Error',
   // Movement Report elements (FGM, MSM, FPM, TLM, MCM, ISM, TPM)
-  "FGMDetail",
-  "FGMTenderSummary",
-  "FGMPositionSummary",
-  "FGMPriceTierSummary",
-  "FPMDetail",
-  "FPMNonResettableTotals",
-  "MSMDetail",
-  "TLMDetail",
-  "MCMDetail",
-  "ISMDetail",
-  "TPMDetail",
+  'FGMDetail',
+  'FGMTenderSummary',
+  'FGMPositionSummary',
+  'FGMPriceTierSummary',
+  'FPMDetail',
+  'FPMNonResettableTotals',
+  'MSMDetail',
+  'TLMDetail',
+  'MCMDetail',
+  'ISMDetail',
+  'TPMDetail',
 ];
 
 // ============================================================================
@@ -223,8 +219,8 @@ export class NAXMLParser {
     if (validationResult !== true) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.INVALID_XML,
-        `Invalid XML structure: ${validationResult.err?.msg || "Unknown error"}`,
-        { line: validationResult.err?.line, col: validationResult.err?.col },
+        `Invalid XML structure: ${validationResult.err?.msg || 'Unknown error'}`,
+        { line: validationResult.err?.line, col: validationResult.err?.col }
       );
     }
 
@@ -236,7 +232,7 @@ export class NAXMLParser {
     if (!documentType) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.UNKNOWN_DOCUMENT_TYPE,
-        "Unable to determine NAXML document type from root element",
+        'Unable to determine NAXML document type from root element'
       );
     }
 
@@ -247,10 +243,7 @@ export class NAXMLParser {
     const data = this.parseDocumentData<T>(parsed, documentType);
 
     // Extract timestamp and store ID
-    const { timestamp, storeLocationId } = this.extractMetadata(
-      parsed,
-      documentType,
-    );
+    const { timestamp, storeLocationId } = this.extractMetadata(parsed, documentType);
 
     return {
       documentType,
@@ -322,20 +315,16 @@ export class NAXMLParser {
    * console.log(result.data.fgmDetails.length);
    * ```
    */
-  parseFuelGradeMovement(
-    xml: string,
-  ): NAXMLDocument<NAXMLFuelGradeMovementData> {
+  parseFuelGradeMovement(xml: string): NAXMLDocument<NAXMLFuelGradeMovementData> {
     const result = this.parse<NAXMLFuelGradeMovementData>(xml);
 
     // Validate with Zod schema
-    const validationResult = NAXMLFuelGradeMovementDataSchema.safeParse(
-      result.data,
-    );
+    const validationResult = NAXMLFuelGradeMovementDataSchema.safeParse(result.data);
     if (!validationResult.success) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_VALIDATION_FAILED,
         `FGM validation failed: ${validationResult.error.message}`,
-        { zodErrors: validationResult.error.issues },
+        { zodErrors: validationResult.error.issues }
       );
     }
 
@@ -366,18 +355,17 @@ export class NAXMLParser {
    * ```
    */
   parseMiscellaneousSummaryMovement(
-    xml: string,
+    xml: string
   ): NAXMLDocument<NAXMLMiscellaneousSummaryMovementData> {
     const result = this.parse<NAXMLMiscellaneousSummaryMovementData>(xml);
 
     // Validate with Zod schema
-    const validationResult =
-      NAXMLMiscellaneousSummaryMovementDataSchema.safeParse(result.data);
+    const validationResult = NAXMLMiscellaneousSummaryMovementDataSchema.safeParse(result.data);
     if (!validationResult.success) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.MSM_VALIDATION_FAILED,
         `MSM validation failed: ${validationResult.error.message}`,
-        { zodErrors: validationResult.error.issues },
+        { zodErrors: validationResult.error.issues }
       );
     }
 
@@ -407,20 +395,16 @@ export class NAXMLParser {
    * console.log(pos1Reading?.fuelProductNonResettableVolumeNumber);
    * ```
    */
-  parseFuelProductMovement(
-    xml: string,
-  ): NAXMLDocument<NAXMLFuelProductMovementData> {
+  parseFuelProductMovement(xml: string): NAXMLDocument<NAXMLFuelProductMovementData> {
     const result = this.parse<NAXMLFuelProductMovementData>(xml);
 
     // Validate with Zod schema
-    const validationResult = NAXMLFuelProductMovementDataSchema.safeParse(
-      result.data,
-    );
+    const validationResult = NAXMLFuelProductMovementDataSchema.safeParse(result.data);
     if (!validationResult.success) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_VALIDATION_FAILED,
         `FPM validation failed: ${validationResult.error.message}`,
-        { zodErrors: validationResult.error.issues },
+        { zodErrors: validationResult.error.issues }
       );
     }
 
@@ -439,10 +423,10 @@ export class NAXMLParser {
     if (structureResult !== true) {
       errors.push({
         code: NAXML_PARSER_ERROR_CODES.INVALID_XML,
-        message: structureResult.err?.msg || "Invalid XML structure",
+        message: structureResult.err?.msg || 'Invalid XML structure',
         line: structureResult.err?.line,
         column: structureResult.err?.col,
-        severity: "critical",
+        severity: 'critical',
       });
       return { isValid: false, errors, warnings };
     }
@@ -455,8 +439,8 @@ export class NAXMLParser {
       if (!documentType) {
         errors.push({
           code: NAXML_PARSER_ERROR_CODES.UNKNOWN_DOCUMENT_TYPE,
-          message: "Unable to determine NAXML document type",
-          severity: "critical",
+          message: 'Unable to determine NAXML document type',
+          severity: 'critical',
         });
         return { isValid: false, errors, warnings };
       }
@@ -464,11 +448,11 @@ export class NAXMLParser {
       const version = this.extractVersion(parsed, documentType);
 
       // Version check
-      if (!["3.2", "3.4", "4.0"].includes(version)) {
+      if (!['3.2', '3.4', '4.0'].includes(version)) {
         warnings.push({
           code: NAXML_PARSER_ERROR_CODES.UNSUPPORTED_VERSION,
           message: `NAXML version ${version} may not be fully supported`,
-          severity: "error",
+          severity: 'error',
         });
       }
 
@@ -482,8 +466,8 @@ export class NAXMLParser {
     } catch (error) {
       errors.push({
         code: NAXML_PARSER_ERROR_CODES.PARSE_ERROR,
-        message: error instanceof Error ? error.message : "Unknown parse error",
-        severity: "critical",
+        message: error instanceof Error ? error.message : 'Unknown parse error',
+        severity: 'critical',
       });
       return { isValid: false, errors, warnings };
     }
@@ -497,41 +481,35 @@ export class NAXMLParser {
    * Detect the NAXML document type from parsed XML
    * SEC-014: Uses strict allowlist matching for document type detection
    */
-  private detectDocumentType(
-    parsed: Record<string, unknown>,
-  ): NAXMLDocumentType | null {
+  private detectDocumentType(parsed: Record<string, unknown>): NAXMLDocumentType | null {
     const rootKeys = Object.keys(parsed);
 
     for (const key of rootKeys) {
       // POSJournal (Gilbarco Passport PJR files) - NAXML-POSJournal root element
-      if (key.includes("NAXML-POSJournal") || key.includes("POSJournal")) {
-        return "POSJournal";
+      if (key.includes('NAXML-POSJournal') || key.includes('POSJournal')) {
+        return 'POSJournal';
       }
       // Movement Report types (Gilbarco Passport) - check NAXML-MovementReport first
-      if (
-        key.includes("NAXML-MovementReport") ||
-        key.includes("MovementReport")
-      ) {
+      if (key.includes('NAXML-MovementReport') || key.includes('MovementReport')) {
         // Need to inspect child elements to determine specific type
         const root = parsed[key] as Record<string, unknown>;
-        if (root?.FuelGradeMovement) return "FuelGradeMovement";
-        if (root?.FuelProductMovement) return "FuelProductMovement";
-        if (root?.MiscellaneousSummaryMovement)
-          return "MiscellaneousSummaryMovement";
-        if (root?.TaxLevelMovement) return "TaxLevelMovement";
-        if (root?.MerchandiseCodeMovement) return "MerchandiseCodeMovement";
-        if (root?.ItemSalesMovement) return "ItemSalesMovement";
-        if (root?.TankProductMovement) return "TankProductMovement";
+        if (root?.FuelGradeMovement) return 'FuelGradeMovement';
+        if (root?.FuelProductMovement) return 'FuelProductMovement';
+        if (root?.MiscellaneousSummaryMovement) return 'MiscellaneousSummaryMovement';
+        if (root?.TaxLevelMovement) return 'TaxLevelMovement';
+        if (root?.MerchandiseCodeMovement) return 'MerchandiseCodeMovement';
+        if (root?.ItemSalesMovement) return 'ItemSalesMovement';
+        if (root?.TankProductMovement) return 'TankProductMovement';
       }
       // Standard NAXML document types
-      if (key.includes("TransactionDocument")) return "TransactionDocument";
-      if (key.includes("DepartmentMaintenance")) return "DepartmentMaintenance";
-      if (key.includes("TenderMaintenance")) return "TenderMaintenance";
-      if (key.includes("TaxRateMaintenance")) return "TaxRateMaintenance";
-      if (key.includes("PriceBookMaintenance")) return "PriceBookMaintenance";
-      if (key.includes("EmployeeMaintenance")) return "EmployeeMaintenance";
-      if (key.includes("InventoryMovement")) return "InventoryMovement";
-      if (key.includes("Acknowledgment")) return "Acknowledgment";
+      if (key.includes('TransactionDocument')) return 'TransactionDocument';
+      if (key.includes('DepartmentMaintenance')) return 'DepartmentMaintenance';
+      if (key.includes('TenderMaintenance')) return 'TenderMaintenance';
+      if (key.includes('TaxRateMaintenance')) return 'TaxRateMaintenance';
+      if (key.includes('PriceBookMaintenance')) return 'PriceBookMaintenance';
+      if (key.includes('EmployeeMaintenance')) return 'EmployeeMaintenance';
+      if (key.includes('InventoryMovement')) return 'InventoryMovement';
+      if (key.includes('Acknowledgment')) return 'Acknowledgment';
     }
 
     return null;
@@ -542,20 +520,20 @@ export class NAXMLParser {
    */
   private extractVersion(
     parsed: Record<string, unknown>,
-    documentType: NAXMLDocumentType,
+    documentType: NAXMLDocumentType
   ): NAXMLVersion {
     const rootKey = this.getRootKey(parsed, documentType);
     const root = parsed[rootKey] as Record<string, unknown>;
 
     // Check for version attribute
-    const versionRaw = root?.["@_version"];
+    const versionRaw = root?.['@_version'];
     // Convert to string if the parser returned a number
     const version = versionRaw != null ? String(versionRaw) : undefined;
 
     if (version) {
-      if (version.startsWith("3.2")) return "3.2";
-      if (version.startsWith("3.4")) return "3.4";
-      if (version.startsWith("4")) return "4.0";
+      if (version.startsWith('3.2')) return '3.2';
+      if (version.startsWith('3.4')) return '3.4';
+      if (version.startsWith('4')) return '4.0';
     }
 
     // Default to 3.4 if not specified
@@ -566,42 +544,36 @@ export class NAXMLParser {
    * Get the root element key for a document type
    * SEC-014: Handles MovementReport and POSJournal special cases
    */
-  private getRootKey(
-    parsed: Record<string, unknown>,
-    documentType: NAXMLDocumentType,
-  ): string {
+  private getRootKey(parsed: Record<string, unknown>, documentType: NAXMLDocumentType): string {
     const keys = Object.keys(parsed);
 
     // POSJournal uses NAXML-POSJournal as root
-    if (documentType === "POSJournal") {
+    if (documentType === 'POSJournal') {
       const journalKey = keys.find(
-        (k) => k.includes("NAXML-POSJournal") || k.includes("POSJournal"),
+        (k) => k.includes('NAXML-POSJournal') || k.includes('POSJournal')
       );
       if (journalKey) return journalKey;
     }
 
     // Movement Report types use NAXML-MovementReport as root
     const movementReportTypes = [
-      "FuelGradeMovement",
-      "FuelProductMovement",
-      "MiscellaneousSummaryMovement",
-      "TaxLevelMovement",
-      "MerchandiseCodeMovement",
-      "ItemSalesMovement",
-      "TankProductMovement",
+      'FuelGradeMovement',
+      'FuelProductMovement',
+      'MiscellaneousSummaryMovement',
+      'TaxLevelMovement',
+      'MerchandiseCodeMovement',
+      'ItemSalesMovement',
+      'TankProductMovement',
     ];
 
     if (movementReportTypes.includes(documentType)) {
       const movementKey = keys.find(
-        (k) =>
-          k.includes("NAXML-MovementReport") || k.includes("MovementReport"),
+        (k) => k.includes('NAXML-MovementReport') || k.includes('MovementReport')
       );
       if (movementKey) return movementKey;
     }
 
-    return (
-      keys.find((k) => k.includes(documentType)) || keys[0] || documentType
-    );
+    return keys.find((k) => k.includes(documentType)) || keys[0] || documentType;
   }
 
   /**
@@ -609,13 +581,13 @@ export class NAXMLParser {
    */
   private isMovementReportType(documentType: NAXMLDocumentType): boolean {
     return [
-      "FuelGradeMovement",
-      "FuelProductMovement",
-      "MiscellaneousSummaryMovement",
-      "TaxLevelMovement",
-      "MerchandiseCodeMovement",
-      "ItemSalesMovement",
-      "TankProductMovement",
+      'FuelGradeMovement',
+      'FuelProductMovement',
+      'MiscellaneousSummaryMovement',
+      'TaxLevelMovement',
+      'MerchandiseCodeMovement',
+      'ItemSalesMovement',
+      'TankProductMovement',
     ].includes(documentType);
   }
 
@@ -625,41 +597,33 @@ export class NAXMLParser {
    */
   private extractMetadata(
     parsed: Record<string, unknown>,
-    documentType: NAXMLDocumentType,
+    documentType: NAXMLDocumentType
   ): { timestamp: Date; storeLocationId: string } {
     const rootKey = this.getRootKey(parsed, documentType);
     const root = parsed[rootKey] as Record<string, unknown>;
 
-    let storeLocationId = "";
+    let storeLocationId = '';
     let timestamp = new Date();
 
     // Movement Report types use TransmissionHeader and MovementHeader
     if (this.isMovementReportType(documentType)) {
-      const transmissionHeader = root?.TransmissionHeader as Record<
-        string,
-        unknown
-      >;
-      storeLocationId = String(transmissionHeader?.StoreLocationID || "");
+      const transmissionHeader = root?.TransmissionHeader as Record<string, unknown>;
+      storeLocationId = String(transmissionHeader?.StoreLocationID || '');
 
       // Get the specific movement type container
       const movementContainer = root?.[documentType] as Record<string, unknown>;
-      const movementHeader = movementContainer?.MovementHeader as Record<
-        string,
-        unknown
-      >;
+      const movementHeader = movementContainer?.MovementHeader as Record<string, unknown>;
 
       if (movementHeader?.BusinessDate) {
         const dateStr = String(movementHeader.BusinessDate);
-        const timeStr = movementHeader?.BeginTime
-          ? String(movementHeader.BeginTime)
-          : "00:00:00";
+        const timeStr = movementHeader?.BeginTime ? String(movementHeader.BeginTime) : '00:00:00';
         // eslint-disable-next-line no-restricted-syntax -- Parsing NAXML business dates in ISO format
         timestamp = new Date(`${dateStr}T${timeStr}`);
       }
-    } else if (documentType === "TransactionDocument") {
+    } else if (documentType === 'TransactionDocument') {
       // Transaction documents
       const header = root?.TransactionHeader as Record<string, unknown>;
-      storeLocationId = String(header?.StoreLocationID || "");
+      storeLocationId = String(header?.StoreLocationID || '');
       const dateStr = header?.TransactionDate as string;
       if (dateStr) {
         timestamp = new Date(dateStr);
@@ -667,7 +631,7 @@ export class NAXMLParser {
     } else {
       // Maintenance documents
       const header = root?.MaintenanceHeader as Record<string, unknown>;
-      storeLocationId = String(header?.StoreLocationID || "");
+      storeLocationId = String(header?.StoreLocationID || '');
       const dateStr = header?.MaintenanceDate as string;
       if (dateStr) {
         timestamp = new Date(dateStr);
@@ -683,30 +647,30 @@ export class NAXMLParser {
    */
   private parseDocumentData<T>(
     parsed: Record<string, unknown>,
-    documentType: NAXMLDocumentType,
+    documentType: NAXMLDocumentType
   ): T {
     const rootKey = this.getRootKey(parsed, documentType);
     const root = parsed[rootKey] as Record<string, unknown>;
 
     switch (documentType) {
-      case "TransactionDocument":
+      case 'TransactionDocument':
         return this.parseTransactionData(root) as T;
-      case "DepartmentMaintenance":
+      case 'DepartmentMaintenance':
         return this.parseDepartmentData(root) as T;
-      case "TenderMaintenance":
+      case 'TenderMaintenance':
         return this.parseTenderData(root) as T;
-      case "TaxRateMaintenance":
+      case 'TaxRateMaintenance':
         return this.parseTaxRateData(root) as T;
-      case "PriceBookMaintenance":
+      case 'PriceBookMaintenance':
         return this.parsePriceBookData(root) as T;
-      case "EmployeeMaintenance":
+      case 'EmployeeMaintenance':
         return this.parseEmployeeData(root) as T;
       // Movement Report types
-      case "FuelGradeMovement":
+      case 'FuelGradeMovement':
         return this.parseFuelGradeMovementData(root) as T;
-      case "FuelProductMovement":
+      case 'FuelProductMovement':
         return this.parseFuelProductMovementData(root) as T;
-      case "MiscellaneousSummaryMovement":
+      case 'MiscellaneousSummaryMovement':
         return this.parseMiscellaneousSummaryMovementData(root) as T;
       default:
         return root as T;
@@ -716,9 +680,7 @@ export class NAXMLParser {
   /**
    * Parse transaction document data
    */
-  private parseTransactionData(
-    root: Record<string, unknown>,
-  ): NAXMLTransactionDocument {
+  private parseTransactionData(root: Record<string, unknown>): NAXMLTransactionDocument {
     const header = root.TransactionHeader as Record<string, unknown>;
     const detailContainer = root.TransactionDetail as Record<string, unknown>;
     const tenderContainer = root.TransactionTender as Record<string, unknown>;
@@ -734,29 +696,23 @@ export class NAXMLParser {
     };
   }
 
-  private parseTransactionHeader(
-    header: Record<string, unknown>,
-  ): NAXMLTransactionHeader {
+  private parseTransactionHeader(header: Record<string, unknown>): NAXMLTransactionHeader {
     // Support both ID (NAXML spec) and Id (common variation) suffixes
     return {
-      storeLocationId: String(
-        header?.StoreLocationID || header?.StoreLocationId || "",
-      ),
-      terminalId: String(header?.TerminalID || header?.TerminalId || ""),
-      transactionId: String(
-        header?.TransactionID || header?.TransactionId || "",
-      ),
-      businessDate: String(header?.BusinessDate || ""),
-      transactionDate: String(header?.TransactionDate || ""),
-      transactionType: String(header?.TransactionType || "Sale") as
-        | "Sale"
-        | "Refund"
-        | "VoidSale"
-        | "NoSale"
-        | "PaidOut"
-        | "PaidIn"
-        | "SafeDrop"
-        | "EndOfShift",
+      storeLocationId: String(header?.StoreLocationID || header?.StoreLocationId || ''),
+      terminalId: String(header?.TerminalID || header?.TerminalId || ''),
+      transactionId: String(header?.TransactionID || header?.TransactionId || ''),
+      businessDate: String(header?.BusinessDate || ''),
+      transactionDate: String(header?.TransactionDate || ''),
+      transactionType: String(header?.TransactionType || 'Sale') as
+        | 'Sale'
+        | 'Refund'
+        | 'VoidSale'
+        | 'NoSale'
+        | 'PaidOut'
+        | 'PaidIn'
+        | 'SafeDrop'
+        | 'EndOfShift',
       cashierId:
         header?.CashierID || header?.CashierId
           ? String(header.CashierID || header.CashierId)
@@ -769,25 +725,19 @@ export class NAXMLParser {
     };
   }
 
-  private parseTransactionDetails(
-    container: Record<string, unknown>,
-  ): NAXMLTransactionDetail[] {
+  private parseTransactionDetails(container: Record<string, unknown>): NAXMLTransactionDetail[] {
     const items = this.ensureArray(container?.LineItem);
     return items.map((item: Record<string, unknown>, index: number) => ({
-      lineNumber: Number(
-        item?.LineNumber || item?.["@_LineNumber"] || index + 1,
-      ),
-      itemCode: String(item?.ItemCode || ""),
-      description: String(item?.Description || ""),
-      departmentCode: String(item?.DepartmentCode || ""),
+      lineNumber: Number(item?.LineNumber || item?.['@_LineNumber'] || index + 1),
+      itemCode: String(item?.ItemCode || ''),
+      description: String(item?.Description || ''),
+      departmentCode: String(item?.DepartmentCode || ''),
       quantity: this.parseNumber(item?.Quantity, 1),
       unitPrice: this.parseNumber(item?.UnitPrice, 0),
       extendedPrice: this.parseNumber(item?.ExtendedPrice, 0),
       taxCode: item?.TaxCode ? String(item.TaxCode) : undefined,
       taxAmount: this.parseNumber(item?.TaxAmount, 0),
-      discountAmount: item?.DiscountAmount
-        ? this.parseNumber(item.DiscountAmount, 0)
-        : undefined,
+      discountAmount: item?.DiscountAmount ? this.parseNumber(item.DiscountAmount, 0) : undefined,
       modifierCodes: item?.ModifierCodes
         ? this.ensureArray(item.ModifierCodes).map(String)
         : undefined,
@@ -796,32 +746,24 @@ export class NAXMLParser {
     }));
   }
 
-  private parseTransactionTenders(
-    container: Record<string, unknown>,
-  ): NAXMLTransactionTender[] {
+  private parseTransactionTenders(container: Record<string, unknown>): NAXMLTransactionTender[] {
     const tenders = this.ensureArray(container?.Tender);
     return tenders.map((tender: Record<string, unknown>) => ({
-      tenderCode: String(tender?.TenderCode || ""),
-      tenderDescription: String(tender?.TenderDescription || ""),
+      tenderCode: String(tender?.TenderCode || ''),
+      tenderDescription: String(tender?.TenderDescription || ''),
       amount: this.parseNumber(tender?.Amount, 0),
-      referenceNumber: tender?.ReferenceNumber
-        ? String(tender.ReferenceNumber)
-        : undefined,
+      referenceNumber: tender?.ReferenceNumber ? String(tender.ReferenceNumber) : undefined,
       cardType: tender?.CardType ? String(tender.CardType) : undefined,
       cardLast4: tender?.CardLast4 ? String(tender.CardLast4) : undefined,
-      changeGiven: tender?.ChangeGiven
-        ? this.parseNumber(tender.ChangeGiven, 0)
-        : undefined,
+      changeGiven: tender?.ChangeGiven ? this.parseNumber(tender.ChangeGiven, 0) : undefined,
     }));
   }
 
-  private parseTransactionTaxes(
-    container: Record<string, unknown>,
-  ): NAXMLTransactionTax[] {
+  private parseTransactionTaxes(container: Record<string, unknown>): NAXMLTransactionTax[] {
     const taxes = this.ensureArray(container?.Tax);
     return taxes.map((tax: Record<string, unknown>) => ({
-      taxCode: String(tax?.TaxCode || tax?.["@_TaxCode"] || ""),
-      taxDescription: String(tax?.TaxDescription || ""),
+      taxCode: String(tax?.TaxCode || tax?.['@_TaxCode'] || ''),
+      taxDescription: String(tax?.TaxDescription || ''),
       taxableAmount: this.parseNumber(tax?.TaxableAmount, 0),
       taxAmount: this.parseNumber(tax?.TaxAmount, 0),
       taxRate: this.parseNumber(tax?.TaxRate, 0),
@@ -829,9 +771,7 @@ export class NAXMLParser {
     }));
   }
 
-  private parseTransactionTotal(
-    container: Record<string, unknown>,
-  ): NAXMLTransactionTotal {
+  private parseTransactionTotal(container: Record<string, unknown>): NAXMLTransactionTotal {
     return {
       subtotal: this.parseNumber(container?.Subtotal, 0),
       taxTotal: this.parseNumber(container?.TaxTotal, 0),
@@ -839,9 +779,7 @@ export class NAXMLParser {
       discountTotal: container?.DiscountTotal
         ? this.parseNumber(container.DiscountTotal, 0)
         : undefined,
-      changeDue: container?.ChangeDue
-        ? this.parseNumber(container.ChangeDue, 0)
-        : undefined,
+      changeDue: container?.ChangeDue ? this.parseNumber(container.ChangeDue, 0) : undefined,
       itemCount: container?.ItemCount ? Number(container.ItemCount) : undefined,
     };
   }
@@ -849,9 +787,7 @@ export class NAXMLParser {
   /**
    * Parse department maintenance data
    */
-  private parseDepartmentData(
-    root: Record<string, unknown>,
-  ): NAXMLDepartmentDocument {
+  private parseDepartmentData(root: Record<string, unknown>): NAXMLDepartmentDocument {
     const header = root.MaintenanceHeader as Record<string, unknown>;
     const deptContainer = root.Departments as Record<string, unknown>;
 
@@ -861,44 +797,29 @@ export class NAXMLParser {
     };
   }
 
-  private parseMaintenanceHeader(
-    header: Record<string, unknown>,
-  ): NAXMLMaintenanceHeader {
+  private parseMaintenanceHeader(header: Record<string, unknown>): NAXMLMaintenanceHeader {
     return {
-      storeLocationId: String(header?.StoreLocationID || ""),
-      maintenanceDate: String(header?.MaintenanceDate || ""),
-      maintenanceType: (header?.MaintenanceType === "Incremental"
-        ? "Incremental"
-        : "Full") as "Full" | "Incremental",
-      effectiveDate: header?.EffectiveDate
-        ? String(header.EffectiveDate)
-        : undefined,
-      sequenceNumber: header?.SequenceNumber
-        ? Number(header.SequenceNumber)
-        : undefined,
+      storeLocationId: String(header?.StoreLocationID || ''),
+      maintenanceDate: String(header?.MaintenanceDate || ''),
+      maintenanceType: (header?.MaintenanceType === 'Incremental' ? 'Incremental' : 'Full') as
+        | 'Full'
+        | 'Incremental',
+      effectiveDate: header?.EffectiveDate ? String(header.EffectiveDate) : undefined,
+      sequenceNumber: header?.SequenceNumber ? Number(header.SequenceNumber) : undefined,
     };
   }
 
-  private parseDepartmentList(
-    container: Record<string, unknown>,
-  ): NAXMLDepartment[] {
+  private parseDepartmentList(container: Record<string, unknown>): NAXMLDepartment[] {
     const depts = this.ensureArray(container?.Department);
     return depts.map((dept: Record<string, unknown>) => ({
-      departmentCode: String(
-        dept?.Code || dept?.["@_Code"] || dept?.DepartmentCode || "",
-      ),
-      description: String(dept?.Description || ""),
+      departmentCode: String(dept?.Code || dept?.['@_Code'] || dept?.DepartmentCode || ''),
+      description: String(dept?.Description || ''),
       isTaxable: this.parseBoolean(dept?.IsTaxable),
       taxRateCode: dept?.TaxRateCode ? String(dept.TaxRateCode) : undefined,
       minimumAge: dept?.MinimumAge ? Number(dept.MinimumAge) : undefined,
       isActive: this.parseBoolean(dept?.IsActive, true),
       sortOrder: dept?.SortOrder ? Number(dept.SortOrder) : undefined,
-      action: dept?.["@_Action"] as
-        | "Add"
-        | "Update"
-        | "Delete"
-        | "AddUpdate"
-        | undefined,
+      action: dept?.['@_Action'] as 'Add' | 'Update' | 'Delete' | 'AddUpdate' | undefined,
     }));
   }
 
@@ -915,36 +836,25 @@ export class NAXMLParser {
     };
   }
 
-  private parseTenderTypes(
-    container: Record<string, unknown>,
-  ): NAXMLTenderType[] {
+  private parseTenderTypes(container: Record<string, unknown>): NAXMLTenderType[] {
     const tenders = this.ensureArray(container?.Tender);
     return tenders.map((tender: Record<string, unknown>) => ({
-      tenderCode: String(
-        tender?.Code || tender?.["@_Code"] || tender?.TenderCode || "",
-      ),
-      description: String(tender?.Description || ""),
+      tenderCode: String(tender?.Code || tender?.['@_Code'] || tender?.TenderCode || ''),
+      description: String(tender?.Description || ''),
       isCashEquivalent: this.parseBoolean(tender?.IsCashEquivalent),
       isElectronic: this.parseBoolean(tender?.IsElectronic),
       affectsCashDrawer: this.parseBoolean(tender?.AffectsCashDrawer, true),
       requiresReference: this.parseBoolean(tender?.RequiresReference),
       isActive: this.parseBoolean(tender?.IsActive, true),
       sortOrder: tender?.SortOrder ? Number(tender.SortOrder) : undefined,
-      action: tender?.["@_Action"] as
-        | "Add"
-        | "Update"
-        | "Delete"
-        | "AddUpdate"
-        | undefined,
+      action: tender?.['@_Action'] as 'Add' | 'Update' | 'Delete' | 'AddUpdate' | undefined,
     }));
   }
 
   /**
    * Parse tax rate maintenance data
    */
-  private parseTaxRateData(
-    root: Record<string, unknown>,
-  ): NAXMLTaxRateDocument {
+  private parseTaxRateData(root: Record<string, unknown>): NAXMLTaxRateDocument {
     const header = root.MaintenanceHeader as Record<string, unknown>;
     const taxContainer = root.TaxRates as Record<string, unknown>;
 
@@ -957,31 +867,20 @@ export class NAXMLParser {
   private parseTaxRateList(container: Record<string, unknown>): NAXMLTaxRate[] {
     const rates = this.ensureArray(container?.TaxRate);
     return rates.map((rate: Record<string, unknown>) => ({
-      taxRateCode: String(
-        rate?.Code || rate?.["@_Code"] || rate?.TaxRateCode || "",
-      ),
-      description: String(rate?.Description || ""),
+      taxRateCode: String(rate?.Code || rate?.['@_Code'] || rate?.TaxRateCode || ''),
+      description: String(rate?.Description || ''),
       rate: this.parseNumber(rate?.Rate, 0),
       isActive: this.parseBoolean(rate?.IsActive, true),
-      jurisdictionCode: rate?.JurisdictionCode
-        ? String(rate.JurisdictionCode)
-        : undefined,
+      jurisdictionCode: rate?.JurisdictionCode ? String(rate.JurisdictionCode) : undefined,
       taxType: rate?.TaxType ? String(rate.TaxType) : undefined,
-      action: rate?.["@_Action"] as
-        | "Add"
-        | "Update"
-        | "Delete"
-        | "AddUpdate"
-        | undefined,
+      action: rate?.['@_Action'] as 'Add' | 'Update' | 'Delete' | 'AddUpdate' | undefined,
     }));
   }
 
   /**
    * Parse price book data
    */
-  private parsePriceBookData(
-    root: Record<string, unknown>,
-  ): NAXMLPriceBookDocument {
+  private parsePriceBookData(root: Record<string, unknown>): NAXMLPriceBookDocument {
     const header = root.MaintenanceHeader as Record<string, unknown>;
     const itemContainer = root.Items as Record<string, unknown>;
 
@@ -991,45 +890,30 @@ export class NAXMLParser {
     };
   }
 
-  private parsePriceBookItems(
-    container: Record<string, unknown>,
-  ): NAXMLPriceBookItem[] {
+  private parsePriceBookItems(container: Record<string, unknown>): NAXMLPriceBookItem[] {
     const items = this.ensureArray(container?.Item);
     return items.map((item: Record<string, unknown>) => ({
-      itemCode: String(item?.ItemCode || item?.Code || ""),
-      description: String(item?.Description || ""),
-      shortDescription: item?.ShortDescription
-        ? String(item.ShortDescription)
-        : undefined,
-      departmentCode: String(item?.DepartmentCode || ""),
+      itemCode: String(item?.ItemCode || item?.Code || ''),
+      description: String(item?.Description || ''),
+      shortDescription: item?.ShortDescription ? String(item.ShortDescription) : undefined,
+      departmentCode: String(item?.DepartmentCode || ''),
       unitPrice: this.parseNumber(item?.UnitPrice, 0),
-      taxRateCode: String(item?.TaxRateCode || ""),
+      taxRateCode: String(item?.TaxRateCode || ''),
       isActive: this.parseBoolean(item?.IsActive, true),
-      effectiveDate: item?.EffectiveDate
-        ? String(item.EffectiveDate)
-        : undefined,
-      expirationDate: item?.ExpirationDate
-        ? String(item.ExpirationDate)
-        : undefined,
+      effectiveDate: item?.EffectiveDate ? String(item.EffectiveDate) : undefined,
+      expirationDate: item?.ExpirationDate ? String(item.ExpirationDate) : undefined,
       minimumAge: item?.MinimumAge ? Number(item.MinimumAge) : undefined,
       foodStampEligible: item?.FoodStampEligible
         ? this.parseBoolean(item.FoodStampEligible)
         : undefined,
-      action: item?.["@_Action"] as
-        | "Add"
-        | "Update"
-        | "Delete"
-        | "AddUpdate"
-        | undefined,
+      action: item?.['@_Action'] as 'Add' | 'Update' | 'Delete' | 'AddUpdate' | undefined,
     }));
   }
 
   /**
    * Parse employee data
    */
-  private parseEmployeeData(
-    root: Record<string, unknown>,
-  ): NAXMLEmployeeDocument {
+  private parseEmployeeData(root: Record<string, unknown>): NAXMLEmployeeDocument {
     const header = root.MaintenanceHeader as Record<string, unknown>;
     const empContainer = root.Employees as Record<string, unknown>;
 
@@ -1039,28 +923,19 @@ export class NAXMLParser {
     };
   }
 
-  private parseEmployeeList(
-    container: Record<string, unknown>,
-  ): NAXMLEmployee[] {
+  private parseEmployeeList(container: Record<string, unknown>): NAXMLEmployee[] {
     const employees = this.ensureArray(container?.Employee);
     return employees.map((emp: Record<string, unknown>) => ({
-      employeeId: String(emp?.EmployeeID || emp?.ID || ""),
-      firstName: String(emp?.FirstName || ""),
-      lastName: String(emp?.LastName || ""),
+      employeeId: String(emp?.EmployeeID || emp?.ID || ''),
+      firstName: String(emp?.FirstName || ''),
+      lastName: String(emp?.LastName || ''),
       isActive: this.parseBoolean(emp?.IsActive, true),
       pinHash: emp?.PINHash ? String(emp.PINHash) : undefined,
       jobTitle: emp?.JobTitle ? String(emp.JobTitle) : undefined,
       hireDate: emp?.HireDate ? String(emp.HireDate) : undefined,
-      terminationDate: emp?.TerminationDate
-        ? String(emp.TerminationDate)
-        : undefined,
+      terminationDate: emp?.TerminationDate ? String(emp.TerminationDate) : undefined,
       accessLevel: emp?.AccessLevel ? Number(emp.AccessLevel) : undefined,
-      action: emp?.["@_Action"] as
-        | "Add"
-        | "Update"
-        | "Delete"
-        | "AddUpdate"
-        | undefined,
+      action: emp?.['@_Action'] as 'Add' | 'Update' | 'Delete' | 'AddUpdate' | undefined,
     }));
   }
 
@@ -1080,26 +955,21 @@ export class NAXMLParser {
    *
    * SEC-014: Validates required fields and uses strict type parsing
    */
-  private parseFuelGradeMovementData(
-    root: Record<string, unknown>,
-  ): NAXMLFuelGradeMovementData {
+  private parseFuelGradeMovementData(root: Record<string, unknown>): NAXMLFuelGradeMovementData {
     const fgmContainer = root.FuelGradeMovement as Record<string, unknown>;
 
     if (!fgmContainer) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "FuelGradeMovement element not found in document",
+        'FuelGradeMovement element not found in document'
       );
     }
 
-    const movementHeaderRaw = fgmContainer.MovementHeader as Record<
-      string,
-      unknown
-    >;
+    const movementHeaderRaw = fgmContainer.MovementHeader as Record<string, unknown>;
     if (!movementHeaderRaw) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_MISSING_MOVEMENT_HEADER,
-        "MovementHeader not found in FuelGradeMovement",
+        'MovementHeader not found in FuelGradeMovement'
       );
     }
 
@@ -1116,7 +986,7 @@ export class NAXMLParser {
     // Parse FGMDetail array
     const fgmDetailArray = this.ensureArray(fgmContainer.FGMDetail);
     const fgmDetails = fgmDetailArray.map((detail) =>
-      this.parseFGMDetail(detail as Record<string, unknown>),
+      this.parseFGMDetail(detail as Record<string, unknown>)
     );
 
     return {
@@ -1137,9 +1007,7 @@ export class NAXMLParser {
    *
    * SEC-014: Validates PrimaryReportPeriod against allowed values (2 or 98)
    */
-  private parseMovementHeader(
-    header: Record<string, unknown>,
-  ): NAXMLMovementHeader {
+  private parseMovementHeader(header: Record<string, unknown>): NAXMLMovementHeader {
     const primaryReportPeriod = this.parseNumber(header.PrimaryReportPeriod, 2);
 
     // Validate PrimaryReportPeriod is one of the allowed values
@@ -1147,7 +1015,7 @@ export class NAXMLParser {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_INVALID_REPORT_PERIOD,
         `Invalid PrimaryReportPeriod: ${primaryReportPeriod}. Must be 2 (day close) or 98 (shift close)`,
-        { primaryReportPeriod },
+        { primaryReportPeriod }
       );
     }
 
@@ -1155,11 +1023,11 @@ export class NAXMLParser {
       reportSequenceNumber: this.parseNumber(header.ReportSequenceNumber, 1),
       primaryReportPeriod: primaryReportPeriod as NAXMLPrimaryReportPeriod,
       secondaryReportPeriod: this.parseNumber(header.SecondaryReportPeriod, 0),
-      businessDate: String(header.BusinessDate || ""),
-      beginDate: String(header.BeginDate || ""),
-      beginTime: String(header.BeginTime || "00:00:00"),
-      endDate: String(header.EndDate || ""),
-      endTime: String(header.EndTime || "00:00:00"),
+      businessDate: String(header.BusinessDate || ''),
+      beginDate: String(header.BeginDate || ''),
+      beginTime: String(header.BeginTime || '00:00:00'),
+      endDate: String(header.EndDate || ''),
+      endTime: String(header.EndTime || '00:00:00'),
     };
   }
 
@@ -1172,13 +1040,11 @@ export class NAXMLParser {
    * @param header - Raw SalesMovementHeader element
    * @returns Parsed sales movement header
    */
-  private parseSalesMovementHeader(
-    header: Record<string, unknown>,
-  ): NAXMLSalesMovementHeader {
+  private parseSalesMovementHeader(header: Record<string, unknown>): NAXMLSalesMovementHeader {
     return {
-      registerId: String(header.RegisterID || ""),
-      cashierId: String(header.CashierID || ""),
-      tillId: String(header.TillID || ""),
+      registerId: String(header.RegisterID || ''),
+      cashierId: String(header.CashierID || ''),
+      tillId: String(header.TillID || ''),
     };
   }
 
@@ -1196,12 +1062,12 @@ export class NAXMLParser {
    * SEC-014: Validates FuelGradeID presence
    */
   private parseFGMDetail(detail: Record<string, unknown>): NAXMLFGMDetail {
-    const fuelGradeId = String(detail.FuelGradeID || "");
+    const fuelGradeId = String(detail.FuelGradeID || '');
 
     if (!fuelGradeId) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_MISSING_FUEL_GRADE_ID,
-        "FuelGradeID is required in FGMDetail",
+        'FuelGradeID is required in FGMDetail'
       );
     }
 
@@ -1211,7 +1077,7 @@ export class NAXMLParser {
       ? this.parseFGMTenderSummary(
           Array.isArray(tenderSummaryRaw)
             ? (tenderSummaryRaw[0] as Record<string, unknown>)
-            : (tenderSummaryRaw as Record<string, unknown>),
+            : (tenderSummaryRaw as Record<string, unknown>)
         )
       : undefined;
 
@@ -1220,7 +1086,7 @@ export class NAXMLParser {
     const fgmPositionSummaries =
       positionSummaryArray.length > 0
         ? positionSummaryArray.map((ps) =>
-            this.parseFGMPositionSummary(ps as Record<string, unknown>),
+            this.parseFGMPositionSummary(ps as Record<string, unknown>)
           )
         : undefined;
 
@@ -1254,22 +1120,15 @@ export class NAXMLParser {
    * @param summary - Raw FGMTenderSummary element
    * @returns Parsed tender summary
    */
-  private parseFGMTenderSummary(
-    summary: Record<string, unknown>,
-  ): NAXMLFGMTenderSummary {
+  private parseFGMTenderSummary(summary: Record<string, unknown>): NAXMLFGMTenderSummary {
     // Tender may be an array (from ARRAY_ELEMENT_NAMES) - take first element
     const tenderArray = this.ensureArray(summary.Tender);
     const tenderRaw = (tenderArray[0] || {}) as Record<string, unknown>;
-    const sellPriceSummaryRaw = summary.FGMSellPriceSummary as Record<
-      string,
-      unknown
-    >;
+    const sellPriceSummaryRaw = summary.FGMSellPriceSummary as Record<string, unknown>;
 
     return {
       tender: this.parseFGMTender(tenderRaw),
-      fgmSellPriceSummary: this.parseFGMSellPriceSummary(
-        sellPriceSummaryRaw || {},
-      ),
+      fgmSellPriceSummary: this.parseFGMSellPriceSummary(sellPriceSummaryRaw || {}),
     };
   }
 
@@ -1282,20 +1141,20 @@ export class NAXMLParser {
    * SEC-014: Validates TenderCode against allowlist of valid fuel tender codes
    */
   private parseFGMTender(tender: Record<string, unknown>): NAXMLFGMTender {
-    const tenderCode = String(tender.TenderCode || "cash");
+    const tenderCode = String(tender.TenderCode || 'cash');
 
     // Validate tender code against allowlist
     if (!VALID_FUEL_TENDER_CODES.includes(tenderCode as NAXMLFuelTenderCode)) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_INVALID_TENDER_CODE,
-        `Invalid TenderCode: ${tenderCode}. Must be one of: ${VALID_FUEL_TENDER_CODES.join(", ")}`,
-        { tenderCode },
+        `Invalid TenderCode: ${tenderCode}. Must be one of: ${VALID_FUEL_TENDER_CODES.join(', ')}`,
+        { tenderCode }
       );
     }
 
     return {
       tenderCode: tenderCode as NAXMLFuelTenderCode,
-      tenderSubCode: String(tender.TenderSubCode || "generic"),
+      tenderSubCode: String(tender.TenderSubCode || 'generic'),
     };
   }
 
@@ -1305,18 +1164,14 @@ export class NAXMLParser {
    * @param summary - Raw FGMSellPriceSummary element
    * @returns Parsed sell price summary
    */
-  private parseFGMSellPriceSummary(
-    summary: Record<string, unknown>,
-  ): NAXMLFGMSellPriceSummary {
+  private parseFGMSellPriceSummary(summary: Record<string, unknown>): NAXMLFGMSellPriceSummary {
     const serviceLevelSummaryRaw = summary.FGMServiceLevelSummary as
       | Record<string, unknown>
       | undefined;
 
     return {
       actualSalesPrice: this.parseNumber(summary.ActualSalesPrice, 0),
-      fgmServiceLevelSummary: this.parseFGMServiceLevelSummary(
-        serviceLevelSummaryRaw || {},
-      ),
+      fgmServiceLevelSummary: this.parseFGMServiceLevelSummary(serviceLevelSummaryRaw || {}),
     };
   }
 
@@ -1327,14 +1182,12 @@ export class NAXMLParser {
    * @returns Parsed service level summary
    */
   private parseFGMServiceLevelSummary(
-    summary: Record<string, unknown>,
+    summary: Record<string, unknown>
   ): NAXMLFGMServiceLevelSummary {
-    const salesTotalsRaw = summary.FGMSalesTotals as
-      | Record<string, unknown>
-      | undefined;
+    const salesTotalsRaw = summary.FGMSalesTotals as Record<string, unknown> | undefined;
 
     return {
-      serviceLevelCode: String(summary.ServiceLevelCode || "1"),
+      serviceLevelCode: String(summary.ServiceLevelCode || '1'),
       fgmSalesTotals: this.parseFGMSalesTotals(salesTotalsRaw || {}),
     };
   }
@@ -1348,10 +1201,8 @@ export class NAXMLParser {
    * @param summary - Raw FGMPositionSummary element
    * @returns Parsed position summary
    */
-  private parseFGMPositionSummary(
-    summary: Record<string, unknown>,
-  ): NAXMLFGMPositionSummary {
-    const fuelPositionId = String(summary.FuelPositionID || "");
+  private parseFGMPositionSummary(summary: Record<string, unknown>): NAXMLFGMPositionSummary {
+    const fuelPositionId = String(summary.FuelPositionID || '');
 
     // Parse optional non-resettable total
     const nonResettableTotalRaw = summary.FGMNonResettableTotal as
@@ -1364,7 +1215,7 @@ export class NAXMLParser {
     // Parse price tier summaries
     const priceTierArray = this.ensureArray(summary.FGMPriceTierSummary);
     const fgmPriceTierSummaries = priceTierArray.map((pt) =>
-      this.parseFGMPriceTierSummary(pt as Record<string, unknown>),
+      this.parseFGMPriceTierSummary(pt as Record<string, unknown>)
     );
 
     return {
@@ -1383,17 +1234,15 @@ export class NAXMLParser {
    * @param total - Raw FGMNonResettableTotal element
    * @returns Parsed non-resettable total
    */
-  private parseFGMNonResettableTotal(
-    total: Record<string, unknown>,
-  ): NAXMLFGMNonResettableTotal {
+  private parseFGMNonResettableTotal(total: Record<string, unknown>): NAXMLFGMNonResettableTotal {
     return {
       fuelGradeNonResettableTotalVolume: this.parseNumber(
         total.FuelGradeNonResettableTotalVolume,
-        0,
+        0
       ),
       fuelGradeNonResettableTotalAmount: this.parseNumber(
         total.FuelGradeNonResettableTotalAmount,
-        0,
+        0
       ),
     };
   }
@@ -1407,15 +1256,11 @@ export class NAXMLParser {
    * @param summary - Raw FGMPriceTierSummary element
    * @returns Parsed price tier summary
    */
-  private parseFGMPriceTierSummary(
-    summary: Record<string, unknown>,
-  ): NAXMLFGMPriceTierSummary {
-    const salesTotalsRaw = summary.FGMSalesTotals as
-      | Record<string, unknown>
-      | undefined;
+  private parseFGMPriceTierSummary(summary: Record<string, unknown>): NAXMLFGMPriceTierSummary {
+    const salesTotalsRaw = summary.FGMSalesTotals as Record<string, unknown> | undefined;
 
     return {
-      priceTierCode: String(summary.PriceTierCode || "0001"),
+      priceTierCode: String(summary.PriceTierCode || '0001'),
       fgmSalesTotals: this.parseFGMSalesTotals(salesTotalsRaw || {}),
     };
   }
@@ -1431,24 +1276,16 @@ export class NAXMLParser {
    *
    * SEC-014: Validates that sales volume and amount are non-negative
    */
-  private parseFGMSalesTotals(
-    totals: Record<string, unknown>,
-  ): NAXMLFGMSalesTotals {
-    const fuelGradeSalesVolume = this.parseNumber(
-      totals.FuelGradeSalesVolume,
-      0,
-    );
-    const fuelGradeSalesAmount = this.parseNumber(
-      totals.FuelGradeSalesAmount,
-      0,
-    );
+  private parseFGMSalesTotals(totals: Record<string, unknown>): NAXMLFGMSalesTotals {
+    const fuelGradeSalesVolume = this.parseNumber(totals.FuelGradeSalesVolume, 0);
+    const fuelGradeSalesAmount = this.parseNumber(totals.FuelGradeSalesAmount, 0);
 
     // Validate non-negative values (SEC-014)
     if (fuelGradeSalesVolume < 0) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_INVALID_SALES_VOLUME,
         `Invalid FuelGradeSalesVolume: ${fuelGradeSalesVolume}. Value must be non-negative`,
-        { fuelGradeSalesVolume },
+        { fuelGradeSalesVolume }
       );
     }
 
@@ -1456,14 +1293,12 @@ export class NAXMLParser {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FGM_INVALID_SALES_AMOUNT,
         `Invalid FuelGradeSalesAmount: ${fuelGradeSalesAmount}. Value must be non-negative`,
-        { fuelGradeSalesAmount },
+        { fuelGradeSalesAmount }
       );
     }
 
     // Parse optional pump test totals
-    const pumpTestTotalsRaw = totals.PumpTestTotals as
-      | Record<string, unknown>
-      | undefined;
+    const pumpTestTotalsRaw = totals.PumpTestTotals as Record<string, unknown> | undefined;
     const pumpTestTotals = pumpTestTotalsRaw
       ? this.parseFGMPumpTestTotals(pumpTestTotalsRaw)
       : undefined;
@@ -1498,9 +1333,7 @@ export class NAXMLParser {
    * @param totals - Raw PumpTestTotals element
    * @returns Parsed pump test totals
    */
-  private parseFGMPumpTestTotals(
-    totals: Record<string, unknown>,
-  ): NAXMLFGMPumpTestTotals {
+  private parseFGMPumpTestTotals(totals: Record<string, unknown>): NAXMLFGMPumpTestTotals {
     return {
       pumpTestAmount: this.parseNumber(totals.PumpTestAmount, 0),
       pumpTestVolume: this.parseNumber(totals.PumpTestVolume, 0),
@@ -1530,28 +1363,22 @@ export class NAXMLParser {
    * SEC-014: Validates required fields and uses strict type parsing
    */
   private parseMiscellaneousSummaryMovementData(
-    root: Record<string, unknown>,
+    root: Record<string, unknown>
   ): NAXMLMiscellaneousSummaryMovementData {
-    const msmContainer = root.MiscellaneousSummaryMovement as Record<
-      string,
-      unknown
-    >;
+    const msmContainer = root.MiscellaneousSummaryMovement as Record<string, unknown>;
 
     if (!msmContainer) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "MiscellaneousSummaryMovement element not found in document",
+        'MiscellaneousSummaryMovement element not found in document'
       );
     }
 
-    const movementHeaderRaw = msmContainer.MovementHeader as Record<
-      string,
-      unknown
-    >;
+    const movementHeaderRaw = msmContainer.MovementHeader as Record<string, unknown>;
     if (!movementHeaderRaw) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.MSM_MISSING_MOVEMENT_HEADER,
-        "MovementHeader not found in MiscellaneousSummaryMovement",
+        'MovementHeader not found in MiscellaneousSummaryMovement'
       );
     }
 
@@ -1577,10 +1404,10 @@ export class NAXMLParser {
     // Combine both arrays, parsing each detail
     const msmDetails = [
       ...msmDetailArrayInContainer.map((detail) =>
-        this.parseMSMDetail(detail as Record<string, unknown>),
+        this.parseMSMDetail(detail as Record<string, unknown>)
       ),
       ...msmDetailArrayAtRoot.map((detail) =>
-        this.parseMSMDetail(detail as Record<string, unknown>),
+        this.parseMSMDetail(detail as Record<string, unknown>)
       ),
     ];
 
@@ -1612,18 +1439,14 @@ export class NAXMLParser {
    * SEC-014: Validates summary codes presence
    */
   private parseMSMDetail(detail: Record<string, unknown>): NAXMLMSMDetail {
-    const codesRaw = detail.MiscellaneousSummaryCodes as Record<
-      string,
-      unknown
-    >;
+    const codesRaw = detail.MiscellaneousSummaryCodes as Record<string, unknown>;
 
     // Parse summary codes (required)
     const miscellaneousSummaryCodes = this.parseMSMSummaryCodes(codesRaw || {});
 
     // Parse optional register/cashier/till IDs
     // Note: In production files, these may appear as REGISTERID (uppercase)
-    const registerId =
-      detail.RegisterID || detail.REGISTERID || detail.registerId;
+    const registerId = detail.RegisterID || detail.REGISTERID || detail.registerId;
     const cashierId = detail.CashierID || detail.CASHIERID || detail.cashierId;
     const tillId = detail.TillID || detail.TILLID || detail.tillId;
 
@@ -1649,18 +1472,15 @@ export class NAXMLParser {
    * @param codes - Raw MiscellaneousSummaryCodes element
    * @returns Parsed summary codes
    */
-  private parseMSMSummaryCodes(
-    codes: Record<string, unknown>,
-  ): NAXMLMiscellaneousSummaryCodes {
+  private parseMSMSummaryCodes(codes: Record<string, unknown>): NAXMLMiscellaneousSummaryCodes {
     return {
-      miscellaneousSummaryCode: String(codes.MiscellaneousSummaryCode || ""),
+      miscellaneousSummaryCode: String(codes.MiscellaneousSummaryCode || ''),
       miscellaneousSummarySubCode: codes.MiscellaneousSummarySubCode
         ? String(codes.MiscellaneousSummarySubCode)
         : undefined,
-      miscellaneousSummarySubCodeModifier:
-        codes.MiscellaneousSummarySubCodeModifier
-          ? String(codes.MiscellaneousSummarySubCodeModifier)
-          : undefined,
+      miscellaneousSummarySubCodeModifier: codes.MiscellaneousSummarySubCodeModifier
+        ? String(codes.MiscellaneousSummarySubCodeModifier)
+        : undefined,
     };
   }
 
@@ -1676,51 +1496,39 @@ export class NAXMLParser {
    *
    * SEC-014: Validates tender code if present
    */
-  private parseMSMSalesTotals(
-    totals: Record<string, unknown>,
-  ): NAXMLMSMSalesTotals {
+  private parseMSMSalesTotals(totals: Record<string, unknown>): NAXMLMSMSalesTotals {
     // Parse optional tender - may be array (from ARRAY_ELEMENT_NAMES)
     const tenderArray = this.ensureArray(totals.Tender);
     const tenderRaw =
-      tenderArray.length > 0
-        ? (tenderArray[0] as Record<string, unknown>)
-        : undefined;
+      tenderArray.length > 0 ? (tenderArray[0] as Record<string, unknown>) : undefined;
 
     let tender: NAXMLFGMTender | undefined;
     if (tenderRaw) {
-      const tenderCode = String(tenderRaw.TenderCode || "");
-      const tenderSubCode = String(tenderRaw.TenderSubCode || "");
+      const tenderCode = String(tenderRaw.TenderCode || '');
+      const tenderSubCode = String(tenderRaw.TenderSubCode || '');
 
       // Only validate non-empty tender codes
       if (tenderCode && tenderCode.trim().length > 0) {
         // Validate tender code against allowlist (SEC-014)
-        if (
-          !VALID_FUEL_TENDER_CODES.includes(tenderCode as NAXMLFuelTenderCode)
-        ) {
+        if (!VALID_FUEL_TENDER_CODES.includes(tenderCode as NAXMLFuelTenderCode)) {
           throw new NAXMLParserError(
             NAXML_PARSER_ERROR_CODES.MSM_INVALID_TENDER_CODE,
-            `Invalid TenderCode in MSM: ${tenderCode}. Must be one of: ${VALID_FUEL_TENDER_CODES.join(", ")}`,
-            { tenderCode },
+            `Invalid TenderCode in MSM: ${tenderCode}. Must be one of: ${VALID_FUEL_TENDER_CODES.join(', ')}`,
+            { tenderCode }
           );
         }
 
         tender = {
           tenderCode: tenderCode as NAXMLFuelTenderCode,
-          tenderSubCode: tenderSubCode || "generic",
+          tenderSubCode: tenderSubCode || 'generic',
         };
       }
     }
 
     return {
       tender,
-      miscellaneousSummaryAmount: this.parseNumber(
-        totals.MiscellaneousSummaryAmount,
-        0,
-      ),
-      miscellaneousSummaryCount: this.parseNumber(
-        totals.MiscellaneousSummaryCount,
-        0,
-      ),
+      miscellaneousSummaryAmount: this.parseNumber(totals.MiscellaneousSummaryAmount, 0),
+      miscellaneousSummaryCount: this.parseNumber(totals.MiscellaneousSummaryCount, 0),
     };
   }
 
@@ -1742,25 +1550,22 @@ export class NAXMLParser {
    * SEC-014: Validates required fields and uses strict type parsing
    */
   private parseFuelProductMovementData(
-    root: Record<string, unknown>,
+    root: Record<string, unknown>
   ): NAXMLFuelProductMovementData {
     const fpmContainer = root.FuelProductMovement as Record<string, unknown>;
 
     if (!fpmContainer) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
-        "FuelProductMovement element not found in document",
+        'FuelProductMovement element not found in document'
       );
     }
 
-    const movementHeaderRaw = fpmContainer.MovementHeader as Record<
-      string,
-      unknown
-    >;
+    const movementHeaderRaw = fpmContainer.MovementHeader as Record<string, unknown>;
     if (!movementHeaderRaw) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_MISSING_MOVEMENT_HEADER,
-        "MovementHeader not found in FuelProductMovement",
+        'MovementHeader not found in FuelProductMovement'
       );
     }
 
@@ -1769,7 +1574,7 @@ export class NAXMLParser {
     // Parse FPMDetail array
     const fpmDetailArray = this.ensureArray(fpmContainer.FPMDetail);
     const fpmDetails = fpmDetailArray.map((detail) =>
-      this.parseFPMDetail(detail as Record<string, unknown>),
+      this.parseFPMDetail(detail as Record<string, unknown>)
     );
 
     return {
@@ -1791,21 +1596,19 @@ export class NAXMLParser {
    * SEC-014: Validates FuelProductID presence
    */
   private parseFPMDetail(detail: Record<string, unknown>): NAXMLFPMDetail {
-    const fuelProductId = String(detail.FuelProductID || "");
+    const fuelProductId = String(detail.FuelProductID || '');
 
     if (!fuelProductId) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_MISSING_PRODUCT_ID,
-        "FuelProductID is required in FPMDetail",
+        'FuelProductID is required in FPMDetail'
       );
     }
 
     // Parse FPMNonResettableTotals array
-    const nonResettableTotalsArray = this.ensureArray(
-      detail.FPMNonResettableTotals,
-    );
+    const nonResettableTotalsArray = this.ensureArray(detail.FPMNonResettableTotals);
     const fpmNonResettableTotals = nonResettableTotalsArray.map((totals) =>
-      this.parseFPMNonResettableTotals(totals as Record<string, unknown>),
+      this.parseFPMNonResettableTotals(totals as Record<string, unknown>)
     );
 
     return {
@@ -1828,25 +1631,19 @@ export class NAXMLParser {
    * SEC-014: Validates FuelPositionID presence and non-negative meter readings
    */
   private parseFPMNonResettableTotals(
-    totals: Record<string, unknown>,
+    totals: Record<string, unknown>
   ): NAXMLFPMNonResettableTotals {
-    const fuelPositionId = String(totals.FuelPositionID || "");
+    const fuelPositionId = String(totals.FuelPositionID || '');
 
     if (!fuelPositionId) {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_MISSING_POSITION_ID,
-        "FuelPositionID is required in FPMNonResettableTotals",
+        'FuelPositionID is required in FPMNonResettableTotals'
       );
     }
 
-    const volumeNumber = this.parseNumber(
-      totals.FuelProductNonResettableVolumeNumber,
-      0,
-    );
-    const amountNumber = this.parseNumber(
-      totals.FuelProductNonResettableAmountNumber,
-      0,
-    );
+    const volumeNumber = this.parseNumber(totals.FuelProductNonResettableVolumeNumber, 0);
+    const amountNumber = this.parseNumber(totals.FuelProductNonResettableAmountNumber, 0);
 
     // Validate non-negative meter readings (SEC-014)
     // Meter readings are cumulative and should never be negative
@@ -1854,7 +1651,7 @@ export class NAXMLParser {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_INVALID_METER_READING,
         `Invalid FuelProductNonResettableVolumeNumber: ${volumeNumber}. Meter readings must be non-negative`,
-        { fuelPositionId, volumeNumber },
+        { fuelPositionId, volumeNumber }
       );
     }
 
@@ -1862,7 +1659,7 @@ export class NAXMLParser {
       throw new NAXMLParserError(
         NAXML_PARSER_ERROR_CODES.FPM_INVALID_METER_READING,
         `Invalid FuelProductNonResettableAmountNumber: ${amountNumber}. Meter readings must be non-negative`,
-        { fuelPositionId, amountNumber },
+        { fuelPositionId, amountNumber }
       );
     }
 
@@ -1900,12 +1697,10 @@ export class NAXMLParser {
    */
   private parseBoolean(value: unknown, defaultValue = false): boolean {
     if (value === null || value === undefined) return defaultValue;
-    if (typeof value === "boolean") return value;
+    if (typeof value === 'boolean') return value;
     const str = String(value).toLowerCase();
-    if (str === "y" || str === "yes" || str === "true" || str === "1")
-      return true;
-    if (str === "n" || str === "no" || str === "false" || str === "0")
-      return false;
+    if (str === 'y' || str === 'yes' || str === 'true' || str === '1') return true;
+    if (str === 'n' || str === 'no' || str === 'false' || str === '0') return false;
     return defaultValue;
   }
 }
@@ -1917,9 +1712,7 @@ export class NAXMLParser {
 /**
  * Create a new NAXML parser instance
  */
-export function createNAXMLParser(
-  options?: Partial<NAXMLParserOptions>,
-): NAXMLParser {
+export function createNAXMLParser(options?: Partial<NAXMLParserOptions>): NAXMLParser {
   return new NAXMLParser(options);
 }
 
@@ -1928,7 +1721,7 @@ export function createNAXMLParser(
  */
 export function parseNAXML<T = unknown>(
   xml: string,
-  options?: Partial<NAXMLParserOptions>,
+  options?: Partial<NAXMLParserOptions>
 ): NAXMLDocument<T> {
   const parser = createNAXMLParser(options);
   return parser.parse<T>(xml);
@@ -1939,7 +1732,7 @@ export function parseNAXML<T = unknown>(
  */
 export function validateNAXML(
   xml: string,
-  options?: Partial<NAXMLParserOptions>,
+  options?: Partial<NAXMLParserOptions>
 ): NAXMLValidationResult {
   const parser = createNAXMLParser(options);
   return parser.validate(xml);
@@ -1965,7 +1758,7 @@ export function validateNAXML(
  */
 export function parseFuelGradeMovement(
   xml: string,
-  options?: Partial<NAXMLParserOptions>,
+  options?: Partial<NAXMLParserOptions>
 ): NAXMLDocument<NAXMLFuelGradeMovementData> {
   const parser = createNAXMLParser(options);
   return parser.parseFuelGradeMovement(xml);
@@ -2002,7 +1795,7 @@ export function parseFuelGradeMovement(
  */
 export function parseMiscellaneousSummaryMovement(
   xml: string,
-  options?: Partial<NAXMLParserOptions>,
+  options?: Partial<NAXMLParserOptions>
 ): NAXMLDocument<NAXMLMiscellaneousSummaryMovementData> {
   const parser = createNAXMLParser(options);
   return parser.parseMiscellaneousSummaryMovement(xml);
@@ -2039,7 +1832,7 @@ export function parseMiscellaneousSummaryMovement(
  */
 export function parseFuelProductMovement(
   xml: string,
-  options?: Partial<NAXMLParserOptions>,
+  options?: Partial<NAXMLParserOptions>
 ): NAXMLDocument<NAXMLFuelProductMovementData> {
   const parser = createNAXMLParser(options);
   return parser.parseFuelProductMovement(xml);

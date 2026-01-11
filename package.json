@@ -14,38 +14,58 @@
     "package": "electron-builder",
     "package:win": "electron-builder --win",
     "lint": "eslint . --ext .ts,.tsx",
+    "lint:fix": "eslint . --ext .ts,.tsx --fix",
+    "format": "prettier --write \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\"",
+    "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\"",
     "typecheck": "tsc --noEmit",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "prepare": "husky"
   },
   "dependencies": {
+    "axios": "^1.7.0",
+    "bcrypt": "^6.0.0",
+    "better-sqlite3-multiple-ciphers": "^12.5.0",
     "chokidar": "^4.0.0",
+    "date-fns": "^3.6.0",
     "electron-store": "^8.2.0",
     "electron-updater": "^6.3.0",
     "fast-xml-parser": "^5.3.3",
-    "zod": "^4.1.12",
-    "date-fns": "^3.6.0",
-    "axios": "^1.7.0"
+    "uuid": "^13.0.0",
+    "zod": "^4.1.12"
   },
   "devDependencies": {
-    "@vitest/coverage-v8": "^1.6.0",
-    "vitest": "^1.6.0",
+    "@types/bcrypt": "^6.0.0",
+    "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^20.14.0",
     "@types/react": "^18.3.0",
     "@types/react-dom": "^18.3.0",
+    "@types/uuid": "^10.0.0",
+    "@typescript-eslint/eslint-plugin": "^8.52.0",
+    "@typescript-eslint/parser": "^8.52.0",
     "@vitejs/plugin-react": "^4.3.0",
+    "@vitest/coverage-v8": "^1.6.0",
     "autoprefixer": "^10.4.19",
     "electron": "^31.0.0",
     "electron-builder": "^24.13.0",
     "electron-vite": "^2.3.0",
     "eslint": "^8.57.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.4",
+    "eslint-plugin-react": "^7.37.5",
+    "eslint-plugin-react-hooks": "^7.0.1",
+    "eslint-plugin-security": "^3.0.1",
+    "husky": "^9.1.7",
+    "lint-staged": "^16.2.7",
     "postcss": "^8.4.38",
+    "prettier": "^3.7.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "tailwindcss": "^3.4.4",
     "typescript": "^5.4.5",
-    "vite": "^5.3.0"
+    "vite": "^5.3.0",
+    "vitest": "^1.6.0"
   },
   "build": {
     "appId": "com.nuvana.sync",
@@ -58,7 +78,9 @@
       "resources/**/*"
     ],
     "win": {
-      "target": ["nsis"],
+      "target": [
+        "nsis"
+      ],
       "icon": "resources/icon.ico"
     },
     "nsis": {
@@ -68,5 +90,14 @@
       "createStartMenuShortcut": true,
       "shortcutName": "Nuvana Sync"
     }
+  },
+  "lint-staged": {
+    "*.{ts,tsx}": [
+      "prettier --write",
+      "eslint --fix"
+    ],
+    "*.{json,md,yml,yaml}": [
+      "prettier --write"
+    ]
   }
 }

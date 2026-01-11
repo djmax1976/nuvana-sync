@@ -8,26 +8,23 @@
  * @security SEC-014: Path validation, CDP-001: SHA-256 hashing
  */
 
-import { EventEmitter } from "events";
-import * as fs from "fs/promises";
-import * as path from "path";
-import * as crypto from "crypto";
-import chokidar, { FSWatcher } from "chokidar";
-import { createNAXMLParser } from "../../shared/naxml/parser";
-import { createLogger } from "../utils/logger";
-import {
-  type NuvanaSyncConfig,
-  validateSafePath,
-} from "../../shared/types/config.types";
+import { EventEmitter } from 'events';
+import * as fs from 'fs/promises';
+import * as path from 'path';
+import * as crypto from 'crypto';
+import chokidar, { FSWatcher } from 'chokidar';
+import { createNAXMLParser } from '../../shared/naxml/parser';
+import { createLogger } from '../utils/logger';
+import { type NuvanaSyncConfig, validateSafePath } from '../../shared/types/config.types';
 import {
   type FileRecord,
   type SyncStats,
   type NAXMLDocumentType,
   NAXMLDocumentTypeSchema,
-} from "../../shared/types/sync.types";
-import type { SyncService } from "./sync.service";
+} from '../../shared/types/sync.types';
+import type { SyncService } from './sync.service';
 
-const log = createLogger("file-watcher");
+const log = createLogger('file-watcher');
 
 /**
  * SEC-014: Validate that a file path is safe and within allowed directories
@@ -37,8 +34,8 @@ function isPathSafe(filePath: string, allowedBasePaths: string[]): boolean {
   const normalizedPath = path.normalize(filePath);
 
   // Check for path traversal patterns
-  if (normalizedPath.includes("..")) {
-    log.warn("Path traversal attempt detected", {
+  if (normalizedPath.includes('..')) {
+    log.warn('Path traversal attempt detected', {
       filePath,
       normalizedPath,
     });
@@ -52,7 +49,7 @@ function isPathSafe(filePath: string, allowedBasePaths: string[]): boolean {
   });
 
   if (!isWithinAllowed) {
-    log.warn("Path outside allowed directories", {
+    log.warn('Path outside allowed directories', {
       filePath,
       allowedBasePaths,
     });
@@ -66,7 +63,7 @@ function isPathSafe(filePath: string, allowedBasePaths: string[]): boolean {
  * CDP-001: Generate SHA-256 hash of file content
  */
 function generateFileHash(content: string): string {
-  return crypto.createHash("sha256").update(content, "utf8").digest("hex");
+  return crypto.createHash('sha256').update(content, 'utf8').digest('hex');
 }
 
 export class FileWatcherService extends EventEmitter {
@@ -105,26 +102,26 @@ export class FileWatcherService extends EventEmitter {
    */
   start(): void {
     if (this.watcher) {
-      log.info("File watcher already running");
+      log.info('File watcher already running');
       return;
     }
 
     if (!this.config.watchPath) {
-      log.error("No watch path configured");
+      log.error('No watch path configured');
       return;
     }
 
     // SEC-014: Validate watch path
     const pathValidation = validateSafePath(this.config.watchPath);
     if (!pathValidation.success) {
-      log.error("Invalid watch path", {
+      log.error('Invalid watch path', {
         watchPath: this.config.watchPath,
         error: pathValidation.error?.message,
       });
       return;
     }
 
-    log.info("Starting file watcher", { watchPath: this.config.watchPath });
+    log.info('Starting file watcher', { watchPath: this.config.watchPath });
 
     this.watcher = chokidar.watch(this.config.watchPath, {
       // Use polling for network drives (more reliable)
@@ -140,7 +137,7 @@ export class FileWatcherService extends EventEmitter {
       // Only watch XML files
       ignored: (filePath: string) => {
         const ext = path.extname(filePath).toLowerCase();
-        return ext !== ".xml";
+        return ext !== '.xml';
       },
 
       // Watch settings
@@ -151,13 +148,15 @@ export class FileWatcherService extends EventEmitter {
     });
 
     this.watcher
-      .on("add", (filePath) => this.handleNewFile(filePath))
-      .on("change", (filePath) => this.handleFileChange(filePath))
-      .on("error", (error: unknown) => this.handleError(error instanceof Error ? error : new Error(String(error))))
-      .on("ready", () => {
-        log.info("File watcher ready");
+      .on('add', (filePath) => this.handleNewFile(filePath))
+      .on('change', (filePath) => this.handleFileChange(filePath))
+      .on('error', (error: unknown) =>
+        this.handleError(error instanceof Error ? error : new Error(String(error)))
+      )
+      .on('ready', () => {
+        log.info('File watcher ready');
         this.stats.isWatching = true;
-        this.emit("watcher-ready");
+        this.emit('watcher-ready');
       });
   }
 
@@ -169,7 +168,7 @@ export class FileWatcherService extends EventEmitter {
       this.watcher.close();
       this.watcher = null;
       this.stats.isWatching = false;
-      log.info("File watcher stopped");
+      log.info('File watcher stopped');
     }
   }
 
@@ -202,18 +201,16 @@ export class FileWatcherService extends EventEmitter {
 
     try {
       const files = await fs.readdir(this.config.watchPath);
-      const xmlFiles = files.filter(
-        (f) => path.extname(f).toLowerCase() === ".xml"
-      );
+      const xmlFiles = files.filter((f) => path.extname(f).toLowerCase() === '.xml');
 
-      log.info("Processing existing files", { count: xmlFiles.length });
+      log.info('Processing existing files', { count: xmlFiles.length });
 
       for (const file of xmlFiles) {
         const filePath = path.join(this.config.watchPath, file);
         await this.processFile(filePath);
       }
     } catch (error) {
-      log.error("Error processing existing files", {
+      log.error('Error processing existing files', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
@@ -227,12 +224,12 @@ export class FileWatcherService extends EventEmitter {
 
     // SEC-014: Validate file path
     if (!isPathSafe(filePath, this.getAllowedPaths())) {
-      log.warn("Rejected file outside allowed paths", { filePath });
+      log.warn('Rejected file outside allowed paths', { filePath });
       return;
     }
 
-    log.info("New file detected", { filePath });
-    this.emit("file-detected", filePath);
+    log.info('New file detected', { filePath });
+    this.emit('file-detected', filePath);
 
     await this.processFile(filePath);
   }
@@ -243,18 +240,18 @@ export class FileWatcherService extends EventEmitter {
   private async handleFileChange(filePath: string): Promise<void> {
     // For NAXML files, changes typically mean the file is still being written
     // The awaitWriteFinish option should handle this
-    log.debug("File changed", { filePath });
+    log.debug('File changed', { filePath });
   }
 
   /**
    * Handle watcher error
    */
   private handleError(error: Error): void {
-    log.error("File watcher error", {
+    log.error('File watcher error', {
       error: error.message,
       stack: error.stack,
     });
-    this.emit("watcher-error", error);
+    this.emit('watcher-error', error);
   }
 
   /**
@@ -265,7 +262,7 @@ export class FileWatcherService extends EventEmitter {
 
     // SEC-014: Validate file path before processing
     if (!isPathSafe(filePath, this.getAllowedPaths())) {
-      log.warn("Rejected file with unsafe path", { filePath });
+      log.warn('Rejected file with unsafe path', { filePath });
       return;
     }
 
@@ -281,14 +278,14 @@ export class FileWatcherService extends EventEmitter {
     const record: FileRecord = {
       filePath,
       fileName,
-      status: "processing",
+      status: 'processing',
       timestamp: new Date(),
     };
     this.addFileRecord(record);
 
     try {
       // Read file
-      const xml = await fs.readFile(filePath, "utf-8");
+      const xml = await fs.readFile(filePath, 'utf-8');
 
       // CDP-001: Generate SHA-256 hash for integrity
       const fileHash = generateFileHash(xml);
@@ -297,18 +294,18 @@ export class FileWatcherService extends EventEmitter {
       const docType = this.detectDocumentType(fileName, xml);
       record.documentType = docType;
 
-      log.info("Processing file", {
+      log.info('Processing file', {
         fileName,
         documentType: docType,
-        fileHash: fileHash.substring(0, 16) + "...", // Truncate for logging
+        fileHash: fileHash.substring(0, 16) + '...', // Truncate for logging
         sizeBytes: xml.length,
       });
 
       // Check if this file type is enabled
       if (!this.isFileTypeEnabled(docType)) {
-        log.info("Skipping disabled file type", { docType, fileName });
-        record.status = "success";
-        record.error = "Skipped (disabled file type)";
+        log.info('Skipping disabled file type', { docType, fileName });
+        record.status = 'success';
+        record.error = 'Skipped (disabled file type)';
         this.updateFileRecord(record);
         await this.moveToArchive(filePath);
         return;
@@ -326,11 +323,11 @@ export class FileWatcherService extends EventEmitter {
       });
 
       // Success
-      record.status = "success";
+      record.status = 'success';
       this.stats.filesProcessed++;
       this.stats.lastSyncTime = new Date();
 
-      log.info("File processed successfully", {
+      log.info('File processed successfully', {
         fileName,
         documentType: docType,
         totalProcessed: this.stats.filesProcessed,
@@ -339,25 +336,24 @@ export class FileWatcherService extends EventEmitter {
       // Move to archive
       await this.moveToArchive(filePath);
 
-      this.emit("file-processed", { filePath, success: true });
+      this.emit('file-processed', { filePath, success: true });
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const errorMessage = error instanceof Error ? error.message : String(error);
 
-      log.error("Error processing file", {
+      log.error('Error processing file', {
         fileName,
         error: errorMessage,
         stack: error instanceof Error ? error.stack : undefined,
       });
 
-      record.status = "error";
+      record.status = 'error';
       record.error = errorMessage;
       this.stats.filesErrored++;
 
       // Move to error folder
       await this.moveToError(filePath);
 
-      this.emit("file-error", { filePath, error: errorMessage });
+      this.emit('file-error', { filePath, error: errorMessage });
     } finally {
       this.processingQueue.delete(filePath);
       this.updateFileRecord(record);
@@ -369,18 +365,18 @@ export class FileWatcherService extends EventEmitter {
    */
   private isNAXMLFile(filePath: string): boolean {
     const ext = path.extname(filePath).toLowerCase();
-    if (ext !== ".xml") return false;
+    if (ext !== '.xml') return false;
 
     const name = path.basename(filePath).toUpperCase();
     return (
-      name.startsWith("PJR") ||
-      name.startsWith("FGM") ||
-      name.startsWith("MSM") ||
-      name.startsWith("FPM") ||
-      name.startsWith("MCM") ||
-      name.startsWith("TLM") ||
-      name.startsWith("ISM") ||
-      name.startsWith("TPM")
+      name.startsWith('PJR') ||
+      name.startsWith('FGM') ||
+      name.startsWith('MSM') ||
+      name.startsWith('FPM') ||
+      name.startsWith('MCM') ||
+      name.startsWith('TLM') ||
+      name.startsWith('ISM') ||
+      name.startsWith('TPM')
     );
   }
 
@@ -391,17 +387,17 @@ export class FileWatcherService extends EventEmitter {
   private detectDocumentType(fileName: string, _xml: string): NAXMLDocumentType {
     const name = fileName.toUpperCase();
 
-    if (name.startsWith("PJR")) return "POSJournal";
-    if (name.startsWith("FGM")) return "FuelGradeMovement";
-    if (name.startsWith("MSM")) return "MiscellaneousSummaryMovement";
-    if (name.startsWith("FPM")) return "FuelProductMovement";
-    if (name.startsWith("MCM")) return "MerchandiseCodeMovement";
-    if (name.startsWith("TLM")) return "TaxLevelMovement";
-    if (name.startsWith("ISM")) return "ItemSalesMovement";
-    if (name.startsWith("TPM")) return "TankProductMovement";
+    if (name.startsWith('PJR')) return 'POSJournal';
+    if (name.startsWith('FGM')) return 'FuelGradeMovement';
+    if (name.startsWith('MSM')) return 'MiscellaneousSummaryMovement';
+    if (name.startsWith('FPM')) return 'FuelProductMovement';
+    if (name.startsWith('MCM')) return 'MerchandiseCodeMovement';
+    if (name.startsWith('TLM')) return 'TaxLevelMovement';
+    if (name.startsWith('ISM')) return 'ItemSalesMovement';
+    if (name.startsWith('TPM')) return 'TankProductMovement';
 
     // Fall back to Unknown (validated enum value)
-    return "Unknown";
+    return 'Unknown';
   }
 
   /**
@@ -409,12 +405,12 @@ export class FileWatcherService extends EventEmitter {
    */
   private isFileTypeEnabled(docType: NAXMLDocumentType): boolean {
     const typeMap: Record<string, keyof typeof this.config.enabledFileTypes> = {
-      POSJournal: "pjr",
-      FuelGradeMovement: "fgm",
-      MiscellaneousSummaryMovement: "msm",
-      FuelProductMovement: "fpm",
-      MerchandiseCodeMovement: "mcm",
-      TaxLevelMovement: "tlm",
+      POSJournal: 'pjr',
+      FuelGradeMovement: 'fgm',
+      MiscellaneousSummaryMovement: 'msm',
+      FuelProductMovement: 'fpm',
+      MerchandiseCodeMovement: 'mcm',
+      TaxLevelMovement: 'tlm',
     };
 
     const configKey = typeMap[docType];
@@ -444,7 +440,7 @@ export class FileWatcherService extends EventEmitter {
       // SEC-014: Validate archive path
       const archiveValidation = validateSafePath(this.config.archivePath);
       if (!archiveValidation.success) {
-        log.error("Invalid archive path", {
+        log.error('Invalid archive path', {
           archivePath: this.config.archivePath,
         });
         return;
@@ -456,7 +452,7 @@ export class FileWatcherService extends EventEmitter {
       // SEC-014: Ensure destination is within archive path
       const destPath = path.join(this.config.archivePath, fileName);
       if (!isPathSafe(destPath, [this.config.archivePath])) {
-        log.error("Archive destination path traversal attempt", {
+        log.error('Archive destination path traversal attempt', {
           filePath,
           destPath,
         });
@@ -464,9 +460,9 @@ export class FileWatcherService extends EventEmitter {
       }
 
       await fs.rename(filePath, destPath);
-      log.info("File archived", { fileName, destPath });
+      log.info('File archived', { fileName, destPath });
     } catch (error) {
-      log.error("Failed to archive file", {
+      log.error('Failed to archive file', {
         filePath,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -484,7 +480,7 @@ export class FileWatcherService extends EventEmitter {
       // SEC-014: Validate error path
       const errorPathValidation = validateSafePath(this.config.errorPath);
       if (!errorPathValidation.success) {
-        log.error("Invalid error path", { errorPath: this.config.errorPath });
+        log.error('Invalid error path', { errorPath: this.config.errorPath });
         return;
       }
 
@@ -494,7 +490,7 @@ export class FileWatcherService extends EventEmitter {
       // SEC-014: Ensure destination is within error path
       const destPath = path.join(this.config.errorPath, fileName);
       if (!isPathSafe(destPath, [this.config.errorPath])) {
-        log.error("Error destination path traversal attempt", {
+        log.error('Error destination path traversal attempt', {
           filePath,
           destPath,
         });
@@ -502,9 +498,9 @@ export class FileWatcherService extends EventEmitter {
       }
 
       await fs.rename(filePath, destPath);
-      log.info("File moved to error folder", { fileName, destPath });
+      log.info('File moved to error folder', { fileName, destPath });
     } catch (error) {
-      log.error("Failed to move file to error folder", {
+      log.error('Failed to move file to error folder', {
         filePath,
         error: error instanceof Error ? error.message : String(error),
       });
@@ -525,9 +521,7 @@ export class FileWatcherService extends EventEmitter {
    * Update existing file record
    */
   private updateFileRecord(record: FileRecord): void {
-    const index = this.recentFiles.findIndex(
-      (r) => r.filePath === record.filePath
-    );
+    const index = this.recentFiles.findIndex((r) => r.filePath === record.filePath);
     if (index !== -1) {
       this.recentFiles[index] = record;
     }

@@ -16,7 +16,8 @@
       "@shared/*": ["src/shared/*"],
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"]
-    }
+    },
+    "types": ["vitest/globals", "node"]
   },
   "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist", "release"]

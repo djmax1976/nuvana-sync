@@ -7,7 +7,7 @@
  * @security SEC-014: Strict input validation schemas
  */
 
-import { z } from "zod";
+import { z } from 'zod';
 
 // ============================================================================
 // Document Type Definitions
@@ -18,15 +18,15 @@ import { z } from "zod";
  * SEC-014: Strict allowlist for document types
  */
 export const NAXMLDocumentTypeSchema = z.enum([
-  "POSJournal",
-  "FuelGradeMovement",
-  "MiscellaneousSummaryMovement",
-  "FuelProductMovement",
-  "MerchandiseCodeMovement",
-  "TaxLevelMovement",
-  "ItemSalesMovement",
-  "TankProductMovement",
-  "Unknown",
+  'POSJournal',
+  'FuelGradeMovement',
+  'MiscellaneousSummaryMovement',
+  'FuelProductMovement',
+  'MerchandiseCodeMovement',
+  'TaxLevelMovement',
+  'ItemSalesMovement',
+  'TankProductMovement',
+  'Unknown',
 ]);
 
 export type NAXMLDocumentType = z.infer<typeof NAXMLDocumentTypeSchema>;
@@ -38,12 +38,7 @@ export type NAXMLDocumentType = z.infer<typeof NAXMLDocumentTypeSchema>;
 /**
  * File processing status
  */
-export const FileStatusSchema = z.enum([
-  "queued",
-  "processing",
-  "success",
-  "error",
-]);
+export const FileStatusSchema = z.enum(['queued', 'processing', 'success', 'error']);
 
 export type FileStatus = z.infer<typeof FileStatusSchema>;
 
@@ -84,9 +79,7 @@ export type SyncStats = z.infer<typeof SyncStatsSchema>;
 /**
  * SHA-256 hash validation (64 hex characters)
  */
-export const FileHashSchema = z
-  .string()
-  .regex(/^[a-f0-9]{64}$/i, "Invalid SHA-256 hash format");
+export const FileHashSchema = z.string().regex(/^[a-f0-9]{64}$/i, 'Invalid SHA-256 hash format');
 
 /**
  * Upload payload schema
@@ -97,9 +90,9 @@ export const UploadPayloadSchema = z.object({
   data: z.unknown(),
   fileName: z
     .string()
-    .min(1, "File name is required")
-    .max(255, "File name too long")
-    .regex(/^[\w\-. ]+\.xml$/i, "Invalid file name format"),
+    .min(1, 'File name is required')
+    .max(255, 'File name too long')
+    .regex(/^[\w\-. ]+\.xml$/i, 'Invalid file name format'),
   fileHash: FileHashSchema,
 });
 
@@ -141,11 +134,11 @@ export type TestConnectionResponse = z.infer<typeof TestConnectionResponseSchema
  * Sync status event types
  */
 export const SyncStatusEventTypeSchema = z.enum([
-  "file-detected",
-  "file-processed",
-  "file-error",
-  "watcher-ready",
-  "watcher-error",
+  'file-detected',
+  'file-processed',
+  'file-error',
+  'watcher-ready',
+  'watcher-error',
 ]);
 
 export type SyncStatusEventType = z.infer<typeof SyncStatusEventTypeSchema>;

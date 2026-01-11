@@ -7,7 +7,7 @@
  * @security SEC-014: Strict input validation schemas
  */
 
-import { z } from "zod";
+import { z } from 'zod';
 
 // ============================================================================
 // Validation Schemas (SEC-014: Input Validation)
@@ -19,13 +19,10 @@ import { z } from "zod";
  */
 export const ApiUrlSchema = z
   .string()
-  .min(1, "API URL is required")
-  .max(500, "API URL too long")
-  .url("Invalid URL format")
-  .refine(
-    (url) => url.startsWith("https://"),
-    "API URL must use HTTPS for security"
-  );
+  .min(1, 'API URL is required')
+  .max(500, 'API URL too long')
+  .url('Invalid URL format')
+  .refine((url) => url.startsWith('https://'), 'API URL must use HTTPS for security');
 
 /**
  * API Key validation schema
@@ -33,12 +30,9 @@ export const ApiUrlSchema = z
  */
 export const ApiKeySchema = z
   .string()
-  .min(1, "API Key is required")
-  .max(500, "API Key too long")
-  .regex(
-    /^[a-zA-Z0-9_\-\.]+$/,
-    "API Key contains invalid characters"
-  );
+  .min(1, 'API Key is required')
+  .max(500, 'API Key too long')
+  .regex(/^[a-zA-Z0-9_\-\.]+$/, 'API Key contains invalid characters');
 
 /**
  * Store ID validation schema
@@ -46,12 +40,9 @@ export const ApiKeySchema = z
  */
 export const StoreIdSchema = z
   .string()
-  .min(1, "Store ID is required")
-  .max(100, "Store ID too long")
-  .regex(
-    /^[a-zA-Z0-9\-_]+$/,
-    "Store ID contains invalid characters"
-  );
+  .min(1, 'Store ID is required')
+  .max(100, 'Store ID too long')
+  .regex(/^[a-zA-Z0-9\-_]+$/, 'Store ID contains invalid characters');
 
 /**
  * Safe file path validation schema
@@ -59,19 +50,10 @@ export const StoreIdSchema = z
  */
 export const SafePathSchema = z
   .string()
-  .max(500, "Path too long")
-  .refine(
-    (path) => !path.includes(".."),
-    "Path cannot contain parent directory references (..)"
-  )
-  .refine(
-    (path) => !path.includes("~"),
-    "Path cannot contain home directory references (~)"
-  )
-  .refine(
-    (path) => !/[<>"|?*]/.test(path),
-    "Path contains invalid characters"
-  );
+  .max(500, 'Path too long')
+  .refine((path) => !path.includes('..'), 'Path cannot contain parent directory references (..)')
+  .refine((path) => !path.includes('~'), 'Path cannot contain home directory references (~)')
+  .refine((path) => !/[<>"|?*]/.test(path), 'Path contains invalid characters');
 
 /**
  * Poll interval validation schema
@@ -79,9 +61,9 @@ export const SafePathSchema = z
  */
 export const PollIntervalSchema = z
   .number()
-  .int("Poll interval must be an integer")
-  .min(1, "Poll interval must be at least 1 second")
-  .max(3600, "Poll interval cannot exceed 3600 seconds (1 hour)");
+  .int('Poll interval must be an integer')
+  .min(1, 'Poll interval must be at least 1 second')
+  .max(3600, 'Poll interval cannot exceed 3600 seconds (1 hour)');
 
 /**
  * Enabled file types schema
@@ -101,14 +83,14 @@ export const EnabledFileTypesSchema = z.object({
  */
 export const NuvanaSyncConfigSchema = z.object({
   // Cloud connection
-  apiUrl: ApiUrlSchema.or(z.literal("")),
+  apiUrl: ApiUrlSchema.or(z.literal('')),
   apiKey: z.string().max(500), // Allow empty during setup, encrypted storage
-  storeId: StoreIdSchema.or(z.literal("")),
+  storeId: StoreIdSchema.or(z.literal('')),
 
   // File watching
-  watchPath: SafePathSchema.or(z.literal("")),
-  archivePath: SafePathSchema.or(z.literal("")),
-  errorPath: SafePathSchema.or(z.literal("")),
+  watchPath: SafePathSchema.or(z.literal('')),
+  archivePath: SafePathSchema.or(z.literal('')),
+  errorPath: SafePathSchema.or(z.literal('')),
   pollInterval: PollIntervalSchema,
 
   // File type toggles
@@ -142,12 +124,12 @@ export type EnabledFileTypes = z.infer<typeof EnabledFileTypesSchema>;
 // ============================================================================
 
 export const DEFAULT_CONFIG: NuvanaSyncConfig = {
-  apiUrl: "",
-  apiKey: "",
-  storeId: "",
-  watchPath: "",
-  archivePath: "",
-  errorPath: "",
+  apiUrl: '',
+  apiKey: '',
+  storeId: '',
+  watchPath: '',
+  archivePath: '',
+  errorPath: '',
   pollInterval: 5,
   enabledFileTypes: {
     pjr: true,

@@ -7,7 +7,7 @@
  * @security SEC-014: Client-side input validation
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useCallback } from 'react';
 
 /**
  * SEC-014: Client-side validation patterns
@@ -66,10 +66,10 @@ interface ValidationErrors {
 function validateUrl(url: string): string | undefined {
   if (!url) return undefined; // Allow empty during editing
   if (url.length > VALIDATION.MAX_URL_LENGTH) {
-    return "URL is too long (max 500 characters)";
+    return 'URL is too long (max 500 characters)';
   }
   if (!VALIDATION.URL_PATTERN.test(url)) {
-    return "URL must start with https://";
+    return 'URL must start with https://';
   }
   return undefined;
 }
@@ -80,10 +80,10 @@ function validateUrl(url: string): string | undefined {
 function validateApiKey(key: string): string | undefined {
   if (!key) return undefined;
   if (key.length > VALIDATION.MAX_API_KEY_LENGTH) {
-    return "API key is too long";
+    return 'API key is too long';
   }
   if (!VALIDATION.API_KEY_PATTERN.test(key)) {
-    return "API key contains invalid characters";
+    return 'API key contains invalid characters';
   }
   return undefined;
 }
@@ -94,10 +94,10 @@ function validateApiKey(key: string): string | undefined {
 function validateStoreId(storeId: string): string | undefined {
   if (!storeId) return undefined;
   if (storeId.length > VALIDATION.MAX_STORE_ID_LENGTH) {
-    return "Store ID is too long";
+    return 'Store ID is too long';
   }
   if (!VALIDATION.STORE_ID_PATTERN.test(storeId)) {
-    return "Store ID contains invalid characters";
+    return 'Store ID contains invalid characters';
   }
   return undefined;
 }
@@ -108,10 +108,10 @@ function validateStoreId(storeId: string): string | undefined {
 function validatePath(path: string): string | undefined {
   if (!path) return undefined;
   if (path.length > VALIDATION.MAX_PATH_LENGTH) {
-    return "Path is too long (max 500 characters)";
+    return 'Path is too long (max 500 characters)';
   }
   if (VALIDATION.PATH_FORBIDDEN_PATTERN.test(path)) {
-    return "Path contains forbidden characters or sequences";
+    return 'Path contains forbidden characters or sequences';
   }
   return undefined;
 }
@@ -121,7 +121,7 @@ function validatePath(path: string): string | undefined {
  */
 function validatePollInterval(interval: number): string | undefined {
   if (isNaN(interval)) {
-    return "Poll interval must be a number";
+    return 'Poll interval must be a number';
   }
   if (interval < VALIDATION.POLL_MIN || interval > VALIDATION.POLL_MAX) {
     return `Poll interval must be between ${VALIDATION.POLL_MIN} and ${VALIDATION.POLL_MAX} seconds`;
@@ -184,25 +184,25 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
       // Validate the changed field
       const newErrors = { ...errors };
       switch (field) {
-        case "apiUrl":
+        case 'apiUrl':
           newErrors.apiUrl = validateUrl(value as string);
           break;
-        case "apiKey":
+        case 'apiKey':
           newErrors.apiKey = validateApiKey(value as string);
           break;
-        case "storeId":
+        case 'storeId':
           newErrors.storeId = validateStoreId(value as string);
           break;
-        case "watchPath":
+        case 'watchPath':
           newErrors.watchPath = validatePath(value as string);
           break;
-        case "archivePath":
+        case 'archivePath':
           newErrors.archivePath = validatePath(value as string);
           break;
-        case "errorPath":
+        case 'errorPath':
           newErrors.errorPath = validatePath(value as string);
           break;
-        case "pollInterval":
+        case 'pollInterval':
           newErrors.pollInterval = validatePollInterval(value as number);
           break;
       }
@@ -219,7 +219,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
     setErrors(validationErrors);
 
     if (hasErrors(validationErrors)) {
-      setSaveError("Please fix validation errors before saving");
+      setSaveError('Please fix validation errors before saving');
       return;
     }
 
@@ -232,12 +232,10 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
       } else {
-        setSaveError(result.error || "Failed to save configuration");
+        setSaveError(result.error || 'Failed to save configuration');
       }
     } catch (error) {
-      setSaveError(
-        error instanceof Error ? error.message : "An error occurred"
-      );
+      setSaveError(error instanceof Error ? error.message : 'An error occurred');
     } finally {
       setSaving(false);
     }
@@ -254,7 +252,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
     if (urlError || keyError || storeError) {
       setTestResult({
         success: false,
-        message: "Please fix validation errors before testing",
+        message: 'Please fix validation errors before testing',
       });
       return;
     }
@@ -268,7 +266,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
     } catch (error) {
       setTestResult({
         success: false,
-        message: error instanceof Error ? error.message : "Connection test failed",
+        message: error instanceof Error ? error.message : 'Connection test failed',
       });
     } finally {
       setTesting(false);
@@ -293,12 +291,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
             aria-label="Go back"
           >
-            <svg
-              className="w-6 h-6"
-              fill="none"
-              stroke="currentColor"
-              viewBox="0 0 24 24"
-            >
+            <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
               <path
                 strokeLinecap="round"
                 strokeLinejoin="round"
@@ -314,84 +307,65 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
       <main className="p-6 max-w-2xl mx-auto">
         {/* Connection Section */}
         <section className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            Connection
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">Connection</h2>
 
           <div className="space-y-4">
             <div>
-              <label
-                htmlFor="apiUrl"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="apiUrl" className="block text-sm font-medium text-gray-700 mb-1">
                 API URL
               </label>
               <input
                 id="apiUrl"
                 type="url"
                 value={config.apiUrl}
-                onChange={(e) => updateConfig("apiUrl", e.target.value)}
+                onChange={(e) => updateConfig('apiUrl', e.target.value)}
                 maxLength={VALIDATION.MAX_URL_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.apiUrl ? "border-red-500" : "border-gray-300"
+                  errors.apiUrl ? 'border-red-500' : 'border-gray-300'
                 }`}
                 placeholder="https://api.example.com"
               />
-              {errors.apiUrl && (
-                <p className="text-sm text-red-500 mt-1">{errors.apiUrl}</p>
-              )}
+              {errors.apiUrl && <p className="text-sm text-red-500 mt-1">{errors.apiUrl}</p>}
             </div>
 
             <div>
-              <label
-                htmlFor="apiKey"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="apiKey" className="block text-sm font-medium text-gray-700 mb-1">
                 API Key
               </label>
               <input
                 id="apiKey"
                 type="password"
                 value={config.apiKey}
-                onChange={(e) => updateConfig("apiKey", e.target.value)}
+                onChange={(e) => updateConfig('apiKey', e.target.value)}
                 maxLength={VALIDATION.MAX_API_KEY_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.apiKey ? "border-red-500" : "border-gray-300"
+                  errors.apiKey ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
-              {errors.apiKey && (
-                <p className="text-sm text-red-500 mt-1">{errors.apiKey}</p>
-              )}
+              {errors.apiKey && <p className="text-sm text-red-500 mt-1">{errors.apiKey}</p>}
             </div>
 
             <div>
-              <label
-                htmlFor="storeId"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="storeId" className="block text-sm font-medium text-gray-700 mb-1">
                 Store ID
               </label>
               <input
                 id="storeId"
                 type="text"
                 value={config.storeId}
-                onChange={(e) => updateConfig("storeId", e.target.value)}
+                onChange={(e) => updateConfig('storeId', e.target.value)}
                 maxLength={VALIDATION.MAX_STORE_ID_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.storeId ? "border-red-500" : "border-gray-300"
+                  errors.storeId ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
-              {errors.storeId && (
-                <p className="text-sm text-red-500 mt-1">{errors.storeId}</p>
-              )}
+              {errors.storeId && <p className="text-sm text-red-500 mt-1">{errors.storeId}</p>}
             </div>
 
             {testResult && (
               <div
                 className={`p-3 rounded-lg ${
-                  testResult.success
-                    ? "bg-green-50 text-green-700"
-                    : "bg-red-50 text-red-700"
+                  testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
                 }`}
                 role="alert"
               >
@@ -404,84 +378,67 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
               disabled={testing}
               className="px-4 py-2 bg-gray-100 text-gray-700 rounded-lg font-medium hover:bg-gray-200 disabled:opacity-50"
             >
-              {testing ? "Testing..." : "Test Connection"}
+              {testing ? 'Testing...' : 'Test Connection'}
             </button>
           </div>
         </section>
 
         {/* File Watching Section */}
         <section className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            File Watching
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">File Watching</h2>
 
           <div className="space-y-4">
             <div>
-              <label
-                htmlFor="watchPath"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="watchPath" className="block text-sm font-medium text-gray-700 mb-1">
                 Watch Path
               </label>
               <input
                 id="watchPath"
                 type="text"
                 value={config.watchPath}
-                onChange={(e) => updateConfig("watchPath", e.target.value)}
+                onChange={(e) => updateConfig('watchPath', e.target.value)}
                 maxLength={VALIDATION.MAX_PATH_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.watchPath ? "border-red-500" : "border-gray-300"
+                  errors.watchPath ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
-              {errors.watchPath && (
-                <p className="text-sm text-red-500 mt-1">{errors.watchPath}</p>
-              )}
+              {errors.watchPath && <p className="text-sm text-red-500 mt-1">{errors.watchPath}</p>}
             </div>
 
             <div>
-              <label
-                htmlFor="archivePath"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="archivePath" className="block text-sm font-medium text-gray-700 mb-1">
                 Archive Path
               </label>
               <input
                 id="archivePath"
                 type="text"
                 value={config.archivePath}
-                onChange={(e) => updateConfig("archivePath", e.target.value)}
+                onChange={(e) => updateConfig('archivePath', e.target.value)}
                 maxLength={VALIDATION.MAX_PATH_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.archivePath ? "border-red-500" : "border-gray-300"
+                  errors.archivePath ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
               {errors.archivePath && (
-                <p className="text-sm text-red-500 mt-1">
-                  {errors.archivePath}
-                </p>
+                <p className="text-sm text-red-500 mt-1">{errors.archivePath}</p>
               )}
             </div>
 
             <div>
-              <label
-                htmlFor="errorPath"
-                className="block text-sm font-medium text-gray-700 mb-1"
-              >
+              <label htmlFor="errorPath" className="block text-sm font-medium text-gray-700 mb-1">
                 Error Path
               </label>
               <input
                 id="errorPath"
                 type="text"
                 value={config.errorPath}
-                onChange={(e) => updateConfig("errorPath", e.target.value)}
+                onChange={(e) => updateConfig('errorPath', e.target.value)}
                 maxLength={VALIDATION.MAX_PATH_LENGTH}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.errorPath ? "border-red-500" : "border-gray-300"
+                  errors.errorPath ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
-              {errors.errorPath && (
-                <p className="text-sm text-red-500 mt-1">{errors.errorPath}</p>
-              )}
+              {errors.errorPath && <p className="text-sm text-red-500 mt-1">{errors.errorPath}</p>}
             </div>
 
             <div>
@@ -497,17 +454,13 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
                 min={VALIDATION.POLL_MIN}
                 max={VALIDATION.POLL_MAX}
                 value={config.pollInterval}
-                onChange={(e) =>
-                  updateConfig("pollInterval", parseInt(e.target.value, 10) || 5)
-                }
+                onChange={(e) => updateConfig('pollInterval', parseInt(e.target.value, 10) || 5)}
                 className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent ${
-                  errors.pollInterval ? "border-red-500" : "border-gray-300"
+                  errors.pollInterval ? 'border-red-500' : 'border-gray-300'
                 }`}
               />
               {errors.pollInterval && (
-                <p className="text-sm text-red-500 mt-1">
-                  {errors.pollInterval}
-                </p>
+                <p className="text-sm text-red-500 mt-1">{errors.pollInterval}</p>
               )}
             </div>
           </div>
@@ -515,30 +468,21 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
 
         {/* File Types Section */}
         <section className="bg-white rounded-xl border border-gray-200 p-6 mb-6">
-          <h2 className="text-lg font-semibold text-gray-900 mb-4">
-            File Types
-          </h2>
+          <h2 className="text-lg font-semibold text-gray-900 mb-4">File Types</h2>
 
           <div className="space-y-3">
             {[
-              { key: "pjr", label: "PJR - Transaction Journal" },
-              { key: "fgm", label: "FGM - Fuel Grade Movement" },
-              { key: "msm", label: "MSM - Miscellaneous Summary" },
-              { key: "fpm", label: "FPM - Fuel Product Movement" },
-              { key: "mcm", label: "MCM - Merchandise Code Movement" },
-              { key: "tlm", label: "TLM - Tax Level Movement" },
+              { key: 'pjr', label: 'PJR - Transaction Journal' },
+              { key: 'fgm', label: 'FGM - Fuel Grade Movement' },
+              { key: 'msm', label: 'MSM - Miscellaneous Summary' },
+              { key: 'fpm', label: 'FPM - Fuel Product Movement' },
+              { key: 'mcm', label: 'MCM - Merchandise Code Movement' },
+              { key: 'tlm', label: 'TLM - Tax Level Movement' },
             ].map(({ key, label }) => (
-              <label
-                key={key}
-                className="flex items-center gap-3 cursor-pointer"
-              >
+              <label key={key} className="flex items-center gap-3 cursor-pointer">
                 <input
                   type="checkbox"
-                  checked={
-                    config.enabledFileTypes[
-                      key as keyof typeof config.enabledFileTypes
-                    ]
-                  }
+                  checked={config.enabledFileTypes[key as keyof typeof config.enabledFileTypes]}
                   onChange={(e) =>
                     setConfig({
                       ...config,
@@ -565,37 +509,27 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
               <input
                 type="checkbox"
                 checked={config.startOnLogin}
-                onChange={(e) =>
-                  setConfig({ ...config, startOnLogin: e.target.checked })
-                }
+                onChange={(e) => setConfig({ ...config, startOnLogin: e.target.checked })}
                 className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
               />
-              <span className="text-sm text-gray-700">
-                Start on Windows login
-              </span>
+              <span className="text-sm text-gray-700">Start on Windows login</span>
             </label>
 
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.minimizeToTray}
-                onChange={(e) =>
-                  setConfig({ ...config, minimizeToTray: e.target.checked })
-                }
+                onChange={(e) => setConfig({ ...config, minimizeToTray: e.target.checked })}
                 className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
               />
-              <span className="text-sm text-gray-700">
-                Minimize to system tray
-              </span>
+              <span className="text-sm text-gray-700">Minimize to system tray</span>
             </label>
 
             <label className="flex items-center gap-3 cursor-pointer">
               <input
                 type="checkbox"
                 checked={config.showNotifications}
-                onChange={(e) =>
-                  setConfig({ ...config, showNotifications: e.target.checked })
-                }
+                onChange={(e) => setConfig({ ...config, showNotifications: e.target.checked })}
                 className="w-4 h-4 text-indigo-600 rounded focus:ring-indigo-500"
               />
               <span className="text-sm text-gray-700">Show notifications</span>
@@ -615,12 +549,10 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
           onClick={handleSave}
           disabled={saving || hasErrors(errors)}
           className={`w-full py-3 px-4 rounded-lg font-medium transition-colors ${
-            saved
-              ? "bg-green-600 text-white"
-              : "bg-indigo-600 text-white hover:bg-indigo-700"
+            saved ? 'bg-green-600 text-white' : 'bg-indigo-600 text-white hover:bg-indigo-700'
           } disabled:opacity-50`}
         >
-          {saving ? "Saving..." : saved ? "Saved!" : "Save Changes"}
+          {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Changes'}
         </button>
       </main>
     </div>

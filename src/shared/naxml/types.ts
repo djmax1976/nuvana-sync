@@ -17,47 +17,47 @@
 /**
  * Supported NAXML versions
  */
-export type NAXMLVersion = "3.2" | "3.4" | "4.0";
+export type NAXMLVersion = '3.2' | '3.4' | '4.0';
 
 /**
  * NAXML document types for different data exchanges
  */
 export type NAXMLDocumentType =
-  | "PriceBookMaintenance"
-  | "TransactionDocument"
-  | "InventoryMovement"
-  | "EmployeeMaintenance"
-  | "TenderMaintenance"
-  | "DepartmentMaintenance"
-  | "TaxRateMaintenance"
-  | "Acknowledgment"
-  | "POSJournal" // Gilbarco Passport POS Journal Report (PJR files)
+  | 'PriceBookMaintenance'
+  | 'TransactionDocument'
+  | 'InventoryMovement'
+  | 'EmployeeMaintenance'
+  | 'TenderMaintenance'
+  | 'DepartmentMaintenance'
+  | 'TaxRateMaintenance'
+  | 'Acknowledgment'
+  | 'POSJournal' // Gilbarco Passport POS Journal Report (PJR files)
   // Movement Report Types (Gilbarco Passport)
-  | "FuelGradeMovement" // FGM - Fuel sales by grade, tender, position
-  | "FuelProductMovement" // FPM - Pump meter readings
-  | "MiscellaneousSummaryMovement" // MSM - Grand totals, drawer ops, statistics
-  | "TaxLevelMovement" // TLM - Tax collection summaries
-  | "MerchandiseCodeMovement" // MCM - Department/merchandise sales
-  | "ItemSalesMovement" // ISM - Individual item sales
-  | "TankProductMovement"; // TPM - Tank inventory readings
+  | 'FuelGradeMovement' // FGM - Fuel sales by grade, tender, position
+  | 'FuelProductMovement' // FPM - Pump meter readings
+  | 'MiscellaneousSummaryMovement' // MSM - Grand totals, drawer ops, statistics
+  | 'TaxLevelMovement' // TLM - Tax collection summaries
+  | 'MerchandiseCodeMovement' // MCM - Department/merchandise sales
+  | 'ItemSalesMovement' // ISM - Individual item sales
+  | 'TankProductMovement'; // TPM - Tank inventory readings
 
 /**
  * NAXML maintenance action types
  */
-export type NAXMLMaintenanceAction = "Add" | "Update" | "Delete" | "AddUpdate";
+export type NAXMLMaintenanceAction = 'Add' | 'Update' | 'Delete' | 'AddUpdate';
 
 /**
  * NAXML transaction types
  */
 export type NAXMLTransactionType =
-  | "Sale"
-  | "Refund"
-  | "VoidSale"
-  | "NoSale"
-  | "PaidOut"
-  | "PaidIn"
-  | "SafeDrop"
-  | "EndOfShift";
+  | 'Sale'
+  | 'Refund'
+  | 'VoidSale'
+  | 'NoSale'
+  | 'PaidOut'
+  | 'PaidIn'
+  | 'SafeDrop'
+  | 'EndOfShift';
 
 // ============================================================================
 // NAXML Document Structures
@@ -94,18 +94,18 @@ export interface NAXMLParserOptions {
   /** Whether to trim whitespace from values */
   trimWhitespace: boolean;
   /** Encoding (default: UTF-8) */
-  encoding?: "UTF-8" | "ISO-8859-1";
+  encoding?: 'UTF-8' | 'ISO-8859-1';
 }
 
 /**
  * Default parser options
  */
 export const DEFAULT_NAXML_PARSER_OPTIONS: NAXMLParserOptions = {
-  version: "3.4",
+  version: '3.4',
   strictValidation: true,
   throwOnUnknown: false,
   trimWhitespace: true,
-  encoding: "UTF-8",
+  encoding: 'UTF-8',
 };
 
 /**
@@ -128,10 +128,10 @@ export interface NAXMLBuilderOptions {
  * Default builder options
  */
 export const DEFAULT_NAXML_BUILDER_OPTIONS: NAXMLBuilderOptions = {
-  version: "3.4",
+  version: '3.4',
   includeDeclaration: true,
   prettyPrint: true,
-  indent: "  ",
+  indent: '  ',
   includeNamespace: true,
 };
 
@@ -283,58 +283,48 @@ export interface NAXMLTransactionTotal {
  * POSJournal transaction line status
  * SEC-014: Strict allowlist for status values
  */
-export type NAXMLTransactionLineStatus =
-  | "normal"
-  | "cancel"
-  | "void"
-  | "refund";
+export type NAXMLTransactionLineStatus = 'normal' | 'cancel' | 'void' | 'refund';
 
 /**
  * Service level codes for fuel transactions
  * SEC-014: Strict allowlist for service level values
  */
-export type NAXMLServiceLevelCode = "self" | "full" | "mini";
+export type NAXMLServiceLevelCode = 'self' | 'full' | 'mini';
 
 /**
  * Entry method codes
  * SEC-014: Strict allowlist for entry method values
  */
-export type NAXMLEntryMethod =
-  | "manual"
-  | "scanned"
-  | "keyed"
-  | "rfid"
-  | "card"
-  | "other";
+export type NAXMLEntryMethod = 'manual' | 'scanned' | 'keyed' | 'rfid' | 'card' | 'other';
 
 /**
  * Tender codes (based on NAXML specification)
  * SEC-014: Strict allowlist for tender codes
  */
 export type NAXMLTenderCode =
-  | "cash"
-  | "check"
-  | "creditDebit"
-  | "foodStamps"
-  | "giftCard"
-  | "fleet"
-  | "coupon"
-  | "loyalty"
-  | "houseCharge"
-  | "other";
+  | 'cash'
+  | 'check'
+  | 'creditDebit'
+  | 'foodStamps'
+  | 'giftCard'
+  | 'fleet'
+  | 'coupon'
+  | 'loyalty'
+  | 'houseCharge'
+  | 'other';
 
 /**
  * Transaction link reasons
  * SEC-014: Strict allowlist for link reasons
  */
 export type NAXMLTransactionLinkReason =
-  | "fuelPrepay"
-  | "fuelPostpay"
-  | "layaway"
-  | "refund"
-  | "void"
-  | "split"
-  | "other";
+  | 'fuelPrepay'
+  | 'fuelPostpay'
+  | 'layaway'
+  | 'refund'
+  | 'void'
+  | 'split'
+  | 'other';
 
 /**
  * NAXML POSJournal Document structure (Gilbarco Passport format)
@@ -624,7 +614,7 @@ export interface NAXMLJournalTransactionSummary {
   /** Grand total (direction: Collected or Refunded) */
   transactionTotalGrandAmount: number;
   /** Grand total direction */
-  transactionTotalGrandAmountDirection: "Collected" | "Refunded";
+  transactionTotalGrandAmountDirection: 'Collected' | 'Refunded';
 }
 
 /**
@@ -674,7 +664,7 @@ export interface NAXMLMaintenanceHeader {
   /** Maintenance timestamp */
   maintenanceDate: string;
   /** Type of maintenance (Full, Incremental) */
-  maintenanceType: "Full" | "Incremental";
+  maintenanceType: 'Full' | 'Incremental';
   /** Effective date for changes */
   effectiveDate?: string;
   /** Sequence number for ordering */
@@ -898,7 +888,7 @@ export interface NAXMLAcknowledgment {
   /** Original document type */
   originalDocumentType: NAXMLDocumentType;
   /** Acknowledgment status */
-  status: "Received" | "Processed" | "Rejected" | "PartiallyProcessed";
+  status: 'Received' | 'Processed' | 'Rejected' | 'PartiallyProcessed';
   /** Timestamp of acknowledgment */
   timestamp: string;
   /** Number of records processed */
@@ -960,7 +950,7 @@ export interface NAXMLValidationError {
   /** XPath to problematic element */
   path?: string;
   /** Severity level */
-  severity: "error" | "critical";
+  severity: 'error' | 'critical';
 }
 
 /**
@@ -985,17 +975,17 @@ export interface NAXMLValidationWarning {
  * File processing status
  */
 export type NAXMLFileStatus =
-  | "PENDING"
-  | "PROCESSING"
-  | "SUCCESS"
-  | "PARTIAL"
-  | "FAILED"
-  | "SKIPPED";
+  | 'PENDING'
+  | 'PROCESSING'
+  | 'SUCCESS'
+  | 'PARTIAL'
+  | 'FAILED'
+  | 'SKIPPED';
 
 /**
  * File direction
  */
-export type NAXMLFileDirection = "IMPORT" | "EXPORT";
+export type NAXMLFileDirection = 'IMPORT' | 'EXPORT';
 
 /**
  * NAXML file log entry
@@ -1154,24 +1144,24 @@ export type NAXMLPrimaryReportPeriod = 2 | 98;
  * SEC-014: Strict allowlist for fuel tender codes
  */
 export type NAXMLFuelTenderCode =
-  | "cash" // Inside cash sales
-  | "outsideCredit" // Pay-at-pump credit card
-  | "outsideDebit" // Pay-at-pump debit card
-  | "insideCredit" // Inside credit card
-  | "insideDebit" // Inside debit card
-  | "fleet"; // Fleet card sales
+  | 'cash' // Inside cash sales
+  | 'outsideCredit' // Pay-at-pump credit card
+  | 'outsideDebit' // Pay-at-pump debit card
+  | 'insideCredit' // Inside credit card
+  | 'insideDebit' // Inside debit card
+  | 'fleet'; // Fleet card sales
 
 /**
  * Valid fuel tender codes as readonly array for runtime validation.
  * SEC-014: Allowlist for validation
  */
 export const VALID_FUEL_TENDER_CODES = [
-  "cash",
-  "outsideCredit",
-  "outsideDebit",
-  "insideCredit",
-  "insideDebit",
-  "fleet",
+  'cash',
+  'outsideCredit',
+  'outsideDebit',
+  'insideCredit',
+  'insideDebit',
+  'fleet',
 ] as const;
 
 /**
@@ -1180,21 +1170,21 @@ export const VALID_FUEL_TENDER_CODES = [
  * SEC-014: Strict allowlist for MSM summary codes
  */
 export type NAXMLMiscellaneousSummaryCode =
-  | "safeDrop"
-  | "safeLoan"
-  | "refunds"
-  | "payouts"
-  | "payins"
-  | "totalizers"
-  | "statistics"
-  | "discount"
-  | "totalizer"
-  | "summaryTotals"
-  | "sales"
-  | "openingBalance"
-  | "closingBalance"
-  | "taxTotals"
-  | "fuelSalesByGrade";
+  | 'safeDrop'
+  | 'safeLoan'
+  | 'refunds'
+  | 'payouts'
+  | 'payins'
+  | 'totalizers'
+  | 'statistics'
+  | 'discount'
+  | 'totalizer'
+  | 'summaryTotals'
+  | 'sales'
+  | 'openingBalance'
+  | 'closingBalance'
+  | 'taxTotals'
+  | 'fuelSalesByGrade';
 
 /**
  * Miscellaneous Summary sub-codes.
@@ -1202,35 +1192,35 @@ export type NAXMLMiscellaneousSummaryCode =
  * SEC-014: Strict allowlist for MSM sub-codes
  */
 export type NAXMLMiscellaneousSummarySubCode =
-  | "total"
-  | "loan"
-  | "vendorPay"
-  | "carWashSales"
-  | "discounts"
-  | "itemssold"
-  | "noSales"
-  | "transactions"
-  | "nonFuelVoidItems"
-  | "voidTransactions"
-  | "postVoids"
-  | "driveoff"
-  | "refunds"
-  | "safeDrop"
-  | "overShort"
-  | "correction"
-  | "amountFixed"
-  | "amountPercentage"
-  | "promotional"
-  | "fuel"
-  | "storeCoupons"
-  | "sales"
-  | "tax"
-  | "nonTaxableSales"
-  | "MOP"
-  | "taxableSalesByTaxCode"
-  | "taxCollectedByTaxCode"
-  | "taxExemptedByTaxCode"
-  | "insideFuel";
+  | 'total'
+  | 'loan'
+  | 'vendorPay'
+  | 'carWashSales'
+  | 'discounts'
+  | 'itemssold'
+  | 'noSales'
+  | 'transactions'
+  | 'nonFuelVoidItems'
+  | 'voidTransactions'
+  | 'postVoids'
+  | 'driveoff'
+  | 'refunds'
+  | 'safeDrop'
+  | 'overShort'
+  | 'correction'
+  | 'amountFixed'
+  | 'amountPercentage'
+  | 'promotional'
+  | 'fuel'
+  | 'storeCoupons'
+  | 'sales'
+  | 'tax'
+  | 'nonTaxableSales'
+  | 'MOP'
+  | 'taxableSalesByTaxCode'
+  | 'taxCollectedByTaxCode'
+  | 'taxExemptedByTaxCode'
+  | 'insideFuel';
 
 // ============================================================================
 // Movement Report Base Interfaces
@@ -1268,13 +1258,13 @@ export interface NAXMLMovementReportDocument<T = unknown> {
  * SEC-014: Strict allowlist for movement report types
  */
 export type NAXMLMovementReportType =
-  | "FuelGradeMovement"
-  | "FuelProductMovement"
-  | "MiscellaneousSummaryMovement"
-  | "TaxLevelMovement"
-  | "MerchandiseCodeMovement"
-  | "ItemSalesMovement"
-  | "TankProductMovement";
+  | 'FuelGradeMovement'
+  | 'FuelProductMovement'
+  | 'MiscellaneousSummaryMovement'
+  | 'TaxLevelMovement'
+  | 'MerchandiseCodeMovement'
+  | 'ItemSalesMovement'
+  | 'TankProductMovement';
 
 /**
  * Movement header common to all movement reports.
@@ -2062,33 +2052,33 @@ export interface NAXMLTPMDetail {
  */
 export const NAXML_MOVEMENT_REPORT_ERROR_CODES = {
   // General errors
-  INVALID_DOCUMENT_TYPE: "MR_INVALID_DOCUMENT_TYPE",
-  MISSING_MOVEMENT_HEADER: "MR_MISSING_MOVEMENT_HEADER",
-  INVALID_REPORT_PERIOD: "MR_INVALID_REPORT_PERIOD",
-  INVALID_DATE_FORMAT: "MR_INVALID_DATE_FORMAT",
+  INVALID_DOCUMENT_TYPE: 'MR_INVALID_DOCUMENT_TYPE',
+  MISSING_MOVEMENT_HEADER: 'MR_MISSING_MOVEMENT_HEADER',
+  INVALID_REPORT_PERIOD: 'MR_INVALID_REPORT_PERIOD',
+  INVALID_DATE_FORMAT: 'MR_INVALID_DATE_FORMAT',
 
   // FGM specific errors
-  FGM_MISSING_FUEL_GRADE_ID: "FGM_MISSING_FUEL_GRADE_ID",
-  FGM_INVALID_TENDER_CODE: "FGM_INVALID_TENDER_CODE",
-  FGM_INVALID_SALES_VOLUME: "FGM_INVALID_SALES_VOLUME",
-  FGM_INVALID_SALES_AMOUNT: "FGM_INVALID_SALES_AMOUNT",
-  FGM_MISMATCHED_TOTALS: "FGM_MISMATCHED_TOTALS",
-  FGM_INVALID_POSITION_ID: "FGM_INVALID_POSITION_ID",
+  FGM_MISSING_FUEL_GRADE_ID: 'FGM_MISSING_FUEL_GRADE_ID',
+  FGM_INVALID_TENDER_CODE: 'FGM_INVALID_TENDER_CODE',
+  FGM_INVALID_SALES_VOLUME: 'FGM_INVALID_SALES_VOLUME',
+  FGM_INVALID_SALES_AMOUNT: 'FGM_INVALID_SALES_AMOUNT',
+  FGM_MISMATCHED_TOTALS: 'FGM_MISMATCHED_TOTALS',
+  FGM_INVALID_POSITION_ID: 'FGM_INVALID_POSITION_ID',
 
   // FPM specific errors
-  FPM_MISSING_PRODUCT_ID: "FPM_MISSING_PRODUCT_ID",
-  FPM_INVALID_METER_READING: "FPM_INVALID_METER_READING",
+  FPM_MISSING_PRODUCT_ID: 'FPM_MISSING_PRODUCT_ID',
+  FPM_INVALID_METER_READING: 'FPM_INVALID_METER_READING',
 
   // MSM specific errors
-  MSM_INVALID_SUMMARY_CODE: "MSM_INVALID_SUMMARY_CODE",
-  MSM_INVALID_AMOUNT: "MSM_INVALID_AMOUNT",
+  MSM_INVALID_SUMMARY_CODE: 'MSM_INVALID_SUMMARY_CODE',
+  MSM_INVALID_AMOUNT: 'MSM_INVALID_AMOUNT',
 
   // TLM specific errors
-  TLM_MISSING_TAX_LEVEL_ID: "TLM_MISSING_TAX_LEVEL_ID",
-  TLM_INVALID_TAX_AMOUNT: "TLM_INVALID_TAX_AMOUNT",
+  TLM_MISSING_TAX_LEVEL_ID: 'TLM_MISSING_TAX_LEVEL_ID',
+  TLM_INVALID_TAX_AMOUNT: 'TLM_INVALID_TAX_AMOUNT',
 
   // MCM specific errors
-  MCM_MISSING_MERCHANDISE_CODE: "MCM_MISSING_MERCHANDISE_CODE",
+  MCM_MISSING_MERCHANDISE_CODE: 'MCM_MISSING_MERCHANDISE_CODE',
 } as const;
 
 /**

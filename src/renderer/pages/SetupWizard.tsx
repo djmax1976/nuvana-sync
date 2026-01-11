@@ -1,19 +1,19 @@
-import React, { useState } from "react";
+import React, { useState } from 'react';
 
 interface SetupWizardProps {
   onComplete: () => void;
 }
 
-type Step = "welcome" | "connection" | "watchPath" | "complete";
+type Step = 'welcome' | 'connection' | 'watchPath' | 'complete';
 
 function SetupWizard({ onComplete }: SetupWizardProps) {
-  const [step, setStep] = useState<Step>("welcome");
+  const [step, setStep] = useState<Step>('welcome');
   const [config, setConfig] = useState({
-    apiUrl: "",
-    apiKey: "",
-    storeId: "",
-    watchPath: "",
-    archivePath: "",
+    apiUrl: '',
+    apiKey: '',
+    storeId: '',
+    watchPath: '',
+    archivePath: '',
   });
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<{
@@ -38,7 +38,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-8">
-        {step === "welcome" && (
+        {step === 'welcome' && (
           <div className="text-center">
             <div className="w-16 h-16 bg-indigo-600 rounded-full flex items-center justify-center mx-auto mb-6">
               <svg
@@ -55,15 +55,12 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 />
               </svg>
             </div>
-            <h1 className="text-2xl font-bold text-gray-900 mb-2">
-              Welcome to Nuvana Sync
-            </h1>
+            <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Nuvana Sync</h1>
             <p className="text-gray-600 mb-8">
-              This application will sync your POS data to the cloud
-              automatically.
+              This application will sync your POS data to the cloud automatically.
             </p>
             <button
-              onClick={() => setStep("connection")}
+              onClick={() => setStep('connection')}
               className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
             >
               Get Started
@@ -71,56 +68,40 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
         )}
 
-        {step === "connection" && (
+        {step === 'connection' && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-6">
-              Connect to Nuvana Cloud
-            </h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-6">Connect to Nuvana Cloud</h2>
 
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API URL
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">API URL</label>
                 <input
                   type="url"
                   value={config.apiUrl}
-                  onChange={(e) =>
-                    setConfig({ ...config, apiUrl: e.target.value })
-                  }
+                  onChange={(e) => setConfig({ ...config, apiUrl: e.target.value })}
                   placeholder="https://api.nuvana.cloud"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  API Key
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
                 <input
                   type="password"
                   value={config.apiKey}
-                  onChange={(e) =>
-                    setConfig({ ...config, apiKey: e.target.value })
-                  }
+                  onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
                   placeholder="sk_live_xxxxxxxxxxxxx"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Provided by your account manager
-                </p>
+                <p className="text-xs text-gray-500 mt-1">Provided by your account manager</p>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Store ID
-                </label>
+                <label className="block text-sm font-medium text-gray-700 mb-1">Store ID</label>
                 <input
                   type="text"
                   value={config.storeId}
-                  onChange={(e) =>
-                    setConfig({ ...config, storeId: e.target.value })
-                  }
+                  onChange={(e) => setConfig({ ...config, storeId: e.target.value })}
                   placeholder="store-001"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
@@ -129,9 +110,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
               {testResult && (
                 <div
                   className={`p-3 rounded-lg ${
-                    testResult.success
-                      ? "bg-green-50 text-green-700"
-                      : "bg-red-50 text-red-700"
+                    testResult.success ? 'bg-green-50 text-green-700' : 'bg-red-50 text-red-700'
                   }`}
                 >
                   {testResult.message}
@@ -141,7 +120,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
 
             <div className="flex gap-3 mt-8">
               <button
-                onClick={() => setStep("welcome")}
+                onClick={() => setStep('welcome')}
                 className="flex-1 py-3 px-6 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Back
@@ -151,10 +130,10 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 disabled={testing || !config.apiUrl || !config.apiKey}
                 className="flex-1 py-3 px-6 bg-gray-100 rounded-lg font-medium text-gray-700 hover:bg-gray-200 transition-colors disabled:opacity-50"
               >
-                {testing ? "Testing..." : "Test Connection"}
+                {testing ? 'Testing...' : 'Test Connection'}
               </button>
               <button
-                onClick={() => setStep("watchPath")}
+                onClick={() => setStep('watchPath')}
                 disabled={!testResult?.success}
                 className="flex-1 py-3 px-6 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
               >
@@ -164,11 +143,9 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
           </div>
         )}
 
-        {step === "watchPath" && (
+        {step === 'watchPath' && (
           <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-6">
-              Configure File Watching
-            </h2>
+            <h2 className="text-xl font-bold text-gray-900 mb-6">Configure File Watching</h2>
 
             <div className="space-y-4">
               <div>
@@ -178,9 +155,7 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <input
                   type="text"
                   value={config.watchPath}
-                  onChange={(e) =>
-                    setConfig({ ...config, watchPath: e.target.value })
-                  }
+                  onChange={(e) => setConfig({ ...config, watchPath: e.target.value })}
                   placeholder="Z:\Gilbarco\Export\NAXML"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
@@ -196,21 +171,17 @@ function SetupWizard({ onComplete }: SetupWizardProps) {
                 <input
                   type="text"
                   value={config.archivePath}
-                  onChange={(e) =>
-                    setConfig({ ...config, archivePath: e.target.value })
-                  }
+                  onChange={(e) => setConfig({ ...config, archivePath: e.target.value })}
                   placeholder="Z:\Gilbarco\Export\NAXML\Processed"
                   className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
                 />
-                <p className="text-xs text-gray-500 mt-1">
-                  Processed files will be moved here
-                </p>
+                <p className="text-xs text-gray-500 mt-1">Processed files will be moved here</p>
               </div>
             </div>
 
             <div className="flex gap-3 mt-8">
               <button
-                onClick={() => setStep("connection")}
+                onClick={() => setStep('connection')}
                 className="flex-1 py-3 px-6 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Back

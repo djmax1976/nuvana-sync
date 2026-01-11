@@ -1,12 +1,12 @@
-import React, { useState, useEffect } from "react";
-import SetupWizard from "./pages/SetupWizard";
-import Dashboard from "./pages/Dashboard";
-import Settings from "./pages/Settings";
+import React, { useState, useEffect } from 'react';
+import SetupWizard from './pages/SetupWizard';
+import Dashboard from './pages/Dashboard';
+import Settings from './pages/Settings';
 
-type Page = "setup" | "dashboard" | "settings";
+type Page = 'setup' | 'dashboard' | 'settings';
 
 function App() {
-  const [currentPage, setCurrentPage] = useState<Page>("dashboard");
+  const [currentPage, setCurrentPage] = useState<Page>('dashboard');
   const [isConfigured, setIsConfigured] = useState<boolean | null>(null);
 
   useEffect(() => {
@@ -14,16 +14,16 @@ function App() {
     window.nuvanaSyncAPI.getConfig().then((config) => {
       setIsConfigured(config.isConfigured);
       if (!config.isConfigured) {
-        setCurrentPage("setup");
+        setCurrentPage('setup');
       }
     });
 
     // Listen for navigation events from main process
     const unsubscribe = window.nuvanaSyncAPI.onNavigate((path) => {
-      if (path === "/settings") {
-        setCurrentPage("settings");
-      } else if (path === "/dashboard") {
-        setCurrentPage("dashboard");
+      if (path === '/settings') {
+        setCurrentPage('settings');
+      } else if (path === '/dashboard') {
+        setCurrentPage('dashboard');
       }
     });
 
@@ -32,7 +32,7 @@ function App() {
 
   const handleSetupComplete = () => {
     setIsConfigured(true);
-    setCurrentPage("dashboard");
+    setCurrentPage('dashboard');
   };
 
   const handleNavigate = (page: Page) => {
@@ -50,11 +50,11 @@ function App() {
 
   // Render current page
   switch (currentPage) {
-    case "setup":
+    case 'setup':
       return <SetupWizard onComplete={handleSetupComplete} />;
-    case "settings":
-      return <Settings onBack={() => handleNavigate("dashboard")} />;
-    case "dashboard":
+    case 'settings':
+      return <Settings onBack={() => handleNavigate('dashboard')} />;
+    case 'dashboard':
     default:
       return <Dashboard onNavigate={handleNavigate} />;
   }

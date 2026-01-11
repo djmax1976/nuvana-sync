@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect } from 'react';
 
 interface DashboardProps {
-  onNavigate: (page: "settings") => void;
+  onNavigate: (page: 'settings') => void;
 }
 
 /**
@@ -22,7 +22,7 @@ interface SyncStats {
 interface FileRecord {
   filePath: string;
   fileName: string;
-  status: "queued" | "processing" | "success" | "error";
+  status: 'queued' | 'processing' | 'success' | 'error';
   timestamp: Date | string;
   error?: string;
   documentType?: string;
@@ -38,24 +38,6 @@ function Dashboard({ onNavigate }: DashboardProps) {
   const [recentFiles, setRecentFiles] = useState<FileRecord[]>([]);
   const [isPaused, setIsPaused] = useState(false);
 
-  useEffect(() => {
-    // Load initial data
-    loadData();
-
-    // Poll for updates
-    const interval = setInterval(loadData, 5000);
-
-    // Listen for sync status events
-    const unsubscribe = window.nuvanaSyncAPI.onSyncStatus((data) => {
-      loadData();
-    });
-
-    return () => {
-      clearInterval(interval);
-      unsubscribe();
-    };
-  }, []);
-
   const loadData = async () => {
     const [statsData, filesData] = await Promise.all([
       window.nuvanaSyncAPI.getStats(),
@@ -65,6 +47,25 @@ function Dashboard({ onNavigate }: DashboardProps) {
     setRecentFiles(filesData);
     setIsPaused(!statsData.isWatching);
   };
+
+  useEffect(() => {
+    // Load initial data
+    loadData();
+
+    // Poll for updates
+    const interval = setInterval(loadData, 5000);
+
+    // Listen for sync status events
+    const unsubscribe = window.nuvanaSyncAPI.onSyncStatus((_data) => {
+      loadData();
+    });
+
+    return () => {
+      clearInterval(interval);
+      unsubscribe();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const handleTogglePause = async () => {
     const result = await window.nuvanaSyncAPI.togglePause();
@@ -77,20 +78,20 @@ function Dashboard({ onNavigate }: DashboardProps) {
   };
 
   const formatTime = (timestamp: Date | string | null) => {
-    if (!timestamp) return "Never";
+    if (!timestamp) return 'Never';
     const date = timestamp instanceof Date ? timestamp : new Date(timestamp);
     const now = new Date();
     const diff = now.getTime() - date.getTime();
     const minutes = Math.floor(diff / 60000);
 
-    if (minutes < 1) return "Just now";
+    if (minutes < 1) return 'Just now';
     if (minutes < 60) return `${minutes} min ago`;
     return date.toLocaleTimeString();
   };
 
   const getStatusIcon = (status: string) => {
     switch (status) {
-      case "success":
+      case 'success':
         return (
           <span className="text-green-500">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -102,7 +103,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
             </svg>
           </span>
         );
-      case "error":
+      case 'error':
         return (
           <span className="text-red-500">
             <svg className="w-5 h-5" fill="currentColor" viewBox="0 0 20 20">
@@ -114,7 +115,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
             </svg>
           </span>
         );
-      case "processing":
+      case 'processing':
         return (
           <span className="text-yellow-500 animate-spin">
             <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24">
@@ -156,7 +157,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
         <div className="flex items-center justify-between">
           <h1 className="text-xl font-bold text-gray-900">Nuvana Sync</h1>
           <button
-            onClick={() => onNavigate("settings")}
+            onClick={() => onNavigate('settings')}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -184,12 +185,12 @@ function Dashboard({ onNavigate }: DashboardProps) {
             <div className="flex items-center gap-3">
               <div
                 className={`w-3 h-3 rounded-full ${
-                  stats.isWatching ? "bg-green-500" : "bg-gray-400"
+                  stats.isWatching ? 'bg-green-500' : 'bg-gray-400'
                 }`}
               />
               <div>
                 <div className="text-sm font-medium text-gray-900">
-                  {stats.isWatching ? "Connected" : "Paused"}
+                  {stats.isWatching ? 'Connected' : 'Paused'}
                 </div>
                 <div className="text-xs text-gray-500">Sync Status</div>
               </div>
@@ -223,20 +224,14 @@ function Dashboard({ onNavigate }: DashboardProps) {
 
         {/* Stats */}
         <div className="bg-white rounded-xl p-6 border border-gray-200 mb-6">
-          <h2 className="text-sm font-medium text-gray-500 mb-4">
-            Today's Activity
-          </h2>
+          <h2 className="text-sm font-medium text-gray-500 mb-4">Today's Activity</h2>
           <div className="grid grid-cols-2 gap-6">
             <div>
-              <div className="text-3xl font-bold text-gray-900">
-                {stats.filesProcessed}
-              </div>
+              <div className="text-3xl font-bold text-gray-900">{stats.filesProcessed}</div>
               <div className="text-sm text-gray-500">Files Processed</div>
             </div>
             <div>
-              <div className="text-3xl font-bold text-red-600">
-                {stats.filesErrored}
-              </div>
+              <div className="text-3xl font-bold text-red-600">{stats.filesErrored}</div>
               <div className="text-sm text-gray-500">Errors</div>
             </div>
           </div>
@@ -249,29 +244,18 @@ function Dashboard({ onNavigate }: DashboardProps) {
           </div>
           <div className="divide-y divide-gray-100">
             {recentFiles.length === 0 ? (
-              <div className="px-6 py-8 text-center text-gray-500">
-                No files processed yet
-              </div>
+              <div className="px-6 py-8 text-center text-gray-500">No files processed yet</div>
             ) : (
               recentFiles.slice(0, 10).map((file, index) => (
-                <div
-                  key={index}
-                  className="px-6 py-3 flex items-center justify-between"
-                >
+                <div key={index} className="px-6 py-3 flex items-center justify-between">
                   <div className="flex items-center gap-3">
                     {getStatusIcon(file.status)}
                     <div>
-                      <div className="text-sm font-medium text-gray-900">
-                        {file.fileName}
-                      </div>
-                      {file.error && (
-                        <div className="text-xs text-red-500">{file.error}</div>
-                      )}
+                      <div className="text-sm font-medium text-gray-900">{file.fileName}</div>
+                      {file.error && <div className="text-xs text-red-500">{file.error}</div>}
                     </div>
                   </div>
-                  <div className="text-xs text-gray-500">
-                    {formatTime(file.timestamp)}
-                  </div>
+                  <div className="text-xs text-gray-500">{formatTime(file.timestamp)}</div>
                 </div>
               ))
             )}
@@ -284,8 +268,8 @@ function Dashboard({ onNavigate }: DashboardProps) {
             onClick={handleTogglePause}
             className={`flex-1 py-3 px-4 rounded-lg font-medium flex items-center justify-center gap-2 ${
               isPaused
-                ? "bg-green-600 text-white hover:bg-green-700"
-                : "bg-yellow-100 text-yellow-700 hover:bg-yellow-200"
+                ? 'bg-green-600 text-white hover:bg-green-700'
+                : 'bg-yellow-100 text-yellow-700 hover:bg-yellow-200'
             }`}
           >
             {isPaused ? (
