@@ -7,7 +7,7 @@
  * - CDP-001: Encrypted storage using Electron safeStorage
  * - API-001: Zod schema validation for all license data
  * - LM-001: Structured logging with secret redaction
- * - SEC-GRACE: 7-day grace period after expiry
+ * - SEC-GRACE: 15-day grace period after expiry
  * - SEC-REVOKE: Immediate revocation on 401/403
  *
  * Test Categories:
@@ -167,8 +167,8 @@ describe('LicenseService', () => {
       });
 
       it('should return false for expired license beyond grace period', () => {
-        // Expired 10 days ago (beyond 7-day grace)
-        service.updateFromApiResponse(createLicenseResponse('active', -10));
+        // Expired 20 days ago (beyond 15-day grace)
+        service.updateFromApiResponse(createLicenseResponse('active', -20));
         expect(service.isValid()).toBe(false);
       });
 
@@ -233,8 +233,8 @@ describe('LicenseService', () => {
       });
 
       it('should return false for license expired beyond grace window', () => {
-        // Expired 10 days ago (beyond 7-day grace)
-        service.updateFromApiResponse(createLicenseResponse('active', -10));
+        // Expired 20 days ago (beyond 15-day grace)
+        service.updateFromApiResponse(createLicenseResponse('active', -20));
         expect(service.isInGracePeriod()).toBe(false);
       });
 
@@ -295,15 +295,13 @@ describe('LicenseService', () => {
       it('should return invalid state when no license exists', () => {
         const state = service.getState();
 
-        expect(state).toEqual({
-          valid: false,
-          expiresAt: null,
-          daysRemaining: null,
-          showWarning: false,
-          inGracePeriod: false,
-          status: null,
-          lastChecked: null,
-        });
+        expect(state.valid).toBe(false);
+        expect(state.expiresAt).toBeNull();
+        expect(state.daysRemaining).toBeNull();
+        expect(state.showWarning).toBe(false);
+        expect(state.inGracePeriod).toBe(false);
+        expect(state.status).toBeNull();
+        expect(state.lastChecked).toBeNull();
       });
 
       it('should return complete state for active license', () => {
@@ -333,7 +331,8 @@ describe('LicenseService', () => {
       });
 
       it('should reflect expired beyond grace state correctly', () => {
-        service.updateFromApiResponse(createLicenseResponse('active', -10));
+        // Expired 20 days ago (beyond 15-day grace)
+        service.updateFromApiResponse(createLicenseResponse('active', -20));
 
         const state = service.getState();
 

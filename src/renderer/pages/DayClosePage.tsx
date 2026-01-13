@@ -244,7 +244,7 @@ export default function DayCloseWizardPage() {
     if (summary && summary.bins_closed.length > 0) {
       return {
         closings_created: summary.closings_count,
-        business_day: dayBinsData.business_day?.date || "",
+        business_date: dayBinsData.business_day?.date || "",
         lottery_total: summary.lottery_total,
         bins_closed: summary.bins_closed.map((bin) => ({
           bin_number: bin.bin_number,
@@ -307,7 +307,7 @@ export default function DayCloseWizardPage() {
 
     return {
       closings_created: closedBins.length,
-      business_day: dayBinsData.business_day?.date || "",
+      business_date: dayBinsData.business_day?.date || "",
       lottery_total: lotteryTotal,
       bins_closed: binsClosedData,
     };
