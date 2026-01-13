@@ -18,11 +18,52 @@
  */
 
 // eslint-disable-next-line @typescript-eslint/no-require-imports
-const { execSync } = require('child_process');
+const { execFileSync } = require('child_process');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const path = require('path');
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 const fs = require('fs');
+
+/**
+ * Validate that a file path is safe for signing operations.
+ * Prevents command injection by ensuring path is absolute and within expected directories.
+ * @param {string} filePath - Path to validate
+ * @returns {string} - Resolved absolute path
+ * @throws {Error} - If path is invalid or potentially malicious
+ */
+function validateFilePath(filePath) {
+  if (!filePath || typeof filePath !== 'string') {
+    throw new Error('File path must be a non-empty string');
+  }
+
+  // Resolve to absolute path
+  const resolvedPath = path.resolve(filePath);
+
+  // Check for null bytes (common injection technique)
+  if (filePath.includes('\0') || resolvedPath.includes('\0')) {
+    throw new Error('Invalid file path: contains null bytes');
+  }
+
+  // Ensure file exists
+  if (!fs.existsSync(resolvedPath)) {
+    throw new Error(`File not found: ${resolvedPath}`);
+  }
+
+  // Ensure it's a file, not a directory
+  const stats = fs.statSync(resolvedPath);
+  if (!stats.isFile()) {
+    throw new Error(`Path is not a file: ${resolvedPath}`);
+  }
+
+  // Validate extension (only sign expected file types)
+  const ext = path.extname(resolvedPath).toLowerCase();
+  const allowedExtensions = ['.exe', '.dll', '.msi', '.msix', '.appx'];
+  if (!allowedExtensions.includes(ext)) {
+    throw new Error(`Unsupported file type for signing: ${ext}`);
+  }
+
+  return resolvedPath;
+}
 
 /**
  * Log message with timestamp
@@ -57,7 +98,7 @@ function validateEnvVars(vars) {
 
 /**
  * Sign using Azure SignTool (cloud-based signing)
- * @param {string} filePath - Path to file to sign
+ * @param {string} filePath - Path to file to sign (must be validated)
  * @returns {boolean} - Success status
  */
 function signWithAzure(filePath) {
@@ -73,28 +114,28 @@ function signWithAzure(filePath) {
     return false;
   }
 
-  const command = [
-    'AzureSignTool',
+  // Use execFileSync with args array to prevent command injection
+  const args = [
     'sign',
-    `-kvt "${process.env.AZURE_SIGN_TENANT_ID}"`,
-    `-kvu "${process.env.AZURE_SIGN_VAULT_URL}"`,
-    `-kvi "${process.env.AZURE_SIGN_CLIENT_ID}"`,
-    `-kvs "${process.env.AZURE_SIGN_CLIENT_SECRET}"`,
-    `-kvc "${process.env.AZURE_SIGN_CERTIFICATE_NAME}"`,
-    '-tr http://timestamp.digicert.com',
-    '-td sha256',
-    '-fd sha256',
-    `"${filePath}"`,
-  ].join(' ');
+    '-kvt', process.env.AZURE_SIGN_TENANT_ID,
+    '-kvu', process.env.AZURE_SIGN_VAULT_URL,
+    '-kvi', process.env.AZURE_SIGN_CLIENT_ID,
+    '-kvs', process.env.AZURE_SIGN_CLIENT_SECRET,
+    '-kvc', process.env.AZURE_SIGN_CERTIFICATE_NAME,
+    '-tr', 'http://timestamp.digicert.com',
+    '-td', 'sha256',
+    '-fd', 'sha256',
+    filePath,
+  ];
 
   log('Signing with Azure SignTool...');
-  execSync(command, { stdio: 'inherit' });
+  execFileSync('AzureSignTool', args, { stdio: 'inherit' });
   return true;
 }
 
 /**
  * Sign using local certificate (signtool.exe)
- * @param {string} filePath - Path to file to sign
+ * @param {string} filePath - Path to file to sign (must be validated)
  * @returns {boolean} - Success status
  */
 function signWithLocal(filePath) {
@@ -104,7 +145,7 @@ function signWithLocal(filePath) {
     return false;
   }
 
-  const certPath = process.env.WIN_CSC_LINK;
+  const certPath = path.resolve(process.env.WIN_CSC_LINK);
 
   // Validate certificate file exists
   if (!fs.existsSync(certPath)) {
@@ -112,32 +153,39 @@ function signWithLocal(filePath) {
     return false;
   }
 
-  // Construct signtool command with proper escaping
-  const command = [
-    'signtool',
+  // Validate certificate file extension
+  const certExt = path.extname(certPath).toLowerCase();
+  if (!['.pfx', '.p12'].includes(certExt)) {
+    log(`Invalid certificate file type: ${certExt}`, 'error');
+    return false;
+  }
+
+  // Use execFileSync with args array to prevent command injection
+  const args = [
     'sign',
-    `/f "${certPath}"`,
-    `/p "${process.env.WIN_CSC_KEY_PASSWORD}"`,
-    '/tr http://timestamp.digicert.com',
-    '/td sha256',
-    '/fd sha256',
+    '/f', certPath,
+    '/p', process.env.WIN_CSC_KEY_PASSWORD,
+    '/tr', 'http://timestamp.digicert.com',
+    '/td', 'sha256',
+    '/fd', 'sha256',
     '/v',
-    `"${filePath}"`,
-  ].join(' ');
+    filePath,
+  ];
 
   log('Signing with local certificate...');
-  execSync(command, { stdio: 'inherit' });
+  execFileSync('signtool', args, { stdio: 'inherit' });
   return true;
 }
 
 /**
  * Verify signature on a file
- * @param {string} filePath - Path to file to verify
+ * @param {string} filePath - Path to file to verify (must be validated)
  * @returns {boolean} - Verification success
  */
 function verifySignature(filePath) {
   try {
-    execSync(`signtool verify /pa /v "${filePath}"`, { stdio: 'inherit' });
+    // Use execFileSync with args array to prevent command injection
+    execFileSync('signtool', ['verify', '/pa', '/v', filePath], { stdio: 'inherit' });
     log('Signature verified successfully');
     return true;
   } catch (error) {
@@ -155,7 +203,16 @@ function verifySignature(filePath) {
  * @returns {Promise<void>}
  */
 async function sign(configuration) {
-  const { path: filePath, hash, isNest } = configuration;
+  const { path: rawFilePath, hash, isNest } = configuration;
+
+  // Validate and sanitize file path to prevent command injection
+  let filePath;
+  try {
+    filePath = validateFilePath(rawFilePath);
+  } catch (validationError) {
+    log(`File path validation failed: ${validationError.message}`, 'error');
+    throw validationError;
+  }
 
   log(`Starting code signing for: ${path.basename(filePath)}`);
   log(`Hash algorithm: ${hash || 'sha256'}`);
