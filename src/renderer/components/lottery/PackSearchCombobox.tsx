@@ -101,7 +101,7 @@ export interface PackSearchComboboxProps {
   /** Error message to display */
   error?: string;
   /** Filter by pack status - defaults to RECEIVED for activation */
-  statusFilter?: "RECEIVED" | "ACTIVE" | "DEPLETED" | "RETURNED";
+  statusFilter?: "RECEIVED" | "ACTIVATED" | "SETTLED" | "RETURNED";
   /** Test ID for the input element */
   testId?: string;
 }
@@ -127,8 +127,8 @@ function mapPackToOption(pack: LotteryPackResponse): PackSearchOption {
     game_id: pack.game_id,
     game_name: pack.game?.name || "Unknown Game",
     game_price: pack.game?.price || null,
-    serial_start: pack.serial_start,
-    serial_end: pack.serial_end,
+    serial_start: pack.opening_serial || "",
+    serial_end: pack.closing_serial || "",
   };
 }
 

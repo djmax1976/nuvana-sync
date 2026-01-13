@@ -94,8 +94,7 @@ async function verifyUserPermission(
   permission: string,
   storeId: string,
 ): Promise<UserPermissionVerificationResult> {
-  const API_BASE_URL =
-    "http://localhost:3001" || "http://localhost:3001";
+  const API_BASE_URL = "http://localhost:3001";
 
   const response = await fetch(
     `${API_BASE_URL}/api/auth/verify-user-permission`,

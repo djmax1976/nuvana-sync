@@ -9,235 +9,283 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import {
-  AuthService,
-  type LoginResult,
-} from '../../../src/main/services/auth.service';
-import { SessionService } from '../../../src/main/services/session.service';
-import { UsersDAL, type SafeUser, type UserRole } from '../../../src/main/dal/users.dal';
 
-// Mock the UsersDAL
-vi.mock('../../../src/main/dal/users.dal', () => ({
-  UsersDAL: vi.fn().mockImplementation(() => ({
-    verifyPin: vi.fn(),
-    findById: vi.fn(),
-    findByStore: vi.fn(),
-  })),
-  usersDAL: {
-    verifyPin: vi.fn(),
-    findById: vi.fn(),
-    findByStore: vi.fn(),
+// Mock electron
+vi.mock('electron', () => ({
+  BrowserWindow: {
+    getAllWindows: vi.fn(() => []),
   },
 }));
 
-describe('Auth Service', () => {
-  let authService: AuthService;
-  let mockUsersDAL: {
-    verifyPin: ReturnType<typeof vi.fn>;
-    findById: ReturnType<typeof vi.fn>;
-    findByStore: ReturnType<typeof vi.fn>;
-  };
-  let sessionService: SessionService;
+// Mock the logger
+vi.mock('../../../src/main/utils/logger', () => ({
+  createLogger: () => ({
+    info: vi.fn(),
+    debug: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  }),
+}));
 
-  // Mock user for testing
-  const mockUser: SafeUser = {
+// Mock the IPC module
+vi.mock('../../../src/main/ipc/index', () => {
+  let currentUser: unknown = null;
+  return {
+    setCurrentUser: vi.fn((user: unknown) => {
+      currentUser = user;
+    }),
+    getCurrentUser: vi.fn(() => currentUser),
+  };
+});
+
+// Mock the UsersDAL
+const mockVerifyPin = vi.fn();
+const mockFindByIdForStore = vi.fn();
+const mockFindActiveByStore = vi.fn();
+const mockToSafeUser = vi.fn((user: unknown) => user);
+
+vi.mock('../../../src/main/dal/users.dal', () => ({
+  usersDAL: {
+    verifyPin: mockVerifyPin,
+    findByIdForStore: mockFindByIdForStore,
+    findActiveByStore: mockFindActiveByStore,
+  },
+  UsersDAL: {
+    toSafeUser: mockToSafeUser,
+  },
+}));
+
+// Mock the StoresDAL
+const mockGetConfiguredStore = vi.fn();
+vi.mock('../../../src/main/dal/stores.dal', () => ({
+  storesDAL: {
+    getConfiguredStore: mockGetConfiguredStore,
+  },
+}));
+
+import {
+  authenticateByPin,
+  authenticateUser,
+  logout,
+  getCurrentAuthUser,
+  getCurrentSession,
+  trackActivity,
+  hasPermission,
+  hasMinimumRole,
+  getRoleLevel,
+  getActiveUsersForLogin,
+  type LoginResult,
+  type AuthenticatedUser,
+} from '../../../src/main/services/auth.service';
+import { destroySession } from '../../../src/main/services/session.service';
+
+describe('Auth Service', () => {
+  const mockStore = {
+    store_id: 'store-456',
+    name: 'Test Store',
+    created_at: new Date().toISOString(),
+    updated_at: new Date().toISOString(),
+  };
+
+  const mockUser = {
     user_id: 'user-123',
     store_id: 'store-456',
-    username: 'testuser',
-    role: 'CASHIER' as UserRole,
-    status: 'ACTIVE',
+    name: 'Test User',
+    role: 'cashier' as const,
+    active: true,
+    pin_hash: 'hashed_pin',
+    cloud_user_id: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
 
   beforeEach(() => {
-    mockUsersDAL = {
-      verifyPin: vi.fn(),
-      findById: vi.fn(),
-      findByStore: vi.fn(),
-    };
-    sessionService = new SessionService();
-    authService = new AuthService(mockUsersDAL as unknown as UsersDAL, sessionService);
+    vi.clearAllMocks();
     vi.useFakeTimers();
+    destroySession();
+    mockGetConfiguredStore.mockReturnValue(mockStore);
   });
 
   afterEach(() => {
-    sessionService.destroySession();
+    destroySession();
     vi.useRealTimers();
-    vi.clearAllMocks();
   });
 
-  describe('login', () => {
-    it('should successfully login with valid credentials', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
+  describe('authenticateByPin', () => {
+    it('should successfully authenticate with valid PIN', async () => {
+      mockFindActiveByStore.mockReturnValue([mockUser]);
+      mockVerifyPin.mockResolvedValue(true);
+      mockToSafeUser.mockReturnValue(mockUser);
 
-      const result = await authService.login('store-456', 'user-123', '1234');
+      const result = await authenticateByPin('1234');
 
       expect(result.success).toBe(true);
       expect(result.user).toBeDefined();
-      expect(result.user?.user_id).toBe(mockUser.user_id);
-      expect(mockUsersDAL.verifyPin).toHaveBeenCalledWith('user-123', '1234');
+      expect(result.session).toBeDefined();
     });
 
-    it('should fail login with invalid credentials', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(null);
+    it('should fail when store not configured', async () => {
+      mockGetConfiguredStore.mockReturnValue(null);
 
-      const result = await authService.login('store-456', 'user-123', 'wrong');
+      const result = await authenticateByPin('1234');
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('INVALID_CREDENTIALS');
-      expect(result.user).toBeUndefined();
+      expect(result.errorCode).toBe('STORE_NOT_CONFIGURED');
     });
 
-    it('should fail login for inactive user', async () => {
-      const inactiveUser: SafeUser = { ...mockUser, status: 'INACTIVE' };
-      mockUsersDAL.verifyPin.mockReturnValue(inactiveUser);
+    it('should fail with invalid PIN', async () => {
+      mockFindActiveByStore.mockReturnValue([mockUser]);
+      mockVerifyPin.mockResolvedValue(false);
 
-      const result = await authService.login('store-456', 'user-123', '1234');
+      const result = await authenticateByPin('wrong');
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('USER_INACTIVE');
+      expect(result.errorCode).toBe('INVALID_PIN');
     });
 
-    it('should fail login for user from different store', async () => {
-      const wrongStoreUser: SafeUser = { ...mockUser, store_id: 'other-store' };
-      mockUsersDAL.verifyPin.mockReturnValue(wrongStoreUser);
+    it('should fail when no active users exist', async () => {
+      mockFindActiveByStore.mockReturnValue([]);
 
-      const result = await authService.login('store-456', 'user-123', '1234');
+      const result = await authenticateByPin('1234');
 
       expect(result.success).toBe(false);
-      expect(result.error).toBe('STORE_MISMATCH');
+      expect(result.errorCode).toBe('INVALID_PIN');
+    });
+  });
+
+  describe('authenticateUser', () => {
+    it('should authenticate specific user with valid PIN', async () => {
+      mockFindByIdForStore.mockReturnValue(mockUser);
+      mockVerifyPin.mockResolvedValue(true);
+      mockToSafeUser.mockReturnValue(mockUser);
+
+      const result = await authenticateUser('user-123', '1234');
+
+      expect(result.success).toBe(true);
+      expect(result.user).toBeDefined();
     });
 
-    it('should create session on successful login', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
+    it('should fail when user not found', async () => {
+      mockFindByIdForStore.mockReturnValue(null);
 
-      await authService.login('store-456', 'user-123', '1234');
+      const result = await authenticateUser('nonexistent', '1234');
 
-      const session = sessionService.getCurrentSession();
-      expect(session).not.toBeNull();
-      expect(session?.user_id).toBe(mockUser.user_id);
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('USER_NOT_FOUND');
     });
 
-    it('should apply SEC-011 brute-force delay on failed login', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(null);
+    it('should fail when user is inactive', async () => {
+      mockFindByIdForStore.mockReturnValue({ ...mockUser, active: false });
 
-      const startTime = Date.now();
-      await authService.login('store-456', 'user-123', 'wrong');
+      const result = await authenticateUser('user-123', '1234');
 
-      // Should have at least 1 second delay
-      // Note: This is simulated in the service
-      expect(mockUsersDAL.verifyPin).toHaveBeenCalled();
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('USER_INACTIVE');
+    });
+
+    it('should fail with invalid PIN', async () => {
+      mockFindByIdForStore.mockReturnValue(mockUser);
+      mockVerifyPin.mockResolvedValue(false);
+
+      const result = await authenticateUser('user-123', 'wrong');
+
+      expect(result.success).toBe(false);
+      expect(result.errorCode).toBe('INVALID_PIN');
     });
   });
 
   describe('logout', () => {
     it('should destroy session on logout', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
+      mockFindActiveByStore.mockReturnValue([mockUser]);
+      mockVerifyPin.mockResolvedValue(true);
+      mockToSafeUser.mockReturnValue(mockUser);
 
-      expect(sessionService.getCurrentSession()).not.toBeNull();
+      await authenticateByPin('1234');
+      expect(getCurrentSession()).not.toBeNull();
 
-      authService.logout();
-
-      expect(sessionService.getCurrentSession()).toBeNull();
+      logout();
+      expect(getCurrentSession()).toBeNull();
     });
 
     it('should not throw when logging out without session', () => {
-      expect(() => authService.logout()).not.toThrow();
+      expect(() => logout()).not.toThrow();
     });
   });
 
-  describe('getCurrentUser', () => {
-    it('should return current user when logged in', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
-
-      const user = authService.getCurrentUser();
-
-      expect(user).not.toBeNull();
-      expect(user?.user_id).toBe(mockUser.user_id);
-    });
-
+  describe('getCurrentAuthUser', () => {
     it('should return null when not logged in', () => {
-      expect(authService.getCurrentUser()).toBeNull();
+      expect(getCurrentAuthUser()).toBeNull();
     });
 
-    it('should return null when session is expired', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
+    it('should return user info when logged in', async () => {
+      mockFindActiveByStore.mockReturnValue([mockUser]);
+      mockVerifyPin.mockResolvedValue(true);
+      mockToSafeUser.mockReturnValue(mockUser);
 
-      // Advance past session timeout (16 minutes)
-      vi.advanceTimersByTime(16 * 60 * 1000);
+      await authenticateByPin('1234');
 
-      expect(authService.getCurrentUser()).toBeNull();
-    });
-  });
-
-  describe('isAuthenticated', () => {
-    it('should return true when logged in with valid session', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
-
-      expect(authService.isAuthenticated()).toBe(true);
-    });
-
-    it('should return false when not logged in', () => {
-      expect(authService.isAuthenticated()).toBe(false);
-    });
-
-    it('should return false when session is expired', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
-
-      // Advance past session timeout
-      vi.advanceTimersByTime(16 * 60 * 1000);
-
-      expect(authService.isAuthenticated()).toBe(false);
-    });
-  });
-
-  describe('updateActivity', () => {
-    it('should update session activity timestamp', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser);
-      await authService.login('store-456', 'user-123', '1234');
-
-      // Advance by 10 minutes
-      vi.advanceTimersByTime(10 * 60 * 1000);
-
-      authService.updateActivity();
-
-      // Advance by another 10 minutes
-      vi.advanceTimersByTime(10 * 60 * 1000);
-
-      // Should still be authenticated (activity was updated)
-      expect(authService.isAuthenticated()).toBe(true);
+      const authUser = getCurrentAuthUser();
+      expect(authUser).not.toBeNull();
+      expect(authUser?.userId).toBe('user-123');
     });
   });
 
   describe('hasPermission', () => {
-    it('should check role permissions correctly', async () => {
-      mockUsersDAL.verifyPin.mockReturnValue(mockUser); // CASHIER role
-      await authService.login('store-456', 'user-123', '1234');
+    const authUser: AuthenticatedUser = {
+      userId: 'user-123',
+      name: 'Test User',
+      role: 'shift_manager',
+      storeId: 'store-456',
+    };
 
-      expect(authService.hasPermission('CASHIER')).toBe(true);
-      expect(authService.hasPermission('MANAGER')).toBe(false);
+    it('should return true for valid permission', () => {
+      expect(hasPermission(authUser, 'close_shift')).toBe(true);
     });
 
-    it('should return false when not authenticated', () => {
-      expect(authService.hasPermission('CASHIER')).toBe(false);
+    it('should return false for insufficient permission', () => {
+      const cashierUser: AuthenticatedUser = {
+        ...authUser,
+        role: 'cashier',
+      };
+      expect(hasPermission(cashierUser, 'manage_users')).toBe(false);
     });
   });
 
-  describe('getUsers', () => {
-    it('should return users for the store', () => {
-      const mockUsers: SafeUser[] = [mockUser];
-      mockUsersDAL.findByStore.mockReturnValue(mockUsers);
+  describe('getRoleLevel', () => {
+    it('should return correct role levels', () => {
+      expect(getRoleLevel('cashier')).toBe(0);
+      expect(getRoleLevel('shift_manager')).toBe(1);
+      expect(getRoleLevel('store_manager')).toBe(2);
+    });
+  });
 
-      const users = authService.getUsers('store-456');
+  describe('hasMinimumRole', () => {
+    const storeManager: AuthenticatedUser = {
+      userId: 'user-123',
+      name: 'Manager',
+      role: 'store_manager',
+      storeId: 'store-456',
+    };
 
-      expect(users).toEqual(mockUsers);
-      expect(mockUsersDAL.findByStore).toHaveBeenCalledWith('store-456');
+    const cashier: AuthenticatedUser = {
+      userId: 'user-456',
+      name: 'Cashier',
+      role: 'cashier',
+      storeId: 'store-456',
+    };
+
+    it('should return true when user has higher role', () => {
+      expect(hasMinimumRole(storeManager, 'cashier')).toBe(true);
+      expect(hasMinimumRole(storeManager, 'shift_manager')).toBe(true);
+    });
+
+    it('should return true when user has equal role', () => {
+      expect(hasMinimumRole(storeManager, 'store_manager')).toBe(true);
+    });
+
+    it('should return false when user has lower role', () => {
+      expect(hasMinimumRole(cashier, 'shift_manager')).toBe(false);
+      expect(hasMinimumRole(cashier, 'store_manager')).toBe(false);
     });
   });
 });

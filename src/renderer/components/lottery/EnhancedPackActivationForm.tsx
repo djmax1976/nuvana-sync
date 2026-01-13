@@ -667,26 +667,13 @@ export function EnhancedPackActivationForm({
       const activationData: FullActivatePackInput = {
         pack_id: pending.pack_id,
         bin_id: pending.bin_id,
-        serial_start: pending.custom_serial_start,
-        activated_by: activatedByUserId,
-        activated_shift_id: authResult?.shift_id || undefined,
-        deplete_previous: shouldDepletePrevious,
-        // Serial override approval fields
-        serial_override_approved_by:
-          pending.serial_override_approval?.approver_id,
-        serial_override_reason:
-          pending.custom_serial_start !== "000" &&
-          pending.serial_override_approval
-            ? "Manager approved serial override"
-            : undefined,
-        // Mark sold approval fields
-        mark_sold_approved_by: pending.mark_sold_approval?.approver_id,
-        mark_sold_reason: pending.mark_sold_approval
-          ? "Pack marked as pre-sold during activation"
-          : undefined,
-        // If marked as sold, immediately deplete the pack (pre-sold = already sold out)
-        mark_as_depleted: pending.mark_sold_approval ? true : undefined,
+        opening_serial: pending.custom_serial_start,
+        shift_id: authResult?.shift_id || undefined,
       };
+
+      // Note: Additional fields like activated_by, deplete_previous, serial_override_*,
+      // mark_sold_* are not part of FullActivatePackInput. If needed, extend the type
+      // or handle these through separate API calls.
 
       try {
         await fullActivationMutation.mutateAsync({

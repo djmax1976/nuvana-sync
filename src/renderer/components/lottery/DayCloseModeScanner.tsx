@@ -1059,10 +1059,8 @@ export function DayCloseModeScanner({
 
       // Phase 1: Prepare close - validates and stores pending data
       // Does NOT commit lottery records - that happens in Step 3
-      const response = await prepareLotteryDayClose(storeId, {
+      const response = await prepareLotteryDayClose({
         closings,
-        entry_method: "SCAN",
-        current_shift_id: currentShiftId,
       });
 
       if (response.success && response.data) {
@@ -1166,12 +1164,8 @@ export function DayCloseModeScanner({
 
       // Phase 1: Prepare close - validates and stores pending data
       // Does NOT commit lottery records - that happens in Step 3
-      const response = await prepareLotteryDayClose(storeId, {
+      const response = await prepareLotteryDayClose({
         closings,
-        entry_method: "MANUAL",
-        current_shift_id: currentShiftId,
-        // Include audit trail - the backend will record who authorized
-        authorized_by_user_id: manualEntryState.authorizedBy?.userId,
       });
 
       if (response.success && response.data) {

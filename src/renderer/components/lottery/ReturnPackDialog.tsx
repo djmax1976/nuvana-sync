@@ -9,7 +9,7 @@
  * Calculates tickets sold and sales amount from serial information.
  *
  * Business Rules:
- * - ACTIVE and RECEIVED packs can be returned
+ * - ACTIVATED and RECEIVED packs can be returned
  * - DEPLETED and already RETURNED packs cannot be returned
  * - Last sold serial is required for sales calculation
  * - Notes are required when return_reason is OTHER
@@ -48,9 +48,20 @@ import { Loader2, AlertTriangle, Undo2, Calculator } from "lucide-react";
 import { usePackDetails, useReturnPack } from "@/hooks/useLottery";
 import type {
   LotteryPackResponse,
-  LotteryPackReturnReason,
   ReturnPackInput,
 } from "@/lib/api/lottery";
+
+/**
+ * Return reason type for lottery packs
+ */
+type LotteryPackReturnReason =
+  | "SUPPLIER_RECALL"
+  | "DAMAGED"
+  | "DEFECTIVE"
+  | "EXPIRED"
+  | "INVENTORY_ADJUSTMENT"
+  | "STORE_CLOSURE"
+  | "OTHER";
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -187,7 +198,7 @@ export function ReturnPackDialog({
     }
 
     const lastSoldNum = parseInt(lastSoldSerial, 10);
-    const serialStartNum = parseInt(packData.serial_start, 10);
+    const serialStartNum = parseInt(packData.opening_serial || "000", 10);
 
     // Validate parsing succeeded
     if (Number.isNaN(lastSoldNum) || Number.isNaN(serialStartNum)) {
@@ -195,7 +206,7 @@ export function ReturnPackDialog({
     }
 
     // Validate serial is within valid range
-    const serialEndNum = parseInt(packData.serial_end, 10);
+    const serialEndNum = parseInt(packData.closing_serial || "299", 10);
     if (lastSoldNum < serialStartNum || lastSoldNum > serialEndNum) {
       return null;
     }
@@ -302,10 +313,9 @@ export function ReturnPackDialog({
     }
 
     try {
-      const input: ReturnPackInput = {
+      const input: Omit<ReturnPackInput, 'pack_id'> = {
         return_reason: returnReason,
-        last_sold_serial: lastSoldSerial,
-        ...(returnNotes.trim() && { return_notes: returnNotes.trim() }),
+        ...(returnNotes.trim() && { notes: returnNotes.trim() }),
       };
 
       const response = await returnPackMutation.mutateAsync({
@@ -314,8 +324,8 @@ export function ReturnPackDialog({
       });
 
       if (response.success) {
-        const salesText = response.data?.sales_amount
-          ? ` ($${Number(response.data.sales_amount).toFixed(2)} in sales recorded)`
+        const salesText = salesCalculation?.salesAmount
+          ? ` ($${salesCalculation.salesAmount.toFixed(2)} in sales calculated)`
           : "";
 
         toast({
@@ -421,7 +431,7 @@ export function ReturnPackDialog({
     ? `$${Number(packData.game.price).toFixed(2)}`
     : "N/A";
   const serialRange = packData
-    ? `${packData.serial_start} - ${packData.serial_end}`
+    ? `${packData.opening_serial || "000"} - ${packData.closing_serial || "299"}`
     : "N/A";
   const currentStatus = packData?.status || "Unknown";
 
@@ -443,9 +453,9 @@ export function ReturnPackDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Warning for non-returnable packs (only ACTIVE and RECEIVED can be returned) */}
+          {/* Warning for non-returnable packs (only ACTIVATED and RECEIVED can be returned) */}
           {packData &&
-            packData.status !== "ACTIVE" &&
+            packData.status !== "ACTIVATED" &&
             packData.status !== "RECEIVED" && (
               <div
                 className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4"
@@ -461,7 +471,7 @@ export function ReturnPackDialog({
                     Cannot Return Pack
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    Only ACTIVE or RECEIVED packs can be returned. This pack is
+                    Only ACTIVATED or RECEIVED packs can be returned. This pack is
                     currently <strong>{currentStatus}</strong>.
                   </p>
                 </div>
@@ -550,8 +560,8 @@ export function ReturnPackDialog({
             </p>
             {lastSoldSerial.length === 3 && !salesCalculation && (
               <p className="text-xs text-destructive">
-                Serial must be within range {packData?.serial_start} -{" "}
-                {packData?.serial_end}
+                Serial must be within range {packData?.opening_serial || "000"} -{" "}
+                {packData?.closing_serial || "299"}
               </p>
             )}
           </div>
@@ -639,7 +649,7 @@ export function ReturnPackDialog({
             onClick={handleReturn}
             disabled={
               !canSubmit ||
-              (packData?.status !== "ACTIVE" && packData?.status !== "RECEIVED")
+              (packData?.status !== "ACTIVATED" && packData?.status !== "RECEIVED")
             }
             data-testid="confirm-return-button"
             aria-label={

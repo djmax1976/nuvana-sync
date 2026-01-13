@@ -319,8 +319,8 @@ export function ActivatedPacksSection({
         continue;
       }
 
-      if (pack.status === "ACTIVE") counts.active++;
-      else if (pack.status === "DEPLETED") counts.depleted++;
+      if (pack.status === "ACTIVATED") counts.active++;
+      else if (pack.status === "SETTLED") counts.depleted++;
       else if (pack.status === "RETURNED") counts.returned++;
     }
     return counts;
@@ -471,7 +471,7 @@ export function ActivatedPacksSection({
                     key={pack.pack_id}
                     data-testid={`activated-pack-row-${pack.pack_id}`}
                     className={
-                      pack.status === "DEPLETED" ? "opacity-75" : undefined
+                      pack.status === "SETTLED" ? "opacity-75" : undefined
                     }
                   >
                     {/* Bin Number */}

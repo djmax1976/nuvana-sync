@@ -19,6 +19,7 @@ vi.mock('../../src/main/services/database.service', () => ({
     prepare: mockPrepare,
     transaction: mockTransaction,
   })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 // Mock bcrypt for users DAL

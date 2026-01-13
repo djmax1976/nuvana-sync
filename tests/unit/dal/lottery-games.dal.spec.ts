@@ -12,12 +12,16 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import { LotteryGamesDAL, type LotteryGame, type CreateLotteryGameData } from '../../../src/main/dal/lottery-games.dal';
 
-// Mock the database service
+// Mock database service
+const mockPrepare = vi.fn();
+const mockTransaction = vi.fn((fn) => () => fn());
+
 vi.mock('../../../src/main/services/database.service', () => ({
-  databaseService: {
-    getDatabase: vi.fn(),
-    isReady: vi.fn().mockReturnValue(true),
-  },
+  getDatabase: vi.fn(() => ({
+    prepare: mockPrepare,
+    transaction: mockTransaction,
+  })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 describe('Lottery Games DAL', () => {

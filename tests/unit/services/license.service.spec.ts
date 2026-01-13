@@ -985,8 +985,8 @@ describe('LicenseService', () => {
   // ==========================================================================
 
   describe('Constants Verification', () => {
-    it('should have GRACE_PERIOD_DAYS set to 7', () => {
-      expect(GRACE_PERIOD_DAYS).toBe(7);
+    it('should have GRACE_PERIOD_DAYS set to 15', () => {
+      expect(GRACE_PERIOD_DAYS).toBe(15);
     });
 
     it('should have WARNING_THRESHOLD_DAYS set to 30', () => {

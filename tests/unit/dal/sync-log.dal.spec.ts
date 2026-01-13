@@ -15,6 +15,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
     prepare: mockPrepare,
     transaction: mockTransaction,
   })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 import { SyncLogDAL, type SyncLog } from '../../../src/main/dal/sync-log.dal';

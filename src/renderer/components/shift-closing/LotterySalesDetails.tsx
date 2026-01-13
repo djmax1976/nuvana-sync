@@ -44,7 +44,7 @@ export function LotterySalesDetails({ data }: LotterySalesDetailsProps) {
   // SEC-014: Ensure we handle undefined/NaN values gracefully with safeNumber conversion
   const totalTickets = useMemo(
     () =>
-      data?.bins_closed?.reduce((sum, bin) => {
+      data?.bins_closed?.reduce((sum: number, bin: { tickets_sold: number }) => {
         return sum + safeNumber(bin.tickets_sold);
       }, 0) ?? 0,
     [data?.bins_closed],
@@ -114,7 +114,7 @@ export function LotterySalesDetails({ data }: LotterySalesDetailsProps) {
               </tr>
             </thead>
             <tbody>
-              {data.bins_closed.map((bin, index) => (
+              {data.bins_closed.map((bin: { bin_number: number; pack_number: string; game_name: string; game_price: number; starting_serial: string; closing_serial: string; tickets_sold: number; sales_amount: number }, index: number) => (
                 <tr
                   key={`${bin.pack_number}-${index}`}
                   className="border-b last:border-0 hover:bg-muted/30 transition-colors"

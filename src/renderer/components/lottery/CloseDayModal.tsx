@@ -36,7 +36,7 @@ import { Loader2, Volume2, VolumeX } from "lucide-react";
 import {
   closeLotteryDay,
   type DayBin,
-  type CloseLotteryDayResponse,
+  type CommitLotteryDayCloseResponse,
 } from "@/lib/api/lottery";
 import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
 
@@ -45,9 +45,9 @@ import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
  */
 export interface LotteryCloseResult {
   closings_created: number;
-  business_day: string;
+  business_date: string;
   lottery_total: number;
-  bins_closed: CloseLotteryDayResponse["bins_closed"];
+  bins_closed: CommitLotteryDayCloseResponse["bins_closed"];
 }
 
 /**
@@ -387,15 +387,13 @@ export function CloseDayModal({
       // Pass current_shift_id so backend excludes it from open shifts check
       const response = await closeLotteryDay(storeId, {
         closings,
-        entry_method: "SCAN", // Default to SCAN for now
-        current_shift_id: currentShiftId,
       });
 
       if (response.success && response.data) {
         playSuccess();
         toast({
           title: "Lottery closed successfully",
-          description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_day}`,
+          description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_date}`,
         });
 
         // Reset form
@@ -409,7 +407,7 @@ export function CloseDayModal({
         // Call enhanced callback with lottery data
         onSuccessWithData?.({
           closings_created: response.data.closings_created,
-          business_day: response.data.business_day,
+          business_date: response.data.business_date,
           lottery_total: response.data.lottery_total,
           bins_closed: response.data.bins_closed,
         });

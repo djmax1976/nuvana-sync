@@ -269,7 +269,7 @@ export function PackReceptionForm({
         game_id: game.game_id,
         game_price: game.price ?? undefined,
         game_pack_value: game.pack_value ?? undefined,
-        game_total_tickets: game.total_tickets ?? undefined,
+        game_total_tickets: game.tickets_per_pack ?? undefined,
         scanMetrics,
         addedAt: Date.now(),
       };
@@ -566,10 +566,9 @@ export function PackReceptionForm({
           game_id: "", // Will be fetched from server on submit
           game_code: pendingGameToCreate.game_code,
           name: gameData.name,
-          description: null,
           price: gameData.price,
           pack_value: gameData.pack_value,
-          total_tickets: gameData.total_tickets,
+          tickets_per_pack: gameData.total_tickets,
           status: "ACTIVE",
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),

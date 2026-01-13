@@ -54,8 +54,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  const backendUrl =
-    "http://localhost:3001" || "http://localhost:3001";
+  const backendUrl = "http://localhost:3001";
 
   // Validate session with backend on mount
   useEffect(() => {
