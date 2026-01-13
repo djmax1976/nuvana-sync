@@ -1,5 +1,10 @@
 import React, { useState, useEffect } from 'react';
 
+/**
+ * Check if running in Electron environment
+ */
+const isElectron = typeof window !== 'undefined' && window.nuvanaAPI !== undefined;
+
 interface DashboardProps {
   onNavigate: (page: 'settings') => void;
 }
@@ -38,10 +43,51 @@ function Dashboard({ onNavigate }: DashboardProps) {
   const [recentFiles, setRecentFiles] = useState<FileRecord[]>([]);
   const [isPaused, setIsPaused] = useState(false);
 
+  // Mock data for dev mode
+  const mockStats: SyncStats = {
+    filesProcessed: 42,
+    filesErrored: 2,
+    lastSyncTime: new Date(Date.now() - 5 * 60000).toISOString(),
+    isWatching: true,
+  };
+
+  const mockRecentFiles: FileRecord[] = [
+    {
+      filePath: 'C:\\POS\\Export\\PJR_20240115_001.xml',
+      fileName: 'PJR_20240115_001.xml',
+      status: 'success',
+      timestamp: new Date(Date.now() - 2 * 60000).toISOString(),
+      documentType: 'PJR',
+    },
+    {
+      filePath: 'C:\\POS\\Export\\FGM_20240115_001.xml',
+      fileName: 'FGM_20240115_001.xml',
+      status: 'success',
+      timestamp: new Date(Date.now() - 5 * 60000).toISOString(),
+      documentType: 'FGM',
+    },
+    {
+      filePath: 'C:\\POS\\Export\\MSM_20240115_001.xml',
+      fileName: 'MSM_20240115_001.xml',
+      status: 'error',
+      timestamp: new Date(Date.now() - 10 * 60000).toISOString(),
+      documentType: 'MSM',
+      error: 'Parse error: Invalid XML structure',
+    },
+  ];
+
   const loadData = async () => {
+    // In dev mode without Electron, use mock data
+    if (!isElectron) {
+      setStats(mockStats);
+      setRecentFiles(mockRecentFiles);
+      setIsPaused(!mockStats.isWatching);
+      return;
+    }
+
     const [statsData, filesData] = await Promise.all([
-      window.nuvanaSyncAPI.getStats(),
-      window.nuvanaSyncAPI.getRecentFiles(),
+      window.nuvanaAPI.getStats(),
+      window.nuvanaAPI.getRecentFiles(),
     ]);
     setStats(statsData);
     setRecentFiles(filesData);
@@ -52,11 +98,16 @@ function Dashboard({ onNavigate }: DashboardProps) {
     // Load initial data
     loadData();
 
+    // Skip API subscriptions in dev mode
+    if (!isElectron) {
+      return;
+    }
+
     // Poll for updates
     const interval = setInterval(loadData, 5000);
 
     // Listen for sync status events
-    const unsubscribe = window.nuvanaSyncAPI.onSyncStatus((_data) => {
+    const unsubscribe = window.nuvanaAPI.onSyncStatus((_data) => {
       loadData();
     });
 
@@ -68,12 +119,24 @@ function Dashboard({ onNavigate }: DashboardProps) {
   }, []);
 
   const handleTogglePause = async () => {
-    const result = await window.nuvanaSyncAPI.togglePause();
+    // In dev mode without Electron, toggle local state
+    if (!isElectron) {
+      setIsPaused(!isPaused);
+      return;
+    }
+
+    const result = await window.nuvanaAPI.togglePause();
     setIsPaused(result.paused);
   };
 
   const handleTriggerSync = async () => {
-    await window.nuvanaSyncAPI.triggerSync();
+    // In dev mode without Electron, just refresh mock data
+    if (!isElectron) {
+      loadData();
+      return;
+    }
+
+    await window.nuvanaAPI.triggerSync();
     loadData();
   };
 
@@ -155,7 +218,7 @@ function Dashboard({ onNavigate }: DashboardProps) {
       {/* Header */}
       <header className="bg-white border-b border-gray-200 px-6 py-4">
         <div className="flex items-center justify-between">
-          <h1 className="text-xl font-bold text-gray-900">Nuvana Sync</h1>
+          <h1 className="text-xl font-bold text-gray-900">Nuvana</h1>
           <button
             onClick={() => onNavigate('settings')}
             className="p-2 text-gray-500 hover:text-gray-700 hover:bg-gray-100 rounded-lg"

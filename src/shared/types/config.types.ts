@@ -1,5 +1,5 @@
 /**
- * Configuration Types for Nuvana Sync Desktop Application
+ * Configuration Types for Nuvana Desktop Application
  *
  * Enterprise-grade type definitions with Zod validation schemas.
  *
@@ -81,7 +81,7 @@ export const EnabledFileTypesSchema = z.object({
  * Complete configuration schema
  * API-001: Schema validation for all config inputs
  */
-export const NuvanaSyncConfigSchema = z.object({
+export const NuvanaConfigSchema = z.object({
   // Cloud connection
   apiUrl: ApiUrlSchema.or(z.literal('')),
   apiKey: z.string().max(500), // Allow empty during setup, encrypted storage
@@ -109,21 +109,21 @@ export const NuvanaSyncConfigSchema = z.object({
 /**
  * Partial configuration schema for updates
  */
-export const NuvanaSyncConfigUpdateSchema = NuvanaSyncConfigSchema.partial();
+export const NuvanaConfigUpdateSchema = NuvanaConfigSchema.partial();
 
 // ============================================================================
 // Type Exports
 // ============================================================================
 
-export type NuvanaSyncConfig = z.infer<typeof NuvanaSyncConfigSchema>;
-export type NuvanaSyncConfigUpdate = z.infer<typeof NuvanaSyncConfigUpdateSchema>;
+export type NuvanaConfig = z.infer<typeof NuvanaConfigSchema>;
+export type NuvanaConfigUpdate = z.infer<typeof NuvanaConfigUpdateSchema>;
 export type EnabledFileTypes = z.infer<typeof EnabledFileTypesSchema>;
 
 // ============================================================================
 // Default Values
 // ============================================================================
 
-export const DEFAULT_CONFIG: NuvanaSyncConfig = {
+export const DEFAULT_CONFIG: NuvanaConfig = {
   apiUrl: '',
   apiKey: '',
   storeId: '',
@@ -154,30 +154,30 @@ export const DEFAULT_CONFIG: NuvanaSyncConfig = {
  * Validate full configuration
  * @throws ZodError on validation failure
  */
-export function validateConfig(data: unknown): NuvanaSyncConfig {
-  return NuvanaSyncConfigSchema.parse(data);
+export function validateConfig(data: unknown): NuvanaConfig {
+  return NuvanaConfigSchema.parse(data);
 }
 
 /**
  * Safe validation that returns result object
  */
 export function safeValidateConfig(data: unknown) {
-  return NuvanaSyncConfigSchema.safeParse(data);
+  return NuvanaConfigSchema.safeParse(data);
 }
 
 /**
  * Validate configuration update
  * @throws ZodError on validation failure
  */
-export function validateConfigUpdate(data: unknown): NuvanaSyncConfigUpdate {
-  return NuvanaSyncConfigUpdateSchema.parse(data);
+export function validateConfigUpdate(data: unknown): NuvanaConfigUpdate {
+  return NuvanaConfigUpdateSchema.parse(data);
 }
 
 /**
  * Safe validation for config updates
  */
 export function safeValidateConfigUpdate(data: unknown) {
-  return NuvanaSyncConfigUpdateSchema.safeParse(data);
+  return NuvanaConfigUpdateSchema.safeParse(data);
 }
 
 /**

@@ -1,0 +1,133 @@
+NUVANA SOFTWARE LICENSE AGREEMENT
+
+IMPORTANT: READ THIS LICENSE AGREEMENT CAREFULLY BEFORE INSTALLING OR USING
+THIS SOFTWARE.
+
+This Software License Agreement ("Agreement") is a legal agreement between you
+("User" or "You") and Nuvana Inc. ("Nuvana," "We," or "Us") for the use of the
+Nuvana desktop application software, including any associated documentation,
+updates, and support materials (collectively, the "Software").
+
+BY INSTALLING, COPYING, OR OTHERWISE USING THE SOFTWARE, YOU ACKNOWLEDGE THAT
+YOU HAVE READ, UNDERSTOOD, AND AGREE TO BE BOUND BY THE TERMS OF THIS
+AGREEMENT. IF YOU DO NOT AGREE TO THESE TERMS, DO NOT INSTALL OR USE THE
+SOFTWARE.
+
+1. LICENSE GRANT
+
+Subject to the terms of this Agreement and your compliance with all applicable
+subscription terms, Nuvana grants you a limited, non-exclusive,
+non-transferable, revocable license to install and use the Software on
+computers owned or controlled by you, solely for your internal business
+purposes in connection with your authorized use of Nuvana's services.
+
+2. RESTRICTIONS
+
+You shall not:
+(a) Copy, modify, adapt, translate, or create derivative works of the Software;
+(b) Reverse engineer, disassemble, decompile, or otherwise attempt to derive
+    the source code of the Software;
+(c) Rent, lease, lend, sell, sublicense, assign, distribute, publish, transfer,
+    or otherwise make available the Software to any third party;
+(d) Remove, alter, or obscure any proprietary notices on the Software;
+(e) Use the Software for any unlawful purpose or in violation of any applicable
+    laws or regulations;
+(f) Circumvent or disable any security features of the Software;
+(g) Use the Software to develop competing products or services.
+
+3. INTELLECTUAL PROPERTY
+
+The Software and all copies thereof are proprietary to Nuvana and title thereto
+remains exclusively with Nuvana. All rights in the Software not specifically
+granted in this Agreement are reserved to Nuvana. The Software is protected by
+United States copyright laws, international treaty provisions, and other
+applicable laws.
+
+4. DATA AND PRIVACY
+
+The Software may collect and transmit certain data to Nuvana servers as
+described in our Privacy Policy available at https://nuvana.com/privacy. By
+using the Software, you consent to such data collection and transmission. You
+are responsible for ensuring that your use of the Software complies with all
+applicable data protection laws.
+
+5. UPDATES AND SUPPORT
+
+Nuvana may, at its sole discretion, provide updates, patches, or new versions
+of the Software. Such updates may be installed automatically without additional
+notice. Continued use of the Software following any updates constitutes
+acceptance of such updates.
+
+6. TERM AND TERMINATION
+
+This Agreement is effective until terminated. Nuvana may terminate this
+Agreement immediately and without notice if you fail to comply with any term
+of this Agreement. Upon termination, you must destroy all copies of the
+Software in your possession or control.
+
+7. DISCLAIMER OF WARRANTIES
+
+THE SOFTWARE IS PROVIDED "AS IS" AND "AS AVAILABLE" WITHOUT WARRANTY OF ANY
+KIND, EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE, AND NON-INFRINGEMENT.
+NUVANA DOES NOT WARRANT THAT THE SOFTWARE WILL BE UNINTERRUPTED, ERROR-FREE, OR
+FREE OF VIRUSES OR OTHER HARMFUL COMPONENTS.
+
+8. LIMITATION OF LIABILITY
+
+TO THE MAXIMUM EXTENT PERMITTED BY APPLICABLE LAW, IN NO EVENT SHALL NUVANA OR
+ITS AFFILIATES, OFFICERS, DIRECTORS, EMPLOYEES, OR AGENTS BE LIABLE FOR ANY
+INDIRECT, INCIDENTAL, SPECIAL, CONSEQUENTIAL, OR PUNITIVE DAMAGES, INCLUDING
+BUT NOT LIMITED TO LOSS OF PROFITS, DATA, USE, GOODWILL, OR OTHER INTANGIBLE
+LOSSES, RESULTING FROM (A) YOUR USE OF OR INABILITY TO USE THE SOFTWARE; (B)
+ANY UNAUTHORIZED ACCESS TO OR USE OF OUR SERVERS AND/OR ANY PERSONAL
+INFORMATION STORED THEREIN; (C) ANY INTERRUPTION OR CESSATION OF TRANSMISSION
+TO OR FROM THE SOFTWARE; (D) ANY BUGS, VIRUSES, TROJAN HORSES, OR THE LIKE THAT
+MAY BE TRANSMITTED TO OR THROUGH THE SOFTWARE; OR (E) ANY ERRORS OR OMISSIONS
+IN ANY CONTENT.
+
+9. INDEMNIFICATION
+
+You agree to indemnify, defend, and hold harmless Nuvana and its affiliates,
+officers, directors, employees, and agents from and against any and all claims,
+damages, obligations, losses, liabilities, costs, and expenses arising from
+your use of the Software or your violation of this Agreement.
+
+10. GOVERNING LAW
+
+This Agreement shall be governed by and construed in accordance with the laws
+of the State of Delaware, United States, without regard to its conflict of law
+provisions. Any legal action or proceeding arising under this Agreement shall
+be brought exclusively in the federal or state courts located in Delaware.
+
+11. ENTIRE AGREEMENT
+
+This Agreement constitutes the entire agreement between you and Nuvana
+concerning the Software and supersedes all prior or contemporaneous
+communications, proposals, and agreements, whether oral or written.
+
+12. SEVERABILITY
+
+If any provision of this Agreement is held to be unenforceable, such provision
+shall be reformed only to the extent necessary to make it enforceable, and the
+remaining provisions shall remain in full force and effect.
+
+13. WAIVER
+
+The failure of Nuvana to enforce any right or provision of this Agreement shall
+not constitute a waiver of such right or provision.
+
+14. CONTACT INFORMATION
+
+If you have any questions about this Agreement, please contact:
+
+Nuvana Inc.
+Email: legal@nuvana.com
+Website: https://nuvana.com
+
+--------------------------------------------------------------------------------
+
+Copyright (c) 2024-2025 Nuvana Inc. All rights reserved.
+
+Version: 1.0.0
+Last Updated: January 2025

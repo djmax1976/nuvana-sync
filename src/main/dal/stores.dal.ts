@@ -61,7 +61,7 @@ const log = createLogger('stores-dal');
 /**
  * Data Access Layer for store configuration
  *
- * Note: This is typically a single-row table as each Nuvana Sync
+ * Note: This is typically a single-row table as each Nuvana
  * installation is configured for one store.
  */
 export class StoresDAL extends BaseDAL<Store> {
@@ -157,9 +157,12 @@ export class StoresDAL extends BaseDAL<Store> {
    * Get the configured store (single-store model)
    * Returns the first (and typically only) store
    *
-   * @returns Configured store or undefined
+   * @returns Configured store or undefined (also undefined if db not ready)
    */
   getConfiguredStore(): Store | undefined {
+    if (!this.isDatabaseAvailable) {
+      return undefined;
+    }
     // SEC-006: Static query
     const stmt = this.db.prepare(`
       SELECT * FROM stores WHERE status = 'ACTIVE' LIMIT 1
@@ -170,11 +173,21 @@ export class StoresDAL extends BaseDAL<Store> {
   /**
    * Check if any store is configured
    *
-   * @returns true if at least one store exists
+   * @returns true if at least one store exists, false if db not ready or no stores
    */
   isConfigured(): boolean {
+    if (!this.isDatabaseAvailable) {
+      return false;
+    }
     const stmt = this.db.prepare(`SELECT 1 FROM stores LIMIT 1`);
     return stmt.get() !== undefined;
+  }
+
+  /**
+   * Check if database is ready for store operations
+   */
+  isDatabaseReady(): boolean {
+    return this.isDatabaseAvailable;
   }
 
   /**

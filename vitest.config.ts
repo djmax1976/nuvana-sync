@@ -10,8 +10,23 @@ export default defineConfig({
     globals: true,
     environment: 'node',
     include: ['tests/**/*.spec.ts', 'tests/**/*.test.ts'],
-    exclude: ['**/node_modules/**', '**/dist/**'],
+    exclude: [
+      '**/node_modules/**',
+      '**/dist/**',
+      // Integration tests require native modules (better-sqlite3)
+      // Run separately with actual database via `npm run test:integration`
+      'tests/integration/**',
+    ],
     passWithNoTests: false,
+    // Use forks pool with isolation (Vitest 4 compatible)
+    pool: 'forks',
+    isolate: true,
+    // Add server.deps.inline to help with ESM module resolution for vi.mock
+    server: {
+      deps: {
+        inline: [/^(?!.*vitest).*$/],
+      },
+    },
     coverage: {
       provider: 'v8',
       reporter: ['text', 'json', 'html'],

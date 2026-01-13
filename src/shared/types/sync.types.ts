@@ -1,5 +1,5 @@
 /**
- * Sync Types for Nuvana Sync Desktop Application
+ * Sync Types for Nuvana Desktop Application
  *
  * Type definitions for sync operations and file processing.
  *

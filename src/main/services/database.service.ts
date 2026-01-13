@@ -1,7 +1,7 @@
 /**
  * Database Service
  *
- * SQLCipher-encrypted SQLite database management for Nuvana Sync.
+ * SQLCipher-encrypted SQLite database management for Nuvana.
  * Implements DB-007: Database encryption with externally managed keys.
  * Implements SEC-006: Parameterized queries (enforced by better-sqlite3 API).
  *
@@ -30,7 +30,7 @@ export type DatabaseInstance = Database.Database;
  * Database configuration options
  */
 export interface DatabaseOptions {
-  /** Path to database file (defaults to userData/nuvana-sync.db) */
+  /** Path to database file (defaults to userData/nuvana.db) */
   dbPath?: string;
   /** Enable verbose SQL logging (debug only) */
   verbose?: boolean;
@@ -53,7 +53,7 @@ export interface DatabaseHealth {
 // Constants
 // ============================================================================
 
-const DB_FILENAME = 'nuvana-sync.db';
+const DB_FILENAME = 'nuvana.db';
 const DEFAULT_MEMORY_LIMIT_KB = 64 * 1024; // 64MB
 
 /**

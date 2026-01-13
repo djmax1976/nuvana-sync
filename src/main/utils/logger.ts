@@ -88,7 +88,7 @@ class Logger {
     error: 3,
   };
 
-  constructor(serviceName: string = 'nuvana-sync') {
+  constructor(serviceName: string = 'nuvana') {
     this.serviceName = serviceName;
     this.version = app?.getVersion?.() || '1.0.0';
     this.minLevel = process.env.NODE_ENV === 'development' ? 'debug' : 'info';
@@ -189,21 +189,19 @@ class Logger {
     }
 
     // Output as JSON for structured logging
-    const output = JSON.stringify(entry);
+    const output = JSON.stringify(entry) + '\n';
 
-    switch (level) {
-      case 'debug':
-        console.debug(output);
-        break;
-      case 'info':
-        console.info(output);
-        break;
-      case 'warn':
-        console.warn(output);
-        break;
-      case 'error':
-        console.error(output);
-        break;
+    // Use process.stdout/stderr.write directly to handle EPIPE errors properly
+    // console.log can throw synchronously on broken pipes
+    try {
+      const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
+      if (stream && !stream.destroyed) {
+        stream.write(output, (err) => {
+          // Ignore write errors (EPIPE, etc.) - callback handles async errors
+        });
+      }
+    } catch {
+      // Silently ignore write errors (EPIPE, etc.)
     }
   }
 

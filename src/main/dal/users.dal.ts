@@ -31,8 +31,9 @@ const BCRYPT_ROUNDS = 12;
 
 /**
  * User role enumeration
+ * MVP roles: store_manager, cashier, shift_manager
  */
-export type UserRole = 'CASHIER' | 'MANAGER' | 'ADMIN';
+export type UserRole = 'store_manager' | 'cashier' | 'shift_manager';
 
 /**
  * User entity
@@ -116,6 +117,13 @@ export class UsersDAL extends StoreBasedDAL<User> {
     'role',
     'last_login_at',
   ]);
+
+  /**
+   * Check if database is ready for user operations
+   */
+  isDatabaseReady(): boolean {
+    return this.isDatabaseAvailable;
+  }
 
   /**
    * Create a new user with hashed PIN

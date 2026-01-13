@@ -15,10 +15,10 @@ import Store from 'electron-store';
 import { safeStorage } from 'electron';
 import { createLogger } from '../utils/logger';
 import {
-  type NuvanaSyncConfig,
-  type NuvanaSyncConfigUpdate,
+  type NuvanaConfig,
+  type NuvanaConfigUpdate,
   DEFAULT_CONFIG,
-  NuvanaSyncConfigSchema,
+  NuvanaConfigSchema,
   safeValidateConfigUpdate,
 } from '../../shared/types/config.types';
 
@@ -33,11 +33,11 @@ const log = createLogger('config-service');
 // ============================================================================
 
 export class ConfigService {
-  private store: Store<NuvanaSyncConfig>;
+  private store: Store<NuvanaConfig>;
 
   constructor() {
-    this.store = new Store<NuvanaSyncConfig>({
-      name: 'nuvana-sync-config',
+    this.store = new Store<NuvanaConfig>({
+      name: 'nuvana-config',
       defaults: DEFAULT_CONFIG,
     });
 
@@ -48,7 +48,7 @@ export class ConfigService {
    * Get the current configuration
    * API key is decrypted if stored encrypted
    */
-  getConfig(): NuvanaSyncConfig {
+  getConfig(): NuvanaConfig {
     const config = this.store.store;
 
     // Decrypt API key if stored encrypted
@@ -76,7 +76,7 @@ export class ConfigService {
    * @throws Error if validation fails
    * @security SEC-014: Input validation before storage
    */
-  saveConfig(configUpdate: NuvanaSyncConfigUpdate): void {
+  saveConfig(configUpdate: NuvanaConfigUpdate): void {
     // SEC-014: Validate incoming config update
     const validation = safeValidateConfigUpdate(configUpdate);
 
@@ -108,7 +108,7 @@ export class ConfigService {
     );
 
     // Validate the final config before saving
-    const finalValidation = NuvanaSyncConfigSchema.safeParse(updated);
+    const finalValidation = NuvanaConfigSchema.safeParse(updated);
     if (!finalValidation.success) {
       log.error('Final config validation failed');
       throw new Error('Configuration resulted in invalid state');
@@ -140,7 +140,7 @@ export class ConfigService {
   /**
    * Get a specific config value
    */
-  get<K extends keyof NuvanaSyncConfig>(key: K): NuvanaSyncConfig[K] {
+  get<K extends keyof NuvanaConfig>(key: K): NuvanaConfig[K] {
     return this.store.get(key);
   }
 
@@ -148,7 +148,7 @@ export class ConfigService {
    * Set a specific config value with validation
    * @security SEC-014: Validate individual field updates
    */
-  set<K extends keyof NuvanaSyncConfig>(key: K, value: NuvanaSyncConfig[K]): void {
+  set<K extends keyof NuvanaConfig>(key: K, value: NuvanaConfig[K]): void {
     // Validate the value against the schema
     const partialConfig = { [key]: value };
     const validation = safeValidateConfigUpdate(partialConfig);
@@ -168,4 +168,4 @@ export class ConfigService {
 // Type Re-exports for Convenience
 // ============================================================================
 
-export type { NuvanaSyncConfig, NuvanaSyncConfigUpdate };
+export type { NuvanaConfig, NuvanaConfigUpdate };

@@ -10,7 +10,7 @@
 
 import axios, { AxiosInstance, AxiosError } from 'axios';
 import { createLogger } from '../utils/logger';
-import { type NuvanaSyncConfig } from '../../shared/types/config.types';
+import { type NuvanaConfig } from '../../shared/types/config.types';
 import {
   type UploadPayload,
   type UploadResponse,
@@ -39,9 +39,9 @@ const REQUEST_TIMEOUT_MS = 30000;
 
 export class SyncService {
   private client: AxiosInstance;
-  private config: NuvanaSyncConfig;
+  private config: NuvanaConfig;
 
-  constructor(config: NuvanaSyncConfig) {
+  constructor(config: NuvanaConfig) {
     this.config = config;
 
     this.client = axios.create({

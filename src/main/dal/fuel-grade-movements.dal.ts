@@ -374,6 +374,49 @@ export class FuelGradeMovementsDAL extends StoreBasedDAL<FuelGradeMovement> {
   }
 
   /**
+   * Get aggregation by date (single day)
+   * DB-006: Store-scoped aggregate query
+   *
+   * @param storeId - Store identifier
+   * @param businessDate - Business date
+   * @returns Array of grade aggregations for the day
+   */
+  getAggregationByDate(
+    storeId: string,
+    businessDate: string
+  ): Array<{
+    gradeId: string;
+    gradeName: string | null;
+    salesVolume: number;
+    salesAmount: number;
+  }> {
+    const stmt = this.db.prepare(`
+      SELECT
+        grade_id,
+        grade_name,
+        SUM(volume_sold) as sales_volume,
+        SUM(amount_sold) as sales_amount
+      FROM fuel_grade_movements
+      WHERE store_id = ? AND business_date = ?
+      GROUP BY grade_id, grade_name
+    `);
+
+    const results = stmt.all(storeId, businessDate) as Array<{
+      grade_id: string;
+      grade_name: string | null;
+      sales_volume: number;
+      sales_amount: number;
+    }>;
+
+    return results.map((r) => ({
+      gradeId: r.grade_id,
+      gradeName: r.grade_name,
+      salesVolume: r.sales_volume,
+      salesAmount: r.sales_amount,
+    }));
+  }
+
+  /**
    * Delete movements for a processed file (for reprocessing)
    *
    * @param fileId - Processed file ID

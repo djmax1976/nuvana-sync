@@ -13,6 +13,7 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
+      "@/*": ["src/renderer/*"],
       "@shared/*": ["src/shared/*"],
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"]

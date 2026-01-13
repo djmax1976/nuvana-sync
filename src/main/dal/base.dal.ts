@@ -11,8 +11,8 @@
  * @security DB-001: ORM-like patterns with safe query building
  */
 
-import { getDatabase, type DatabaseInstance } from '../services/database.service';
-import { v4 as uuidv4 } from 'uuid';
+import { getDatabase, isDatabaseInitialized, type DatabaseInstance } from '../services/database.service';
+import { randomUUID } from 'crypto';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -112,16 +112,31 @@ export abstract class BaseDAL<T extends BaseEntity> {
   /**
    * Get database instance
    * SEC-006: Returns instance configured for prepared statements
+   * @throws Error if database is not initialized
    */
   protected get db(): DatabaseInstance {
+    if (!isDatabaseInitialized()) {
+      throw new Error(
+        `Database not initialized. Cannot perform ${this.tableName} operations. ` +
+        'Ensure bootstrapDatabase() completes before accessing DAL.'
+      );
+    }
     return getDatabase();
+  }
+
+  /**
+   * Check if database is available for operations
+   * Use this to conditionally execute database operations
+   */
+  protected get isDatabaseAvailable(): boolean {
+    return isDatabaseInitialized();
   }
 
   /**
    * Generate a new UUID v4 primary key
    */
   protected generateId(): string {
-    return uuidv4();
+    return randomUUID();
   }
 
   /**

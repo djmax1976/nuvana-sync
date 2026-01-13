@@ -400,6 +400,100 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Get retryable items with exponential backoff
+   * Items are eligible for retry based on their attempt count and time since last attempt
+   *
+   * Backoff schedule (in seconds):
+   * - Attempt 0: immediate
+   * - Attempt 1: 2s delay
+   * - Attempt 2: 4s delay
+   * - Attempt 3: 8s delay
+   * - Attempt 4: 16s delay
+   * - Attempt 5: 32s delay
+   * - Attempt 6+: 60s delay (capped)
+   *
+   * SEC-006: Parameterized query
+   * API-002: Built-in rate limiting via backoff
+   *
+   * @param storeId - Store identifier
+   * @param limit - Maximum items to return
+   * @returns Array of retryable items
+   */
+  getRetryableItems(storeId: string, limit: number = DEFAULT_BATCH_SIZE): SyncQueueItem[] {
+    const safeLimit = Math.min(limit, MAX_BATCH_SIZE);
+    const now = new Date();
+
+    // SQLite doesn't have POWER function, so we calculate backoff in application layer
+    // Get all unsynced items that haven't exceeded max attempts
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+      ORDER BY priority DESC, created_at ASC
+      LIMIT ?
+    `);
+
+    const allItems = stmt.all(storeId, safeLimit * 2) as SyncQueueItem[]; // Get extra to filter
+
+    // Filter items based on exponential backoff
+    const retryableItems: SyncQueueItem[] = [];
+
+    for (const item of allItems) {
+      if (retryableItems.length >= safeLimit) break;
+
+      // First attempt or never attempted
+      if (item.sync_attempts === 0 || !item.last_attempt_at) {
+        retryableItems.push(item);
+        continue;
+      }
+
+      // Calculate backoff delay in seconds: min(2^attempts, 60)
+      const backoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+      const lastAttempt = new Date(item.last_attempt_at);
+      const nextRetryTime = new Date(lastAttempt.getTime() + backoffSeconds * 1000);
+
+      if (now >= nextRetryTime) {
+        retryableItems.push(item);
+      }
+    }
+
+    log.debug('Got retryable items with backoff', {
+      storeId,
+      totalCandidates: allItems.length,
+      retryable: retryableItems.length,
+    });
+
+    return retryableItems;
+  }
+
+  /**
+   * Clean up synced items older than specified days
+   * Maintenance operation to prevent unbounded queue growth
+   * SEC-006: Parameterized query
+   *
+   * @param olderThanDays - Delete items synced more than this many days ago
+   * @returns Number of items deleted
+   */
+  cleanupSynced(olderThanDays: number = 7): number {
+    const cutoffDate = new Date();
+    cutoffDate.setDate(cutoffDate.getDate() - olderThanDays);
+
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE synced = 1
+      AND synced_at < ?
+    `);
+
+    const result = stmt.run(cutoffDate.toISOString());
+
+    log.info('Cleaned up old synced items', {
+      olderThanDays,
+      deletedCount: result.changes,
+    });
+
+    return result.changes;
+  }
+
+  /**
    * Get sync statistics for a store
    *
    * @param storeId - Store identifier

@@ -396,6 +396,49 @@ export class MerchandiseMovementsDAL extends StoreBasedDAL<MerchandiseMovement> 
   }
 
   /**
+   * Get aggregation by date (single day)
+   * DB-006: Store-scoped aggregate query
+   *
+   * @param storeId - Store identifier
+   * @param businessDate - Business date
+   * @returns Array of department aggregations for the day
+   */
+  getAggregationByDate(
+    storeId: string,
+    businessDate: string
+  ): Array<{
+    departmentId: string;
+    departmentName: string | null;
+    salesQuantity: number;
+    salesAmount: number;
+  }> {
+    const stmt = this.db.prepare(`
+      SELECT
+        department_id,
+        department_name,
+        SUM(quantity_sold) as sales_quantity,
+        SUM(amount_sold) as sales_amount
+      FROM merchandise_movements
+      WHERE store_id = ? AND business_date = ?
+      GROUP BY department_id, department_name
+    `);
+
+    const results = stmt.all(storeId, businessDate) as Array<{
+      department_id: string;
+      department_name: string | null;
+      sales_quantity: number;
+      sales_amount: number;
+    }>;
+
+    return results.map((r) => ({
+      departmentId: r.department_id,
+      departmentName: r.department_name,
+      salesQuantity: r.sales_quantity,
+      salesAmount: r.sales_amount,
+    }));
+  }
+
+  /**
    * Delete movements for a processed file (for reprocessing)
    *
    * @param fileId - Processed file ID

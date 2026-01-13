@@ -60,6 +60,9 @@ import {
   type NAXMLFuelProductMovementData,
   type NAXMLFPMDetail,
   type NAXMLFPMNonResettableTotals,
+  // ISM types
+  type NAXMLItemSalesMovementData,
+  type NAXMLISMDetail,
 } from './types';
 import {
   NAXMLFuelGradeMovementDataSchema,
@@ -672,6 +675,8 @@ export class NAXMLParser {
         return this.parseFuelProductMovementData(root) as T;
       case 'MiscellaneousSummaryMovement':
         return this.parseMiscellaneousSummaryMovementData(root) as T;
+      case 'ItemSalesMovement':
+        return this.parseItemSalesMovementData(root) as T;
       default:
         return root as T;
     }
@@ -1529,6 +1534,101 @@ export class NAXMLParser {
       tender,
       miscellaneousSummaryAmount: this.parseNumber(totals.MiscellaneousSummaryAmount, 0),
       miscellaneousSummaryCount: this.parseNumber(totals.MiscellaneousSummaryCount, 0),
+    };
+  }
+
+  // ============================================================================
+  // ISM (Item Sales Movement) Parsing Methods
+  // ============================================================================
+
+  /**
+   * Parse Item Sales Movement (ISM) document data.
+   *
+   * This method parses the root NAXML-MovementReport element containing
+   * ItemSalesMovement data. ISM files contain item-level sales summaries.
+   *
+   * @param root - The parsed NAXML-MovementReport root element
+   * @returns Parsed ISM data structure
+   * @throws NAXMLParserError if required fields are missing
+   *
+   * SEC-014: Validates required fields and uses strict type parsing
+   */
+  private parseItemSalesMovementData(root: Record<string, unknown>): NAXMLItemSalesMovementData {
+    const ismContainer = root.ItemSalesMovement as Record<string, unknown>;
+
+    if (!ismContainer) {
+      throw new NAXMLParserError(
+        NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
+        'ItemSalesMovement element not found in document'
+      );
+    }
+
+    const movementHeaderRaw = ismContainer.MovementHeader as Record<string, unknown>;
+    if (!movementHeaderRaw) {
+      throw new NAXMLParserError(
+        NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
+        'MovementHeader not found in ItemSalesMovement'
+      );
+    }
+
+    const movementHeader = this.parseMovementHeader(movementHeaderRaw);
+
+    // SalesMovementHeader is optional (present only for shift reports, Period 98)
+    const salesMovementHeaderRaw = ismContainer.SalesMovementHeader as
+      | Record<string, unknown>
+      | undefined;
+    const salesMovementHeader = salesMovementHeaderRaw
+      ? this.parseSalesMovementHeader(salesMovementHeaderRaw)
+      : undefined;
+
+    // Parse ISMDetail array
+    const ismDetailArray = this.ensureArray(ismContainer.ISMDetail);
+    const ismDetails = ismDetailArray.map((detail) =>
+      this.parseISMDetail(detail as Record<string, unknown>)
+    );
+
+    return {
+      movementHeader,
+      salesMovementHeader,
+      ismDetails,
+    };
+  }
+
+  /**
+   * Parse ISMDetail element.
+   *
+   * Each ISMDetail contains item-level sales data including item code,
+   * description, quantity sold, and sales amount.
+   *
+   * @param detail - Raw ISMDetail element
+   * @returns Parsed ISM detail
+   *
+   * SEC-014: Validates item code presence
+   */
+  private parseISMDetail(detail: Record<string, unknown>): NAXMLISMDetail {
+    const itemCode = String(detail.ItemCode || '');
+
+    if (!itemCode) {
+      throw new NAXMLParserError(
+        NAXML_PARSER_ERROR_CODES.MISSING_REQUIRED_FIELD,
+        'ItemCode is required in ISMDetail'
+      );
+    }
+
+    // Parse sales totals
+    const salesTotalsRaw = detail.ISMSalesTotals as Record<string, unknown>;
+
+    return {
+      itemCode,
+      itemDescription: String(detail.ItemDescription || ''),
+      merchandiseCode: String(detail.DepartmentID || detail.MerchandiseCode || ''),
+      salesQuantity: this.parseNumber(salesTotalsRaw?.ItemSalesQuantity, 0),
+      salesAmount: this.parseNumber(salesTotalsRaw?.ItemSalesAmount, 0),
+      unitPrice:
+        salesTotalsRaw?.ItemSalesAmount && salesTotalsRaw?.ItemSalesQuantity
+          ? this.parseNumber(salesTotalsRaw.ItemSalesAmount, 0) /
+            this.parseNumber(salesTotalsRaw.ItemSalesQuantity, 1)
+          : 0,
     };
   }
 

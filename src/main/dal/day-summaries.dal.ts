@@ -296,16 +296,18 @@ export class DaySummariesDAL extends StoreBasedDAL<DaySummary> {
       WHERE store_id = ? AND business_date >= ? AND business_date <= ?
     `);
 
-    const result = stmt.get(storeId, startDate, endDate) as {
-      total_sales: number;
-      total_transactions: number;
-      day_count: number;
-    };
+    const result = stmt.get(storeId, startDate, endDate) as
+      | {
+          total_sales: number;
+          total_transactions: number;
+          day_count: number;
+        }
+      | undefined;
 
     return {
-      totalSales: result.total_sales,
-      totalTransactions: result.total_transactions,
-      dayCount: result.day_count,
+      totalSales: result?.total_sales ?? 0,
+      totalTransactions: result?.total_transactions ?? 0,
+      dayCount: result?.day_count ?? 0,
     };
   }
 
@@ -338,8 +340,8 @@ export class DaySummariesDAL extends StoreBasedDAL<DaySummary> {
       SELECT COUNT(*) as count FROM day_summaries
       WHERE store_id = ? AND status = ?
     `);
-    const result = stmt.get(storeId, status) as { count: number };
-    return result.count;
+    const result = stmt.get(storeId, status) as { count: number } | undefined;
+    return result?.count ?? 0;
   }
 }
 

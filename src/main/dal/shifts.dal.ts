@@ -278,8 +278,8 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
       SELECT MAX(shift_number) as max_num FROM shifts
       WHERE store_id = ? AND business_date = ?
     `);
-    const result = stmt.get(storeId, businessDate) as { max_num: number | null };
-    return (result.max_num || 0) + 1;
+    const result = stmt.get(storeId, businessDate) as { max_num: number | null } | undefined;
+    return (result?.max_num || 0) + 1;
   }
 
   /**
@@ -311,8 +311,8 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
       SELECT COUNT(*) as count FROM shifts
       WHERE store_id = ? AND status = ?
     `);
-    const result = stmt.get(storeId, status) as { count: number };
-    return result.count;
+    const result = stmt.get(storeId, status) as { count: number } | undefined;
+    return result?.count ?? 0;
   }
 
   /**

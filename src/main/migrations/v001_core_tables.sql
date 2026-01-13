@@ -27,10 +27,11 @@ CREATE TABLE stores (
 -- Users (synced from cloud for local auth)
 -- Security: SEC-001 - PIN stored as bcrypt hash (handled by DAL)
 -- Security: DB-006 - Scoped by store_id for tenant isolation
+-- MVP roles: cashier, shift_manager, store_manager
 CREATE TABLE users (
   user_id TEXT PRIMARY KEY,
   store_id TEXT NOT NULL REFERENCES stores(store_id) ON DELETE CASCADE,
-  role TEXT NOT NULL CHECK(role IN ('CASHIER', 'MANAGER', 'ADMIN')),
+  role TEXT NOT NULL CHECK(role IN ('cashier', 'shift_manager', 'store_manager')),
   name TEXT NOT NULL,
   pin_hash TEXT NOT NULL,
   active INTEGER NOT NULL DEFAULT 1 CHECK(active IN (0, 1)),

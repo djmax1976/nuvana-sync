@@ -2,10 +2,12 @@
  * File Watcher Service
  *
  * Monitors a directory for NAXML files using Chokidar.
- * Parses files and sends them to the cloud via SyncService.
+ * Parses files and stores them locally via ParserService (local-first architecture).
+ * Data is then queued for cloud synchronization via SyncQueueDAL.
  *
  * @module main/services/file-watcher
  * @security SEC-014: Path validation, CDP-001: SHA-256 hashing
+ * @security SEC-015: File size limits enforced
  */
 
 import { EventEmitter } from 'events';
@@ -13,15 +15,14 @@ import * as fs from 'fs/promises';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import chokidar, { FSWatcher } from 'chokidar';
-import { createNAXMLParser } from '../../shared/naxml/parser';
 import { createLogger } from '../utils/logger';
-import { type NuvanaSyncConfig, validateSafePath } from '../../shared/types/config.types';
+import { type NuvanaConfig, validateSafePath } from '../../shared/types/config.types';
 import {
   type FileRecord,
   type SyncStats,
   type NAXMLDocumentType,
 } from '../../shared/types/sync.types';
-import type { SyncService } from './sync.service';
+import { createParserService, type ParserService } from './parser.service';
 
 const log = createLogger('file-watcher');
 
@@ -67,9 +68,9 @@ function generateFileHash(content: string): string {
 
 export class FileWatcherService extends EventEmitter {
   private watcher: FSWatcher | null = null;
-  private config: NuvanaSyncConfig;
-  private syncService: SyncService;
-  private parser = createNAXMLParser();
+  private config: NuvanaConfig;
+  private storeId: string;
+  private parserService: ParserService;
   private recentFiles: FileRecord[] = [];
   private stats: SyncStats = {
     filesProcessed: 0,
@@ -79,10 +80,17 @@ export class FileWatcherService extends EventEmitter {
   };
   private processingQueue: Set<string> = new Set();
 
-  constructor(config: NuvanaSyncConfig, syncService: SyncService) {
+  /**
+   * Create a FileWatcherService instance
+   *
+   * @param config - Application configuration
+   * @param storeId - Store identifier for tenant isolation (DB-006)
+   */
+  constructor(config: NuvanaConfig, storeId: string) {
     super();
     this.config = config;
-    this.syncService = syncService;
+    this.storeId = storeId;
+    this.parserService = createParserService(storeId);
   }
 
   /**
@@ -254,7 +262,12 @@ export class FileWatcherService extends EventEmitter {
   }
 
   /**
-   * Process a single file
+   * Process a single file using local-first architecture
+   * Parses XML → Stores in SQLite via DAL → Queues for cloud sync
+   *
+   * @security SEC-014: Path validation before processing
+   * @security SEC-015: File size limits enforced by ParserService
+   * @security CDP-001: SHA-256 hash for integrity/deduplication
    */
   private async processFile(filePath: string): Promise<void> {
     const fileName = path.basename(filePath);
@@ -273,7 +286,7 @@ export class FileWatcherService extends EventEmitter {
     // Add to queue
     this.processingQueue.add(filePath);
 
-    // Create file record
+    // Create file record for UI tracking
     const record: FileRecord = {
       filePath,
       fileName,
@@ -283,24 +296,22 @@ export class FileWatcherService extends EventEmitter {
     this.addFileRecord(record);
 
     try {
-      // Read file
-      const xml = await fs.readFile(filePath, 'utf-8');
+      // CDP-001: Generate SHA-256 hash before reading full content
+      const content = await fs.readFile(filePath, 'utf-8');
+      const fileHash = generateFileHash(content);
 
-      // CDP-001: Generate SHA-256 hash for integrity
-      const fileHash = generateFileHash(xml);
-
-      // Detect document type
-      const docType = this.detectDocumentType(fileName, xml);
+      // Detect document type for UI record (ParserService also detects internally)
+      const docType = this.detectDocumentType(fileName, content);
       record.documentType = docType;
 
       log.info('Processing file', {
         fileName,
         documentType: docType,
-        fileHash: fileHash.substring(0, 16) + '...', // Truncate for logging
-        sizeBytes: xml.length,
+        fileHash: fileHash.substring(0, 16) + '...',
+        sizeBytes: content.length,
       });
 
-      // Check if this file type is enabled
+      // Check if this file type is enabled in config
       if (!this.isFileTypeEnabled(docType)) {
         log.info('Skipping disabled file type', { docType, fileName });
         record.status = 'success';
@@ -310,32 +321,38 @@ export class FileWatcherService extends EventEmitter {
         return;
       }
 
-      // Parse the XML
-      const parsed = await this.parseFile(xml, docType);
+      // LOCAL-FIRST: Parse and store via ParserService
+      // ParserService handles: parsing, DAL storage, sync queue, processed_files tracking
+      const result = await this.parserService.processFile(filePath, fileHash);
 
-      // Send to cloud
-      await this.syncService.upload({
-        documentType: docType,
-        data: parsed,
-        fileName,
-        fileHash,
-      });
+      if (result.success) {
+        // Success - data stored locally and queued for sync
+        record.status = 'success';
+        // Cast to sync types - parser may return broader document types
+        record.documentType = result.documentType as NAXMLDocumentType;
+        this.stats.filesProcessed++;
+        this.stats.lastSyncTime = new Date();
 
-      // Success
-      record.status = 'success';
-      this.stats.filesProcessed++;
-      this.stats.lastSyncTime = new Date();
+        log.info('File processed successfully (local-first)', {
+          fileName,
+          documentType: result.documentType,
+          recordsCreated: result.recordsCreated,
+          totalProcessed: this.stats.filesProcessed,
+        });
 
-      log.info('File processed successfully', {
-        fileName,
-        documentType: docType,
-        totalProcessed: this.stats.filesProcessed,
-      });
+        // Move to archive
+        await this.moveToArchive(filePath);
 
-      // Move to archive
-      await this.moveToArchive(filePath);
-
-      this.emit('file-processed', { filePath, success: true });
+        this.emit('file-processed', {
+          filePath,
+          success: true,
+          documentType: result.documentType,
+          recordsCreated: result.recordsCreated,
+        });
+      } else {
+        // ParserService returned error (validation, duplicate, etc.)
+        throw new Error(result.error || 'Unknown processing error');
+      }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
 
@@ -416,16 +433,6 @@ export class FileWatcherService extends EventEmitter {
     if (!configKey) return true; // Unknown types are processed
 
     return this.config.enabledFileTypes[configKey] ?? true;
-  }
-
-  /**
-   * Parse XML file based on document type
-   * The parser throws NAXMLParserError on failure, returns NAXMLDocument on success
-   */
-  private async parseFile(xml: string, _docType: NAXMLDocumentType): Promise<unknown> {
-    // Use the NAXML parser - throws NAXMLParserError on failure
-    const result = this.parser.parse(xml);
-    return result.data;
   }
 
   /**
@@ -525,4 +532,29 @@ export class FileWatcherService extends EventEmitter {
       this.recentFiles[index] = record;
     }
   }
+}
+
+// ============================================================================
+// Factory Function
+// ============================================================================
+
+/**
+ * Create a new FileWatcherService instance
+ *
+ * @param config - Application configuration
+ * @param storeId - Store identifier for tenant isolation (DB-006)
+ * @returns FileWatcherService instance
+ *
+ * @example
+ * ```typescript
+ * const watcher = createFileWatcherService(config, 'store-123');
+ * watcher.on('file-processed', (event) => console.log('Processed:', event.filePath));
+ * watcher.start();
+ * ```
+ */
+export function createFileWatcherService(
+  config: NuvanaConfig,
+  storeId: string
+): FileWatcherService {
+  return new FileWatcherService(config, storeId);
 }

@@ -1,13 +1,18 @@
 /**
  * Settings Page Component
  *
- * Configuration UI for Nuvana Sync settings.
+ * Configuration UI for Nuvana settings.
  *
  * @module renderer/pages/Settings
  * @security SEC-014: Client-side input validation
  */
 
 import React, { useState, useEffect, useCallback } from 'react';
+
+/**
+ * Check if running in Electron environment
+ */
+const isElectron = typeof window !== 'undefined' && window.nuvanaAPI !== undefined;
 
 /**
  * SEC-014: Client-side validation patterns
@@ -164,7 +169,33 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
   const [saveError, setSaveError] = useState<string | null>(null);
 
   useEffect(() => {
-    window.nuvanaSyncAPI.getConfig().then((response) => {
+    // Skip API calls if not in Electron (dev mode in browser)
+    if (!isElectron) {
+      // Set mock config for dev mode
+      setConfig({
+        apiUrl: 'https://api.example.com',
+        apiKey: 'dev-api-key-12345',
+        storeId: 'STORE-001',
+        watchPath: 'C:\\POS\\Export',
+        archivePath: 'C:\\POS\\Archive',
+        errorPath: 'C:\\POS\\Errors',
+        pollInterval: 30,
+        enabledFileTypes: {
+          pjr: true,
+          fgm: true,
+          msm: true,
+          fpm: false,
+          mcm: false,
+          tlm: false,
+        },
+        startOnLogin: true,
+        minimizeToTray: true,
+        showNotifications: true,
+      });
+      return;
+    }
+
+    window.nuvanaAPI.getConfig().then((response) => {
       if (response && response.config) {
         setConfig(response.config);
       }
@@ -227,7 +258,16 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
     setSaveError(null);
 
     try {
-      const result = await window.nuvanaSyncAPI.saveConfig(config);
+      // In dev mode without Electron, simulate successful save
+      if (!isElectron) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+        setSaving(false);
+        return;
+      }
+
+      const result = await window.nuvanaAPI.saveConfig(config);
       if (result.success) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
@@ -261,7 +301,18 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
     setTestResult(null);
 
     try {
-      const result = await window.nuvanaSyncAPI.testConnection(config);
+      // In dev mode without Electron, simulate successful connection
+      if (!isElectron) {
+        await new Promise((resolve) => setTimeout(resolve, 1000));
+        setTestResult({
+          success: true,
+          message: 'Connection successful (dev mode)',
+        });
+        setTesting(false);
+        return;
+      }
+
+      const result = await window.nuvanaAPI.testConnection(config);
       setTestResult(result);
     } catch (error) {
       setTestResult({

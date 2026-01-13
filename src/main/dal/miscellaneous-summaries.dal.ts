@@ -195,7 +195,7 @@ export class MiscellaneousSummariesDAL extends StoreBasedDAL<MiscellaneousSummar
       summary_code: codes.miscellaneousSummaryCode,
       amount: salesTotals.miscellaneousSummaryAmount,
       count: salesTotals.miscellaneousSummaryCount,
-      tender_type: salesTotals.tender?.tenderCode || null,
+      tender_type: salesTotals.tender?.tenderCode ?? undefined,
       file_id: fileId,
     });
 
