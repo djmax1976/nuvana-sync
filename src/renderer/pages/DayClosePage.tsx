@@ -647,7 +647,7 @@ export default function DayCloseWizardPage() {
     dashboardData?.stores.find((s) => s.store_id === storeId)?.name ||
     "Your Store";
   const businessDate =
-    lotteryData?.business_day || dayBinsData?.business_day?.date;
+    lotteryData?.business_date || dayBinsData?.business_day?.date;
   const formattedDate = formatBusinessDate(businessDate);
 
   // Transform open shifts to blocking format for DayCloseModeScanner

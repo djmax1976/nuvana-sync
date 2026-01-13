@@ -115,7 +115,7 @@ describe('Settings IPC Handlers', () => {
         expect.any(Function),
         expect.objectContaining({
           requiresAuth: true,
-          requiredRole: 'MANAGER',
+          requiredRole: 'shift_manager',
         })
       );
 

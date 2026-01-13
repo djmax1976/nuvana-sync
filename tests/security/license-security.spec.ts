@@ -296,16 +296,16 @@ describe('License Security Tests', () => {
 
   describe('Grace Period Bypass Prevention', () => {
     it('should not allow status manipulation to gain grace period', () => {
-      // Expired beyond grace
+      // Expired beyond grace (20 days > 15 day grace period)
       service.updateFromApiResponse({
-        expiresAt: daysFromNow(-10),
+        expiresAt: daysFromNow(-20),
         status: 'active',
       });
       expect(service.isValid()).toBe(false);
 
       // Try to "restore" by updating with past_due
       service.updateFromApiResponse({
-        expiresAt: daysFromNow(-10),
+        expiresAt: daysFromNow(-20),
         status: 'past_due',
       });
 
@@ -338,7 +338,7 @@ describe('License Security Tests', () => {
 
     it('should not extend grace by updating with suspended->active', () => {
       service.updateFromApiResponse({
-        expiresAt: daysFromNow(-10), // Expired
+        expiresAt: daysFromNow(-20), // Expired beyond 15-day grace
         status: 'active',
       });
       service.markSuspended();
@@ -346,7 +346,7 @@ describe('License Security Tests', () => {
 
       // Try to restore
       service.updateFromApiResponse({
-        expiresAt: daysFromNow(-10),
+        expiresAt: daysFromNow(-20),
         status: 'active',
       });
 

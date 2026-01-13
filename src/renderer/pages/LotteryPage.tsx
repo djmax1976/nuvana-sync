@@ -444,10 +444,9 @@ export default function LotteryManagementPage() {
         closing_serial: manualEndingValues[bin.bin_id],
       }));
 
-      // Submit to API with MANUAL entry method
+      // Submit to API
       const response = await closeLotteryDay(storeId, {
         closings,
-        entry_method: "MANUAL",
       });
 
       if (response.success && response.data) {
@@ -465,7 +464,7 @@ export default function LotteryManagementPage() {
 
         toast({
           title: "Lottery Closed Successfully",
-          description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_day}`,
+          description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_date}`,
         });
 
         setSuccessMessage("Lottery closed successfully via manual entry");
@@ -578,13 +577,15 @@ export default function LotteryManagementPage() {
     : null;
 
   // Convert pack details to modal format
-  // Note: Convert null to undefined for location since PackDetailsData expects string | undefined
+  // Note: Map from API response types to modal types
+  // LotteryPackDetailResponse uses opening_serial/closing_serial, settled_at
+  // PackDetailsData uses serial_start/serial_end, depleted_at
   const packDetailsForModal: PackDetailsData | null = packDetails
     ? ({
         pack_id: packDetails.pack_id,
         pack_number: packDetails.pack_number,
-        serial_start: packDetails.serial_start,
-        serial_end: packDetails.serial_end,
+        serial_start: packDetails.opening_serial || "",
+        serial_end: packDetails.closing_serial || "",
         status: packDetails.status,
         game: packDetails.game || {
           game_id: packDetails.game_id,
@@ -593,32 +594,18 @@ export default function LotteryManagementPage() {
         bin: packDetails.bin
           ? {
               bin_id: packDetails.bin.bin_id,
-              name: packDetails.bin.name,
-              location: packDetails.bin.location ?? undefined,
+              name: packDetails.bin.label || `Bin ${packDetails.bin.bin_number}`,
+              location: undefined,
             }
           : null,
         received_at: packDetails.received_at,
         activated_at: packDetails.activated_at,
-        depleted_at: packDetails.depleted_at ?? undefined,
+        depleted_at: packDetails.settled_at ?? undefined,
         returned_at: packDetails.returned_at ?? undefined,
         tickets_remaining: packDetails.tickets_remaining,
-        shift_openings: packDetails.shift_openings?.map((o) => ({
-          opening_id: o.opening_id,
-          shift_id: o.shift_id,
-          opening_serial: o.opening_serial,
-          created_at: o.opened_at, // API uses opened_at, component expects created_at
-        })),
-        shift_closings: packDetails.shift_closings?.map((c) => ({
-          closing_id: c.closing_id,
-          shift_id: c.shift_id,
-          closing_serial: c.closing_serial,
-          opening_serial: c.opening_serial,
-          expected_count: c.expected_count,
-          actual_count: c.actual_count,
-          difference: c.difference,
-          has_variance: c.has_variance,
-          created_at: c.closed_at, // API uses closed_at, component expects created_at
-        })),
+        // shift_openings and shift_closings are not available in LotteryPackDetailResponse
+        shift_openings: undefined,
+        shift_closings: undefined,
       } as PackDetailsData)
     : null;
 
