@@ -229,18 +229,21 @@ export default function LotteryManagementPage() {
           pack_id: bin.pack.pack_id,
           game_id: "", // Not needed for display, dialog uses game.name and game.price
           pack_number: bin.pack.pack_number,
-          serial_start: bin.pack.starting_serial,
-          serial_end: bin.pack.serial_end,
-          status: "ACTIVE", // Pack in bins is always ACTIVE
+          opening_serial: bin.pack.starting_serial,
+          closing_serial: bin.pack.serial_end,
+          status: "ACTIVATED", // Pack in bins is always ACTIVATED
           store_id: storeId || "",
-          current_bin_id: bin.bin_id,
+          bin_id: bin.bin_id,
           received_at: "", // Not needed for display
           activated_at: null,
+          settled_at: null,
+          returned_at: null,
           game: {
             game_id: "",
             game_code: "",
             name: bin.pack.game_name,
             price: bin.pack.game_price,
+            tickets_per_pack: 300, // Default value
           },
         };
         setPackDataToReturn(packData);

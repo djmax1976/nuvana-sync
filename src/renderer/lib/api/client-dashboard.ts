@@ -274,7 +274,7 @@ export async function getDashboardSales(): Promise<SalesDataResponse> {
     const weeklySales = await window.electronAPI.invoke('dashboard:getWeeklySales');
 
     return {
-      today: todaySales || {
+      today: todaySales as TodaySalesData || {
         fuel_sales: 0,
         fuel_gallons: 0,
         net_sales: 0,
@@ -286,7 +286,7 @@ export async function getDashboardSales(): Promise<SalesDataResponse> {
         avg_transaction: 0,
         business_date: null,
       },
-      week: weeklySales || [],
+      week: (weeklySales as DailySalesData[]) || [],
     };
   }
 

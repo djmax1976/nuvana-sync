@@ -20,10 +20,14 @@ vi.mock('../../../src/main/services/database.service', () => ({
   isDatabaseInitialized: vi.fn(() => true),
 }));
 
-// Mock uuid
-vi.mock('uuid', () => ({
-  v4: vi.fn().mockReturnValue('mock-shift-uuid'),
-}));
+// Mock crypto
+vi.mock('crypto', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('crypto')>();
+  return {
+    ...actual,
+    randomUUID: vi.fn().mockReturnValue('mock-shift-uuid'),
+  };
+});
 
 import { ShiftsDAL, type Shift, type ShiftStatus } from '../../../src/main/dal/shifts.dal';
 

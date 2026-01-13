@@ -120,7 +120,7 @@ export interface LotteryCloseResult {
   /** Number of packs with closing serials */
   closings_created: number;
   /** Business day date string */
-  business_day: string;
+  business_date: string;
   /** Estimated lottery total (calculated from scanned serials) */
   lottery_total: number;
   /** Bin breakdown with sales calculations */
@@ -1072,7 +1072,7 @@ export function DayCloseModeScanner({
         setInputValue("");
         onSuccess({
           closings_created: response.data.closings_count,
-          business_day: response.data.business_date,
+          business_date: response.data.business_date,
           lottery_total: response.data.estimated_lottery_total,
           bins_closed: response.data.bins_preview,
           day_id: response.data.day_id,
@@ -1186,7 +1186,7 @@ export function DayCloseModeScanner({
 
         onSuccess({
           closings_created: response.data.closings_count,
-          business_day: response.data.business_date,
+          business_date: response.data.business_date,
           lottery_total: response.data.estimated_lottery_total,
           bins_closed: response.data.bins_preview,
           day_id: response.data.day_id,

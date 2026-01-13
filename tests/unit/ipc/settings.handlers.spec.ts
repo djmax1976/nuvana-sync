@@ -138,7 +138,7 @@ describe('Settings IPC Handlers', () => {
       );
     });
 
-    it('should require MANAGER role for settings:update', async () => {
+    it('should require shift_manager role for settings:update', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
       const updateCall = vi.mocked(registerHandler).mock.calls.find(
@@ -149,12 +149,12 @@ describe('Settings IPC Handlers', () => {
       expect(updateCall?.[2]).toEqual(
         expect.objectContaining({
           requiresAuth: true,
-          requiredRole: 'MANAGER',
+          requiredRole: 'shift_manager',
         })
       );
     });
 
-    it('should require ADMIN role for settings:reset', async () => {
+    it('should require store_manager role for settings:reset', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
       const resetCall = vi.mocked(registerHandler).mock.calls.find(
@@ -165,7 +165,7 @@ describe('Settings IPC Handlers', () => {
       expect(resetCall?.[2]).toEqual(
         expect.objectContaining({
           requiresAuth: true,
-          requiredRole: 'ADMIN',
+          requiredRole: 'store_manager',
         })
       );
     });

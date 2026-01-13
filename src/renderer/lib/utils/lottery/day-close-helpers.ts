@@ -239,13 +239,12 @@ export function checkAllBinsScanned(
  */
 export function transformToApiPayload(
   scannedBins: ScannedBin[],
-  entryMethod: "SCAN" | "MANUAL" = "SCAN",
+  _entryMethod: "SCAN" | "MANUAL" = "SCAN",
 ): CloseLotteryDayInput {
   return {
     closings: scannedBins.map((bin) => ({
       pack_id: bin.pack_id,
       closing_serial: bin.closing_serial,
     })),
-    entry_method: entryMethod,
   };
 }

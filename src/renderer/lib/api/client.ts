@@ -40,8 +40,7 @@ import {
 } from "@/lib/auth-error-handler";
 
 // Configuration
-const API_BASE_URL =
-  "http://localhost:3001" || "http://localhost:3001";
+const API_BASE_URL = "http://localhost:3001";
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
 /**

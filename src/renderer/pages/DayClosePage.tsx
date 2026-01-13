@@ -413,7 +413,7 @@ export default function DayCloseWizardPage() {
   const handleLotteryCancel = useCallback(async () => {
     if (pendingLotteryDayId && storeId) {
       try {
-        await cancelLotteryDayClose(storeId);
+        await cancelLotteryDayClose();
       } catch {
         // Ignore errors - will auto-expire
       }
@@ -489,7 +489,7 @@ export default function DayCloseWizardPage() {
     if (pendingLotteryDayId && storeId) {
       setIsCommittingLottery(true);
       try {
-        const result = await commitLotteryDayClose(storeId);
+        const result = await commitLotteryDayClose();
 
         if (result.success) {
           toast({
@@ -545,7 +545,7 @@ export default function DayCloseWizardPage() {
 
     if (pendingLotteryDayId && storeId) {
       try {
-        await cancelLotteryDayClose(storeId);
+        await cancelLotteryDayClose();
       } catch {
         // Don't block navigation
       }
