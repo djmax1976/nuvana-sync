@@ -9,7 +9,14 @@
  * @module tests/performance/benchmarks
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach as _beforeEach,
+  afterEach as _afterEach,
+} from 'vitest';
 
 // Mock dependencies
 const mockPrepare = vi.fn();

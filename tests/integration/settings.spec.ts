@@ -10,7 +10,15 @@
  * @module tests/integration/settings
  */
 
-import { describe, it, expect, beforeAll, afterAll, beforeEach, vi } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll as _beforeAll,
+  afterAll as _afterAll,
+  beforeEach,
+  vi,
+} from 'vitest';
 
 // Mock electron modules for integration tests
 vi.mock('electron', () => ({

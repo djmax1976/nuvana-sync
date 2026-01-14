@@ -69,12 +69,12 @@ import {
   logout,
   getCurrentAuthUser,
   getCurrentSession,
-  trackActivity,
+  trackActivity as _trackActivity,
   hasPermission,
   hasMinimumRole,
   getRoleLevel,
-  getActiveUsersForLogin,
-  type LoginResult,
+  getActiveUsersForLogin as _getActiveUsersForLogin,
+  type LoginResult as _LoginResult,
   type AuthenticatedUser,
 } from '../../../src/main/services/auth.service';
 import { destroySession } from '../../../src/main/services/session.service';

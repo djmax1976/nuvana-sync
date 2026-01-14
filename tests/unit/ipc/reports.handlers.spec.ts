@@ -282,7 +282,7 @@ describe('Reports Handlers', () => {
 
   describe('store scoping (DB-006)', () => {
     it('should scope all reports to configured store', async () => {
-      const storeId = 'store-123';
+      const _storeId = 'store-123';
 
       // All queries should include store_id parameter
       const query = 'SELECT * FROM day_summaries WHERE store_id = ?';
@@ -336,14 +336,14 @@ describe('Reports Handlers', () => {
     });
 
     it('should handle validation errors', async () => {
-      const invalidParams = { startDate: 'invalid' };
+      const _invalidParams = { startDate: 'invalid' };
 
       const response = { error: 'VALIDATION_ERROR', message: 'Invalid parameters' };
       expect(response.error).toBe('VALIDATION_ERROR');
     });
 
     it('should handle database errors gracefully', async () => {
-      const error = new Error('Database connection failed');
+      const _error = new Error('Database connection failed');
 
       const response = {
         error: 'INTERNAL_ERROR',

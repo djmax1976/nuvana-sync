@@ -12,15 +12,18 @@ export function ThemeToggle() {
 
   // Initialize theme from localStorage or system preference
   useEffect(() => {
-    setMounted(true);
-    const stored = localStorage.getItem('theme');
-    if (stored === 'dark' || stored === 'light') {
-      setThemeState(stored);
-      document.documentElement.classList.toggle('dark', stored === 'dark');
-    } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
-      setThemeState('dark');
-      document.documentElement.classList.add('dark');
-    }
+    // Use queueMicrotask to avoid synchronous setState during effect
+    queueMicrotask(() => {
+      setMounted(true);
+      const stored = localStorage.getItem('theme');
+      if (stored === 'dark' || stored === 'light') {
+        setThemeState(stored);
+        document.documentElement.classList.toggle('dark', stored === 'dark');
+      } else if (window.matchMedia('(prefers-color-scheme: dark)').matches) {
+        setThemeState('dark');
+        document.documentElement.classList.add('dark');
+      }
+    });
   }, []);
 
   const toggleTheme = useCallback(() => {

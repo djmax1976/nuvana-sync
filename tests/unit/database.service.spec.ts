@@ -178,8 +178,11 @@ describe('DatabaseService', () => {
         isKeyAvailable: vi.fn().mockReturnValue(true),
       }));
 
-      const { initializeDatabase, closeDatabase, isDatabaseInitialized } =
-        await import('../../src/main/services/database.service');
+      const {
+        initializeDatabase,
+        closeDatabase,
+        isDatabaseInitialized: _isDatabaseInitialized,
+      } = await import('../../src/main/services/database.service');
 
       initializeDatabase();
       closeDatabase();

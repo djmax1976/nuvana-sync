@@ -63,7 +63,10 @@ export function CashierSessionProvider({ children }: { children: ReactNode }) {
           const parsed = JSON.parse(stored) as CashierSessionData;
           // Check if session is expired
           if (new Date(parsed.expiresAt) > new Date()) {
-            setSessionState(parsed);
+            // Use queueMicrotask to avoid synchronous setState during effect
+            queueMicrotask(() => {
+              setSessionState(parsed);
+            });
           } else {
             // Clear expired session
             sessionStorage.removeItem(SESSION_STORAGE_KEY);

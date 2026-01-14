@@ -9,7 +9,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import path from 'path';
+import _path from 'path';
 import fs from 'fs';
 
 // Mock electron modules before importing the service
@@ -22,7 +22,7 @@ vi.mock('electron', () => ({
 }));
 
 // Mock electron-store with a proper class
-const createMockStore = () => {
+const _createMockStore = () => {
   const mockStore = new Map<string, unknown>();
   return {
     get: vi.fn((key: string) => mockStore.get(key)),

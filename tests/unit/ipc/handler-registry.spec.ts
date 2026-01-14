@@ -150,7 +150,7 @@ describe('IPC Handler Registry', () => {
     });
 
     it('should not expose stack traces in error responses', async () => {
-      const internalError = new Error('Database connection failed');
+      const _internalError = new Error('Database connection failed');
 
       // Build sanitized response
       const response = {

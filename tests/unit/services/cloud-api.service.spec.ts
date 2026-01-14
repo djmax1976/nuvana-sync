@@ -23,7 +23,7 @@ vi.mock('electron', () => ({
   safeStorage: {
     isEncryptionAvailable: vi.fn(() => true),
     decryptString: vi.fn(() => 'decrypted-api-key'),
-    encryptString: vi.fn((str: string) => Buffer.from('encrypted')),
+    encryptString: vi.fn((_str: string) => Buffer.from('encrypted')),
   },
 }));
 

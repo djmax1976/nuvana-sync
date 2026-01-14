@@ -230,7 +230,9 @@ describe('Settings IPC Handlers', () => {
         storeId: 'store-123',
         storeName: 'Test Store',
       };
-      vi.mocked(settingsService.getAll).mockReturnValue(mockSettings as any);
+      vi.mocked(settingsService.getAll).mockReturnValue(
+        mockSettings as unknown as ReturnType<typeof settingsService.getAll>
+      );
 
       await import('../../../src/main/ipc/settings.handlers');
 

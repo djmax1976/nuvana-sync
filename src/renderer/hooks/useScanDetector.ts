@@ -173,7 +173,11 @@ export function useScanDetector(options: UseScanDetectorOptions = {}): UseScanDe
 
   // Refs for callbacks to avoid stale closures
   const callbacksRef = useRef({ onManualDetected, onScanDetected, onComplete });
-  callbacksRef.current = { onManualDetected, onScanDetected, onComplete };
+
+  // Update callbacks ref in an effect to avoid accessing refs during render
+  useEffect(() => {
+    callbacksRef.current = { onManualDetected, onScanDetected, onComplete };
+  }, [onManualDetected, onScanDetected, onComplete]);
 
   // Track the last keystroke timestamp
   const lastKeystrokeRef = useRef<number | null>(null);

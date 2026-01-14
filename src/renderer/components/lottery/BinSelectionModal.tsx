@@ -67,7 +67,10 @@ export function BinSelectionModal({
   // Reset selection when modal opens with new pack
   useEffect(() => {
     if (open) {
-      setSelectedBinId('');
+      // Use queueMicrotask to avoid synchronous setState during effect
+      queueMicrotask(() => {
+        setSelectedBinId('');
+      });
     }
   }, [open, pack?.pack_id]);
 

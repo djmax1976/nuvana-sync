@@ -125,7 +125,7 @@ describe('Shifts Handlers', () => {
     });
 
     it('should return NOT_FOUND for non-existent shift', async () => {
-      const mockShift = null;
+      const _mockShift = null;
 
       const response = { error: 'NOT_FOUND', message: 'Shift not found' };
 
@@ -152,7 +152,7 @@ describe('Shifts Handlers', () => {
 
   describe('shifts:getSummary', () => {
     it('should return shift with transaction totals', async () => {
-      const mockShift = { shift_id: 'shift-1', status: 'OPEN' };
+      const _mockShift = { shift_id: 'shift-1', status: 'OPEN' };
       const mockTransactions = [
         { total_amount: 100, voided: 0 },
         { total_amount: 200, voided: 0 },
@@ -178,7 +178,7 @@ describe('Shifts Handlers', () => {
     });
 
     it('should handle shift with no transactions', async () => {
-      const mockTransactions: unknown[] = [];
+      const _mockTransactions: unknown[] = [];
 
       const summary = {
         transactionCount: 0,
@@ -336,7 +336,7 @@ describe('Shifts Handlers', () => {
     });
 
     it('should handle validation errors', async () => {
-      const invalidParams = { startDate: 'invalid' };
+      const _invalidParams = { startDate: 'invalid' };
 
       const response = { error: 'VALIDATION_ERROR', message: 'Invalid parameters' };
       expect(response.error).toBe('VALIDATION_ERROR');

@@ -330,7 +330,7 @@ describe('SQL Injection Protection', () => {
   describe('Base DAL Pattern Verification', () => {
     it('should verify all DAL classes use prepared statements', () => {
       // This test documents the pattern all DALs must follow
-      const expectedPattern = /prepare\s*\(\s*`[^`]*\?\s*[^`]*`\s*\)/;
+      const _expectedPattern = /prepare\s*\(\s*`[^`]*\?\s*[^`]*`\s*\)/;
 
       // Sample queries that demonstrate parameterized pattern
       const sampleQueries = [
@@ -367,7 +367,7 @@ describe('SQL Injection Protection', () => {
   describe('Query Builder Safety', () => {
     it('should validate buildWhereClause uses parameters', () => {
       // The buildWhereClause method should return parameterized clause
-      const mockConditions = { status: 'ACTIVE', store_id: 'store-123' };
+      const _mockConditions = { status: 'ACTIVE', store_id: 'store-123' };
 
       // Simulating what buildWhereClause should produce
       const expectedClause = 'WHERE status = ? AND store_id = ?';

@@ -323,8 +323,11 @@ export function UnscannedBinWarningModal({
    */
   useEffect(() => {
     if (open) {
-      // Reset selections when modal opens to ensure clean state
-      setSoldOutBins({});
+      // Use queueMicrotask to avoid synchronous setState during effect
+      queueMicrotask(() => {
+        // Reset selections when modal opens to ensure clean state
+        setSoldOutBins({});
+      });
     }
   }, [open]);
 

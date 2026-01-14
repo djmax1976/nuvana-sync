@@ -32,7 +32,6 @@ import {
   type Transaction,
   type TransactionLineItem,
   type TransactionPayment,
-  type TransactionWithDetails,
 } from '../../../src/main/dal/transactions.dal';
 
 describe('TransactionsDAL', () => {

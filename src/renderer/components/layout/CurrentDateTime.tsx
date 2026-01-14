@@ -42,7 +42,10 @@ export function CurrentDateTime() {
 
   useEffect(() => {
     // Initialize time on mount (client-side only to avoid hydration mismatch)
-    updateTime();
+    // Use setTimeout with 0ms to avoid synchronous setState during render
+    const initTimeout = setTimeout(() => {
+      updateTime();
+    }, 0);
 
     // Calculate milliseconds until the next minute to sync updates
     const now = new Date();
@@ -62,6 +65,7 @@ export function CurrentDateTime() {
     }, msUntilNextMinute);
 
     return () => {
+      clearTimeout(initTimeout);
       clearTimeout(initialTimeout);
       const interval = (window as Window & { __dateTimeInterval?: ReturnType<typeof setInterval> })
         .__dateTimeInterval;

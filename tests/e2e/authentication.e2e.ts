@@ -16,7 +16,7 @@ test.describe('Authentication', () => {
   // These tests assume app is configured (setup wizard completed)
   test.beforeEach(async ({ electronApp }) => {
     // Seed test database with configured store and users
-    await electronApp.evaluate(async ({ ipcMain }) => {
+    await electronApp.evaluate(async ({ _ipcMain }) => {
       // This would be implemented to seed test data
       // For now, we document the expected setup
     });
@@ -215,13 +215,13 @@ test.describe('Authentication', () => {
     test('should show warning before session expires', async ({ window }) => {
       // This test would require manipulating session timing
       // Document expected behavior
-      const warningMessage = window.locator('[data-testid="session-warning"]');
+      const _warningMessage = window.locator('[data-testid="session-warning"]');
 
       // Warning should appear when session is about to expire
       // For testing, we'd need to mock the session timeout
     });
 
-    test('should redirect to login on session expiry', async ({ window }) => {
+    test('should redirect to login on session expiry', async ({ _window }) => {
       // This test would require mocking session expiry
       // Document expected behavior
       // On session expiry:
@@ -234,7 +234,7 @@ test.describe('Authentication', () => {
   test.describe('Authorization', () => {
     test('should hide admin features for non-admin users', async ({ window }) => {
       // Admin-only features should be hidden
-      const adminFeatures = window.locator('[data-testid="admin-only"]');
+      const _adminFeatures = window.locator('[data-testid="admin-only"]');
 
       // If logged in as non-admin, these should not be visible
       // Implementation depends on current user role
@@ -242,7 +242,7 @@ test.describe('Authentication', () => {
 
     test('should show manager features for manager users', async ({ window }) => {
       // Manager features (day close, reports)
-      const managerFeatures = window.locator('[data-testid="manager-features"]');
+      const _managerFeatures = window.locator('[data-testid="manager-features"]');
 
       // Visibility depends on current user role
     });

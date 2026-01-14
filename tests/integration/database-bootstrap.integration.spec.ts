@@ -121,8 +121,11 @@ describe('Database Bootstrap Integration', () => {
 
     it('should create backup before running migrations on existing database', async () => {
       try {
-        const { bootstrapDatabase, getAvailableBackups, shutdownDatabase } =
-          await import('../../src/main/services/database-bootstrap.service');
+        const {
+          bootstrapDatabase,
+          getAvailableBackups: _getAvailableBackups,
+          shutdownDatabase,
+        } = await import('../../src/main/services/database-bootstrap.service');
 
         // First bootstrap - creates database
         await bootstrapDatabase({ skipBackup: true });
@@ -202,7 +205,7 @@ describe('Database Bootstrap Integration', () => {
         // Record initial state
         stateHistory.push(getDatabaseState());
 
-        const result = await bootstrapDatabase({ skipBackup: true });
+        const _result = await bootstrapDatabase({ skipBackup: true });
 
         // Record final state
         stateHistory.push(getDatabaseState());
@@ -281,8 +284,12 @@ describe('Database Bootstrap Integration', () => {
   describe('Backup and Recovery Integration', () => {
     it('should restore database from backup file', async () => {
       try {
-        const { bootstrapDatabase, getAvailableBackups, restoreFromBackup, shutdownDatabase } =
-          await import('../../src/main/services/database-bootstrap.service');
+        const {
+          bootstrapDatabase,
+          getAvailableBackups: _getAvailableBackups,
+          restoreFromBackup,
+          shutdownDatabase,
+        } = await import('../../src/main/services/database-bootstrap.service');
 
         // First bootstrap
         await bootstrapDatabase({ skipBackup: true });

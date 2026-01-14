@@ -313,16 +313,19 @@ export function EnhancedPackActivationForm({
    */
   useEffect(() => {
     if (open) {
-      setPendingActivations([]);
-      setCurrentScannedPack(null);
-      setShowBinModal(false);
-      setIsSubmitting(false);
-      setPackSearchQuery('');
-      setAuthResult(null);
-      setEditingSerialId(null);
-      setEditingSerialValue('');
-      setIsSerialInvalid(false);
-      setPendingSerialEditId(null);
+      // Use queueMicrotask to avoid synchronous setState during effect
+      queueMicrotask(() => {
+        setPendingActivations([]);
+        setCurrentScannedPack(null);
+        setShowBinModal(false);
+        setIsSubmitting(false);
+        setPackSearchQuery('');
+        setAuthResult(null);
+        setEditingSerialId(null);
+        setEditingSerialValue('');
+        setIsSerialInvalid(false);
+        setPendingSerialEditId(null);
+      });
     }
   }, [open]);
 

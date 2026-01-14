@@ -52,15 +52,15 @@ vi.mock('../../src/main/utils/logger', () => ({
 
 // Import DALs after mocking
 import {
-  processedFilesDAL,
-  syncQueueDAL,
-  fuelGradeMovementsDAL,
-  itemSalesMovementsDAL,
-  shiftsDAL,
+  processedFilesDAL as _processedFilesDAL,
+  syncQueueDAL as _syncQueueDAL,
+  fuelGradeMovementsDAL as _fuelGradeMovementsDAL,
+  itemSalesMovementsDAL as _itemSalesMovementsDAL,
+  shiftsDAL as _shiftsDAL,
 } from '../../src/main/dal';
 
 import { createParserService, ParserService } from '../../src/main/services/parser.service';
-import { createNAXMLParser } from '../../src/shared/naxml/parser';
+import { createNAXMLParser as _createNAXMLParser } from '../../src/shared/naxml/parser';
 
 // ============================================================================
 // Test Fixtures
@@ -361,7 +361,7 @@ describe('XML to Database Integration', () => {
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
 
       const fileHash = 'test-hash-fgm-003';
-      const result = await parserService.processFile(filePath, fileHash);
+      const _result = await parserService.processFile(filePath, fileHash);
 
       // All FGM records should have the file_id set
       const records = testDb

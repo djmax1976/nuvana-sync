@@ -11,7 +11,7 @@
  * @security SEC-015: File security
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach as _beforeEach } from 'vitest';
 import path from 'path';
 
 // Mock electron
@@ -378,6 +378,7 @@ describe('Path Traversal Protection', () => {
       // Remove directory separators
       safe = safe.replace(/[/\\]/g, '');
       // Remove null bytes
+      // eslint-disable-next-line no-control-regex
       safe = safe.replace(/\x00/g, '');
       // Limit length
       safe = safe.substring(0, 255);

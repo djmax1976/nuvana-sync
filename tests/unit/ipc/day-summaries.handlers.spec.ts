@@ -124,7 +124,7 @@ describe('Day Summaries Handlers', () => {
     });
 
     it('should return NOT_FOUND for date with no summary', async () => {
-      const mockSummary = null;
+      const _mockSummary = null;
 
       const response = { error: 'NOT_FOUND', message: 'Day summary not found' };
 
@@ -282,7 +282,7 @@ describe('Day Summaries Handlers', () => {
     });
 
     it('should handle validation errors', async () => {
-      const invalidParams = { businessDate: 'invalid' };
+      const _invalidParams = { businessDate: 'invalid' };
 
       const response = { error: 'VALIDATION_ERROR', message: 'Invalid parameters' };
       expect(response.error).toBe('VALIDATION_ERROR');

@@ -127,7 +127,7 @@ describe('Preload Script', () => {
 
     it('should pass arguments to ipcRenderer.invoke', async () => {
       // Test that arguments are properly forwarded
-      const channel = 'shifts:list';
+      const _channel = 'shifts:list';
       const args = { status: 'OPEN', limit: 50 };
 
       // Implementation would verify args are passed correctly

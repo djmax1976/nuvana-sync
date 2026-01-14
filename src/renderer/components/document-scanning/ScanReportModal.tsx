@@ -387,7 +387,6 @@ export function ScanReportModal({
             {/* Image preview */}
             <div className="relative aspect-[4/3] bg-muted rounded-lg overflow-hidden">
               {previewUrl && (
-                // eslint-disable-next-line @next/next/no-img-element
                 <img
                   src={previewUrl}
                   alt="Document preview"
@@ -586,7 +585,6 @@ function OCRVerificationView({
           <h4 className="font-medium text-sm">Scanned Document</h4>
           <div className="min-h-[300px] max-h-[500px] bg-muted rounded-lg overflow-hidden border flex items-center justify-center">
             {previewUrl && (
-              // eslint-disable-next-line @next/next/no-img-element
               <img
                 src={previewUrl}
                 alt="Scanned document"

@@ -10,11 +10,7 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import {
-  LotteryBinsDAL,
-  type LotteryBin,
-  type CreateLotteryBinData,
-} from '../../../src/main/dal/lottery-bins.dal';
+import { LotteryBinsDAL, type CreateLotteryBinData } from '../../../src/main/dal/lottery-bins.dal';
 
 // Mock database service
 const mockPrepare = vi.fn();
@@ -228,7 +224,7 @@ describe('Lottery Bins DAL', () => {
   describe('findAllByStore', () => {
     it('should include inactive bins but exclude deleted', () => {
       const bin1 = dal.create({ store_id: 'store-1', bin_number: 1 });
-      const bin2 = dal.create({ store_id: 'store-1', bin_number: 2 });
+      const _bin2 = dal.create({ store_id: 'store-1', bin_number: 2 });
       const bin3 = dal.create({ store_id: 'store-1', bin_number: 3 });
 
       dal.update(bin1.bin_id, { status: 'INACTIVE' });

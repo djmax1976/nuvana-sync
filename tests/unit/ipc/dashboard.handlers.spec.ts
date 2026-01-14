@@ -48,19 +48,19 @@ describe('Dashboard Handlers', () => {
   describe('dashboard:getStats', () => {
     it('should return dashboard statistics', async () => {
       // Mock store configured
-      const mockStore = { store_id: 'store-123', status: 'ACTIVE' };
+      const _mockStore = { store_id: 'store-123', status: 'ACTIVE' };
 
       // Mock day summary
-      const mockSummary = {
+      const _mockSummary = {
         total_sales: 5000,
         total_transactions: 100,
       };
 
       // Mock open shifts
-      const mockShifts = [{ shift_id: 'shift-1', status: 'OPEN' }];
+      const _mockShifts = [{ shift_id: 'shift-1', status: 'OPEN' }];
 
       // Mock pending sync
-      const mockPendingCount = 5;
+      const _mockPendingCount = 5;
 
       // Expected response
       const expectedStats = {
@@ -77,7 +77,7 @@ describe('Dashboard Handlers', () => {
 
     it('should return error if store not configured', async () => {
       // Mock store not configured
-      const mockStore = null;
+      const _mockStore = null;
 
       const expectedError = {
         error: 'NOT_CONFIGURED',
@@ -89,8 +89,8 @@ describe('Dashboard Handlers', () => {
 
     it('should return zeros when no data exists', async () => {
       // Mock store configured but no summary
-      const mockStore = { store_id: 'store-123', status: 'ACTIVE' };
-      const mockSummary = null;
+      const _mockStore = { store_id: 'store-123', status: 'ACTIVE' };
+      const _mockSummary = null;
 
       const expectedStats = {
         todaySales: 0,
@@ -152,8 +152,8 @@ describe('Dashboard Handlers', () => {
     });
 
     it('should return zeros for no data', async () => {
-      const mockTransactions: unknown[] = [];
-      const mockSummary = null;
+      const _mockTransactions: unknown[] = [];
+      const _mockSummary = null;
 
       const expectedResponse = {
         hourlyBreakdown: Array(24)
@@ -227,7 +227,7 @@ describe('Dashboard Handlers', () => {
 
   describe('store scoping (DB-006)', () => {
     it('should scope queries to configured store', async () => {
-      const storeId = 'store-123';
+      const _storeId = 'store-123';
 
       // All queries should include store_id parameter
       const query = 'SELECT * FROM day_summaries WHERE store_id = ?';

@@ -89,7 +89,7 @@ describe('Authentication Security', () => {
     describe('Hash format validation', () => {
       it('should produce valid bcrypt hash format', () => {
         // Bcrypt hashes follow format: $2b$XX$...
-        const bcryptHashRegex = /^\$2[aby]?\$\d{1,2}\$[./A-Za-z0-9]{53}$/;
+        const _bcryptHashRegex = /^\$2[aby]?\$\d{1,2}\$[./A-Za-z0-9]{53}$/;
 
         const sampleHash = '$2b$12$LQv3c1yqBWVHxkd0LHAkCOYz6TtxMQJqhN8/X4.FJTF6pZ';
         // Note: Sample is truncated, real hashes are 60 chars

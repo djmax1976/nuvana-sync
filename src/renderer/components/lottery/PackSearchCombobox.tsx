@@ -266,7 +266,10 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
 
     // Reset highlighted index when packs change
     useEffect(() => {
-      setHighlightedIndex(0);
+      // Use queueMicrotask to avoid synchronous setState during effect
+      queueMicrotask(() => {
+        setHighlightedIndex(0);
+      });
     }, [packs.length]);
 
     // ============================================================================
@@ -430,12 +433,17 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
       // 3. isLoading is false (API call completed)
       // 4. packs.length > 0 (we have results to select from)
       if (pendingEnterSelect && isSearchMode && !isLoading && packs.length > 0) {
-        // Search completed with FILTERED results - auto-select first pack
-        handleSelectPack(packs[0]);
-        setPendingEnterSelect(false);
+        // Use queueMicrotask to avoid synchronous setState during effect
+        queueMicrotask(() => {
+          // Search completed with FILTERED results - auto-select first pack
+          handleSelectPack(packs[0]);
+          setPendingEnterSelect(false);
+        });
       } else if (pendingEnterSelect && isSearchMode && !isLoading && packs.length === 0) {
         // Search completed but no results - clear pending state
-        setPendingEnterSelect(false);
+        queueMicrotask(() => {
+          setPendingEnterSelect(false);
+        });
       }
       // Note: If pendingEnterSelect && !isSearchMode, we wait for debounce to complete
     }, [pendingEnterSelect, isSearchMode, isLoading, packs, handleSelectPack]);

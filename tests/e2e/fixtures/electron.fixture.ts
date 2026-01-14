@@ -7,6 +7,9 @@
  * @module tests/e2e/fixtures/electron
  */
 
+/* eslint-disable react-hooks/rules-of-hooks */
+// Note: Playwright's `use` function triggers false positives for react-hooks/rules-of-hooks
+
 import {
   test as base,
   type Page,
@@ -44,6 +47,7 @@ function createTestDatabasePath(testName: string): string {
  * Electron test fixture configuration
  */
 export const test = base.extend<ElectronTestFixtures>({
+  // eslint-disable-next-line no-empty-pattern
   electronApp: async ({}, use, testInfo) => {
     // Create isolated test database
     const dbPath = createTestDatabasePath(testInfo.title);
@@ -96,16 +100,18 @@ export const test = base.extend<ElectronTestFixtures>({
     await use(window);
   },
 
+  // eslint-disable-next-line no-empty-pattern
   testDataDir: async ({}, use) => {
     const testDataDir =
       process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
     await use(testDataDir);
   },
 
+  // eslint-disable-next-line no-empty-pattern
   cleanup: async ({}, use) => {
     const cleanupFns: Array<() => Promise<void>> = [];
 
-    const registerCleanup = (fn: () => Promise<void>): void => {
+    const _registerCleanup = (fn: () => Promise<void>): void => {
       cleanupFns.push(fn);
     };
 
