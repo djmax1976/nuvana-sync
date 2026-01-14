@@ -119,7 +119,7 @@ describe('CloudApiService', () => {
 
       expect(result).toBe(true);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/v1/health',
+        'https://api.nuvanaapp.com/api/v1/health',
         expect.objectContaining({
           method: 'GET',
         })
@@ -148,26 +148,55 @@ describe('CloudApiService', () => {
   });
 
   describe('validateApiKey', () => {
-    it('should validate API key and return store info', async () => {
-      const mockResponse = {
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: ['lottery', 'reports'],
-      };
+    // Helper to create the proper cloud API response structure
+    const createIdentityResponse = (overrides?: {
+      storeId?: string;
+      storeName?: string;
+      companyId?: string;
+      companyName?: string;
+      features?: string[];
+    }) => ({
+      success: true,
+      data: {
+        identity: {
+          storeId: overrides?.storeId ?? 'store-123',
+          storeName: overrides?.storeName ?? 'Test Store',
+          storePublicId: 'TEST001',
+          companyId: overrides?.companyId ?? 'company-456',
+          companyName: overrides?.companyName ?? 'Test Company',
+          timezone: 'America/New_York',
+          stateId: 'state-1',
+          stateCode: 'NY',
+          offlinePermissions: [],
+          metadata: { features: overrides?.features ?? ['lottery', 'reports'] },
+        },
+        offlineToken: 'token',
+        offlineTokenExpiresAt: '2025-12-31T00:00:00Z',
+        storeManager: null,
+      },
+    });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+    it('should validate API key and return store info', async () => {
+      const mockResponse = createIdentityResponse();
+
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
       expect(result.valid).toBe(true);
       expect(result.storeId).toBe('store-123');
       expect(result.storeName).toBe('Test Store');
+      // Check that identity call was made (second call)
       expect(mockFetch).toHaveBeenCalledWith(
         'https://api.nuvanaapp.com/api/v1/keys/identity',
         expect.objectContaining({
@@ -180,15 +209,26 @@ describe('CloudApiService', () => {
     });
 
     it('should return valid response with minimal data', async () => {
-      // The service maps responses flexibly, so even partial data works
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ storeId: 'store-123' }),
+      // The service maps responses with proper cloud structure
+      const mockResponse = createIdentityResponse({
+        storeId: 'store-123',
       });
+
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
-      // Should return a valid response with defaults for missing fields
+      // Should return a valid response
       expect(result.valid).toBe(true);
       expect(result.storeId).toBe('store-123');
     });
@@ -249,7 +289,7 @@ describe('CloudApiService', () => {
       expect(result.success).toBe(true);
       expect(result.results).toHaveLength(2);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/v1/sync/batch',
+        'https://api.nuvanaapp.com/api/v1/sync/batch',
         expect.objectContaining({
           method: 'POST',
           body: expect.any(String),
@@ -266,94 +306,157 @@ describe('CloudApiService', () => {
   });
 
   describe('pullUsers', () => {
-    it('should pull users from cloud', async () => {
-      const mockResponse = {
-        users: [
-          {
-            userId: 'user-1',
-            name: 'John Doe',
-            role: 'store_manager',
-            pinHash: '$2b$12$hashedpin123',
-            active: true,
-          },
-        ],
-      };
+    // Helper to set up mocks for the full sync flow
+    const setupSyncFlowMocks = (
+      cashiers: Array<{
+        cashierId: string;
+        name: string;
+        pinHash: string;
+        isActive: boolean;
+      }>
+    ) => {
+      mockFetch
+        // 1. POST /api/v1/sync/start
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'VALID',
+                pullPendingCount: cashiers.length,
+              },
+            }),
+        })
+        // 2. GET /api/v1/sync/cashiers
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                cashiers,
+                syncMetadata: {
+                  hasMore: false,
+                  lastSequence: 100,
+                  serverTimestamp: new Date().toISOString(),
+                },
+              },
+            }),
+        })
+        // 3. POST /api/v1/sync/complete
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+    };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+    it('should pull users from cloud', async () => {
+      const mockCashiers = [
+        {
+          cashierId: 'user-1',
+          name: 'John Doe',
+          pinHash: '$2b$12$hashedpin123',
+          isActive: true,
+        },
+      ];
+
+      setupSyncFlowMocks(mockCashiers);
 
       const result = await service.pullUsers();
 
       expect(result.users).toHaveLength(1);
       expect(result.users[0].name).toBe('John Doe');
-      expect(result.users[0].role).toBe('store_manager');
+      // All users pulled via pullUsers are mapped to 'cashier' role
+      expect(result.users[0].role).toBe('cashier');
     });
 
-    it('should handle all valid roles', async () => {
-      const mockResponse = {
-        users: [
-          {
-            userId: 'user-1',
-            name: 'Manager',
-            role: 'store_manager',
-            pinHash: '$2b$12$...',
-            active: true,
-          },
-          {
-            userId: 'user-2',
-            name: 'Shift Lead',
-            role: 'shift_manager',
-            pinHash: '$2b$12$...',
-            active: true,
-          },
-          {
-            userId: 'user-3',
-            name: 'Cashier',
-            role: 'cashier',
-            pinHash: '$2b$12$...',
-            active: true,
-          },
-        ],
-      };
+    it('should handle multiple cashiers', async () => {
+      const mockCashiers = [
+        {
+          cashierId: 'user-1',
+          name: 'Manager',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+        {
+          cashierId: 'user-2',
+          name: 'Shift Lead',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+        {
+          cashierId: 'user-3',
+          name: 'Cashier',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+      ];
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      setupSyncFlowMocks(mockCashiers);
 
       const result = await service.pullUsers();
 
       expect(result.users).toHaveLength(3);
-      expect(result.users[0].role).toBe('store_manager');
-      expect(result.users[1].role).toBe('shift_manager');
+      // All users pulled via pullUsers/pullCashiers are cashiers
+      expect(result.users[0].role).toBe('cashier');
+      expect(result.users[1].role).toBe('cashier');
       expect(result.users[2].role).toBe('cashier');
     });
   });
 
   describe('validateApiKey with initial manager', () => {
-    it('should parse initial manager from response - SEC-001', async () => {
-      const mockResponse = {
-        valid: true,
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: ['lottery', 'reports'],
-        initialManager: {
-          userId: 'init-mgr-001',
-          name: 'Initial Manager',
-          role: 'store_manager',
-          pinHash: '$2b$12$initialmanagerhash',
+    // Helper to create the proper cloud API response structure
+    const createValidateResponse = (
+      storeManager?: {
+        userId: string;
+        name: string;
+        role: { code: string };
+        pinHash: string;
+        isActive: boolean;
+      } | null
+    ) => ({
+      success: true,
+      data: {
+        identity: {
+          storeId: 'store-123',
+          storeName: 'Test Store',
+          storePublicId: 'TEST001',
+          companyId: 'company-456',
+          companyName: 'Test Company',
+          timezone: 'America/New_York',
+          stateId: 'state-1',
+          stateCode: 'NY',
+          offlinePermissions: [],
+          metadata: { features: ['lottery', 'reports'] },
         },
-      };
+        offlineToken: 'token',
+        offlineTokenExpiresAt: '2025-12-31T00:00:00Z',
+        storeManager: storeManager ?? null,
+      },
+    });
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
+    it('should parse initial manager from response - SEC-001', async () => {
+      const mockResponse = createValidateResponse({
+        userId: 'init-mgr-001',
+        name: 'Initial Manager',
+        role: { code: 'STORE_MANAGER' },
+        pinHash: '$2b$12$initialmanagerhash',
+        isActive: true,
       });
+
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
@@ -364,50 +467,49 @@ describe('CloudApiService', () => {
       expect(result.initialManager?.pinHash).toBe('$2b$12$initialmanagerhash');
     });
 
-    it('should handle snake_case initial manager fields', async () => {
-      const mockResponse = {
-        valid: true,
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: [],
-        initial_manager: {
-          user_id: 'snake-case-mgr',
-          name: 'Snake Manager',
-          role: 'shift_manager',
-          pin_hash: '$2b$12$snakecasehash',
-        },
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
+    it('should handle different role codes', async () => {
+      const mockResponse = createValidateResponse({
+        userId: 'snake-case-mgr',
+        name: 'Shift Manager',
+        role: { code: 'SHIFT_MANAGER' },
+        pinHash: '$2b$12$snakecasehash',
+        isActive: true,
       });
+
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
       expect(result.initialManager).toBeDefined();
       expect(result.initialManager?.userId).toBe('snake-case-mgr');
+      expect(result.initialManager?.role).toBe('shift_manager');
       expect(result.initialManager?.pinHash).toBe('$2b$12$snakecasehash');
     });
 
     it('should handle response without initial manager', async () => {
-      const mockResponse = {
-        valid: true,
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: [],
-      };
+      const mockResponse = createValidateResponse(null);
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
@@ -415,26 +517,25 @@ describe('CloudApiService', () => {
     });
 
     it('should ignore incomplete initial manager data', async () => {
-      const mockResponse = {
-        valid: true,
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: [],
-        initialManager: {
-          userId: 'partial-mgr',
-          name: '', // Empty name
-          role: 'store_manager',
-          pinHash: '', // Empty pin hash
-        },
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
+      const mockResponse = createValidateResponse({
+        userId: 'partial-mgr',
+        name: '', // Empty name
+        role: { code: 'STORE_MANAGER' },
+        pinHash: '', // Empty pin hash
+        isActive: true,
       });
+
+      mockFetch
+        // Activate call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        });
 
       const result = await service.validateApiKey();
 
@@ -443,33 +544,38 @@ describe('CloudApiService', () => {
     });
 
     it('should handle all valid initial manager roles', async () => {
-      const roles = ['store_manager', 'shift_manager', 'cashier'] as const;
+      const roleMappings = [
+        { cloudCode: 'STORE_MANAGER', localRole: 'store_manager' },
+        { cloudCode: 'SHIFT_MANAGER', localRole: 'shift_manager' },
+        { cloudCode: 'CASHIER', localRole: 'cashier' },
+      ] as const;
 
-      for (const role of roles) {
-        const mockResponse = {
-          valid: true,
-          storeId: 'store-123',
-          storeName: 'Test Store',
-          companyId: 'company-456',
-          companyName: 'Test Company',
-          timezone: 'America/New_York',
-          features: [],
-          initialManager: {
-            userId: `mgr-${role}`,
-            name: `${role} User`,
-            role,
-            pinHash: '$2b$12$rolehash',
-          },
-        };
+      for (const { cloudCode, localRole } of roleMappings) {
+        vi.clearAllMocks();
 
-        mockFetch.mockResolvedValue({
-          ok: true,
-          json: () => Promise.resolve(mockResponse),
+        const mockResponse = createValidateResponse({
+          userId: `mgr-${localRole}`,
+          name: `${localRole} User`,
+          role: { code: cloudCode },
+          pinHash: '$2b$12$rolehash',
+          isActive: true,
         });
+
+        mockFetch
+          // Activate call
+          .mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ success: true }),
+          })
+          // Identity call
+          .mockResolvedValue({
+            ok: true,
+            json: () => Promise.resolve(mockResponse),
+          });
 
         const result = await service.validateApiKey();
 
-        expect(result.initialManager?.role).toBe(role);
+        expect(result.initialManager?.role).toBe(localRole);
       }
     });
   });
@@ -497,7 +603,7 @@ describe('CloudApiService', () => {
 
       expect(result.bins).toHaveLength(1);
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/v1/sync/bins',
+        'https://api.nuvanaapp.com/api/v1/sync/bins',
         expect.any(Object)
       );
     });
@@ -541,7 +647,7 @@ describe('CloudApiService', () => {
       await service.healthCheck();
 
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/v1/health',
+        'https://api.nuvanaapp.com/api/v1/health',
         expect.any(Object)
       );
     });
@@ -554,24 +660,45 @@ describe('CloudApiService', () => {
         get: vi.fn((name: string) => (name === 'Retry-After' ? '1' : null)),
       };
 
+      // Mock response with proper cloud API structure
+      const validResponse = {
+        success: true,
+        data: {
+          identity: {
+            storeId: 'store-123',
+            storeName: 'Test',
+            storePublicId: 'TEST001',
+            companyId: 'comp-1',
+            companyName: 'Test Co',
+            timezone: 'UTC',
+            stateId: 'state-1',
+            stateCode: 'NY',
+            offlinePermissions: [],
+            metadata: { features: [] },
+          },
+          offlineToken: 'token',
+          offlineTokenExpiresAt: '2025-12-31T00:00:00Z',
+          storeManager: null,
+        },
+      };
+
       mockFetch
+        // First call: activate (may fail or succeed)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Second call: identity with rate limit
         .mockResolvedValueOnce({
           ok: false,
           status: 429,
           headers: mockHeaders,
           json: () => Promise.resolve({ message: 'Rate limited' }),
         })
+        // Third call: identity succeeds
         .mockResolvedValue({
           ok: true,
-          json: () =>
-            Promise.resolve({
-              storeId: 'store-123',
-              storeName: 'Test',
-              companyId: 'comp-1',
-              companyName: 'Test Co',
-              timezone: 'UTC',
-              features: [],
-            }),
+          json: () => Promise.resolve(validResponse),
         });
 
       // validateApiKey retries on rate limit, unlike healthCheck which catches errors
@@ -581,30 +708,51 @@ describe('CloudApiService', () => {
     });
 
     it('should retry on server errors', async () => {
+      // Mock response with proper cloud API structure
+      const validResponse = {
+        success: true,
+        data: {
+          identity: {
+            storeId: 'store-123',
+            storeName: 'Test',
+            storePublicId: 'TEST001',
+            companyId: 'comp-1',
+            companyName: 'Test Co',
+            timezone: 'UTC',
+            stateId: 'state-1',
+            stateCode: 'NY',
+            offlinePermissions: [],
+            metadata: { features: [] },
+          },
+          offlineToken: 'token',
+          offlineTokenExpiresAt: '2025-12-31T00:00:00Z',
+          storeManager: null,
+        },
+      };
+
       mockFetch
+        // First call: activate
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        // Second call: identity with server error
         .mockResolvedValueOnce({
           ok: false,
           status: 503,
           json: () => Promise.resolve({ message: 'Service unavailable' }),
         })
+        // Third call: identity succeeds
         .mockResolvedValue({
           ok: true,
-          json: () =>
-            Promise.resolve({
-              valid: true,
-              storeId: 'store-123',
-              storeName: 'Test',
-              companyId: 'comp-1',
-              companyName: 'Test Co',
-              timezone: 'UTC',
-              features: [],
-            }),
+          json: () => Promise.resolve(validResponse),
         });
 
       const result = await service.validateApiKey();
 
       expect(result.valid).toBe(true);
-      expect(mockFetch).toHaveBeenCalledTimes(2);
+      // 1 activate + 2 identity attempts (first fails, second succeeds)
+      expect(mockFetch).toHaveBeenCalledTimes(3);
     });
   });
 });

@@ -32,7 +32,12 @@ const sharedMockStore = {
 
 vi.mock('electron-store', () => {
   return {
-    default: vi.fn().mockImplementation(() => sharedMockStore),
+    default: class MockStore {
+      get = sharedMockStore.get;
+      set = sharedMockStore.set;
+      has = sharedMockStore.has;
+      delete = sharedMockStore.delete;
+    },
   };
 });
 

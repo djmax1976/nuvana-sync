@@ -77,9 +77,9 @@ describe('BinManagementService', () => {
     updated_at: new Date().toISOString(),
   };
 
-  // Mock bin
+  // Mock bin - using valid UUID format for bin_id
   const mockBin: LotteryBin = {
-    bin_id: 'bin-001',
+    bin_id: '550e8400-e29b-41d4-a716-446655440001',
     store_id: 'store-123',
     bin_number: 1,
     label: 'Bin 1',

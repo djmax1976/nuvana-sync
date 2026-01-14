@@ -39,9 +39,13 @@ const mockDb = {
   }),
 };
 
-vi.mock('better-sqlite3-multiple-ciphers', () => ({
-  default: vi.fn().mockImplementation(() => mockDb),
-}));
+vi.mock('better-sqlite3-multiple-ciphers', () => {
+  // Create a constructor function that returns mockDb
+  function Database() {
+    return mockDb;
+  }
+  return { default: Database };
+});
 
 // Mock fs
 vi.mock('fs', () => ({
