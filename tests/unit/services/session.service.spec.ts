@@ -47,17 +47,17 @@ import {
   hasSession,
   getSessionTimeoutMs,
   forceExpireSession,
-  type SessionInfo,
+  type SessionInfo as _SessionInfo,
 } from '../../../src/main/services/session.service';
 import type { SessionUser } from '../../../src/main/ipc/index';
 
 describe('Session Service', () => {
-  // Mock user for testing
+  // Mock user for testing - UserRole uses lowercase
   const mockUser: SessionUser = {
     user_id: 'user-123',
     store_id: 'store-456',
     username: 'testuser',
-    role: 'CASHIER',
+    role: 'cashier',
   };
 
   beforeEach(() => {

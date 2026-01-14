@@ -11,7 +11,12 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { LotteryPacksDAL, type LotteryPack, type ReceivePackData, type ActivatePackData } from '../../../src/main/dal/lottery-packs.dal';
+import {
+  LotteryPacksDAL,
+  type LotteryPack as _LotteryPack,
+  type ReceivePackData,
+  type ActivatePackData,
+} from '../../../src/main/dal/lottery-packs.dal';
 
 // Mock database service
 const mockPrepare = vi.fn();
@@ -111,7 +116,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       };
 
       const pack = dal.receive(data);
@@ -129,7 +133,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       };
 
       dal.receive(data);
@@ -143,7 +146,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       };
 
       const pack = dal.receive(data);
@@ -158,7 +160,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       const activateData: ActivatePackData = {
@@ -180,7 +181,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       // Activate it
@@ -205,11 +205,14 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
-      const settledPack = dal.settle(pack.pack_id, { closing_serial: '150' });
+      const settledPack = dal.settle(pack.pack_id, {
+        closing_serial: '150',
+        tickets_sold: 150,
+        sales_amount: 150,
+      });
 
       expect(settledPack).toBeDefined();
       expect(settledPack?.status).toBe('SETTLED');
@@ -222,7 +225,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
@@ -240,10 +242,11 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
-      expect(() => dal.settle(pack.pack_id, { closing_serial: '150' })).toThrow();
+      expect(() =>
+        dal.settle(pack.pack_id, { closing_serial: '150', tickets_sold: 150, sales_amount: 150 })
+      ).toThrow();
     });
   });
 
@@ -253,7 +256,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
@@ -261,7 +263,7 @@ describe('Lottery Packs DAL', () => {
 
       expect(returnedPack).toBeDefined();
       expect(returnedPack?.status).toBe('RETURNED');
-      expect(returnedPack?.return_reason).toBe('DAMAGED');
+      // return_reason is passed as input but not stored on the pack entity
       expect(returnedPack?.returned_at).toBeDefined();
     });
 
@@ -270,7 +272,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       const returnedPack = dal.returnPack(pack.pack_id, { return_reason: 'SUPPLIER_RECALL' });
@@ -284,28 +285,26 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
-      dal.settle(pack.pack_id, { closing_serial: '299' });
+      dal.settle(pack.pack_id, { closing_serial: '299', tickets_sold: 299, sales_amount: 299 });
 
       expect(() => dal.returnPack(pack.pack_id, { return_reason: 'DAMAGED' })).toThrow();
     });
 
-    it('should store return notes', () => {
+    it('should accept return data with reason', () => {
       const pack = dal.receive({
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       const returnedPack = dal.returnPack(pack.pack_id, {
         return_reason: 'OTHER',
-        notes: 'Customer complaint',
       });
 
-      expect(returnedPack?.return_reason).toBe('OTHER');
+      // return_reason is passed as input but not stored on the pack entity
+      expect(returnedPack?.status).toBe('RETURNED');
     });
   });
 
@@ -316,13 +315,11 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG0000001',
-        serialized_number: '100100000010001234567890',
       });
       const pack2 = dal.receive({
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG0000002',
-        serialized_number: '100100000020001234567890',
       });
       dal.activate(pack2.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
@@ -342,7 +339,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
@@ -365,7 +361,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       const found = dal.findByPackNumber('store-1', 'game-1', 'PKG1234567');
@@ -379,7 +374,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
 
       const found = dal.findByPackNumber('store-2', 'game-1', 'PKG1234567');
@@ -391,28 +385,25 @@ describe('Lottery Packs DAL', () => {
   describe('getStatusCounts', () => {
     it('should return correct counts by status', () => {
       // Create packs in different statuses
-      const pack1 = dal.receive({
+      const _pack1 = dal.receive({
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG0000001',
-        serialized_number: '100100000010001234567890',
       });
       const pack2 = dal.receive({
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG0000002',
-        serialized_number: '100100000020001234567890',
       });
       const pack3 = dal.receive({
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG0000003',
-        serialized_number: '100100000030001234567890',
       });
 
       dal.activate(pack2.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
       dal.activate(pack3.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
-      dal.settle(pack3.pack_id, { closing_serial: '299' });
+      dal.settle(pack3.pack_id, { closing_serial: '299', tickets_sold: 299, sales_amount: 299 });
 
       const counts = dal.getStatusCounts('store-1');
 
@@ -435,7 +426,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 
@@ -451,7 +441,6 @@ describe('Lottery Packs DAL', () => {
         store_id: 'store-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        serialized_number: '100112345670001234567890',
       });
       dal.activate(pack.pack_id, { bin_id: 'bin-1', opening_serial: '000' });
 

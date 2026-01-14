@@ -74,14 +74,22 @@ vi.mock('../../../src/main/utils/logger', () => ({
 import { dialog } from 'electron';
 import { settingsService } from '../../../src/main/services/settings.service';
 import { cloudApiService } from '../../../src/main/services/cloud-api.service';
-import { registerHandler, createErrorResponse, createSuccessResponse, IPCErrorCodes } from '../../../src/main/ipc/index';
+import {
+  registerHandler,
+  createErrorResponse,
+  createSuccessResponse,
+  IPCErrorCodes as _IPCErrorCodes,
+} from '../../../src/main/ipc/index';
 
 // Import handlers to trigger registration
 import '../../../src/main/ipc/settings.handlers';
 
+// Type for IPC handlers
+type IPCHandler = (...args: unknown[]) => Promise<unknown> | unknown;
+
 describe('Settings IPC Handlers', () => {
   // Capture registered handlers
-  const handlers: Map<string, Function> = new Map();
+  const handlers: Map<string, IPCHandler> = new Map();
 
   beforeEach(() => {
     vi.clearAllMocks();
@@ -141,9 +149,9 @@ describe('Settings IPC Handlers', () => {
     it('should require shift_manager role for settings:update', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const updateCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:update'
-      );
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
 
       expect(updateCall).toBeDefined();
       expect(updateCall?.[2]).toEqual(
@@ -157,9 +165,9 @@ describe('Settings IPC Handlers', () => {
     it('should require store_manager role for settings:reset', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const resetCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:reset'
-      );
+      const resetCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:reset');
 
       expect(resetCall).toBeDefined();
       expect(resetCall?.[2]).toEqual(
@@ -175,23 +183,23 @@ describe('Settings IPC Handlers', () => {
     it('should validate API key input schema', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const validateApiKeyCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:validateApiKey'
-      );
+      const validateApiKeyCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
 
       expect(validateApiKeyCall).toBeDefined();
 
       // Handler should be registered
-      const handler = validateApiKeyCall?.[1] as Function;
+      const handler = validateApiKeyCall?.[1] as IPCHandler;
       expect(handler).toBeDefined();
     });
 
     it('should validate folder path input', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const validateFolderCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:validateFolder'
-      );
+      const validateFolderCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateFolder');
 
       expect(validateFolderCall).toBeDefined();
     });
@@ -199,9 +207,9 @@ describe('Settings IPC Handlers', () => {
     it('should validate local settings update input', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const updateCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:update'
-      );
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
 
       expect(updateCall).toBeDefined();
     });
@@ -217,11 +225,11 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const getCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:get'
-      );
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
 
-      const handler = getCall?.[1] as Function;
+      const handler = getCall?.[1] as IPCHandler;
       await handler();
 
       expect(settingsService.getAll).toHaveBeenCalled();
@@ -232,11 +240,11 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const testConnectionCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:testConnection'
-      );
+      const testConnectionCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:testConnection');
 
-      const handler = testConnectionCall?.[1] as Function;
+      const handler = testConnectionCall?.[1] as IPCHandler;
       await handler();
 
       expect(cloudApiService.healthCheck).toHaveBeenCalled();
@@ -251,11 +259,11 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const browseCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:browseFolder'
-      );
+      const browseCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:browseFolder');
 
-      const handler = browseCall?.[1] as Function;
+      const handler = browseCall?.[1] as IPCHandler;
       await handler();
 
       expect(dialog.showOpenDialog).toHaveBeenCalledWith(
@@ -268,11 +276,11 @@ describe('Settings IPC Handlers', () => {
     it('settings:completeSetup should call settingsService.completeSetup', async () => {
       await import('../../../src/main/ipc/settings.handlers');
 
-      const completeCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:completeSetup'
-      );
+      const completeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:completeSetup');
 
-      const handler = completeCall?.[1] as Function;
+      const handler = completeCall?.[1] as IPCHandler;
       await handler();
 
       expect(settingsService.completeSetup).toHaveBeenCalled();
@@ -281,6 +289,7 @@ describe('Settings IPC Handlers', () => {
     it('settings:isSetupComplete should call settingsService.isSetupComplete', async () => {
       vi.mocked(settingsService.isSetupComplete).mockReturnValue(true);
       vi.mocked(settingsService.getConfigurationStatus).mockReturnValue({
+        databaseReady: true,
         hasStore: true,
         hasApiKey: true,
         setupComplete: true,
@@ -289,11 +298,11 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const isCompleteCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:isSetupComplete'
-      );
+      const isCompleteCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:isSetupComplete');
 
-      const handler = isCompleteCall?.[1] as Function;
+      const handler = isCompleteCall?.[1] as IPCHandler;
       await handler();
 
       expect(settingsService.isSetupComplete).toHaveBeenCalled();
@@ -308,12 +317,12 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const updateCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:update'
-      );
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
 
-      const handler = updateCall?.[1] as Function;
-      const result = await handler(null, { syncIntervalSeconds: 60 });
+      const handler = updateCall?.[1] as IPCHandler;
+      const _result = await handler(null, { syncIntervalSeconds: 60 });
 
       expect(createErrorResponse).toHaveBeenCalled();
     });
@@ -323,12 +332,12 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const testConnectionCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:testConnection'
-      );
+      const testConnectionCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:testConnection');
 
-      const handler = testConnectionCall?.[1] as Function;
-      const result = await handler();
+      const handler = testConnectionCall?.[1] as IPCHandler;
+      const _result = await handler();
 
       // Should return success response with online: false
       expect(createSuccessResponse).toHaveBeenCalledWith(
@@ -346,12 +355,12 @@ describe('Settings IPC Handlers', () => {
 
       await import('../../../src/main/ipc/settings.handlers');
 
-      const browseCall = vi.mocked(registerHandler).mock.calls.find(
-        (call) => call[0] === 'settings:browseFolder'
-      );
+      const browseCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:browseFolder');
 
-      const handler = browseCall?.[1] as Function;
-      const result = await handler();
+      const handler = browseCall?.[1] as IPCHandler;
+      const _result = await handler();
 
       expect(createSuccessResponse).toHaveBeenCalledWith({ selected: false });
     });

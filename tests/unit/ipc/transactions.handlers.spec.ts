@@ -133,16 +133,16 @@ describe('Transactions Handlers', () => {
         store_id: 'store-1',
         shift_id: 'shift-1',
         transaction_time: '2024-01-15T10:30:00Z',
-        total_amount: 150.50,
+        total_amount: 150.5,
         voided: 0,
       };
 
       expect(mockTransaction.transaction_id).toBe('txn-123');
-      expect(mockTransaction.total_amount).toBe(150.50);
+      expect(mockTransaction.total_amount).toBe(150.5);
     });
 
     it('should return NOT_FOUND for non-existent transaction', async () => {
-      const mockTransaction = null;
+      const _mockTransaction = null;
 
       const response = { error: 'NOT_FOUND', message: 'Transaction not found' };
 
@@ -170,8 +170,8 @@ describe('Transactions Handlers', () => {
       const mockTransaction = {
         transaction_id: 'txn-123',
         lineItems: [
-          { item_id: 'item-1', quantity: 2, price: 10.00, total: 20.00 },
-          { item_id: 'item-2', quantity: 1, price: 5.50, total: 5.50 },
+          { item_id: 'item-1', quantity: 2, price: 10.0, total: 20.0 },
+          { item_id: 'item-2', quantity: 1, price: 5.5, total: 5.5 },
         ],
       };
 
@@ -183,8 +183,8 @@ describe('Transactions Handlers', () => {
       const mockTransaction = {
         transaction_id: 'txn-123',
         payments: [
-          { payment_id: 'pay-1', method: 'CASH', amount: 20.00 },
-          { payment_id: 'pay-2', method: 'CARD', amount: 5.50 },
+          { payment_id: 'pay-1', method: 'CASH', amount: 20.0 },
+          { payment_id: 'pay-2', method: 'CARD', amount: 5.5 },
         ],
       };
 
@@ -212,8 +212,8 @@ describe('Transactions Handlers', () => {
     });
 
     it('should verify shift belongs to configured store', async () => {
-      const configuredStoreId = 'store-123';
-      const shiftStoreId = 'store-456';
+      const configuredStoreId: string = 'store-123';
+      const shiftStoreId: string = 'store-456';
 
       if (configuredStoreId !== shiftStoreId) {
         const response = { error: 'FORBIDDEN', message: 'Shift not in configured store' };
@@ -264,11 +264,7 @@ describe('Transactions Handlers', () => {
     });
 
     it('should calculate correct count excluding voided', async () => {
-      const transactions = [
-        { voided: 0 },
-        { voided: 0 },
-        { voided: 1 },
-      ];
+      const transactions = [{ voided: 0 }, { voided: 0 }, { voided: 1 }];
 
       const activeCount = transactions.filter((t) => !t.voided).length;
 
@@ -296,7 +292,7 @@ describe('Transactions Handlers', () => {
     });
 
     it('should handle validation errors', async () => {
-      const invalidParams = { startDate: 'invalid' };
+      const _invalidParams = { startDate: 'invalid' };
 
       const response = { error: 'VALIDATION_ERROR', message: 'Invalid parameters' };
       expect(response.error).toBe('VALIDATION_ERROR');

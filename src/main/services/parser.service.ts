@@ -61,6 +61,8 @@ export interface FileProcessingResult {
   error?: string;
   processingDurationMs: number;
   fileId?: string;
+  /** Indicates the file was skipped (e.g., duplicate detection) */
+  skipped?: boolean;
 }
 
 /**
@@ -645,7 +647,7 @@ export class ParserService {
    * Creates shifts, transactions, line items, and payments
    * SEC-006: Uses parameterized DAL methods within transaction
    */
-  private processPOSJournal(data: unknown, fileHash: string): number {
+  private processPOSJournal(data: unknown, _fileHash: string): number {
     // POS Journal structure is more complex - parse and handle
     const pjrData = data as {
       journalHeader?: { businessDate?: string };

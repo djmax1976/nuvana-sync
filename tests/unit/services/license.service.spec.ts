@@ -91,7 +91,7 @@ import {
   WARNING_THRESHOLD_DAYS,
   LICENSE_CHECK_INTERVAL_MS,
   LICENSE_STORE_KEY,
-  type LicenseState,
+  type LicenseState as _LicenseState,
   type LicenseApiResponse,
   type LicenseStatus,
 } from '../../../src/main/services/license.service';
@@ -134,7 +134,7 @@ describe('LicenseService', () => {
 
     // Get mocked electron module
     const electron = await import('electron');
-    safeStorageMock = electron.safeStorage as typeof safeStorageMock;
+    safeStorageMock = electron.safeStorage as unknown as typeof safeStorageMock;
     safeStorageMock.isEncryptionAvailable.mockReturnValue(true);
 
     service = new LicenseService();
@@ -381,10 +381,12 @@ describe('LicenseService', () => {
         service.updateFromApiResponse(createLicenseResponse('active', 90));
 
         expect(callback).toHaveBeenCalledTimes(1);
-        expect(callback).toHaveBeenCalledWith(expect.objectContaining({
-          valid: true,
-          status: 'active',
-        }));
+        expect(callback).toHaveBeenCalledWith(
+          expect.objectContaining({
+            valid: true,
+            status: 'active',
+          })
+        );
       });
 
       it('should notify multiple listeners', () => {
@@ -563,7 +565,7 @@ describe('LicenseService', () => {
         service.updateFromApiResponse(createLicenseResponse('active', 30));
 
         // Create new instance to trigger load
-        const service2 = new LicenseService();
+        const _service2 = new LicenseService();
 
         expect(safeStorageMock.decryptString).toHaveBeenCalled();
       });
@@ -639,7 +641,7 @@ describe('LicenseService', () => {
         }
 
         // Create new instance
-        const service2 = new LicenseService();
+        const _service2 = new LicenseService();
 
         // Corrupted data should be cleared
         expect(mockStoreData.has(LICENSE_STORE_KEY)).toBe(false);
@@ -666,10 +668,12 @@ describe('LicenseService', () => {
 
         service.clear();
 
-        expect(callback).toHaveBeenCalledWith(expect.objectContaining({
-          valid: false,
-          status: null,
-        }));
+        expect(callback).toHaveBeenCalledWith(
+          expect.objectContaining({
+            valid: false,
+            status: null,
+          })
+        );
       });
     });
   });

@@ -55,11 +55,26 @@ vi.mock('../../../src/main/services/scanner.service', () => ({
   validateBarcode: vi.fn(),
 }));
 
+// Create mock sessionService for test convenience
+const mockSessionService = {
+  getCurrentSession: vi.fn(),
+  hasRole: vi.fn(),
+  hasMinimumRole: vi.fn(),
+  getTimeRemaining: vi.fn(),
+  isNearExpiry: vi.fn(),
+};
+
 vi.mock('../../../src/main/services/session.service', () => ({
-  sessionService: {
-    getCurrentSession: vi.fn(),
-    hasMinimumRole: vi.fn(),
-  },
+  sessionService: mockSessionService,
+  getSessionInfo: vi.fn(),
+  createSession: vi.fn(),
+  destroySession: vi.fn(),
+  getSessionUser: vi.fn(),
+  updateActivity: vi.fn(),
+  isSessionExpired: vi.fn(),
+  hasSession: vi.fn(),
+  getCurrentSession: vi.fn(),
+  hasMinimumRole: vi.fn(),
 }));
 
 vi.mock('../../../src/main/services/config.service', () => ({
@@ -100,10 +115,8 @@ describe('Lottery IPC Handlers', () => {
     parseBarcode: ReturnType<typeof vi.fn>;
     validateBarcode: ReturnType<typeof vi.fn>;
   };
-  let sessionService: {
-    getCurrentSession: ReturnType<typeof vi.fn>;
-    hasMinimumRole: ReturnType<typeof vi.fn>;
-  };
+  // Use mockSessionService directly defined above
+  const sessionService = mockSessionService;
 
   beforeEach(async () => {
     // Get mocked modules
@@ -112,14 +125,14 @@ describe('Lottery IPC Handlers', () => {
     const packsModule = await import('../../../src/main/dal/lottery-packs.dal');
     const daysModule = await import('../../../src/main/dal/lottery-business-days.dal');
     const scannerModule = await import('../../../src/main/services/scanner.service');
-    const sessionModule = await import('../../../src/main/services/session.service');
 
     lotteryGamesDAL = gamesModule.lotteryGamesDAL as unknown as typeof lotteryGamesDAL;
     lotteryBinsDAL = binsModule.lotteryBinsDAL as unknown as typeof lotteryBinsDAL;
     lotteryPacksDAL = packsModule.lotteryPacksDAL as unknown as typeof lotteryPacksDAL;
-    lotteryBusinessDaysDAL = daysModule.lotteryBusinessDaysDAL as unknown as typeof lotteryBusinessDaysDAL;
+    lotteryBusinessDaysDAL =
+      daysModule.lotteryBusinessDaysDAL as unknown as typeof lotteryBusinessDaysDAL;
     scannerService = scannerModule as unknown as typeof scannerService;
-    sessionService = sessionModule.sessionService as unknown as typeof sessionService;
+    // sessionService is already assigned from mockSessionService
   });
 
   afterEach(() => {
@@ -323,7 +336,11 @@ describe('Lottery IPC Handlers', () => {
       it('should accept sold out flag', () => {
         const input = {
           closings: [
-            { pack_id: '550e8400-e29b-41d4-a716-446655440000', closing_serial: '299', is_sold_out: true },
+            {
+              pack_id: '550e8400-e29b-41d4-a716-446655440000',
+              closing_serial: '299',
+              is_sold_out: true,
+            },
           ],
         };
 
@@ -492,7 +509,11 @@ describe('Lottery IPC Handlers', () => {
 
       scannerService.parseBarcode.mockReturnValue(mockParsed);
 
-      const result = scannerService.parseBarcode('100112345670001234567890');
+      // Call the mock and verify it returns expected value
+      const mockFn = scannerService.parseBarcode as unknown as (
+        barcode: string
+      ) => typeof mockParsed;
+      const result = mockFn('100112345670001234567890');
 
       expect(result).toEqual(mockParsed);
       expect(result.game_code).toBe('1001');
@@ -502,7 +523,9 @@ describe('Lottery IPC Handlers', () => {
     it('should return null for invalid barcode', () => {
       scannerService.parseBarcode.mockReturnValue(null);
 
-      const result = scannerService.parseBarcode('invalid');
+      // Call the mock and verify it returns expected value
+      const mockFn = scannerService.parseBarcode as unknown as (barcode: string) => null;
+      const result = mockFn('invalid');
 
       expect(result).toBeNull();
     });
@@ -517,7 +540,11 @@ describe('Lottery IPC Handlers', () => {
 
       lotteryGamesDAL.findActiveByStore.mockReturnValue(mockGames);
 
-      const result = lotteryGamesDAL.findActiveByStore('store-1');
+      // Call the mock and verify it returns expected value
+      const mockFn = lotteryGamesDAL.findActiveByStore as unknown as (
+        storeId: string
+      ) => typeof mockGames;
+      const result = mockFn('store-1');
 
       expect(lotteryGamesDAL.findActiveByStore).toHaveBeenCalledWith('store-1');
       expect(result).toEqual(mockGames);
@@ -531,7 +558,11 @@ describe('Lottery IPC Handlers', () => {
 
       lotteryBinsDAL.findBinsWithPacks.mockReturnValue(mockBins);
 
-      const result = lotteryBinsDAL.findBinsWithPacks('store-1');
+      // Call the mock and verify it returns expected value
+      const mockFn = lotteryBinsDAL.findBinsWithPacks as unknown as (
+        storeId: string
+      ) => typeof mockBins;
+      const result = mockFn('store-1');
 
       expect(lotteryBinsDAL.findBinsWithPacks).toHaveBeenCalledWith('store-1');
       expect(result).toEqual(mockBins);
@@ -554,7 +585,9 @@ describe('Lottery IPC Handlers', () => {
         serialized_number: '100112345670001234567890',
       };
 
-      const result = lotteryPacksDAL.receive(data);
+      // Call the mock and verify it returns expected value
+      const mockFn = lotteryPacksDAL.receive as unknown as (data: object) => typeof mockPack;
+      const result = mockFn(data);
 
       expect(lotteryPacksDAL.receive).toHaveBeenCalledWith(data);
       expect(result).toEqual(mockPack);
@@ -572,7 +605,12 @@ describe('Lottery IPC Handlers', () => {
 
       lotteryPacksDAL.activate.mockReturnValue(mockPack);
 
-      const result = lotteryPacksDAL.activate('pack-1', { bin_id: 'bin-1', opening_serial: '000' });
+      // Call the mock and verify it returns expected value
+      const mockFn = lotteryPacksDAL.activate as unknown as (
+        packId: string,
+        opts: object
+      ) => typeof mockPack;
+      const result = mockFn('pack-1', { bin_id: 'bin-1', opening_serial: '000' });
 
       expect(lotteryPacksDAL.activate).toHaveBeenCalled();
       expect(result).toEqual(mockPack);
@@ -593,7 +631,12 @@ describe('Lottery IPC Handlers', () => {
         { pack_id: 'pack-2', closing_serial: '150' },
       ];
 
-      const result = lotteryBusinessDaysDAL.prepareClose('day-1', closings);
+      // Call the mock and verify it returns expected value
+      const mockFn = lotteryBusinessDaysDAL.prepareClose as unknown as (
+        dayId: string,
+        closingsData: object[]
+      ) => typeof mockResult;
+      const result = mockFn('day-1', closings);
 
       expect(lotteryBusinessDaysDAL.prepareClose).toHaveBeenCalledWith('day-1', closings);
       expect(result).toEqual(mockResult);

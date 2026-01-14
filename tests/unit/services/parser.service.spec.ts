@@ -194,8 +194,8 @@ describe('ParserService', () => {
     mockGetOrCreateForDate = vi.mocked(dal.shiftsDAL.getOrCreateForDate);
     mockCreateWithDetails = vi.mocked(dal.transactionsDAL.createWithDetails);
 
-    // Get parser mock
-    const parserInstance = createNAXMLParser('store-123');
+    // Get parser mock - createNAXMLParser takes options object, not store ID
+    const parserInstance = createNAXMLParser();
     mockParse = vi.mocked(parserInstance.parse);
 
     // Create service

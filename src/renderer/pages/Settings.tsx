@@ -34,6 +34,21 @@ interface SettingsProps {
   onBack: () => void;
 }
 
+/**
+ * NuvanaConfig from preload API (snake_case for IPC)
+ */
+interface NuvanaConfig {
+  store_id: string;
+  api_url: string;
+  api_key: string;
+  watch_path: string;
+  sync_interval_seconds: number;
+  cloud_sync_enabled: boolean;
+}
+
+/**
+ * Local UI Config (camelCase for React)
+ */
 interface Config {
   apiUrl: string;
   apiKey: string;
@@ -53,6 +68,46 @@ interface Config {
   startOnLogin: boolean;
   minimizeToTray: boolean;
   showNotifications: boolean;
+}
+
+/**
+ * Convert NuvanaConfig (from API) to local Config (for UI)
+ */
+function nuvanaConfigToConfig(nuvanaConfig: NuvanaConfig): Config {
+  return {
+    apiUrl: nuvanaConfig.api_url || '',
+    apiKey: nuvanaConfig.api_key || '',
+    storeId: nuvanaConfig.store_id || '',
+    watchPath: nuvanaConfig.watch_path || '',
+    archivePath: '',
+    errorPath: '',
+    pollInterval: nuvanaConfig.sync_interval_seconds || 60,
+    enabledFileTypes: {
+      pjr: true,
+      fgm: true,
+      msm: true,
+      fpm: true,
+      mcm: true,
+      tlm: true,
+    },
+    startOnLogin: true,
+    minimizeToTray: true,
+    showNotifications: true,
+  };
+}
+
+/**
+ * Convert local Config (from UI) to NuvanaConfig (for API)
+ */
+function configToNuvanaConfig(config: Config): Partial<NuvanaConfig> {
+  return {
+    api_url: config.apiUrl,
+    api_key: config.apiKey,
+    store_id: config.storeId,
+    watch_path: config.watchPath,
+    sync_interval_seconds: config.pollInterval,
+    cloud_sync_enabled: true,
+  };
 }
 
 interface ValidationErrors {
@@ -197,7 +252,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
 
     window.nuvanaAPI.getConfig().then((response) => {
       if (response && response.config) {
-        setConfig(response.config);
+        setConfig(nuvanaConfigToConfig(response.config));
       }
     });
   }, []);
@@ -267,7 +322,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
         return;
       }
 
-      const result = await window.nuvanaAPI.saveConfig(config);
+      const result = await window.nuvanaAPI.saveConfig(configToNuvanaConfig(config));
       if (result.success) {
         setSaved(true);
         setTimeout(() => setSaved(false), 2000);
@@ -312,7 +367,7 @@ function Settings({ onBack }: SettingsProps): React.ReactElement {
         return;
       }
 
-      const result = await window.nuvanaAPI.testConnection(config);
+      const result = await window.nuvanaAPI.testConnection(configToNuvanaConfig(config));
       setTestResult(result);
     } catch (error) {
       setTestResult({

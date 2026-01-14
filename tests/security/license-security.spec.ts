@@ -122,7 +122,7 @@ describe('License Security Tests', () => {
     mockStoreData.clear();
 
     const electron = await import('electron');
-    safeStorageMock = electron.safeStorage as typeof safeStorageMock;
+    safeStorageMock = electron.safeStorage as unknown as typeof safeStorageMock;
     safeStorageMock.isEncryptionAvailable.mockReturnValue(true);
 
     service = new LicenseService();
@@ -363,7 +363,7 @@ describe('License Security Tests', () => {
     it('should handle corrupted JSON in encrypted data', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const _stored = mockStoreData.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };

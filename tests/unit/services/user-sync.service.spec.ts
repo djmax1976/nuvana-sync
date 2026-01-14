@@ -81,7 +81,7 @@ describe('UserSyncService', () => {
         users: [
           {
             userId: 'cloud-user-1',
-            role: 'CASHIER',
+            role: 'cashier',
             name: 'John Doe',
             pinHash: '$2b$10$abcdef',
             active: true,
@@ -99,7 +99,7 @@ describe('UserSyncService', () => {
       expect(mockUpsertFromCloud).toHaveBeenCalledWith({
         cloud_user_id: 'cloud-user-1',
         store_id: 'store-123',
-        role: 'CASHIER',
+        role: 'cashier',
         name: 'John Doe',
         pin_hash: '$2b$10$abcdef',
       });
@@ -110,7 +110,7 @@ describe('UserSyncService', () => {
         users: [
           {
             userId: 'cloud-user-1',
-            role: 'MANAGER',
+            role: 'store_manager',
             name: 'John Doe Updated',
             pinHash: '$2b$10$newHash',
             active: true,
@@ -122,7 +122,7 @@ describe('UserSyncService', () => {
         cloud_user_id: 'cloud-user-1',
         name: 'John Doe',
         active: true,
-      } as ReturnType<typeof usersDAL.findByCloudId>);
+      } as unknown as ReturnType<typeof usersDAL.findByCloudId>);
       mockFindActiveByStore.mockReturnValue([]);
 
       const result = await service.syncUsers();
@@ -142,7 +142,7 @@ describe('UserSyncService', () => {
           name: 'Removed User',
           active: true,
         },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       const result = await service.syncUsers();
 
@@ -159,7 +159,7 @@ describe('UserSyncService', () => {
           name: 'Local Admin',
           active: true,
         },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       const result = await service.syncUsers();
 
@@ -172,7 +172,7 @@ describe('UserSyncService', () => {
         users: [
           {
             userId: 'cloud-user-1',
-            role: 'CASHIER',
+            role: 'cashier',
             name: 'Reactivated User',
             pinHash: '$2b$10$hash',
             active: true,
@@ -184,7 +184,7 @@ describe('UserSyncService', () => {
         cloud_user_id: 'cloud-user-1',
         name: 'Reactivated User',
         active: false, // Was inactive
-      } as ReturnType<typeof usersDAL.findByCloudId>);
+      } as unknown as ReturnType<typeof usersDAL.findByCloudId>);
       mockFindActiveByStore.mockReturnValue([]);
 
       const result = await service.syncUsers();
@@ -198,7 +198,7 @@ describe('UserSyncService', () => {
         users: [
           {
             userId: 'cloud-user-1',
-            role: 'CASHIER',
+            role: 'cashier',
             name: 'Deactivated User',
             pinHash: '$2b$10$hash',
             active: false, // Now inactive
@@ -210,7 +210,7 @@ describe('UserSyncService', () => {
         cloud_user_id: 'cloud-user-1',
         name: 'Deactivated User',
         active: true, // Was active
-      } as ReturnType<typeof usersDAL.findByCloudId>);
+      } as unknown as ReturnType<typeof usersDAL.findByCloudId>);
       mockFindActiveByStore.mockReturnValue([]);
 
       const result = await service.syncUsers();
@@ -224,14 +224,14 @@ describe('UserSyncService', () => {
         users: [
           {
             userId: 'cloud-user-1',
-            role: 'CASHIER',
+            role: 'cashier',
             name: 'User 1',
             pinHash: '$2b$10$hash1',
             active: true,
           },
           {
             userId: 'cloud-user-2',
-            role: 'MANAGER',
+            role: 'store_manager',
             name: 'User 2',
             pinHash: '$2b$10$hash2',
             active: true,
@@ -243,7 +243,7 @@ describe('UserSyncService', () => {
 
       // First call succeeds, second throws
       mockUpsertFromCloud
-        .mockImplementationOnce(() => {})
+        .mockImplementationOnce(() => ({}) as ReturnType<typeof usersDAL.upsertFromCloud>)
         .mockImplementationOnce(() => {
           throw new Error('DB error');
         });
@@ -273,7 +273,7 @@ describe('UserSyncService', () => {
     it('should return true if no users with cloud_user_id', () => {
       mockFindActiveByStore.mockReturnValue([
         { user_id: 'local-1', cloud_user_id: null, name: 'Local Only' },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.needsSync()).toBe(true);
     });
@@ -281,7 +281,7 @@ describe('UserSyncService', () => {
     it('should return false if synced users exist', () => {
       mockFindActiveByStore.mockReturnValue([
         { user_id: 'local-1', cloud_user_id: 'cloud-1', name: 'Synced User' },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.needsSync()).toBe(false);
     });
@@ -305,7 +305,7 @@ describe('UserSyncService', () => {
         { user_id: 'local-1', cloud_user_id: 'cloud-1', name: 'Synced 1' },
         { user_id: 'local-2', cloud_user_id: null, name: 'Local Only' },
         { user_id: 'local-3', cloud_user_id: 'cloud-3', name: 'Synced 2' },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.getSyncedUserCount()).toBe(2);
     });
@@ -313,7 +313,7 @@ describe('UserSyncService', () => {
     it('should return 0 if no synced users', () => {
       mockFindActiveByStore.mockReturnValue([
         { user_id: 'local-1', cloud_user_id: null, name: 'Local Only' },
-      ] as ReturnType<typeof usersDAL.findActiveByStore>);
+      ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.getSyncedUserCount()).toBe(0);
     });

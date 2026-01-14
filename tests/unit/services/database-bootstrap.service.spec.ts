@@ -25,14 +25,21 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 // ============================================================================
 
 // Use vi.hoisted() to ensure mock objects are available when vi.mock runs
-const { mockDbInstance, mockFs } = vi.hoisted(() => {
-  const mockDbInstance = {
+const { mockDbInstance, mockDbInstanceRaw, mockFs } = vi.hoisted(() => {
+  // Create a raw mock object that we can call mockReturnValue on
+  const mockDbInstanceRaw = {
     prepare: vi.fn().mockReturnValue({
       get: vi.fn().mockReturnValue({ result: 1 }),
       all: vi.fn().mockReturnValue([]),
     }),
     pragma: vi.fn().mockReturnValue([{ integrity_check: 'ok' }]),
+    key: vi.fn(),
+    rekey: vi.fn(),
   };
+
+  // Cast for use in type-expecting locations
+  const mockDbInstance =
+    mockDbInstanceRaw as unknown as import('better-sqlite3-multiple-ciphers').Database;
 
   const mockFs = {
     existsSync: vi.fn().mockReturnValue(true),
@@ -45,7 +52,7 @@ const { mockDbInstance, mockFs } = vi.hoisted(() => {
     statfsSync: vi.fn().mockReturnValue({ bavail: 1000000000, bsize: 4096 }),
   };
 
-  return { mockDbInstance, mockFs };
+  return { mockDbInstance, mockDbInstanceRaw, mockFs };
 });
 
 // Mock Electron app module
@@ -126,7 +133,10 @@ import {
   getDatabaseHealth,
 } from '../../../src/main/services/database.service';
 
-import { runMigrations, getCurrentSchemaVersion } from '../../../src/main/services/migration.service';
+import {
+  runMigrations,
+  getCurrentSchemaVersion,
+} from '../../../src/main/services/migration.service';
 
 // ============================================================================
 // Test Suites
@@ -148,6 +158,8 @@ describe('DatabaseBootstrapService', () => {
       isOpen: true,
       isEncrypted: true,
       tableCount: 10,
+      sizeBytes: 1024000,
+      path: '/mock/user/data/nuvana.db',
     });
     vi.mocked(backupDatabase).mockResolvedValue(undefined);
     vi.mocked(closeDatabase).mockImplementation(() => {});
@@ -163,18 +175,20 @@ describe('DatabaseBootstrapService', () => {
     mockFs.statSync.mockReturnValue({ size: 1024, mtime: new Date() });
 
     // Mock required tables exist
-    mockDbInstance.prepare.mockReturnValue({
+    mockDbInstanceRaw.prepare.mockReturnValue({
       get: vi.fn().mockReturnValue({ result: 1 }),
-      all: vi.fn().mockReturnValue([
-        { name: 'stores' },
-        { name: 'users' },
-        { name: 'shifts' },
-        { name: 'day_summaries' },
-        { name: 'transactions' },
-        { name: 'sync_queue' },
-        { name: 'processed_files' },
-        { name: 'schema_migrations' },
-      ]),
+      all: vi
+        .fn()
+        .mockReturnValue([
+          { name: 'stores' },
+          { name: 'users' },
+          { name: 'shifts' },
+          { name: 'day_summaries' },
+          { name: 'transactions' },
+          { name: 'sync_queue' },
+          { name: 'processed_files' },
+          { name: 'schema_migrations' },
+        ]),
     });
 
     vi.mocked(runMigrations).mockReturnValue({
@@ -195,18 +209,16 @@ describe('DatabaseBootstrapService', () => {
 
   describe('State Management', () => {
     it('should start in uninitialized state', async () => {
-      const { getDatabaseState } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { getDatabaseState } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       // Initial state should be uninitialized
       expect(getDatabaseState()).toBe('uninitialized');
     });
 
     it('should report not ready before bootstrap', async () => {
-      const { isDatabaseReady } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { isDatabaseReady } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       expect(isDatabaseReady()).toBe(false);
     });
@@ -219,18 +231,20 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValue(true); // All subsequent checks (health check, etc.)
 
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
       const module = await import('../../../src/main/services/database-bootstrap.service');
@@ -244,9 +258,8 @@ describe('DatabaseBootstrapService', () => {
     });
 
     it('should include correlation ID in result for error tracking (API-003)', async () => {
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -256,9 +269,8 @@ describe('DatabaseBootstrapService', () => {
     });
 
     it('should track duration in milliseconds', async () => {
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -277,9 +289,8 @@ describe('DatabaseBootstrapService', () => {
       // Simulate low disk space (1MB available, 100MB required)
       mockFs.statfsSync.mockReturnValue({ bavail: 256, bsize: 4096 }); // ~1MB
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({
         skipBackup: true,
@@ -298,9 +309,8 @@ describe('DatabaseBootstrapService', () => {
         throw new Error('EACCES: permission denied');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -319,9 +329,8 @@ describe('DatabaseBootstrapService', () => {
         return false; // Directory doesn't exist
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
 
@@ -341,18 +350,20 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValueOnce(false) // Initial check
         .mockReturnValue(true); // After initialization
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
       const module = await import('../../../src/main/services/database-bootstrap.service');
@@ -372,9 +383,8 @@ describe('DatabaseBootstrapService', () => {
     it('should skip initialization if database already initialized', async () => {
       vi.mocked(isDatabaseInitialized).mockReturnValue(true);
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -387,9 +397,8 @@ describe('DatabaseBootstrapService', () => {
     it('should force re-initialization when force option is true', async () => {
       vi.mocked(isDatabaseInitialized).mockReturnValue(true);
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true, force: true });
 
@@ -472,9 +481,8 @@ describe('DatabaseBootstrapService', () => {
     it('should skip backup when skipBackup option is true', async () => {
       mockFs.existsSync.mockReturnValue(true);
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
 
@@ -487,9 +495,8 @@ describe('DatabaseBootstrapService', () => {
         return true;
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: false });
 
@@ -564,9 +571,8 @@ describe('DatabaseBootstrapService', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.statSync.mockReturnValue({ size: 2048, mtime: new Date() });
 
-      const { getAvailableBackups } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { getAvailableBackups } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const backups = getAvailableBackups();
 
@@ -579,9 +585,8 @@ describe('DatabaseBootstrapService', () => {
     it('should return empty array when backup directory does not exist', async () => {
       mockFs.existsSync.mockReturnValue(false);
 
-      const { getAvailableBackups } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { getAvailableBackups } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const backups = getAvailableBackups();
 
@@ -600,18 +605,20 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValueOnce(false) // Initial check
         .mockReturnValue(true); // After initialization
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
       vi.mocked(runMigrations).mockReturnValue({
         applied: [
@@ -648,9 +655,8 @@ describe('DatabaseBootstrapService', () => {
         totalDurationMs: 110,
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -665,9 +671,8 @@ describe('DatabaseBootstrapService', () => {
         throw new Error('File system error');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -684,7 +689,7 @@ describe('DatabaseBootstrapService', () => {
   describe('Schema Validation', () => {
     it('should fail when required tables are missing', async () => {
       // Only return some tables, missing 'stores'
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
         all: vi.fn().mockReturnValue([
           { name: 'users' },
@@ -694,9 +699,8 @@ describe('DatabaseBootstrapService', () => {
         ]),
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -711,7 +715,7 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValueOnce(false) // Initial check
         .mockReturnValue(true); // After initialization
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
         all: vi.fn().mockReturnValue([
           { name: 'stores' },
@@ -742,9 +746,8 @@ describe('DatabaseBootstrapService', () => {
     it('should return unhealthy when database not initialized', async () => {
       vi.mocked(isDatabaseInitialized).mockReturnValue(false);
 
-      const { performHealthCheck } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { performHealthCheck } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const health = performHealthCheck();
 
@@ -757,23 +760,24 @@ describe('DatabaseBootstrapService', () => {
       vi.mocked(isDatabaseInitialized).mockReturnValue(true);
       vi.mocked(checkDatabaseIntegrity).mockReturnValue(true);
 
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
-      const { performHealthCheck } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { performHealthCheck } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const health = performHealthCheck();
 
@@ -787,23 +791,24 @@ describe('DatabaseBootstrapService', () => {
       vi.mocked(isDatabaseInitialized).mockReturnValue(true);
       vi.mocked(checkDatabaseIntegrity).mockReturnValue(false);
 
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
-      const { performHealthCheck } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { performHealthCheck } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const health = performHealthCheck();
 
@@ -817,9 +822,8 @@ describe('DatabaseBootstrapService', () => {
         throw new Error('Connection lost');
       });
 
-      const { performHealthCheck } = await import(
-        '../../../src/main/services/database-bootstrap.service'
-      );
+      const { performHealthCheck } =
+        await import('../../../src/main/services/database-bootstrap.service');
 
       const health = performHealthCheck();
 
@@ -838,7 +842,7 @@ describe('DatabaseBootstrapService', () => {
       vi.mocked(initializeDatabase).mockImplementation(() => {
         // Return a promise that won't resolve until after timeout
         // The service uses Promise.race so this will cause timeout
-        const delay = new Promise<never>(() => {
+        const _delay = new Promise<never>(() => {
           // Never resolves - timeout will trigger first
         });
         // TypeScript trick: the function expects sync return but we're testing timeout
@@ -880,18 +884,20 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValueOnce(false) // Initial check
         .mockReturnValue(true); // After initialization
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
       const module = await import('../../../src/main/services/database-bootstrap.service');
@@ -914,18 +920,20 @@ describe('DatabaseBootstrapService', () => {
         .mockReturnValueOnce(false) // Initial check
         .mockReturnValue(true); // After initialization
       vi.mocked(initializeDatabase).mockReturnValue(mockDbInstance);
-      mockDbInstance.prepare.mockReturnValue({
+      mockDbInstanceRaw.prepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ result: 1 }),
-        all: vi.fn().mockReturnValue([
-          { name: 'stores' },
-          { name: 'users' },
-          { name: 'shifts' },
-          { name: 'day_summaries' },
-          { name: 'transactions' },
-          { name: 'sync_queue' },
-          { name: 'processed_files' },
-          { name: 'schema_migrations' },
-        ]),
+        all: vi
+          .fn()
+          .mockReturnValue([
+            { name: 'stores' },
+            { name: 'users' },
+            { name: 'shifts' },
+            { name: 'day_summaries' },
+            { name: 'transactions' },
+            { name: 'sync_queue' },
+            { name: 'processed_files' },
+            { name: 'schema_migrations' },
+          ]),
       });
 
       const module = await import('../../../src/main/services/database-bootstrap.service');

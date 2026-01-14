@@ -13,27 +13,46 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { z } from 'zod';
 
-// Mock the services
+// Mock the services - create an authService object for test convenience
+const mockAuthService = {
+  login: vi.fn(),
+  logout: vi.fn(),
+  getCurrentUser: vi.fn(),
+  isAuthenticated: vi.fn(),
+  updateActivity: vi.fn(),
+  hasPermission: vi.fn(),
+  getUsers: vi.fn(),
+};
+
+const mockSessionService = {
+  getCurrentSession: vi.fn(),
+  hasRole: vi.fn(),
+  hasMinimumRole: vi.fn(),
+  getTimeRemaining: vi.fn(),
+  isNearExpiry: vi.fn(),
+};
+
 vi.mock('../../../src/main/services/auth.service', () => ({
-  authService: {
-    login: vi.fn(),
-    logout: vi.fn(),
-    getCurrentUser: vi.fn(),
-    isAuthenticated: vi.fn(),
-    updateActivity: vi.fn(),
-    hasPermission: vi.fn(),
-    getUsers: vi.fn(),
-  },
+  authService: mockAuthService,
+  authenticateByPin: vi.fn(),
+  authenticateUser: vi.fn(),
+  logout: vi.fn(),
+  getCurrentAuthUser: vi.fn(),
+  getCurrentSession: vi.fn(),
+  trackActivity: vi.fn(),
+  hasPermission: vi.fn(),
+  hasMinimumRole: vi.fn(),
 }));
 
 vi.mock('../../../src/main/services/session.service', () => ({
-  sessionService: {
-    getCurrentSession: vi.fn(),
-    hasRole: vi.fn(),
-    hasMinimumRole: vi.fn(),
-    getTimeRemaining: vi.fn(),
-    isNearExpiry: vi.fn(),
-  },
+  sessionService: mockSessionService,
+  getSession: vi.fn(),
+  createSession: vi.fn(),
+  updateSession: vi.fn(),
+  endSession: vi.fn(),
+  hasRole: vi.fn(),
+  hasMinimumRole: vi.fn(),
+  isSessionValid: vi.fn(),
 }));
 
 vi.mock('../../../src/main/dal/users.dal', () => ({
@@ -45,22 +64,9 @@ vi.mock('../../../src/main/dal/users.dal', () => ({
 }));
 
 describe('Auth IPC Handlers', () => {
-  let authService: {
-    login: ReturnType<typeof vi.fn>;
-    logout: ReturnType<typeof vi.fn>;
-    getCurrentUser: ReturnType<typeof vi.fn>;
-    isAuthenticated: ReturnType<typeof vi.fn>;
-    updateActivity: ReturnType<typeof vi.fn>;
-    hasPermission: ReturnType<typeof vi.fn>;
-    getUsers: ReturnType<typeof vi.fn>;
-  };
-  let sessionService: {
-    getCurrentSession: ReturnType<typeof vi.fn>;
-    hasRole: ReturnType<typeof vi.fn>;
-    hasMinimumRole: ReturnType<typeof vi.fn>;
-    getTimeRemaining: ReturnType<typeof vi.fn>;
-    isNearExpiry: ReturnType<typeof vi.fn>;
-  };
+  // Use the mock objects directly defined above
+  const authService = mockAuthService;
+  const sessionService = mockSessionService;
   let usersDAL: {
     findByStore: ReturnType<typeof vi.fn>;
     findById: ReturnType<typeof vi.fn>;
@@ -69,12 +75,7 @@ describe('Auth IPC Handlers', () => {
 
   beforeEach(async () => {
     // Get mocked modules
-    const authModule = await import('../../../src/main/services/auth.service');
-    const sessionModule = await import('../../../src/main/services/session.service');
     const usersModule = await import('../../../src/main/dal/users.dal');
-
-    authService = authModule.authService as unknown as typeof authService;
-    sessionService = sessionModule.sessionService as unknown as typeof sessionService;
     usersDAL = usersModule.usersDAL as unknown as typeof usersDAL;
   });
 
@@ -413,9 +414,9 @@ describe('Auth IPC Handlers', () => {
         error: 'INVALID_CREDENTIALS',
       });
 
-      const startTime = Date.now();
+      const _startTime = Date.now();
       await authService.login('store-1', 'user-123', 'wrong');
-      const endTime = Date.now();
+      const _endTime = Date.now();
 
       // In a real implementation, there should be a delay
       // This test verifies the mock is called correctly
@@ -450,7 +451,9 @@ describe('Auth IPC Handlers', () => {
 
       usersDAL.findByStore.mockReturnValue(mockUsers);
 
-      const result = usersDAL.findByStore('store-1');
+      // Call the mock and verify it returns expected value
+      const mockFn = usersDAL.findByStore as unknown as (storeId: string) => typeof mockUsers;
+      const result = mockFn('store-1');
 
       expect(usersDAL.findByStore).toHaveBeenCalledWith('store-1');
       expect(result).toEqual(mockUsers);
@@ -461,7 +464,12 @@ describe('Auth IPC Handlers', () => {
 
       usersDAL.verifyPin.mockReturnValue(mockUser);
 
-      const result = usersDAL.verifyPin('user-1', '1234');
+      // Call the mock and verify it returns expected value
+      const mockFn = usersDAL.verifyPin as unknown as (
+        userId: string,
+        pin: string
+      ) => typeof mockUser;
+      const result = mockFn('user-1', '1234');
 
       expect(usersDAL.verifyPin).toHaveBeenCalledWith('user-1', '1234');
       expect(result).toEqual(mockUser);
@@ -470,7 +478,9 @@ describe('Auth IPC Handlers', () => {
     it('should return null for invalid PIN', () => {
       usersDAL.verifyPin.mockReturnValue(null);
 
-      const result = usersDAL.verifyPin('user-1', 'wrong');
+      // Call the mock and verify it returns expected value
+      const mockFn = usersDAL.verifyPin as unknown as (userId: string, pin: string) => null;
+      const result = mockFn('user-1', 'wrong');
 
       expect(result).toBeNull();
     });

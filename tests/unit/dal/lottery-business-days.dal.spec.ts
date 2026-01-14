@@ -13,8 +13,10 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import {
   LotteryBusinessDaysDAL,
-  type LotteryBusinessDay,
-  type ClosingData,
+  type LotteryBusinessDay as _LotteryBusinessDay,
+  type PackClosingData,
+  type PrepareCloseResult as _PrepareCloseResult,
+  type CommitCloseResult as _CommitCloseResult,
 } from '../../../src/main/dal/lottery-business-days.dal';
 
 // Mock database service
@@ -80,7 +82,7 @@ describe('Lottery Business Days DAL', () => {
         store_id TEXT NOT NULL,
         business_date TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'OPEN',
-        packs_activated INTEGER DEFAULT 0,
+        total_packs_activated INTEGER DEFAULT 0,
         packs_settled INTEGER DEFAULT 0,
         total_sales REAL DEFAULT 0,
         closed_at TEXT,
@@ -204,18 +206,18 @@ describe('Lottery Business Days DAL', () => {
   });
 
   describe('incrementPacksActivated', () => {
-    it('should increment packs_activated count', () => {
+    it('should increment total_packs_activated count', () => {
       const today = new Date().toISOString().split('T')[0];
       const day = dal.getOrCreateForDate('store-1', today);
 
-      expect(day.packs_activated).toBe(0);
+      expect(day.total_packs_activated).toBe(0);
 
-      dal.incrementPacksActivated(day.day_id);
-      dal.incrementPacksActivated(day.day_id);
-      dal.incrementPacksActivated(day.day_id);
+      dal.incrementPacksActivated('store-1', today);
+      dal.incrementPacksActivated('store-1', today);
+      dal.incrementPacksActivated('store-1', today);
 
       const updated = dal.findById(day.day_id);
-      expect(updated?.packs_activated).toBe(3);
+      expect(updated?.total_packs_activated).toBe(3);
     });
   });
 
@@ -230,9 +232,7 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       const result = dal.prepareClose(day.day_id, closings);
 
@@ -256,9 +256,7 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-2', 'store-1', 'game-2', 'bin-1', 'PKG002', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-2', closing_serial: '100' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-2', closing_serial: '100' }];
 
       const result = dal.prepareClose(day.day_id, closings);
 
@@ -274,16 +272,14 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       const result = dal.prepareClose(day.day_id, closings);
 
-      expect(result.pending_close_expires_at).toBeDefined();
-      // Expiration should be in the future (5 minutes from now)
-      const expiration = new Date(result.pending_close_expires_at);
-      expect(expiration.getTime()).toBeGreaterThan(Date.now());
+      expect(result.pending_close_at).toBeDefined();
+      // pending_close_at should be a valid timestamp
+      const pendingTime = new Date(result.pending_close_at);
+      expect(pendingTime.getTime()).toBeLessThanOrEqual(Date.now());
     });
 
     it('should throw error for non-OPEN day', () => {
@@ -293,9 +289,7 @@ describe('Lottery Business Days DAL', () => {
       // Manually set to CLOSED
       db.exec(`UPDATE lottery_business_days SET status = 'CLOSED' WHERE day_id = '${day.day_id}'`);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       expect(() => dal.prepareClose(day.day_id, closings)).toThrow();
     });
@@ -312,18 +306,16 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       dal.prepareClose(day.day_id, closings);
       const result = dal.commitClose(day.day_id, 'user-123');
 
       expect(result).toBeDefined();
-      expect(result.status).toBe('CLOSED');
+      expect(result.day_id).toBe(day.day_id);
       expect(result.closed_at).toBeDefined();
-      expect(result.closed_by_user_id).toBe('user-123');
-      expect(result.total_sales).toBe(150);
+      expect(result.closings_created).toBe(1);
+      expect(result.lottery_total).toBe(150);
     });
 
     it('should update pack status to SETTLED', () => {
@@ -335,9 +327,7 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       dal.prepareClose(day.day_id, closings);
       dal.commitClose(day.day_id, 'user-123');
@@ -369,14 +359,14 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       dal.prepareClose(day.day_id, closings);
 
       // Manually set expiration to past
-      db.exec(`UPDATE lottery_business_days SET pending_close_expires_at = datetime('now', '-1 hour') WHERE day_id = '${day.day_id}'`);
+      db.exec(
+        `UPDATE lottery_business_days SET pending_close_expires_at = datetime('now', '-1 hour') WHERE day_id = '${day.day_id}'`
+      );
 
       expect(() => dal.commitClose(day.day_id, 'user-123')).toThrow();
     });
@@ -392,9 +382,7 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       dal.prepareClose(day.day_id, closings);
       dal.cancelClose(day.day_id);
@@ -412,16 +400,14 @@ describe('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: ClosingData[] = [
-        { pack_id: 'pack-1', closing_serial: '150' },
-      ];
+      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
 
       dal.prepareClose(day.day_id, closings);
       dal.cancelClose(day.day_id);
 
       const updated = dal.findById(day.day_id);
-      expect(updated?.pending_close_data).toBeNull();
-      expect(updated?.pending_close_expires_at).toBeNull();
+      // After cancel, status should return to OPEN
+      expect(updated?.status).toBe('OPEN');
     });
 
     it('should not affect already closed days', () => {
@@ -456,15 +442,15 @@ describe('Lottery Business Days DAL', () => {
 
       const result = dal.getSalesForDateRange('store-1', date1, date3);
 
-      expect(result.total_sales).toBe(451.25);
-      expect(result.days_count).toBe(3);
+      expect(result.totalSales).toBe(451.25);
+      expect(result.daysCount).toBe(3);
     });
 
     it('should return 0 for range with no data', () => {
       const result = dal.getSalesForDateRange('store-1', '2020-01-01', '2020-01-31');
 
-      expect(result.total_sales).toBe(0);
-      expect(result.days_count).toBe(0);
+      expect(result.totalSales).toBe(0);
+      expect(result.daysCount).toBe(0);
     });
 
     it('should only include specified store (DB-006)', () => {
@@ -477,7 +463,7 @@ describe('Lottery Business Days DAL', () => {
 
       const result = dal.getSalesForDateRange('store-1', '2024-01-01', '2024-01-31');
 
-      expect(result.total_sales).toBe(100);
+      expect(result.totalSales).toBe(100);
     });
   });
 

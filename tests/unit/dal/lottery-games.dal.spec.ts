@@ -10,7 +10,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { LotteryGamesDAL, type LotteryGame, type CreateLotteryGameData } from '../../../src/main/dal/lottery-games.dal';
+import {
+  LotteryGamesDAL,
+  type LotteryGame as _LotteryGame,
+  type CreateLotteryGameData,
+} from '../../../src/main/dal/lottery-games.dal';
 
 // Mock database service
 const mockPrepare = vi.fn();
@@ -176,7 +180,7 @@ describe('Lottery Games DAL', () => {
       const games = dal.findActiveByStore('store-1');
 
       expect(games.length).toBe(2);
-      expect(games.every(g => g.store_id === 'store-1')).toBe(true);
+      expect(games.every((g) => g.store_id === 'store-1')).toBe(true);
     });
 
     it('should exclude inactive games', () => {
@@ -221,7 +225,12 @@ describe('Lottery Games DAL', () => {
     });
 
     it('should not find soft-deleted games', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
       dal.softDelete(game.game_id);
 
       const found = dal.findByGameCode('store-1', '1001');
@@ -232,7 +241,12 @@ describe('Lottery Games DAL', () => {
 
   describe('softDelete', () => {
     it('should set deleted_at timestamp', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
 
       const result = dal.softDelete(game.game_id);
 
@@ -252,7 +266,12 @@ describe('Lottery Games DAL', () => {
 
   describe('restore', () => {
     it('should clear deleted_at timestamp', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
       dal.softDelete(game.game_id);
 
       const result = dal.restore(game.game_id);
@@ -267,7 +286,12 @@ describe('Lottery Games DAL', () => {
 
   describe('activate/deactivate', () => {
     it('should set status to ACTIVE', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
       dal.update(game.game_id, { status: 'INACTIVE' });
 
       const result = dal.activate(game.game_id);
@@ -278,7 +302,12 @@ describe('Lottery Games DAL', () => {
     });
 
     it('should set status to INACTIVE', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
 
       const result = dal.deactivate(game.game_id);
 
@@ -296,6 +325,7 @@ describe('Lottery Games DAL', () => {
         game_code: '1001',
         name: 'Lucky 7s',
         price: 1,
+        pack_value: 300,
         tickets_per_pack: 300,
       };
 
@@ -312,6 +342,7 @@ describe('Lottery Games DAL', () => {
         game_code: '1001',
         name: 'Lucky 7s',
         price: 1,
+        pack_value: 300,
         tickets_per_pack: 300,
       };
 
@@ -335,7 +366,12 @@ describe('Lottery Games DAL', () => {
 
   describe('findById (inherited from BaseDAL)', () => {
     it('should find game by ID', () => {
-      const game = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Lucky 7s', price: 1 });
+      const game = dal.create({
+        store_id: 'store-1',
+        game_code: '1001',
+        name: 'Lucky 7s',
+        price: 1,
+      });
 
       const found = dal.findById(game.game_id);
 

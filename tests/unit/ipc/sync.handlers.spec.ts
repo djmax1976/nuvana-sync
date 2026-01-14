@@ -72,18 +72,21 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
   },
 }));
 
+// Type for IPC handlers
+type IPCHandler = (...args: unknown[]) => Promise<unknown> | unknown;
+
 // Handler registry - global so it survives hoisting
-const handlerRegistry: Map<string, Function> = new Map();
+const _handlerRegistry: Map<string, IPCHandler> = new Map();
 
 // Mock IPC handler registration - capture handlers
 vi.mock('../../../src/main/ipc/index', () => {
   // Use the outer handlerRegistry defined above
   return {
-    registerHandler: vi.fn((channel: string, handler: Function) => {
+    registerHandler: vi.fn((channel: string, handler: IPCHandler) => {
       // Store directly in module state
       (globalThis as Record<string, unknown>).__syncHandlers =
         (globalThis as Record<string, unknown>).__syncHandlers || new Map();
-      ((globalThis as Record<string, unknown>).__syncHandlers as Map<string, Function>).set(
+      ((globalThis as Record<string, unknown>).__syncHandlers as Map<string, IPCHandler>).set(
         channel,
         handler
       );
@@ -99,9 +102,9 @@ vi.mock('../../../src/main/ipc/index', () => {
 });
 
 // Helper to get registered handlers
-function getHandler(channel: string): Function | undefined {
+function getHandler(channel: string): IPCHandler | undefined {
   const handlers = (globalThis as Record<string, unknown>).__syncHandlers as
-    | Map<string, Function>
+    | Map<string, IPCHandler>
     | undefined;
   return handlers?.get(channel);
 }
@@ -351,14 +354,16 @@ describe('Sync IPC Handlers', () => {
   describe('sync:getHistoryPaginated', () => {
     it('should return paginated sync history', async () => {
       const paginatedResult = {
-        logs: [{ id: 'log-1' }],
+        data: [{ id: 'log-1' }],
         total: 100,
+        limit: 25,
+        offset: 0,
         hasMore: true,
       };
 
-      mockGetLogsPaginated.mockReturnValue(paginatedResult as ReturnType<
-        typeof syncLogDAL.getLogsPaginated
-      >);
+      mockGetLogsPaginated.mockReturnValue(
+        paginatedResult as unknown as ReturnType<typeof syncLogDAL.getLogsPaginated>
+      );
 
       const handler = getHandler('sync:getHistoryPaginated');
       expect(handler).toBeDefined();
@@ -373,9 +378,9 @@ describe('Sync IPC Handlers', () => {
     it('should return pending queue items', async () => {
       const items = [{ id: 'q-1', entity_type: 'transaction', operation: 'CREATE' }];
 
-      mockGetUnsyncedByStore.mockReturnValue(items as ReturnType<
-        typeof syncQueueDAL.getUnsyncedByStore
-      >);
+      mockGetUnsyncedByStore.mockReturnValue(
+        items as ReturnType<typeof syncQueueDAL.getUnsyncedByStore>
+      );
       mockGetPendingCount.mockReturnValue(10);
 
       const handler = getHandler('sync:getPendingQueue');
