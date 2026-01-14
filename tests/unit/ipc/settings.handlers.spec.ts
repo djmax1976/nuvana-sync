@@ -84,12 +84,21 @@ import {
 // Import handlers to trigger registration
 import '../../../src/main/ipc/settings.handlers';
 
-// Type for IPC handlers
-type IPCHandler = (...args: unknown[]) => Promise<unknown> | unknown;
+// Type for IPC handler results
+interface IPCResult {
+  data?: unknown;
+  error?: string;
+  message?: string;
+}
+
+// Type for IPC handlers - eslint-disable needed for test flexibility
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IPCHandler = (...args: any[]) => Promise<IPCResult> | IPCResult;
 
 describe('Settings IPC Handlers', () => {
   // Capture registered handlers
-  const handlers: Map<string, IPCHandler> = new Map();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handlers: Map<string, any> = new Map();
 
   beforeEach(() => {
     vi.clearAllMocks();

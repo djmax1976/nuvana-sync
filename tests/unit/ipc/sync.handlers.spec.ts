@@ -72,8 +72,16 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
   },
 }));
 
-// Type for IPC handlers
-type IPCHandler = (...args: unknown[]) => Promise<unknown> | unknown;
+// Type for IPC handler results
+interface IPCResult {
+  data?: unknown;
+  error?: string;
+  message?: string;
+}
+
+// Type for IPC handlers - eslint-disable needed for test flexibility
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IPCHandler = (...args: any[]) => Promise<IPCResult> | IPCResult;
 
 // Handler registry - global so it survives hoisting
 const _handlerRegistry: Map<string, IPCHandler> = new Map();
