@@ -241,16 +241,13 @@ export default function LotteryManagementPage() {
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
 
-  const handlePackReception = async (data: Parameters<typeof receivePack>[0]) => {
-    try {
-      await packReceptionMutation.mutateAsync(data);
-      invalidateAll(); // Invalidate all lottery data including day bins
-      setReceptionDialogOpen(false);
-      setSuccessMessage('Pack received successfully');
-      setTimeout(() => setSuccessMessage(null), 5000);
-    } catch (error) {
-      throw error; // Error handling is done in the form component
-    }
+  const _handlePackReception = async (data: Parameters<typeof receivePack>[0]) => {
+    await packReceptionMutation.mutateAsync(data);
+    invalidateAll(); // Invalidate all lottery data including day bins
+    setReceptionDialogOpen(false);
+    setSuccessMessage('Pack received successfully');
+    setTimeout(() => setSuccessMessage(null), 5000);
+    // Error handling is done in the form component
   };
 
   /**

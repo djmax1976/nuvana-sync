@@ -598,20 +598,16 @@ export function formatDateRange(
   endDate: Date | string,
   storeTimezone: string
 ): string {
-  try {
-    const start = formatDate(startDate, storeTimezone);
-    const end = formatDate(endDate, storeTimezone);
+  // formatDate will throw RangeError for invalid timezones - let it propagate
+  const start = formatDate(startDate, storeTimezone);
+  const end = formatDate(endDate, storeTimezone);
 
-    // If same date, only show once
-    if (start === end) {
-      return start;
-    }
-
-    return `${start} - ${end}`;
-  } catch (error) {
-    // Re-throw RangeError from formatDate to maintain consistent error behavior
-    throw error;
+  // If same date, only show once
+  if (start === end) {
+    return start;
   }
+
+  return `${start} - ${end}`;
 }
 
 /**

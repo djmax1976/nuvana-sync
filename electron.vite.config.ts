@@ -16,7 +16,7 @@ function copyMigrationsPlugin() {
         cpSync(srcDir, destDir, { recursive: true });
         console.log('✓ Copied migrations to dist/migrations');
       }
-    }
+    },
   };
 }
 
