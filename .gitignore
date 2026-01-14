@@ -65,6 +65,7 @@ tmp/
 temp/
 *.tmp
 *.temp
+tmpclaude-*
 
 # Claude Code
 .claude/
