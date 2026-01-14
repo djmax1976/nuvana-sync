@@ -6,12 +6,42 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock cloud API service
-const mockPullBins = vi.fn();
-const mockPullGames = vi.fn();
-const mockPushBins = vi.fn();
-const mockPushGames = vi.fn();
+// Hoist mock functions so they're available when vi.mock factory runs
+const {
+  mockPullBins,
+  mockPullGames,
+  mockPushBins,
+  mockPushGames,
+  mockBinsFindAllByStore,
+  mockBinsFindByCloudId,
+  mockBinsUpsertFromCloud,
+  mockBinsSoftDelete,
+  mockGamesFindAllByStore,
+  mockGamesFindByCloudId,
+  mockGamesUpsertFromCloud,
+  mockGetLastPullAt,
+  mockSetLastPullAt,
+  mockReset,
+  mockGetConfiguredStore,
+} = vi.hoisted(() => ({
+  mockPullBins: vi.fn(),
+  mockPullGames: vi.fn(),
+  mockPushBins: vi.fn(),
+  mockPushGames: vi.fn(),
+  mockBinsFindAllByStore: vi.fn(),
+  mockBinsFindByCloudId: vi.fn(),
+  mockBinsUpsertFromCloud: vi.fn(),
+  mockBinsSoftDelete: vi.fn(),
+  mockGamesFindAllByStore: vi.fn(),
+  mockGamesFindByCloudId: vi.fn(),
+  mockGamesUpsertFromCloud: vi.fn(),
+  mockGetLastPullAt: vi.fn(),
+  mockSetLastPullAt: vi.fn(),
+  mockReset: vi.fn(),
+  mockGetConfiguredStore: vi.fn(),
+}));
 
+// Mock cloud API service
 vi.mock('../../../src/main/services/cloud-api.service', () => ({
   cloudApiService: {
     pullBins: mockPullBins,
@@ -22,11 +52,6 @@ vi.mock('../../../src/main/services/cloud-api.service', () => ({
 }));
 
 // Mock DALs
-const mockBinsFindAllByStore = vi.fn();
-const mockBinsFindByCloudId = vi.fn();
-const mockBinsUpsertFromCloud = vi.fn();
-const mockBinsSoftDelete = vi.fn();
-
 vi.mock('../../../src/main/dal/lottery-bins.dal', () => ({
   lotteryBinsDAL: {
     findAllByStore: mockBinsFindAllByStore,
@@ -36,10 +61,6 @@ vi.mock('../../../src/main/dal/lottery-bins.dal', () => ({
   },
 }));
 
-const mockGamesFindAllByStore = vi.fn();
-const mockGamesFindByCloudId = vi.fn();
-const mockGamesUpsertFromCloud = vi.fn();
-
 vi.mock('../../../src/main/dal/lottery-games.dal', () => ({
   lotteryGamesDAL: {
     findAllByStore: mockGamesFindAllByStore,
@@ -48,10 +69,6 @@ vi.mock('../../../src/main/dal/lottery-games.dal', () => ({
   },
 }));
 
-const mockGetLastPullAt = vi.fn();
-const mockSetLastPullAt = vi.fn();
-const mockReset = vi.fn();
-
 vi.mock('../../../src/main/dal/sync-timestamps.dal', () => ({
   syncTimestampsDAL: {
     getLastPullAt: mockGetLastPullAt,
@@ -59,8 +76,6 @@ vi.mock('../../../src/main/dal/sync-timestamps.dal', () => ({
     reset: mockReset,
   },
 }));
-
-const mockGetConfiguredStore = vi.fn();
 
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
@@ -76,7 +91,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
       get: vi.fn(),
       all: vi.fn().mockReturnValue([]),
     }),
-    transaction: vi.fn((fn) => () => fn()),
+    transaction: vi.fn((fn: () => unknown) => () => fn()),
   })),
 }));
 

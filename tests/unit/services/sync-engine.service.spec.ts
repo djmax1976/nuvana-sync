@@ -6,29 +6,52 @@
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
+// Hoist mock functions so they're available when vi.mock factory runs
+const {
+  mockPrepare,
+  mockGetRetryableItems,
+  mockMarkSynced,
+  mockIncrementAttempts,
+  mockGetPendingCount,
+  mockCleanupSynced,
+  mockStartSync,
+  mockCompleteSync,
+  mockFailSync,
+  mockCleanupStaleRunning,
+  mockGetConfiguredStore,
+} = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockGetRetryableItems: vi.fn(),
+  mockMarkSynced: vi.fn(),
+  mockIncrementAttempts: vi.fn(),
+  mockGetPendingCount: vi.fn(),
+  mockCleanupSynced: vi.fn(),
+  mockStartSync: vi.fn(),
+  mockCompleteSync: vi.fn(),
+  mockFailSync: vi.fn(),
+  mockCleanupStaleRunning: vi.fn(),
+  mockGetConfiguredStore: vi.fn(),
+}));
+
 // Mock electron
 vi.mock('electron', () => ({
+  app: {
+    getVersion: vi.fn(() => '1.0.0'),
+  },
   BrowserWindow: {
     getAllWindows: vi.fn(() => []),
   },
 }));
 
 // Mock database service
-const mockPrepare = vi.fn();
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
     prepare: mockPrepare,
-    transaction: vi.fn((fn) => () => fn()),
+    transaction: vi.fn((fn: () => unknown) => () => fn()),
   })),
 }));
 
 // Mock DALs
-const mockGetRetryableItems = vi.fn();
-const mockMarkSynced = vi.fn();
-const mockIncrementAttempts = vi.fn();
-const mockGetPendingCount = vi.fn();
-const mockCleanupSynced = vi.fn();
-
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
     getRetryableItems: mockGetRetryableItems,
@@ -39,11 +62,6 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   },
 }));
 
-const mockStartSync = vi.fn();
-const mockCompleteSync = vi.fn();
-const mockFailSync = vi.fn();
-const mockCleanupStaleRunning = vi.fn();
-
 vi.mock('../../../src/main/dal/sync-log.dal', () => ({
   syncLogDAL: {
     startSync: mockStartSync,
@@ -52,8 +70,6 @@ vi.mock('../../../src/main/dal/sync-log.dal', () => ({
     cleanupStaleRunning: mockCleanupStaleRunning,
   },
 }));
-
-const mockGetConfiguredStore = vi.fn();
 
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
@@ -165,13 +181,15 @@ describe('SyncEngineService', () => {
   });
 
   describe('getStatus', () => {
-    it('should return current sync status', () => {
+    it('should return current sync status', async () => {
       mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
       mockGetPendingCount.mockReturnValue(5);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue([]);
 
       service.start();
+      // Wait for initial sync to complete
+      await vi.advanceTimersByTimeAsync(100);
 
       const status = service.getStatus();
 

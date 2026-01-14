@@ -10,6 +10,21 @@
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
+// Hoist mock functions so they're available when vi.mock factory runs
+const {
+  mockVerifyPin,
+  mockFindByIdForStore,
+  mockFindActiveByStore,
+  mockToSafeUser,
+  mockGetConfiguredStore,
+} = vi.hoisted(() => ({
+  mockVerifyPin: vi.fn(),
+  mockFindByIdForStore: vi.fn(),
+  mockFindActiveByStore: vi.fn(),
+  mockToSafeUser: vi.fn((user: unknown) => user),
+  mockGetConfiguredStore: vi.fn(),
+}));
+
 // Mock electron
 vi.mock('electron', () => ({
   BrowserWindow: {
@@ -39,11 +54,6 @@ vi.mock('../../../src/main/ipc/index', () => {
 });
 
 // Mock the UsersDAL
-const mockVerifyPin = vi.fn();
-const mockFindByIdForStore = vi.fn();
-const mockFindActiveByStore = vi.fn();
-const mockToSafeUser = vi.fn((user: unknown) => user);
-
 vi.mock('../../../src/main/dal/users.dal', () => ({
   usersDAL: {
     verifyPin: mockVerifyPin,
@@ -56,7 +66,6 @@ vi.mock('../../../src/main/dal/users.dal', () => ({
 }));
 
 // Mock the StoresDAL
-const mockGetConfiguredStore = vi.fn();
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
     getConfiguredStore: mockGetConfiguredStore,
@@ -137,7 +146,9 @@ describe('Auth Service', () => {
       mockFindActiveByStore.mockReturnValue([mockUser]);
       mockVerifyPin.mockResolvedValue(false);
 
-      const result = await authenticateByPin('wrong');
+      const resultPromise = authenticateByPin('wrong');
+      await vi.advanceTimersByTimeAsync(5100); // Advance past brute-force delay
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('INVALID_PIN');
@@ -146,7 +157,9 @@ describe('Auth Service', () => {
     it('should fail when no active users exist', async () => {
       mockFindActiveByStore.mockReturnValue([]);
 
-      const result = await authenticateByPin('1234');
+      const resultPromise = authenticateByPin('1234');
+      await vi.advanceTimersByTimeAsync(5100); // Advance past brute-force delay
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('INVALID_PIN');
@@ -168,7 +181,9 @@ describe('Auth Service', () => {
     it('should fail when user not found', async () => {
       mockFindByIdForStore.mockReturnValue(null);
 
-      const result = await authenticateUser('nonexistent', '1234');
+      const resultPromise = authenticateUser('nonexistent', '1234');
+      await vi.advanceTimersByTimeAsync(5100); // Advance past brute-force delay
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('USER_NOT_FOUND');
@@ -177,7 +192,9 @@ describe('Auth Service', () => {
     it('should fail when user is inactive', async () => {
       mockFindByIdForStore.mockReturnValue({ ...mockUser, active: false });
 
-      const result = await authenticateUser('user-123', '1234');
+      const resultPromise = authenticateUser('user-123', '1234');
+      await vi.advanceTimersByTimeAsync(5100); // Advance past brute-force delay
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('USER_INACTIVE');
@@ -187,7 +204,9 @@ describe('Auth Service', () => {
       mockFindByIdForStore.mockReturnValue(mockUser);
       mockVerifyPin.mockResolvedValue(false);
 
-      const result = await authenticateUser('user-123', 'wrong');
+      const resultPromise = authenticateUser('user-123', 'wrong');
+      await vi.advanceTimersByTimeAsync(5100); // Advance past brute-force delay
+      const result = await resultPromise;
 
       expect(result.success).toBe(false);
       expect(result.errorCode).toBe('INVALID_PIN');
