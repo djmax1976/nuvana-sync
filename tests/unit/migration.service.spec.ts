@@ -215,7 +215,8 @@ describe('MigrationService', () => {
   describe('runMigrations', () => {
     it('should apply pending migrations in order', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readdirSync).mockReturnValue(['v001_first.sql', 'v002_second.sql'] as string[]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fs.readdirSync as any).mockReturnValue(['v001_first.sql', 'v002_second.sql']);
       vi.mocked(fs.readFileSync).mockImplementation((path) => {
         if (String(path).includes('v001')) return 'CREATE TABLE first (id TEXT)';
         if (String(path).includes('v002')) return 'CREATE TABLE second (id TEXT)';
@@ -243,7 +244,8 @@ describe('MigrationService', () => {
 
     it('should skip already applied migrations', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readdirSync).mockReturnValue(['v001_first.sql', 'v002_second.sql'] as string[]);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fs.readdirSync as any).mockReturnValue(['v001_first.sql', 'v002_second.sql']);
       vi.mocked(fs.readFileSync).mockReturnValue('CREATE TABLE test (id TEXT)');
 
       // Version 1 already applied - use schema_migrations to match actual SQL
@@ -267,11 +269,12 @@ describe('MigrationService', () => {
 
     it('should stop on first failure', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
-      vi.mocked(fs.readdirSync).mockReturnValue([
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (fs.readdirSync as any).mockReturnValue([
         'v001_first.sql',
         'v002_failing.sql',
         'v003_third.sql',
-      ] as string[]);
+      ]);
       vi.mocked(fs.readFileSync).mockReturnValue('CREATE TABLE test (id TEXT)');
 
       let callCount = 0;

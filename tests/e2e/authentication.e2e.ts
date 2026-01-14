@@ -14,12 +14,10 @@ import { test, expect } from './fixtures/electron.fixture';
 
 test.describe('Authentication', () => {
   // These tests assume app is configured (setup wizard completed)
-  test.beforeEach(async ({ electronApp }) => {
+  test.beforeEach(async () => {
     // Seed test database with configured store and users
-    await electronApp.evaluate(async ({ _ipcMain }) => {
-      // This would be implemented to seed test data
-      // For now, we document the expected setup
-    });
+    // This would be implemented to seed test data
+    // For now, we document the expected setup
   });
 
   test.describe('PIN Login', () => {
@@ -221,7 +219,7 @@ test.describe('Authentication', () => {
       // For testing, we'd need to mock the session timeout
     });
 
-    test('should redirect to login on session expiry', async ({ _window }) => {
+    test('should redirect to login on session expiry', async () => {
       // This test would require mocking session expiry
       // Document expected behavior
       // On session expiry:
