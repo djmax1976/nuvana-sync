@@ -10,7 +10,11 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
-import { LotteryBinsDAL, type LotteryBin, type CreateLotteryBinData } from '../../../src/main/dal/lottery-bins.dal';
+import {
+  LotteryBinsDAL,
+  type LotteryBin,
+  type CreateLotteryBinData,
+} from '../../../src/main/dal/lottery-bins.dal';
 
 // Mock database service
 const mockPrepare = vi.fn();
@@ -183,7 +187,7 @@ describe('Lottery Bins DAL', () => {
       const bins = dal.findActiveByStore('store-1');
 
       expect(bins.length).toBe(2);
-      expect(bins.every(b => b.store_id === 'store-1')).toBe(true);
+      expect(bins.every((b) => b.store_id === 'store-1')).toBe(true);
     });
 
     it('should exclude inactive bins', () => {
@@ -233,7 +237,7 @@ describe('Lottery Bins DAL', () => {
       const bins = dal.findAllByStore('store-1');
 
       expect(bins.length).toBe(2);
-      expect(bins.some(b => b.status === 'INACTIVE')).toBe(true);
+      expect(bins.some((b) => b.status === 'INACTIVE')).toBe(true);
     });
   });
 

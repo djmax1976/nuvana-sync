@@ -8,17 +8,17 @@
  * accessed through IPC handlers in the main process.
  */
 
-import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 
 /**
  * Company status values
  */
-export type CompanyStatus = "ACTIVE" | "INACTIVE" | "SUSPENDED" | "PENDING";
+export type CompanyStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED' | 'PENDING';
 
 /**
  * Store status values
  */
-export type StoreStatus = "ACTIVE" | "INACTIVE" | "CLOSED";
+export type StoreStatus = 'ACTIVE' | 'INACTIVE' | 'CLOSED';
 
 /**
  * Owned company entity for client dashboard
@@ -127,7 +127,9 @@ export async function getClientDashboard(): Promise<ClientDashboardResponse> {
   if (hasIPC) {
     // In Electron, we call IPC to get dashboard stats and store info
     const [stats, storeInfoResult] = await Promise.all([
-      window.electronAPI.invoke<{ activeShifts?: number; todayTransactions?: number }>('dashboard:getStats'),
+      window.electronAPI.invoke<{ activeShifts?: number; todayTransactions?: number }>(
+        'dashboard:getStats'
+      ),
       window.electronAPI.invoke<{
         store_id?: string;
         company_id?: string;
@@ -141,16 +143,20 @@ export async function getClientDashboard(): Promise<ClientDashboardResponse> {
     // Build stores array from store info (handler returns snake_case fields)
     // Check for error response (has 'error' property) or missing store_id
     const storeInfo = storeInfoResult?.error ? null : storeInfoResult;
-    const stores: OwnedStore[] = storeInfo?.store_id ? [{
-      store_id: storeInfo.store_id,
-      company_id: storeInfo.company_id || 'local-company',
-      company_name: 'Local Company',
-      name: storeInfo.name || 'Store',
-      location_json: null,
-      timezone: storeInfo.timezone || 'America/Chicago',
-      status: (storeInfo.status as StoreStatus) || 'ACTIVE',
-      created_at: new Date().toISOString(),
-    }] : [];
+    const stores: OwnedStore[] = storeInfo?.store_id
+      ? [
+          {
+            store_id: storeInfo.store_id,
+            company_id: storeInfo.company_id || 'local-company',
+            company_name: 'Local Company',
+            name: storeInfo.name || 'Store',
+            location_json: null,
+            timezone: storeInfo.timezone || 'America/Chicago',
+            status: (storeInfo.status as StoreStatus) || 'ACTIVE',
+            created_at: new Date().toISOString(),
+          },
+        ]
+      : [];
 
     return {
       user: {
@@ -178,16 +184,18 @@ export async function getClientDashboard(): Promise<ClientDashboardResponse> {
       name: 'Development User',
     },
     companies: [],
-    stores: [{
-      store_id: 'dev-store',
-      company_id: 'dev-company',
-      company_name: 'Development Company',
-      name: 'Development Store',
-      location_json: null,
-      timezone: 'America/Chicago',
-      status: 'ACTIVE',
-      created_at: new Date().toISOString(),
-    }],
+    stores: [
+      {
+        store_id: 'dev-store',
+        company_id: 'dev-company',
+        company_name: 'Development Company',
+        name: 'Development Store',
+        location_json: null,
+        timezone: 'America/Chicago',
+        status: 'ACTIVE',
+        created_at: new Date().toISOString(),
+      },
+    ],
     stats: {
       total_companies: 1,
       total_stores: 1,
@@ -203,11 +211,9 @@ export async function getClientDashboard(): Promise<ClientDashboardResponse> {
  * @param companyId - Company UUID (must be owned by current user)
  * @returns List of stores for the company
  */
-export async function getOwnedCompanyStores(
-  companyId: string,
-): Promise<OwnedStore[]> {
+export async function getOwnedCompanyStores(companyId: string): Promise<OwnedStore[]> {
   if (!companyId) {
-    throw new Error("Company ID is required");
+    throw new Error('Company ID is required');
   }
 
   // Return empty array for Electron standalone app
@@ -219,11 +225,9 @@ export async function getOwnedCompanyStores(
  * @param companyId - Company UUID (must be owned by current user)
  * @returns Company details
  */
-export async function getOwnedCompany(
-  companyId: string,
-): Promise<OwnedCompany> {
+export async function getOwnedCompany(companyId: string): Promise<OwnedCompany> {
   if (!companyId) {
-    throw new Error("Company ID is required");
+    throw new Error('Company ID is required');
   }
 
   // Return mock company for Electron standalone app
@@ -244,7 +248,7 @@ export async function getOwnedCompany(
  */
 export async function getOwnedStore(storeId: string): Promise<OwnedStore> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   // Return mock store for Electron standalone app
@@ -274,7 +278,7 @@ export async function getDashboardSales(): Promise<SalesDataResponse> {
     const weeklySales = await window.electronAPI.invoke('dashboard:getWeeklySales');
 
     return {
-      today: todaySales as TodaySalesData || {
+      today: (todaySales as TodaySalesData) || {
         fuel_sales: 0,
         fuel_gallons: 0,
         net_sales: 0,
@@ -293,13 +297,13 @@ export async function getDashboardSales(): Promise<SalesDataResponse> {
   // Mock data for development
   return {
     today: {
-      fuel_sales: 2450.50,
+      fuel_sales: 2450.5,
       fuel_gallons: 785.5,
       net_sales: 1847.25,
-      gross_sales: 1956.80,
+      gross_sales: 1956.8,
       tax_collected: 109.55,
-      lottery_sales: 425.00,
-      lottery_net: 34.00,
+      lottery_sales: 425.0,
+      lottery_net: 34.0,
       transaction_count: 78,
       avg_transaction: 24.95,
       business_date: new Date().toISOString().split('T')[0],
@@ -312,14 +316,14 @@ export async function getDashboardSales(): Promise<SalesDataResponse> {
  * Query key factory for client dashboard queries
  */
 export const clientDashboardKeys = {
-  all: ["client-dashboard"] as const,
-  dashboard: () => [...clientDashboardKeys.all, "dashboard"] as const,
-  sales: () => [...clientDashboardKeys.all, "sales"] as const,
-  companies: () => [...clientDashboardKeys.all, "companies"] as const,
+  all: ['client-dashboard'] as const,
+  dashboard: () => [...clientDashboardKeys.all, 'dashboard'] as const,
+  sales: () => [...clientDashboardKeys.all, 'sales'] as const,
+  companies: () => [...clientDashboardKeys.all, 'companies'] as const,
   company: (id: string) => [...clientDashboardKeys.companies(), id] as const,
-  stores: () => [...clientDashboardKeys.all, "stores"] as const,
+  stores: () => [...clientDashboardKeys.all, 'stores'] as const,
   companyStores: (companyId: string) =>
-    [...clientDashboardKeys.stores(), "company", companyId] as const,
+    [...clientDashboardKeys.stores(), 'company', companyId] as const,
   store: (id: string) => [...clientDashboardKeys.stores(), id] as const,
 };
 
@@ -338,7 +342,7 @@ export function useClientDashboard(options?: { enabled?: boolean }) {
     queryKey: clientDashboardKeys.dashboard(),
     queryFn: getClientDashboard,
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false, // Disable for Electron
     staleTime: 60000, // Consider data fresh for 1 minute
     refetchInterval: DASHBOARD_REFETCH_INTERVAL, // Auto-refresh every 5 minutes
@@ -357,7 +361,7 @@ export function useDashboardSales(options?: { enabled?: boolean }) {
     queryKey: clientDashboardKeys.sales(),
     queryFn: getDashboardSales,
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false, // Disable for Electron
     staleTime: 60000, // Consider data fresh for 1 minute
     refetchInterval: DASHBOARD_REFETCH_INTERVAL, // Auto-refresh every 5 minutes
@@ -372,13 +376,13 @@ export function useDashboardSales(options?: { enabled?: boolean }) {
  */
 export function useOwnedCompanyStores(
   companyId: string | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: clientDashboardKeys.companyStores(companyId || ""),
+    queryKey: clientDashboardKeys.companyStores(companyId || ''),
     queryFn: () => getOwnedCompanyStores(companyId!),
     enabled: options?.enabled !== false && !!companyId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: false, // Disable for Electron
   });
 }
@@ -389,12 +393,9 @@ export function useOwnedCompanyStores(
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with company data
  */
-export function useOwnedCompany(
-  companyId: string | undefined,
-  options?: { enabled?: boolean },
-) {
+export function useOwnedCompany(companyId: string | undefined, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: clientDashboardKeys.company(companyId || ""),
+    queryKey: clientDashboardKeys.company(companyId || ''),
     queryFn: () => getOwnedCompany(companyId!),
     enabled: options?.enabled !== false && !!companyId,
   });
@@ -406,12 +407,9 @@ export function useOwnedCompany(
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with store data
  */
-export function useOwnedStore(
-  storeId: string | undefined,
-  options?: { enabled?: boolean },
-) {
+export function useOwnedStore(storeId: string | undefined, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: clientDashboardKeys.store(storeId || ""),
+    queryKey: clientDashboardKeys.store(storeId || ''),
     queryFn: () => getOwnedStore(storeId!),
     enabled: options?.enabled !== false && !!storeId,
   });

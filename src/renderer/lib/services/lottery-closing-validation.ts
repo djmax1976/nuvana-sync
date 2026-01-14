@@ -16,7 +16,7 @@
  * Tests will fail until this service is fully implemented.
  */
 
-import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
+import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 
 /**
  * Validation result structure
@@ -56,13 +56,13 @@ export interface BinValidationData {
  */
 export async function validateManualEntryEnding(
   endingNumber: string,
-  binData: { starting_serial: string; serial_end: string },
+  binData: { starting_serial: string; serial_end: string }
 ): Promise<ValidationResult> {
   // INPUT_VALIDATION: Validate format before processing
-  if (!endingNumber || typeof endingNumber !== "string") {
+  if (!endingNumber || typeof endingNumber !== 'string') {
     return {
       valid: false,
-      error: "Invalid ending number format",
+      error: 'Invalid ending number format',
     };
   }
 
@@ -70,19 +70,19 @@ export async function validateManualEntryEnding(
   if (!/^\d{3}$/.test(endingNumber)) {
     return {
       valid: false,
-      error: "Ending number must be exactly 3 digits",
+      error: 'Ending number must be exactly 3 digits',
     };
   }
 
   // INPUT_VALIDATION: Validate binData structure
   if (
     !binData ||
-    typeof binData.starting_serial !== "string" ||
-    typeof binData.serial_end !== "string"
+    typeof binData.starting_serial !== 'string' ||
+    typeof binData.serial_end !== 'string'
   ) {
     return {
       valid: false,
-      error: "Invalid bin validation data",
+      error: 'Invalid bin validation data',
     };
   }
 
@@ -94,7 +94,7 @@ export async function validateManualEntryEnding(
     if (isNaN(endingNum) || isNaN(startingNum)) {
       return {
         valid: false,
-        error: "Invalid serial number format",
+        error: 'Invalid serial number format',
       };
     }
 
@@ -111,7 +111,7 @@ export async function validateManualEntryEnding(
     if (isNaN(maxNum)) {
       return {
         valid: false,
-        error: "Invalid pack maximum serial",
+        error: 'Invalid pack maximum serial',
       };
     }
 
@@ -130,7 +130,7 @@ export async function validateManualEntryEnding(
     // ERROR_HANDLING: Return generic error, don't leak implementation details
     return {
       valid: false,
-      error: "Invalid ending number format",
+      error: 'Invalid ending number format',
     };
   }
 }
@@ -156,13 +156,13 @@ export async function validateManualEntryEnding(
  */
 export async function validateEndingSerial(
   scannedSerial: string,
-  binData: BinValidationData,
+  binData: BinValidationData
 ): Promise<ValidationResult> {
   // INPUT_VALIDATION: Validate serial format before processing
-  if (!scannedSerial || typeof scannedSerial !== "string") {
+  if (!scannedSerial || typeof scannedSerial !== 'string') {
     return {
       valid: false,
-      error: "Invalid serial number format",
+      error: 'Invalid serial number format',
     };
   }
 
@@ -170,20 +170,20 @@ export async function validateEndingSerial(
   if (!/^\d{24}$/.test(scannedSerial)) {
     return {
       valid: false,
-      error: "Serial number must be exactly 24 digits",
+      error: 'Serial number must be exactly 24 digits',
     };
   }
 
   // INPUT_VALIDATION: Validate binData structure
   if (
     !binData ||
-    typeof binData.pack_number !== "string" ||
-    typeof binData.starting_serial !== "string" ||
-    typeof binData.serial_end !== "string"
+    typeof binData.pack_number !== 'string' ||
+    typeof binData.starting_serial !== 'string' ||
+    typeof binData.serial_end !== 'string'
   ) {
     return {
       valid: false,
-      error: "Invalid bin validation data",
+      error: 'Invalid bin validation data',
     };
   }
 
@@ -206,7 +206,7 @@ export async function validateEndingSerial(
     if (isNaN(endingNum) || isNaN(startingNum)) {
       return {
         valid: false,
-        error: "Invalid serial number format",
+        error: 'Invalid serial number format',
       };
     }
 
@@ -223,7 +223,7 @@ export async function validateEndingSerial(
     if (isNaN(maxNum)) {
       return {
         valid: false,
-        error: "Invalid pack maximum serial",
+        error: 'Invalid pack maximum serial',
       };
     }
 
@@ -244,7 +244,7 @@ export async function validateEndingSerial(
     // parseSerializedNumber throws InvalidSerialNumberError, but we return generic message
     return {
       valid: false,
-      error: "Invalid serial number format",
+      error: 'Invalid serial number format',
     };
   }
 }

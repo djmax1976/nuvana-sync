@@ -10,13 +10,8 @@
  * - Credential handling (httpOnly cookies)
  */
 
-import {
-  useQuery,
-  useMutation,
-  useQueryClient,
-  useQueries,
-} from "@tanstack/react-query";
-import apiClient, { extractData, ApiResponse } from "./client";
+import { useQuery, useMutation, useQueryClient, useQueries } from '@tanstack/react-query';
+import apiClient, { extractData, ApiResponse } from './client';
 
 /**
  * Cashier entity type
@@ -82,21 +77,15 @@ export interface UpdateCashierInput {
  */
 export async function getCashiers(
   storeId: string,
-  filters?: { is_active?: boolean },
+  filters?: { is_active?: boolean }
 ): Promise<Cashier[]> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
-  const response = await apiClient.get<ApiResponse<Cashier[]>>(
-    `/api/stores/${storeId}/cashiers`,
-    {
-      params:
-        filters?.is_active !== undefined
-          ? { is_active: filters.is_active }
-          : undefined,
-    },
-  );
+  const response = await apiClient.get<ApiResponse<Cashier[]>>(`/api/stores/${storeId}/cashiers`, {
+    params: filters?.is_active !== undefined ? { is_active: filters.is_active } : undefined,
+  });
   return extractData(response);
 }
 
@@ -106,19 +95,16 @@ export async function getCashiers(
  * @param cashierId - Cashier UUID
  * @returns Cashier data
  */
-export async function getCashierById(
-  storeId: string,
-  cashierId: string,
-): Promise<Cashier> {
+export async function getCashierById(storeId: string, cashierId: string): Promise<Cashier> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
   if (!cashierId) {
-    throw new Error("Cashier ID is required");
+    throw new Error('Cashier ID is required');
   }
 
   const response = await apiClient.get<ApiResponse<Cashier>>(
-    `/api/stores/${storeId}/cashiers/${cashierId}`,
+    `/api/stores/${storeId}/cashiers/${cashierId}`
   );
   return extractData(response);
 }
@@ -129,17 +115,14 @@ export async function getCashierById(
  * @param data - Cashier data (name, pin, hired_on, termination_date)
  * @returns Created cashier data
  */
-export async function createCashier(
-  storeId: string,
-  data: CreateCashierInput,
-): Promise<Cashier> {
+export async function createCashier(storeId: string, data: CreateCashierInput): Promise<Cashier> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   const response = await apiClient.post<ApiResponse<Cashier>>(
     `/api/stores/${storeId}/cashiers`,
-    data,
+    data
   );
   return extractData(response);
 }
@@ -154,18 +137,18 @@ export async function createCashier(
 export async function updateCashier(
   storeId: string,
   cashierId: string,
-  data: UpdateCashierInput,
+  data: UpdateCashierInput
 ): Promise<Cashier> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
   if (!cashierId) {
-    throw new Error("Cashier ID is required");
+    throw new Error('Cashier ID is required');
   }
 
   const response = await apiClient.put<ApiResponse<Cashier>>(
     `/api/stores/${storeId}/cashiers/${cashierId}`,
-    data,
+    data
   );
   return extractData(response);
 }
@@ -175,15 +158,12 @@ export async function updateCashier(
  * @param storeId - Store UUID
  * @param cashierId - Cashier UUID
  */
-export async function deleteCashier(
-  storeId: string,
-  cashierId: string,
-): Promise<void> {
+export async function deleteCashier(storeId: string, cashierId: string): Promise<void> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
   if (!cashierId) {
-    throw new Error("Cashier ID is required");
+    throw new Error('Cashier ID is required');
   }
 
   await apiClient.delete(`/api/stores/${storeId}/cashiers/${cashierId}`);
@@ -206,18 +186,18 @@ export async function authenticateCashier(
   storeId: string,
   identifier: { name?: string; employee_id?: string },
   pin: string,
-  terminalId?: string,
+  terminalId?: string
 ): Promise<CashierAuthResult> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!identifier.name && !identifier.employee_id) {
-    throw new Error("Either name or employee_id must be provided");
+    throw new Error('Either name or employee_id must be provided');
   }
 
   if (!pin || !/^\d{4}$/.test(pin)) {
-    throw new Error("PIN must be exactly 4 numeric digits");
+    throw new Error('PIN must be exactly 4 numeric digits');
   }
 
   const response = await apiClient.post<ApiResponse<CashierAuthResult>>(
@@ -227,7 +207,7 @@ export async function authenticateCashier(
       employee_id: identifier.employee_id,
       pin,
       terminal_id: terminalId,
-    },
+    }
   );
   return extractData(response);
 }
@@ -236,11 +216,11 @@ export async function authenticateCashier(
  * Query keys for cashier queries
  */
 export const cashierKeys = {
-  all: () => ["cashiers"] as const,
-  lists: () => [...cashierKeys.all(), "list"] as const,
+  all: () => ['cashiers'] as const,
+  lists: () => [...cashierKeys.all(), 'list'] as const,
   list: (storeId: string, filters?: { is_active?: boolean }) =>
     [...cashierKeys.lists(), storeId, filters] as const,
-  details: () => [...cashierKeys.all(), "detail"] as const,
+  details: () => [...cashierKeys.all(), 'detail'] as const,
   detail: (storeId: string, cashierId: string) =>
     [...cashierKeys.details(), storeId, cashierId] as const,
 };
@@ -255,13 +235,13 @@ export const cashierKeys = {
 export function useCashiers(
   storeId: string | undefined,
   filters?: { is_active?: boolean },
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: cashierKeys.list(storeId || "", filters),
+    queryKey: cashierKeys.list(storeId || '', filters),
     queryFn: () => getCashiers(storeId!, filters),
     enabled: options?.enabled !== false && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
 }
@@ -287,14 +267,14 @@ export function useCashiersMultiStore(
   storeIds: string[],
   storeNameMap: Map<string, string>,
   filters?: { is_active?: boolean },
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   const queries = useQueries({
     queries: storeIds.map((storeId) => ({
       queryKey: cashierKeys.list(storeId, filters),
       queryFn: () => getCashiers(storeId, filters),
       enabled: options?.enabled !== false && storeIds.length > 0,
-      refetchOnMount: "always" as const,
+      refetchOnMount: 'always' as const,
       refetchOnWindowFocus: true,
     })),
   });
@@ -310,7 +290,7 @@ export function useCashiersMultiStore(
   queries.forEach((query, index) => {
     const storeId = storeIds.at(index);
     if (!query?.data || !storeId) return;
-    const storeName = storeNameMap.get(storeId) || "Unknown Store";
+    const storeName = storeNameMap.get(storeId) || 'Unknown Store';
     for (const cashier of query.data) {
       data.push({
         ...cashier,
@@ -370,10 +350,10 @@ export function useAuthenticateCashier() {
 export function useCashier(
   storeId: string | undefined,
   cashierId: string | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: cashierKeys.detail(storeId || "", cashierId || ""),
+    queryKey: cashierKeys.detail(storeId || '', cashierId || ''),
     queryFn: () => getCashierById(storeId!, cashierId!),
     enabled: options?.enabled !== false && !!storeId && !!cashierId,
   });
@@ -387,20 +367,15 @@ export function useCreateCashier() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      data,
-    }: {
-      storeId: string;
-      data: CreateCashierInput;
-    }) => createCashier(storeId, data),
+    mutationFn: ({ storeId, data }: { storeId: string; data: CreateCashierInput }) =>
+      createCashier(storeId, data),
     onSuccess: (_, variables) => {
       // Invalidate ALL cashier list queries for this store (regardless of filters)
       // Using partial key match to invalidate both filtered and unfiltered queries
       // refetchType: "all" ensures queries refetch even when navigating between pages
       queryClient.invalidateQueries({
-        queryKey: ["cashiers", "list", variables.storeId],
-        refetchType: "all",
+        queryKey: ['cashiers', 'list', variables.storeId],
+        refetchType: 'all',
       });
     },
   });
@@ -427,12 +402,12 @@ export function useUpdateCashier() {
       // Invalidate ALL cashier list queries for this store (regardless of filters)
       // refetchType: "all" ensures queries refetch even when navigating between pages
       queryClient.invalidateQueries({
-        queryKey: ["cashiers", "list", variables.storeId],
-        refetchType: "all",
+        queryKey: ['cashiers', 'list', variables.storeId],
+        refetchType: 'all',
       });
       queryClient.invalidateQueries({
         queryKey: cashierKeys.detail(variables.storeId, variables.cashierId),
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -446,19 +421,14 @@ export function useDeleteCashier() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      cashierId,
-    }: {
-      storeId: string;
-      cashierId: string;
-    }) => deleteCashier(storeId, cashierId),
+    mutationFn: ({ storeId, cashierId }: { storeId: string; cashierId: string }) =>
+      deleteCashier(storeId, cashierId),
     onSuccess: (_, variables) => {
       // Invalidate ALL cashier list queries for this store (regardless of filters)
       // refetchType: "all" ensures queries refetch even when navigating between pages
       queryClient.invalidateQueries({
-        queryKey: ["cashiers", "list", variables.storeId],
-        refetchType: "all",
+        queryKey: ['cashiers', 'list', variables.storeId],
+        refetchType: 'all',
       });
     },
   });

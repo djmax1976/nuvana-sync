@@ -5,11 +5,11 @@
  * Story: MyStore Dashboard Redesign
  */
 
-export { StatsGrid } from "./StatsGrid";
-export { ExpectedDeliveries } from "./ExpectedDeliveries";
-export { RecentlyActivatedPacks } from "./RecentlyActivatedPacks";
-export { SalesByDepartment } from "./SalesByDepartment";
-export { RecentTransactions } from "./RecentTransactions";
-export { RecentActivity } from "./RecentActivity";
-export { RecentVoids } from "./RecentVoids";
-export { RecentShiftHistory } from "./RecentShiftHistory";
+export { StatsGrid } from './StatsGrid';
+export { ExpectedDeliveries } from './ExpectedDeliveries';
+export { RecentlyActivatedPacks } from './RecentlyActivatedPacks';
+export { SalesByDepartment } from './SalesByDepartment';
+export { RecentTransactions } from './RecentTransactions';
+export { RecentActivity } from './RecentActivity';
+export { RecentVoids } from './RecentVoids';
+export { RecentShiftHistory } from './RecentShiftHistory';

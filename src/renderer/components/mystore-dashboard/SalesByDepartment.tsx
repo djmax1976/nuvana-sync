@@ -1,10 +1,7 @@
-import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
-import { PieChart, Pie, Cell, ResponsiveContainer } from "recharts";
-import {
-  AccessibleChart,
-  generateChartDescription,
-} from "../ui/accessible-chart";
-import { sanitizeForDisplay, formatCurrency } from "../../lib/utils/security";
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { AccessibleChart, generateChartDescription } from '../ui/accessible-chart';
+import { sanitizeForDisplay, formatCurrency } from '../../lib/utils/security';
 
 /**
  * SalesByDepartment Component
@@ -21,11 +18,11 @@ import { sanitizeForDisplay, formatCurrency } from "../../lib/utils/security";
 
 // Sample sales data - will be replaced with real API data
 const salesData = [
-  { name: "Fuel", value: 3245, color: "#0066FF" },
-  { name: "Beverages", value: 1892, color: "#00C853" },
-  { name: "Lottery", value: 1847, color: "#FF9800" },
-  { name: "Snacks", value: 945, color: "#9C27B0" },
-  { name: "Other", value: 523, color: "#e5e7eb" },
+  { name: 'Fuel', value: 3245, color: '#0066FF' },
+  { name: 'Beverages', value: 1892, color: '#00C853' },
+  { name: 'Lottery', value: 1847, color: '#FF9800' },
+  { name: 'Snacks', value: 945, color: '#9C27B0' },
+  { name: 'Other', value: 523, color: '#e5e7eb' },
 ];
 
 const total = salesData.reduce((sum, item) => sum + item.value, 0);
@@ -33,8 +30,8 @@ const total = salesData.reduce((sum, item) => sum + item.value, 0);
 // Generate accessible description for the donut chart
 const chartDescription = generateChartDescription(
   salesData.map((d) => ({ name: d.name, value: d.value })),
-  "donut",
-  (v) => formatCurrency(v),
+  'donut',
+  (v) => formatCurrency(v)
 );
 
 export function SalesByDepartment() {
@@ -46,10 +43,7 @@ export function SalesByDepartment() {
       aria-labelledby="sales-by-department-title"
     >
       <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle
-          id="sales-by-department-title"
-          className="text-base font-semibold"
-        >
+        <CardTitle id="sales-by-department-title" className="text-base font-semibold">
           Sales
         </CardTitle>
         <select

@@ -1,4 +1,3 @@
-
 /**
  * Enhanced Pack Activation Form Component (Batch Mode)
  * Form for activating multiple lottery packs in a single session
@@ -26,9 +25,9 @@
  * - FE-005: UI_SECURITY - No secrets exposed in UI
  */
 
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -36,10 +35,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import { ScrollArea } from "@/components/ui/scroll-area";
+} from '@/components/ui/dialog';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import { ScrollArea } from '@/components/ui/scroll-area';
 import {
   Loader2,
   AlertCircle,
@@ -49,33 +48,28 @@ import {
   AlertTriangle,
   Package,
   Pencil,
-} from "lucide-react";
-import { useToast } from "@/hooks/use-toast";
-import { useClientAuth } from "@/contexts/ClientAuthContext";
-import { useFullPackActivation, useLotteryDayBins } from "@/hooks/useLottery";
+} from 'lucide-react';
+import { useToast } from '@/hooks/use-toast';
+import { useClientAuth } from '@/contexts/ClientAuthContext';
+import { useFullPackActivation, useLotteryDayBins } from '@/hooks/useLottery';
 import {
   PackSearchCombobox,
   type PackSearchOption,
   type PackSearchComboboxHandle,
-} from "./PackSearchCombobox";
-import { BinSelectionModal } from "./BinSelectionModal";
+} from './PackSearchCombobox';
+import { BinSelectionModal } from './BinSelectionModal';
 import {
   LotteryAuthModal,
   type LotteryAuthResult,
   type SerialOverrideApproval,
   type MarkSoldApproval,
-} from "./LotteryAuthModal";
-import type { DayBin, FullActivatePackInput } from "@/lib/api/lottery";
+} from './LotteryAuthModal';
+import type { DayBin, FullActivatePackInput } from '@/lib/api/lottery';
 
 /**
  * Manager roles that can activate without cashier authentication
  */
-const MANAGER_ROLES = [
-  "CLIENT_OWNER",
-  "CLIENT_ADMIN",
-  "STORE_MANAGER",
-  "SYSTEM_ADMIN",
-];
+const MANAGER_ROLES = ['CLIENT_OWNER', 'CLIENT_ADMIN', 'STORE_MANAGER', 'SYSTEM_ADMIN'];
 
 /**
  * Validates that a serial number falls within the pack's valid range.
@@ -89,9 +83,9 @@ const MANAGER_ROLES = [
 function validateSerialInRange(
   serial: string,
   packSerialStart: string,
-  packSerialEnd: string,
+  packSerialEnd: string
 ): boolean {
-  if (serial === "000") {
+  if (serial === '000') {
     return true;
   }
 
@@ -104,9 +98,7 @@ function validateSerialInRange(
     const userSerialBigInt = BigInt(trimmedSerial);
     const rangeStartBigInt = BigInt(packSerialStart.trim());
     const rangeEndBigInt = BigInt(packSerialEnd.trim());
-    return (
-      userSerialBigInt >= rangeStartBigInt && userSerialBigInt <= rangeEndBigInt
-    );
+    return userSerialBigInt >= rangeStartBigInt && userSerialBigInt <= rangeEndBigInt;
   } catch {
     return false;
   }
@@ -148,7 +140,7 @@ export interface PendingActivation {
   /** Previous pack game name (for display) */
   previous_game_name?: string;
   /** Activation result - set after submission */
-  result?: "success" | "error";
+  result?: 'success' | 'error';
   /** Error message if activation failed */
   error?: string;
   /** Serial override approval info if applicable */
@@ -203,7 +195,7 @@ export function EnhancedPackActivationForm({
   // Use provided bins or fetched bins
   const bins = useMemo(
     () => dayBins || fetchedDayBins?.bins || [],
-    [dayBins, fetchedDayBins?.bins],
+    [dayBins, fetchedDayBins?.bins]
   );
 
   // ============ State ============
@@ -214,18 +206,13 @@ export function EnhancedPackActivationForm({
 
   // Serial override modal state (for cashier needing manager approval)
   const [showSerialOverrideModal, setShowSerialOverrideModal] = useState(false);
-  const [pendingSerialEditId, setPendingSerialEditId] = useState<string | null>(
-    null,
-  );
+  const [pendingSerialEditId, setPendingSerialEditId] = useState<string | null>(null);
 
   // Pending activations list (newest first)
-  const [pendingActivations, setPendingActivations] = useState<
-    PendingActivation[]
-  >([]);
+  const [pendingActivations, setPendingActivations] = useState<PendingActivation[]>([]);
 
   // Current pack being assigned a bin (triggers bin selection modal)
-  const [currentScannedPack, setCurrentScannedPack] =
-    useState<PackSearchOption | null>(null);
+  const [currentScannedPack, setCurrentScannedPack] = useState<PackSearchOption | null>(null);
 
   // Bin selection modal state
   const [showBinModal, setShowBinModal] = useState(false);
@@ -234,11 +221,11 @@ export function EnhancedPackActivationForm({
   const [isSubmitting, setIsSubmitting] = useState(false);
 
   // Pack search query (controlled by this component - single source of truth)
-  const [packSearchQuery, setPackSearchQuery] = useState<string>("");
+  const [packSearchQuery, setPackSearchQuery] = useState<string>('');
 
   // Serial editing state: which pending item is being edited
   const [editingSerialId, setEditingSerialId] = useState<string | null>(null);
-  const [editingSerialValue, setEditingSerialValue] = useState<string>("");
+  const [editingSerialValue, setEditingSerialValue] = useState<string>('');
   const [isSerialInvalid, setIsSerialInvalid] = useState(false);
 
   // Ref for focusing the pack search input
@@ -257,13 +244,13 @@ export function EnhancedPackActivationForm({
   // Check if user can modify starting serial (requires LOTTERY_SERIAL_OVERRIDE permission)
   const canModifySerial = useMemo(() => {
     if (isManager) {
-      return permissions.includes("LOTTERY_SERIAL_OVERRIDE");
+      return permissions.includes('LOTTERY_SERIAL_OVERRIDE');
     }
-    if (authResult?.auth_type === "management" && authResult.permissions) {
-      return authResult.permissions.includes("LOTTERY_SERIAL_OVERRIDE");
+    if (authResult?.auth_type === 'management' && authResult.permissions) {
+      return authResult.permissions.includes('LOTTERY_SERIAL_OVERRIDE');
     }
-    if (authResult?.auth_type === "cashier") {
-      return permissions.includes("LOTTERY_SERIAL_OVERRIDE");
+    if (authResult?.auth_type === 'cashier') {
+      return permissions.includes('LOTTERY_SERIAL_OVERRIDE');
     }
     return false;
   }, [isManager, permissions, authResult]);
@@ -271,10 +258,10 @@ export function EnhancedPackActivationForm({
   // Check if user needs manager approval for serial change
   const needsManagerApprovalForSerial = useMemo(() => {
     if (isManager) return false;
-    if (authResult?.auth_type === "management" && authResult.permissions) {
-      return !authResult.permissions.includes("LOTTERY_SERIAL_OVERRIDE");
+    if (authResult?.auth_type === 'management' && authResult.permissions) {
+      return !authResult.permissions.includes('LOTTERY_SERIAL_OVERRIDE');
     }
-    if (authResult?.auth_type === "cashier") {
+    if (authResult?.auth_type === 'cashier') {
       return true;
     }
     return true;
@@ -283,40 +270,39 @@ export function EnhancedPackActivationForm({
   // Get current user info for mark sold tracking (no permission check needed)
   const currentUserForMarkSold = useMemo(() => {
     return {
-      id: user?.id || authResult?.cashier_id || "",
-      name: user?.name || authResult?.cashier_name || "Unknown",
+      id: user?.id || authResult?.cashier_id || '',
+      name: user?.name || authResult?.cashier_name || 'Unknown',
     };
   }, [user?.id, user?.name, authResult?.cashier_id, authResult?.cashier_name]);
 
   // Get bin IDs already in pending list (for warnings in bin modal)
   const pendingBinIds = useMemo(
     () => pendingActivations.map((p) => p.bin_id),
-    [pendingActivations],
+    [pendingActivations]
   );
 
   // Get pack IDs already in pending list (for duplicate check)
   const pendingPackIds = useMemo(
     () => new Set(pendingActivations.map((p) => p.pack_id)),
-    [pendingActivations],
+    [pendingActivations]
   );
 
   // Count of pending packs
   const pendingCount = pendingActivations.length;
 
   // Check if any packs failed during submission
-  const hasFailedPacks = pendingActivations.some((p) => p.result === "error");
+  const hasFailedPacks = pendingActivations.some((p) => p.result === 'error');
 
   // Check if all packs succeeded
   const allSucceeded =
-    pendingActivations.length > 0 &&
-    pendingActivations.every((p) => p.result === "success");
+    pendingActivations.length > 0 && pendingActivations.every((p) => p.result === 'success');
 
   // Get the user ID to use for activation
   const activatedByUserId = useMemo(() => {
-    if (authResult?.auth_type === "management") {
+    if (authResult?.auth_type === 'management') {
       return authResult.cashier_id;
     }
-    return user?.id || authResult?.cashier_id || "";
+    return user?.id || authResult?.cashier_id || '';
   }, [authResult, user?.id]);
 
   // ============ Effects ============
@@ -331,10 +317,10 @@ export function EnhancedPackActivationForm({
       setCurrentScannedPack(null);
       setShowBinModal(false);
       setIsSubmitting(false);
-      setPackSearchQuery("");
+      setPackSearchQuery('');
       setAuthResult(null);
       setEditingSerialId(null);
-      setEditingSerialValue("");
+      setEditingSerialValue('');
       setIsSerialInvalid(false);
       setPendingSerialEditId(null);
     }
@@ -361,11 +347,11 @@ export function EnhancedPackActivationForm({
     (result: LotteryAuthResult) => {
       setAuthResult(result);
       toast({
-        title: "Authenticated",
+        title: 'Authenticated',
         description: `Authenticated as ${result.cashier_name}`,
       });
     },
-    [toast],
+    [toast]
   );
 
   /**
@@ -383,12 +369,12 @@ export function EnhancedPackActivationForm({
       // Check if pack is already in pending list
       if (pendingPackIds.has(pack.pack_id)) {
         toast({
-          title: "Pack Already Added",
+          title: 'Pack Already Added',
           description: `Pack #${pack.pack_number} is already in the pending list.`,
-          variant: "destructive",
+          variant: 'destructive',
         });
         // Clear search and refocus for next scan
-        setPackSearchQuery("");
+        setPackSearchQuery('');
         setTimeout(() => {
           packSearchRef.current?.focus();
         }, 100);
@@ -400,13 +386,13 @@ export function EnhancedPackActivationForm({
       // Previously, clearing only happened after bin modal closed, allowing
       // scanner input to append to stale display text.
       // MCP FE-001: STATE_MANAGEMENT - Clear state immediately on selection
-      setPackSearchQuery("");
+      setPackSearchQuery('');
 
       // Set current pack and open bin selection modal
       setCurrentScannedPack(pack);
       setShowBinModal(true);
     },
-    [pendingPackIds, toast],
+    [pendingPackIds, toast]
   );
 
   /**
@@ -438,7 +424,7 @@ export function EnhancedPackActivationForm({
         game_price: currentScannedPack.game_price,
         serial_start: currentScannedPack.serial_start,
         serial_end: currentScannedPack.serial_end,
-        custom_serial_start: "000", // Default
+        custom_serial_start: '000', // Default
         bin_id: binId,
         bin_number: bin.bin_number,
         bin_name: bin.name,
@@ -452,7 +438,7 @@ export function EnhancedPackActivationForm({
 
       // Clear current pack and search query (parent owns this state)
       setCurrentScannedPack(null);
-      setPackSearchQuery("");
+      setPackSearchQuery('');
 
       // Refocus the search input for next scan
       setTimeout(() => {
@@ -461,11 +447,11 @@ export function EnhancedPackActivationForm({
 
       // Toast confirmation
       toast({
-        title: "Pack Added",
+        title: 'Pack Added',
         description: `${currentScannedPack.game_name} #${currentScannedPack.pack_number} → Bin ${bin.bin_number}`,
       });
     },
-    [currentScannedPack, toast],
+    [currentScannedPack, toast]
   );
 
   /**
@@ -495,7 +481,7 @@ export function EnhancedPackActivationForm({
         setShowSerialOverrideModal(true);
       }
     },
-    [pendingActivations, canModifySerial, needsManagerApprovalForSerial],
+    [pendingActivations, canModifySerial, needsManagerApprovalForSerial]
   );
 
   /**
@@ -508,16 +494,12 @@ export function EnhancedPackActivationForm({
       // Store approval on the pending item
       setPendingActivations((prev) =>
         prev.map((p) =>
-          p.id === pendingSerialEditId
-            ? { ...p, serial_override_approval: approval }
-            : p,
-        ),
+          p.id === pendingSerialEditId ? { ...p, serial_override_approval: approval } : p
+        )
       );
 
       // Now enable editing
-      const pending = pendingActivations.find(
-        (p) => p.id === pendingSerialEditId,
-      );
+      const pending = pendingActivations.find((p) => p.id === pendingSerialEditId);
       if (pending) {
         setEditingSerialId(pendingSerialEditId);
         setEditingSerialValue(pending.custom_serial_start);
@@ -527,11 +509,11 @@ export function EnhancedPackActivationForm({
       setPendingSerialEditId(null);
 
       toast({
-        title: "Serial Override Approved",
+        title: 'Serial Override Approved',
         description: `Approved by ${approval.approver_name}. You can now change the starting serial.`,
       });
     },
-    [pendingSerialEditId, pendingActivations, toast],
+    [pendingSerialEditId, pendingActivations, toast]
   );
 
   /**
@@ -547,13 +529,11 @@ export function EnhancedPackActivationForm({
       // If already marked as sold, toggle it off
       if (pending.mark_sold_approval) {
         setPendingActivations((prev) =>
-          prev.map((p) =>
-            p.id === pendingId ? { ...p, mark_sold_approval: undefined } : p,
-          ),
+          prev.map((p) => (p.id === pendingId ? { ...p, mark_sold_approval: undefined } : p))
         );
         toast({
-          title: "Pack Sold Removed",
-          description: "Pack will be activated as normal.",
+          title: 'Pack Sold Removed',
+          description: 'Pack will be activated as normal.',
         });
         return;
       }
@@ -566,16 +546,14 @@ export function EnhancedPackActivationForm({
         has_permission: true,
       };
       setPendingActivations((prev) =>
-        prev.map((p) =>
-          p.id === pendingId ? { ...p, mark_sold_approval: approval } : p,
-        ),
+        prev.map((p) => (p.id === pendingId ? { ...p, mark_sold_approval: approval } : p))
       );
       toast({
-        title: "Pack Marked as Sold",
-        description: "Pack will be activated and marked as pre-sold.",
+        title: 'Pack Marked as Sold',
+        description: 'Pack will be activated and marked as pre-sold.',
       });
     },
-    [pendingActivations, currentUserForMarkSold, toast],
+    [pendingActivations, currentUserForMarkSold, toast]
   );
 
   /**
@@ -587,18 +565,14 @@ export function EnhancedPackActivationForm({
 
       // Find the pack being edited
       const pending = pendingActivations.find((p) => p.id === editingSerialId);
-      if (pending && value !== "000") {
-        const isValid = validateSerialInRange(
-          value,
-          pending.serial_start,
-          pending.serial_end,
-        );
+      if (pending && value !== '000') {
+        const isValid = validateSerialInRange(value, pending.serial_start, pending.serial_end);
         setIsSerialInvalid(!isValid);
       } else {
         setIsSerialInvalid(false);
       }
     },
-    [pendingActivations, editingSerialId],
+    [pendingActivations, editingSerialId]
   );
 
   /**
@@ -615,14 +589,12 @@ export function EnhancedPackActivationForm({
 
     setPendingActivations((prev) =>
       prev.map((p) =>
-        p.id === editingSerialId
-          ? { ...p, custom_serial_start: editingSerialValue }
-          : p,
-      ),
+        p.id === editingSerialId ? { ...p, custom_serial_start: editingSerialValue } : p
+      )
     );
 
     setEditingSerialId(null);
-    setEditingSerialValue("");
+    setEditingSerialValue('');
     setIsSerialInvalid(false);
   }, [editingSerialId, editingSerialValue, isSerialInvalid]);
 
@@ -631,7 +603,7 @@ export function EnhancedPackActivationForm({
    */
   const handleCancelSerialEdit = useCallback(() => {
     setEditingSerialId(null);
-    setEditingSerialValue("");
+    setEditingSerialValue('');
     setIsSerialInvalid(false);
   }, []);
 
@@ -654,7 +626,7 @@ export function EnhancedPackActivationForm({
     // Process packs sequentially
     for (const pending of pendingActivations) {
       // Skip already processed packs (for retry scenario)
-      if (pending.result === "success") {
+      if (pending.result === 'success') {
         results.push({ id: pending.id, success: true });
         continue;
       }
@@ -685,23 +657,18 @@ export function EnhancedPackActivationForm({
 
         // Update the pending item with success status
         setPendingActivations((prev) =>
-          prev.map((p) =>
-            p.id === pending.id ? { ...p, result: "success" } : p,
-          ),
+          prev.map((p) => (p.id === pending.id ? { ...p, result: 'success' } : p))
         );
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Failed to activate pack";
+        const errorMessage = error instanceof Error ? error.message : 'Failed to activate pack';
 
         results.push({ id: pending.id, success: false, error: errorMessage });
 
         // Update the pending item with error status
         setPendingActivations((prev) =>
           prev.map((p) =>
-            p.id === pending.id
-              ? { ...p, result: "error", error: errorMessage }
-              : p,
-          ),
+            p.id === pending.id ? { ...p, result: 'error', error: errorMessage } : p
+          )
         );
       }
     }
@@ -715,8 +682,8 @@ export function EnhancedPackActivationForm({
     if (failureCount === 0) {
       // All succeeded
       toast({
-        title: "Packs Activated",
-        description: `Successfully activated ${successCount} pack${successCount !== 1 ? "s" : ""}.`,
+        title: 'Packs Activated',
+        description: `Successfully activated ${successCount} pack${successCount !== 1 ? 's' : ''}.`,
       });
 
       // Close modal and trigger success callback
@@ -725,16 +692,16 @@ export function EnhancedPackActivationForm({
     } else if (successCount === 0) {
       // All failed
       toast({
-        title: "Activation Failed",
-        description: `Failed to activate all ${failureCount} pack${failureCount !== 1 ? "s" : ""}. See details below.`,
-        variant: "destructive",
+        title: 'Activation Failed',
+        description: `Failed to activate all ${failureCount} pack${failureCount !== 1 ? 's' : ''}. See details below.`,
+        variant: 'destructive',
       });
     } else {
       // Partial failure
       toast({
-        title: "Partial Success",
-        description: `Activated ${successCount} pack${successCount !== 1 ? "s" : ""}, ${failureCount} failed. Review and retry failed packs.`,
-        variant: "destructive",
+        title: 'Partial Success',
+        description: `Activated ${successCount} pack${successCount !== 1 ? 's' : ''}, ${failureCount} failed. Review and retry failed packs.`,
+        variant: 'destructive',
       });
     }
   }, [
@@ -754,11 +721,7 @@ export function EnhancedPackActivationForm({
    */
   const handleRetryFailed = useCallback(() => {
     setPendingActivations((prev) =>
-      prev.map((p) =>
-        p.result === "error"
-          ? { ...p, result: undefined, error: undefined }
-          : p,
-      ),
+      prev.map((p) => (p.result === 'error' ? { ...p, result: undefined, error: undefined } : p))
     );
   }, []);
 
@@ -774,16 +737,13 @@ export function EnhancedPackActivationForm({
   return (
     <>
       <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent
-          className="sm:max-w-[600px]"
-          data-testid="batch-pack-activation-form"
-        >
+        <DialogContent className="sm:max-w-[600px]" data-testid="batch-pack-activation-form">
           <DialogHeader>
             <DialogTitle>Activate Packs</DialogTitle>
             <DialogDescription>
               {!isManager && !authResult
-                ? "Please authenticate to scan and activate lottery packs."
-                : "Scan or search for packs to add them to the activation list."}
+                ? 'Please authenticate to scan and activate lottery packs.'
+                : 'Scan or search for packs to add them to the activation list.'}
             </DialogDescription>
           </DialogHeader>
 
@@ -795,8 +755,7 @@ export function EnhancedPackActivationForm({
                   <div className="flex items-center gap-2 text-sm text-green-600">
                     <CheckCircle2 className="h-4 w-4" />
                     <span>
-                      Authenticated as{" "}
-                      <strong>{authResult.cashier_name}</strong>
+                      Authenticated as <strong>{authResult.cashier_name}</strong>
                     </span>
                     <Button
                       type="button"
@@ -838,8 +797,8 @@ export function EnhancedPackActivationForm({
               label="Scan or Search Pack"
               placeholder={
                 isAuthenticated
-                  ? "Scan barcode or search by game/pack number..."
-                  : "Authenticate first to scan packs"
+                  ? 'Scan barcode or search by game/pack number...'
+                  : 'Authenticate first to scan packs'
               }
               statusFilter="RECEIVED"
               disabled={isSubmitting || !isAuthenticated}
@@ -849,9 +808,7 @@ export function EnhancedPackActivationForm({
             {/* Pending activations list */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-sm font-medium">
-                  Pending Packs ({pendingCount})
-                </label>
+                <label className="text-sm font-medium">Pending Packs ({pendingCount})</label>
                 {hasFailedPacks && (
                   <Button
                     type="button"
@@ -870,9 +827,7 @@ export function EnhancedPackActivationForm({
                 <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
                   <Package className="mx-auto mb-2 h-8 w-8 opacity-50" />
                   <p>
-                    {isAuthenticated
-                      ? "Scan a pack to get started"
-                      : "Authenticate to scan packs"}
+                    {isAuthenticated ? 'Scan a pack to get started' : 'Authenticate to scan packs'}
                   </p>
                 </div>
               ) : (
@@ -882,20 +837,18 @@ export function EnhancedPackActivationForm({
                       <div
                         key={pending.id}
                         className={`flex items-center gap-3 p-3 ${
-                          pending.result === "error"
-                            ? "bg-destructive/10"
-                            : pending.result === "success"
-                              ? "bg-green-50 dark:bg-green-950/20"
-                              : ""
+                          pending.result === 'error'
+                            ? 'bg-destructive/10'
+                            : pending.result === 'success'
+                              ? 'bg-green-50 dark:bg-green-950/20'
+                              : ''
                         }`}
                         data-testid={`pending-item-${pending.pack_id}`}
                       >
                         {/* Game name and pack number */}
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
-                            <span className="truncate font-medium">
-                              {pending.game_name}
-                            </span>
+                            <span className="truncate font-medium">{pending.game_name}</span>
                             <span className="shrink-0 text-sm text-muted-foreground">
                               #{pending.pack_number}
                             </span>
@@ -905,16 +858,14 @@ export function EnhancedPackActivationForm({
                             <div className="mt-1 flex items-center gap-2">
                               <Input
                                 value={editingSerialValue}
-                                onChange={(e) =>
-                                  handleSerialInputChange(e.target.value)
-                                }
+                                onChange={(e) => handleSerialInputChange(e.target.value)}
                                 placeholder="000"
                                 maxLength={3}
                                 inputMode="numeric"
                                 className={`h-7 w-20 text-xs ${
                                   isSerialInvalid
-                                    ? "border-destructive focus-visible:ring-destructive"
-                                    : ""
+                                    ? 'border-destructive focus-visible:ring-destructive'
+                                    : ''
                                 }`}
                                 autoFocus
                                 data-testid={`serial-input-${pending.pack_id}`}
@@ -949,16 +900,13 @@ export function EnhancedPackActivationForm({
                                     variant="ghost"
                                     size="sm"
                                     className="h-5 px-1"
-                                    onClick={() =>
-                                      handleChangeSerialClick(pending.id)
-                                    }
+                                    onClick={() => handleChangeSerialClick(pending.id)}
                                     disabled={isSubmitting}
                                     title={
                                       needsManagerApprovalForSerial &&
-                                      !pending.serial_override_approval
-                                        ?.has_permission
-                                        ? "Request manager approval"
-                                        : "Change serial"
+                                      !pending.serial_override_approval?.has_permission
+                                        ? 'Request manager approval'
+                                        : 'Change serial'
                                     }
                                     data-testid={`change-serial-${pending.pack_id}`}
                                   >
@@ -966,50 +914,36 @@ export function EnhancedPackActivationForm({
                                   </Button>
                                   <Button
                                     type="button"
-                                    variant={
-                                      pending.mark_sold_approval
-                                        ? "default"
-                                        : "outline"
-                                    }
+                                    variant={pending.mark_sold_approval ? 'default' : 'outline'}
                                     size="sm"
                                     className={`ml-1 h-5 px-2 text-xs ${
                                       pending.mark_sold_approval
-                                        ? "bg-orange-500 hover:bg-orange-600 text-white"
-                                        : ""
+                                        ? 'bg-orange-500 hover:bg-orange-600 text-white'
+                                        : ''
                                     }`}
-                                    onClick={() =>
-                                      handleMarkSoldClick(pending.id)
-                                    }
+                                    onClick={() => handleMarkSoldClick(pending.id)}
                                     disabled={isSubmitting}
                                     title={
                                       pending.mark_sold_approval
                                         ? `Marked sold by ${pending.mark_sold_approval.approver_name} - Click to remove`
-                                        : "Mark pack as pre-sold"
+                                        : 'Mark pack as pre-sold'
                                     }
                                     data-testid={`mark-sold-${pending.pack_id}`}
                                   >
-                                    {pending.mark_sold_approval
-                                      ? "Sold ✓"
-                                      : "Pack Sold"}
+                                    {pending.mark_sold_approval ? 'Sold ✓' : 'Pack Sold'}
                                   </Button>
                                 </>
                               )}
                               {pending.serial_override_approval && (
                                 <span className="ml-1 text-green-600">
-                                  (serial approved by{" "}
-                                  {
-                                    pending.serial_override_approval
-                                      .approver_name
-                                  }
-                                  )
+                                  (serial approved by{' '}
+                                  {pending.serial_override_approval.approver_name})
                                 </span>
                               )}
                             </div>
                           )}
                           {pending.error && (
-                            <p className="mt-1 text-xs text-destructive">
-                              {pending.error}
-                            </p>
+                            <p className="mt-1 text-xs text-destructive">{pending.error}</p>
                           )}
                         </div>
 
@@ -1021,16 +955,14 @@ export function EnhancedPackActivationForm({
 
                         {/* Price */}
                         <div className="shrink-0 text-sm text-muted-foreground">
-                          {pending.game_price !== null
-                            ? `$${pending.game_price}`
-                            : "—"}
+                          {pending.game_price !== null ? `$${pending.game_price}` : '—'}
                         </div>
 
                         {/* Status indicator */}
                         <div className="shrink-0">
-                          {pending.result === "success" ? (
+                          {pending.result === 'success' ? (
                             <CheckCircle2 className="h-4 w-4 text-green-600" />
-                          ) : pending.result === "error" ? (
+                          ) : pending.result === 'error' ? (
                             <AlertCircle className="h-4 w-4 text-destructive" />
                           ) : pending.deplete_previous ? (
                             <Badge
@@ -1073,41 +1005,29 @@ export function EnhancedPackActivationForm({
               <Alert variant="destructive">
                 <AlertCircle className="h-4 w-4" />
                 <AlertDescription>
-                  Some packs failed to activate. Review errors above and click
-                  &quot;Clear Errors & Retry&quot; to try again.
+                  Some packs failed to activate. Review errors above and click &quot;Clear Errors &
+                  Retry&quot; to try again.
                 </AlertDescription>
               </Alert>
             )}
           </div>
 
           <DialogFooter>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={handleCancel}
-              disabled={isSubmitting}
-            >
+            <Button type="button" variant="outline" onClick={handleCancel} disabled={isSubmitting}>
               Cancel
             </Button>
             <Button
               type="button"
               onClick={handleActivateAll}
-              disabled={
-                isSubmitting ||
-                pendingCount === 0 ||
-                allSucceeded ||
-                !isAuthenticated
-              }
+              disabled={isSubmitting || pendingCount === 0 || allSucceeded || !isAuthenticated}
               data-testid="activate-all-button"
             >
-              {isSubmitting && (
-                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              )}
+              {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
               {isSubmitting
-                ? "Activating..."
+                ? 'Activating...'
                 : pendingCount === 0
-                  ? "Add Packs to Activate"
-                  : `Activate ${pendingCount} Pack${pendingCount !== 1 ? "s" : ""}`}
+                  ? 'Add Packs to Activate'
+                  : `Activate ${pendingCount} Pack${pendingCount !== 1 ? 's' : ''}`}
             </Button>
           </DialogFooter>
         </DialogContent>

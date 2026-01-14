@@ -28,19 +28,11 @@
  * ```
  */
 
-import axios, {
-  AxiosError,
-  AxiosInstance,
-  AxiosResponse,
-  InternalAxiosRequestConfig,
-} from "axios";
-import {
-  handleUnauthorizedError,
-  dispatchSessionExpiredEvent,
-} from "@/lib/auth-error-handler";
+import axios, { AxiosError, AxiosInstance, AxiosResponse, InternalAxiosRequestConfig } from 'axios';
+import { handleUnauthorizedError, dispatchSessionExpiredEvent } from '@/lib/auth-error-handler';
 
 // Configuration
-const API_BASE_URL = "http://localhost:3001";
+const API_BASE_URL = 'http://localhost:3001';
 const DEFAULT_TIMEOUT = 30000; // 30 seconds
 
 /**
@@ -51,10 +43,10 @@ export class ApiError extends Error {
     message: string,
     public status: number,
     public code?: string,
-    public correlationId?: string,
+    public correlationId?: string
   ) {
     super(message);
-    this.name = "ApiError";
+    this.name = 'ApiError';
   }
 }
 
@@ -67,7 +59,7 @@ function createApiClient(): AxiosInstance {
     timeout: DEFAULT_TIMEOUT,
     withCredentials: true, // Send httpOnly cookies with every request
     headers: {
-      "Content-Type": "application/json",
+      'Content-Type': 'application/json',
     },
   });
 
@@ -79,7 +71,7 @@ function createApiClient(): AxiosInstance {
     },
     (error: AxiosError) => {
       return Promise.reject(error);
-    },
+    }
   );
 
   // Response interceptor - handle 401 and transform errors
@@ -90,7 +82,7 @@ function createApiClient(): AxiosInstance {
     async (error: AxiosError) => {
       // Handle 401 Unauthorized
       if (error.response?.status === 401) {
-        const requestUrl = error.config?.url || "";
+        const requestUrl = error.config?.url || '';
 
         // SEC-010: AUTHZ - Distinguish between session expiration and credential verification failures
         // These endpoints verify OTHER users' credentials (not the current session).
@@ -98,12 +90,12 @@ function createApiClient(): AxiosInstance {
         // NOT "the current logged-in user's session expired".
         // Do NOT trigger global session expiration for these endpoints.
         const isCredentialVerificationEndpoint =
-          requestUrl.includes("/auth/verify-management") ||
-          requestUrl.includes("/auth/verify-user-permission") ||
-          requestUrl.includes("/auth/verify-cashier-permission") ||
-          requestUrl.includes("/auth/verify-elevated-access") ||
-          requestUrl.includes("/cashiers/authenticate-pin") ||
-          requestUrl.includes("/cashiers/authenticate");
+          requestUrl.includes('/auth/verify-management') ||
+          requestUrl.includes('/auth/verify-user-permission') ||
+          requestUrl.includes('/auth/verify-cashier-permission') ||
+          requestUrl.includes('/auth/verify-elevated-access') ||
+          requestUrl.includes('/cashiers/authenticate-pin') ||
+          requestUrl.includes('/cashiers/authenticate');
 
         if (isCredentialVerificationEndpoint) {
           // Extract error details for proper error message display
@@ -113,12 +105,9 @@ function createApiClient(): AxiosInstance {
             message?: string;
           };
 
-          const errorCode =
-            responseData?.error?.code || "AUTHENTICATION_FAILED";
+          const errorCode = responseData?.error?.code || 'AUTHENTICATION_FAILED';
           const errorMessage =
-            responseData?.error?.message ||
-            responseData?.message ||
-            "Authentication failed";
+            responseData?.error?.message || responseData?.message || 'Authentication failed';
 
           // Return credential verification error WITHOUT triggering session expiration
           return Promise.reject(new ApiError(errorMessage, 401, errorCode));
@@ -126,24 +115,20 @@ function createApiClient(): AxiosInstance {
 
         // For all other 401s, this is a session expiration
         // Dispatch event for React Query to clear cache
-        dispatchSessionExpiredEvent("api_401");
+        dispatchSessionExpiredEvent('api_401');
 
         // Handle the redirect
         handleUnauthorizedError();
 
         // Return a rejected promise with ApiError
         return Promise.reject(
-          new ApiError(
-            "Session expired. Please log in again.",
-            401,
-            "SESSION_EXPIRED",
-          ),
+          new ApiError('Session expired. Please log in again.', 401, 'SESSION_EXPIRED')
         );
       }
 
       // Handle 403 Forbidden
       if (error.response?.status === 403) {
-        return Promise.reject(new ApiError("Access denied.", 403, "FORBIDDEN"));
+        return Promise.reject(new ApiError('Access denied.', 403, 'FORBIDDEN'));
       }
 
       // Extract error details from response
@@ -155,19 +140,16 @@ function createApiClient(): AxiosInstance {
       };
 
       // Build error message from various response formats
-      let errorMessage = "An unexpected error occurred";
+      let errorMessage = 'An unexpected error occurred';
       let errorCode: string | undefined;
 
       if (responseData) {
         if (responseData.message) {
           errorMessage = responseData.message;
-        } else if (
-          typeof responseData.error === "object" &&
-          responseData.error?.message
-        ) {
+        } else if (typeof responseData.error === 'object' && responseData.error?.message) {
           errorMessage = responseData.error.message;
           errorCode = responseData.error.code;
-        } else if (typeof responseData.error === "string") {
+        } else if (typeof responseData.error === 'string') {
           errorMessage = responseData.error;
         }
         errorCode = errorCode || responseData.code;
@@ -175,30 +157,23 @@ function createApiClient(): AxiosInstance {
 
       // Network error (no response)
       if (!error.response) {
-        if (error.code === "ECONNABORTED") {
-          return Promise.reject(
-            new ApiError("Request timeout", 408, "TIMEOUT"),
-          );
+        if (error.code === 'ECONNABORTED') {
+          return Promise.reject(new ApiError('Request timeout', 408, 'TIMEOUT'));
         }
         return Promise.reject(
           new ApiError(
-            error.message || "Network error - please check your connection",
+            error.message || 'Network error - please check your connection',
             0,
-            "NETWORK_ERROR",
-          ),
+            'NETWORK_ERROR'
+          )
         );
       }
 
       // Return ApiError with full context
       return Promise.reject(
-        new ApiError(
-          errorMessage,
-          error.response.status,
-          errorCode,
-          responseData?.correlationId,
-        ),
+        new ApiError(errorMessage, error.response.status, errorCode, responseData?.correlationId)
       );
-    },
+    }
   );
 
   return client;

@@ -1,4 +1,3 @@
-
 /**
  * Pack Reception Form Component
  * Form for receiving lottery packs via 24-digit serialized barcode scanning
@@ -17,15 +16,9 @@
  * Enhanced: Auto-create games when game code not found (Client Dashboard only)
  */
 
-import {
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-  type ChangeEvent,
-} from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useState, useCallback, useRef, useEffect, type ChangeEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -33,18 +26,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, X } from "lucide-react";
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, X } from 'lucide-react';
 import {
   receivePackBatch,
   getGames,
   checkPackExists,
   type LotteryGameResponse,
-} from "@/lib/api/lottery";
-import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
-import { NewGameModal } from "./NewGameModal";
-import type { ScanMetrics } from "@/types/scan-detection";
+} from '@/lib/api/lottery';
+import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
+import { NewGameModal } from './NewGameModal';
+import type { ScanMetrics } from '@/types/scan-detection';
 
 /**
  * Expected barcode length
@@ -148,16 +141,14 @@ export function PackReceptionForm({
   const isControlled = externalPackList !== undefined;
   const packList = isControlled ? externalPackList : internalPackList;
 
-  const [inputValue, setInputValue] = useState<string>("");
+  const [inputValue, setInputValue] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Timer ref for 400ms scan validation
   const scanValidationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
   // Games cache for checking existence on scan
-  const [gamesCache, setGamesCache] = useState<
-    Map<string, LotteryGameResponse>
-  >(new Map());
+  const [gamesCache, setGamesCache] = useState<Map<string, LotteryGameResponse>>(new Map());
 
   // State for new game creation flow - immediate check on scan
   const [showNewGameModal, setShowNewGameModal] = useState(false);
@@ -194,7 +185,7 @@ export function PackReceptionForm({
             setGamesCache(gameMap);
           }
         } catch (error) {
-          console.error("Failed to fetch games:", error);
+          console.error('Failed to fetch games:', error);
           // Continue without cache - will show modal for all games
         } finally {
           setIsLoadingGames(false);
@@ -214,7 +205,7 @@ export function PackReceptionForm({
         setInternalPackList([]);
       }
       // Always clear input and transient modal states
-      setInputValue("");
+      setInputValue('');
       setPendingGameToCreate(null);
       setShowNewGameModal(false);
       if (scanValidationTimerRef.current) {
@@ -238,7 +229,7 @@ export function PackReceptionForm({
    * Clear input and refocus for next entry
    */
   const clearInputAndFocus = useCallback(() => {
-    setInputValue("");
+    setInputValue('');
     if (scanValidationTimerRef.current) {
       clearTimeout(scanValidationTimerRef.current);
       scanValidationTimerRef.current = null;
@@ -258,7 +249,7 @@ export function PackReceptionForm({
       serial: string,
       parsed: { game_code: string; pack_number: string; serial_start: string },
       game: LotteryGameResponse,
-      scanMetrics?: ScanMetrics,
+      scanMetrics?: ScanMetrics
     ) => {
       const newPack: PackItem = {
         serial,
@@ -283,7 +274,7 @@ export function PackReceptionForm({
       }
       clearInputAndFocus();
     },
-    [clearInputAndFocus, isControlled, onPackAdd],
+    [clearInputAndFocus, isControlled, onPackAdd]
   );
 
   // State for checking pack existence
@@ -310,9 +301,9 @@ export function PackReceptionForm({
         const existingInList = packList.find((p) => p.serial === serial);
         if (existingInList) {
           toast({
-            title: "Duplicate pack",
-            description: "Pack already exists in reception list",
-            variant: "destructive",
+            title: 'Duplicate pack',
+            description: 'Pack already exists in reception list',
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
@@ -321,23 +312,20 @@ export function PackReceptionForm({
         // Check if pack already exists in database (server-side check)
         setIsCheckingPack(true);
         try {
-          const checkResponse = await checkPackExists(
-            storeId,
-            parsed.pack_number,
-          );
+          const checkResponse = await checkPackExists(storeId, parsed.pack_number);
           if (checkResponse.success && checkResponse.data?.exists) {
             const existingPack = checkResponse.data.pack;
             toast({
-              title: "Pack already in inventory",
-              description: `Pack ${parsed.pack_number} already exists${existingPack?.game?.name ? ` (${existingPack.game.name})` : ""} with status: ${existingPack?.status || "Unknown"}`,
-              variant: "destructive",
+              title: 'Pack already in inventory',
+              description: `Pack ${parsed.pack_number} already exists${existingPack?.game?.name ? ` (${existingPack.game.name})` : ''} with status: ${existingPack?.status || 'Unknown'}`,
+              variant: 'destructive',
             });
             clearInputAndFocus();
             return;
           }
         } catch (checkError) {
           // Log error but continue - don't block reception if check fails
-          console.error("Failed to check pack existence:", checkError);
+          console.error('Failed to check pack existence:', checkError);
         } finally {
           setIsCheckingPack(false);
         }
@@ -360,18 +348,17 @@ export function PackReceptionForm({
           clearInputAndFocus();
         }
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Invalid serial format";
+        const errorMessage = error instanceof Error ? error.message : 'Invalid serial format';
         toast({
-          title: "Invalid serial",
+          title: 'Invalid serial',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
         // Clear input on error too
         clearInputAndFocus();
       }
     },
-    [packList, gamesCache, storeId, toast, clearInputAndFocus, addPackToList],
+    [packList, gamesCache, storeId, toast, clearInputAndFocus, addPackToList]
   );
 
   /**
@@ -384,7 +371,7 @@ export function PackReceptionForm({
     (e: ChangeEvent<HTMLInputElement>) => {
       const value = e.target.value;
       // Only allow digits
-      const cleanedValue = value.replace(/\D/g, "");
+      const cleanedValue = value.replace(/\D/g, '');
 
       // Clear any pending validation timer
       if (scanValidationTimerRef.current) {
@@ -397,8 +384,8 @@ export function PackReceptionForm({
         // Too long - reject immediately
         if (cleanedValue.length > EXPECTED_BARCODE_LENGTH) {
           toast({
-            title: "Invalid input. Please scan again.",
-            variant: "destructive",
+            title: 'Invalid input. Please scan again.',
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
@@ -417,8 +404,8 @@ export function PackReceptionForm({
         scanValidationTimerRef.current = setTimeout(() => {
           if (capturedLength !== EXPECTED_BARCODE_LENGTH) {
             toast({
-              title: "Invalid input. Please scan again.",
-              variant: "destructive",
+              title: 'Invalid input. Please scan again.',
+              variant: 'destructive',
             });
             clearInputAndFocus();
           }
@@ -427,7 +414,7 @@ export function PackReceptionForm({
         setInputValue(cleanedValue);
       }
     },
-    [handleSerialComplete, toast, clearInputAndFocus],
+    [handleSerialComplete, toast, clearInputAndFocus]
   );
 
   /**
@@ -442,7 +429,7 @@ export function PackReceptionForm({
         setInternalPackList((prev) => prev.filter((_, i) => i !== index));
       }
     },
-    [isControlled, onPackRemove],
+    [isControlled, onPackRemove]
   );
 
   /**
@@ -453,9 +440,9 @@ export function PackReceptionForm({
 
     if (serials.length === 0) {
       toast({
-        title: "No packs to receive",
-        description: "Please scan at least one valid pack",
-        variant: "destructive",
+        title: 'No packs to receive',
+        description: 'Please scan at least one valid pack',
+        variant: 'destructive',
       });
       return;
     }
@@ -475,12 +462,10 @@ export function PackReceptionForm({
 
         if (createdCount > 0) {
           toast({
-            title: "Packs received",
+            title: 'Packs received',
             description: `Successfully received ${createdCount} pack(s)${
-              duplicateCount > 0
-                ? `, ${duplicateCount} duplicate(s) skipped`
-                : ""
-            }${errorCount > 0 ? `, ${errorCount} error(s)` : ""}`,
+              duplicateCount > 0 ? `, ${duplicateCount} duplicate(s) skipped` : ''
+            }${errorCount > 0 ? `, ${errorCount} error(s)` : ''}`,
           });
 
           // Reset form - clear packs using appropriate method based on mode
@@ -490,7 +475,7 @@ export function PackReceptionForm({
           } else {
             setInternalPackList([]);
           }
-          setInputValue("");
+          setInputValue('');
           if (scanValidationTimerRef.current) {
             clearTimeout(scanValidationTimerRef.current);
             scanValidationTimerRef.current = null;
@@ -499,7 +484,7 @@ export function PackReceptionForm({
           onSuccess?.();
         } else {
           // Build detailed error message
-          let errorDetails = "All packs were duplicates or had errors.";
+          let errorDetails = 'All packs were duplicates or had errors.';
           if (response.data.errors.length > 0) {
             // Show first error for brevity, include serial for debugging
             const firstError = response.data.errors[0];
@@ -511,34 +496,25 @@ export function PackReceptionForm({
             errorDetails = `All ${duplicateCount} pack(s) already exist in the system.`;
           }
           toast({
-            title: "No packs received",
+            title: 'No packs received',
             description: errorDetails,
-            variant: "destructive",
+            variant: 'destructive',
           });
         }
       } else {
-        throw new Error("Batch submission failed");
+        throw new Error('Batch submission failed');
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to receive packs";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to receive packs';
       toast({
-        title: "Error",
+        title: 'Error',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsSubmitting(false);
     }
-  }, [
-    packList,
-    storeId,
-    toast,
-    onOpenChange,
-    onSuccess,
-    isControlled,
-    onPacksClear,
-  ]);
+  }, [packList, storeId, toast, onOpenChange, onSuccess, isControlled, onPacksClear]);
 
   /**
    * Handle game created callback - add the pack to list after game creation
@@ -554,7 +530,7 @@ export function PackReceptionForm({
           pack_value: number;
           total_tickets: number;
         }
-      >,
+      >
     ) => {
       if (!pendingGameToCreate) return;
 
@@ -563,13 +539,13 @@ export function PackReceptionForm({
       if (gameData) {
         // Create a LotteryGameResponse-like object for the new game
         const newGame: LotteryGameResponse = {
-          game_id: "", // Will be fetched from server on submit
+          game_id: '', // Will be fetched from server on submit
           game_code: pendingGameToCreate.game_code,
           name: gameData.name,
           price: gameData.price,
           pack_value: gameData.pack_value,
           tickets_per_pack: gameData.total_tickets,
-          status: "ACTIVE",
+          status: 'ACTIVE',
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
         };
@@ -586,14 +562,14 @@ export function PackReceptionForm({
           pendingGameToCreate.serial,
           pendingGameToCreate,
           newGame,
-          pendingGameToCreate.scanMetrics,
+          pendingGameToCreate.scanMetrics
         );
       }
 
       // Clear pending state
       setPendingGameToCreate(null);
     },
-    [pendingGameToCreate, addPackToList],
+    [pendingGameToCreate, addPackToList]
   );
 
   /**
@@ -602,9 +578,9 @@ export function PackReceptionForm({
   const handleNewGameCancel = useCallback(() => {
     setPendingGameToCreate(null);
     toast({
-      title: "Game creation cancelled",
-      description: "The pack was not added to the list.",
-      variant: "destructive",
+      title: 'Game creation cancelled',
+      description: 'The pack was not added to the list.',
+      variant: 'destructive',
     });
   }, [toast]);
 
@@ -676,15 +652,12 @@ export function PackReceptionForm({
                   >
                     <div className="flex-1 min-w-0">
                       <div className="font-medium truncate">
-                        {pack.game_name || "Unknown Game"} ({pack.game_code})
+                        {pack.game_name || 'Unknown Game'} ({pack.game_code})
                       </div>
                       <div className="text-sm text-muted-foreground">
-                        Pack: {pack.pack_number} | $
-                        {pack.game_price?.toFixed(2) ?? "0.00"}/ticket
+                        Pack: {pack.pack_number} | ${pack.game_price?.toFixed(2) ?? '0.00'}/ticket
                         {pack.game_total_tickets && (
-                          <span className="ml-2">
-                            ({pack.game_total_tickets} tickets)
-                          </span>
+                          <span className="ml-2">({pack.game_total_tickets} tickets)</span>
                         )}
                       </div>
                     </div>
@@ -721,8 +694,8 @@ export function PackReceptionForm({
             data-testid="submit-batch-reception"
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            Receive {packList.length > 0 ? `${packList.length} ` : ""}Pack
-            {packList.length !== 1 ? "s" : ""}
+            Receive {packList.length > 0 ? `${packList.length} ` : ''}Pack
+            {packList.length !== 1 ? 's' : ''}
           </Button>
         </DialogFooter>
       </DialogContent>

@@ -361,11 +361,7 @@ interface HistoryTabProps {
 
 function HistoryTab({ logs }: HistoryTabProps) {
   if (logs.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        No sync history available
-      </div>
-    );
+    return <div className="text-center py-8 text-muted-foreground">No sync history available</div>;
   }
 
   return (
@@ -425,11 +421,7 @@ interface PendingTabProps {
 
 function PendingTab({ items }: PendingTabProps) {
   if (items.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        No pending items in queue
-      </div>
-    );
+    return <div className="text-center py-8 text-muted-foreground">No pending items in queue</div>;
   }
 
   return (
@@ -495,11 +487,7 @@ function FailedTab({
   isRetrying,
 }: FailedTabProps) {
   if (items.length === 0) {
-    return (
-      <div className="text-center py-8 text-muted-foreground">
-        No failed items
-      </div>
-    );
+    return <div className="text-center py-8 text-muted-foreground">No failed items</div>;
   }
 
   return (

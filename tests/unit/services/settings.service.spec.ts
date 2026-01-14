@@ -304,7 +304,9 @@ describe('SettingsService', () => {
         offlineTokenExpiresAt: '',
       });
 
-      const result = await settingsService.validateAndSaveApiKey('nsk_live_validformatbutinvalid12345');
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validformatbutinvalid12345'
+      );
 
       expect(result.valid).toBe(false);
     });
@@ -312,7 +314,9 @@ describe('SettingsService', () => {
     it('should save store info on successful validation', async () => {
       vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationResponse);
 
-      const result = await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
 
       expect(result.valid).toBe(true);
       expect(result.store?.storeId).toBe(mockValidationResponse.storeId);
@@ -322,7 +326,9 @@ describe('SettingsService', () => {
     it('should clear API key on validation error', async () => {
       vi.mocked(cloudApiService.validateApiKey).mockRejectedValue(new Error('Network error'));
 
-      const result = await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
 
       expect(result.valid).toBe(false);
       expect(result.error).toBe('Network error');
@@ -552,7 +558,9 @@ describe('SettingsService', () => {
       };
       vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationWithManager);
 
-      const result = await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
 
       expect(result.valid).toBe(true);
       // Manager should be saved to config store for later sync

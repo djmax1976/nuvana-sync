@@ -1,9 +1,9 @@
-import { useCallback } from "react";
-import { useLocation } from "react-router-dom";
-import { Button } from "../ui/button";
-import { LogOut } from "lucide-react";
-import { ThemeToggle } from "./ThemeToggle";
-import { CurrentDateTime } from "./CurrentDateTime";
+import { useCallback } from 'react';
+import { useLocation } from 'react-router-dom';
+import { Button } from '../ui/button';
+import { LogOut } from 'lucide-react';
+import { ThemeToggle } from './ThemeToggle';
+import { CurrentDateTime } from './CurrentDateTime';
 
 /**
  * Header component props
@@ -14,18 +14,18 @@ export interface HeaderProps {
    * - "full": Full header with page title centered (default, for desktop)
    * - "controls-only": Only renders the right-side controls (for mobile embedded use)
    */
-  variant?: "full" | "controls-only";
+  variant?: 'full' | 'controls-only';
 }
 
 // Page title mapping
 const pageTitles: Record<string, string> = {
-  "/": "Dashboard",
-  "/mystore": "Dashboard",
-  "/clock-in-out": "Clock In/Out",
-  "/lottery": "Lottery",
-  "/pos-integration": "POS Integration",
-  "/terminals": "Terminals",
-  "/settings": "Settings",
+  '/': 'Dashboard',
+  '/mystore': 'Dashboard',
+  '/clock-in-out': 'Clock In/Out',
+  '/lottery': 'Lottery',
+  '/pos-integration': 'POS Integration',
+  '/terminals': 'Terminals',
+  '/settings': 'Settings',
 };
 
 /**
@@ -43,19 +43,19 @@ const pageTitles: Record<string, string> = {
  * - All text content uses React's automatic escaping
  * - No dangerouslySetInnerHTML usage
  */
-export function Header({ variant = "full" }: HeaderProps) {
+export function Header({ variant = 'full' }: HeaderProps) {
   const location = useLocation();
 
   // Get page title from pathname
   const getPageTitle = () => {
-    if (location.pathname.startsWith("/terminal/")) {
-      return "Terminal Details";
+    if (location.pathname.startsWith('/terminal/')) {
+      return 'Terminal Details';
     }
-    return pageTitles[location.pathname] || "Nuvana";
+    return pageTitles[location.pathname] || 'Nuvana';
   };
 
   // Controls-only variant: render just the right-side controls for mobile embedding
-  if (variant === "controls-only") {
+  if (variant === 'controls-only') {
     return (
       <div className="flex flex-col items-end justify-center">
         {/* Controls row - dark mode toggle (no datetime on mobile) */}
@@ -89,10 +89,7 @@ export function Header({ variant = "full" }: HeaderProps) {
       <div className="flex-1 flex justify-end">
         <div className="flex flex-col items-end justify-center">
           {/* Store name placeholder - can be connected to IPC later */}
-          <span
-            className="text-sm font-semibold text-foreground"
-            data-testid="header-store-name"
-          >
+          <span className="text-sm font-semibold text-foreground" data-testid="header-store-name">
             Local Store
           </span>
           {/* Controls row - date/time, dark mode */}

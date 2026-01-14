@@ -1,4 +1,3 @@
-
 /**
  * Activated Packs Section Component
  *
@@ -29,10 +28,10 @@
  * - API-008: OUTPUT_FILTERING - Only whitelisted fields displayed from API response
  */
 
-import { useState, useCallback, useMemo } from "react";
-import { ChevronDown, ChevronRight, Sparkles } from "lucide-react";
-import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
+import { useState, useCallback, useMemo } from 'react';
+import { ChevronDown, ChevronRight, Sparkles } from 'lucide-react';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import {
   Table,
   TableBody,
@@ -40,14 +39,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import type { ActivatedPackDay, OpenBusinessPeriod } from "@/lib/api/lottery";
-import { useDateFormat } from "@/hooks/useDateFormat";
+} from '@/components/ui/table';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import type { ActivatedPackDay, OpenBusinessPeriod } from '@/lib/api/lottery';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -99,31 +94,31 @@ const STATUS_DISPLAY_CONFIG: Readonly<
     Readonly<{
       label: string;
       shortLabel: string;
-      variant: "default" | "secondary" | "outline";
+      variant: 'default' | 'secondary' | 'outline';
       className: string;
     }>
   >
 > = {
   ACTIVE: {
-    label: "Active",
-    shortLabel: "Active",
-    variant: "default",
+    label: 'Active',
+    shortLabel: 'Active',
+    variant: 'default',
     className:
-      "bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800",
+      'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400 border-green-200 dark:border-green-800',
   },
   DEPLETED: {
-    label: "Sold Out",
-    shortLabel: "Sold",
-    variant: "secondary",
+    label: 'Sold Out',
+    shortLabel: 'Sold',
+    variant: 'secondary',
     className:
-      "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800",
+      'bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400 border-amber-200 dark:border-amber-800',
   },
   RETURNED: {
-    label: "Returned",
+    label: 'Returned',
     shortLabel: "Ret'd",
-    variant: "outline",
+    variant: 'outline',
     className:
-      "bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700",
+      'bg-gray-100 text-gray-700 dark:bg-gray-800/30 dark:text-gray-400 border-gray-200 dark:border-gray-700',
   },
 } as const;
 
@@ -132,13 +127,13 @@ const STATUS_DISPLAY_CONFIG: Readonly<
  * MCP: SEC-014 INPUT_VALIDATION - Constrained lookup table for safe suffix generation
  */
 const ORDINAL_SUFFIXES: Readonly<Record<number, string>> = {
-  1: "st",
-  2: "nd",
-  3: "rd",
-  21: "st",
-  22: "nd",
-  23: "rd",
-  31: "st",
+  1: 'st',
+  2: 'nd',
+  3: 'rd',
+  21: 'st',
+  22: 'nd',
+  23: 'rd',
+  31: 'st',
 } as const;
 
 // ============================================================================
@@ -155,7 +150,7 @@ const ORDINAL_SUFFIXES: Readonly<Record<number, string>> = {
 function getOrdinalSuffix(day: number): string {
   // Validate input is within expected range
   if (!Number.isInteger(day) || day < 1 || day > 31) {
-    return "th";
+    return 'th';
   }
 
   // Check lookup table first for special cases
@@ -166,7 +161,7 @@ function getOrdinalSuffix(day: number): string {
   }
 
   // Default to "th" for all other cases (4th-20th, 24th-30th)
-  return "th";
+  return 'th';
 }
 
 /**
@@ -177,7 +172,7 @@ function getOrdinalSuffix(day: number): string {
  * @returns Display configuration for the status badge
  */
 function getStatusDisplay(
-  status: string,
+  status: string
 ): (typeof STATUS_DISPLAY_CONFIG)[keyof typeof STATUS_DISPLAY_CONFIG] {
   // Validate status against allowlist; default to ACTIVE config for unknown statuses
   // This prevents any injection or unexpected values from causing UI issues
@@ -199,18 +194,18 @@ function getStatusDisplay(
  * @returns Parser function for ISO datetime strings
  */
 function createDateTimeParser(
-  formatCustom: (date: Date | string, formatStr: string) => string,
+  formatCustom: (date: Date | string, formatStr: string) => string
 ): (isoString: string) => ParsedDateTime {
   return (isoString: string): ParsedDateTime => {
     // Input validation - check for null/undefined/empty
-    if (!isoString || typeof isoString !== "string") {
-      return { date: "--", time: "--", isValid: false };
+    if (!isoString || typeof isoString !== 'string') {
+      return { date: '--', time: '--', isValid: false };
     }
 
     // Trim whitespace to prevent parsing issues
     const trimmedInput = isoString.trim();
     if (trimmedInput.length === 0) {
-      return { date: "--", time: "--", isValid: false };
+      return { date: '--', time: '--', isValid: false };
     }
 
     try {
@@ -219,26 +214,26 @@ function createDateTimeParser(
       // Validate date is valid (not NaN)
       // Using Number.isNaN for strict NaN check (SEC-014)
       if (Number.isNaN(dateObj.getTime())) {
-        return { date: "--", time: "--", isValid: false };
+        return { date: '--', time: '--', isValid: false };
       }
 
       // Validate date is within reasonable range (not year 0 or far future)
       const year = dateObj.getFullYear();
       if (year < 2000 || year > 2100) {
-        return { date: "--", time: "--", isValid: false };
+        return { date: '--', time: '--', isValid: false };
       }
 
       // Use store timezone for formatting via useDateFormat hook
       // Format: "Jan 25th, 2026" for date
       // Extract day for ordinal suffix (formatCustom returns string, need to extract day)
-      const day = parseInt(formatCustom(trimmedInput, "d"), 10);
+      const day = parseInt(formatCustom(trimmedInput, 'd'), 10);
       const ordinalSuffix = getOrdinalSuffix(day);
-      const monthName = formatCustom(trimmedInput, "MMM");
-      const formattedYear = formatCustom(trimmedInput, "yyyy");
+      const monthName = formatCustom(trimmedInput, 'MMM');
+      const formattedYear = formatCustom(trimmedInput, 'yyyy');
       const dateString = `${monthName} ${day}${ordinalSuffix}, ${formattedYear}`;
 
       // Format time: "3:45 PM" using store timezone
-      const timeString = formatCustom(trimmedInput, "h:mm a");
+      const timeString = formatCustom(trimmedInput, 'h:mm a');
 
       return {
         date: dateString,
@@ -248,7 +243,7 @@ function createDateTimeParser(
     } catch {
       // Catch any parsing errors and return safe fallback
       // MCP: API-003 ERROR_HANDLING - Graceful degradation
-      return { date: "--", time: "--", isValid: false };
+      return { date: '--', time: '--', isValid: false };
     }
   };
 }
@@ -283,10 +278,7 @@ export function ActivatedPacksSection({
 
   // Create memoized datetime parser with store timezone
   // MCP: FE-001 STATE_MANAGEMENT - Memoized parser for performance
-  const parseDateTime = useMemo(
-    () => createDateTimeParser(formatCustom),
-    [formatCustom],
-  );
+  const parseDateTime = useMemo(() => createDateTimeParser(formatCustom), [formatCustom]);
 
   // ========================================================================
   // STATE MANAGEMENT
@@ -315,13 +307,13 @@ export function ActivatedPacksSection({
 
     for (const pack of activatedPacks) {
       // SEC-014: Validate each pack has a status property
-      if (!pack || typeof pack.status !== "string") {
+      if (!pack || typeof pack.status !== 'string') {
         continue;
       }
 
-      if (pack.status === "ACTIVATED") counts.active++;
-      else if (pack.status === "SETTLED") counts.depleted++;
-      else if (pack.status === "RETURNED") counts.returned++;
+      if (pack.status === 'ACTIVATED') counts.active++;
+      else if (pack.status === 'SETTLED') counts.depleted++;
+      else if (pack.status === 'RETURNED') counts.returned++;
     }
     return counts;
   }, [activatedPacks]);
@@ -330,11 +322,7 @@ export function ActivatedPacksSection({
   // EARLY RETURN - No data
   // MCP: SEC-014 INPUT_VALIDATION - Defensive null/undefined check
   // ========================================================================
-  if (
-    !activatedPacks ||
-    !Array.isArray(activatedPacks) ||
-    activatedPacks.length === 0
-  ) {
+  if (!activatedPacks || !Array.isArray(activatedPacks) || activatedPacks.length === 0) {
     return null;
   }
 
@@ -347,7 +335,7 @@ export function ActivatedPacksSection({
   const isMultipleDays =
     daysSinceClose !== null &&
     daysSinceClose !== undefined &&
-    typeof daysSinceClose === "number" &&
+    typeof daysSinceClose === 'number' &&
     daysSinceClose > 1;
 
   // Build the section title based on context
@@ -360,10 +348,9 @@ export function ActivatedPacksSection({
 
   // Build subtitle showing status breakdown if there are non-active packs
   // MCP: SEC-004 XSS - Safe numeric interpolation only
-  const hasNonActivePacks =
-    statusCounts.depleted > 0 || statusCounts.returned > 0;
+  const hasNonActivePacks = statusCounts.depleted > 0 || statusCounts.returned > 0;
   const statusSubtitle = hasNonActivePacks
-    ? `${statusCounts.active} active${statusCounts.depleted > 0 ? `, ${statusCounts.depleted} sold out` : ""}${statusCounts.returned > 0 ? `, ${statusCounts.returned} returned` : ""}`
+    ? `${statusCounts.active} active${statusCounts.depleted > 0 ? `, ${statusCounts.depleted} sold out` : ''}${statusCounts.returned > 0 ? `, ${statusCounts.returned} returned` : ''}`
     : null;
 
   // ========================================================================
@@ -393,9 +380,7 @@ export function ActivatedPacksSection({
             <div className="flex flex-col items-start">
               <span className="font-medium text-left">{sectionTitle}</span>
               {statusSubtitle && (
-                <span className="text-xs text-muted-foreground">
-                  {statusSubtitle}
-                </span>
+                <span className="text-xs text-muted-foreground">{statusSubtitle}</span>
               )}
             </div>
           </div>
@@ -424,19 +409,13 @@ export function ActivatedPacksSection({
           <Table size="compact">
             <TableHeader>
               <TableRow>
-                <TableHead
-                  scope="col"
-                  className="w-14 text-center whitespace-nowrap"
-                >
+                <TableHead scope="col" className="w-14 text-center whitespace-nowrap">
                   Bin
                 </TableHead>
                 <TableHead scope="col" className="min-w-[140px]">
                   Game
                 </TableHead>
-                <TableHead
-                  scope="col"
-                  className="w-20 text-right whitespace-nowrap"
-                >
+                <TableHead scope="col" className="w-20 text-right whitespace-nowrap">
                   Price
                 </TableHead>
                 <TableHead scope="col" className="w-28 whitespace-nowrap">
@@ -445,10 +424,7 @@ export function ActivatedPacksSection({
                 <TableHead scope="col" className="w-36 whitespace-nowrap">
                   Activated
                 </TableHead>
-                <TableHead
-                  scope="col"
-                  className="w-36 text-center whitespace-nowrap"
-                >
+                <TableHead scope="col" className="w-36 text-center whitespace-nowrap">
                   Status
                 </TableHead>
               </TableRow>
@@ -456,7 +432,7 @@ export function ActivatedPacksSection({
             <TableBody>
               {activatedPacks.map((pack) => {
                 // MCP: SEC-014 INPUT_VALIDATION - Validate pack object structure
-                if (!pack || typeof pack.pack_id !== "string") {
+                if (!pack || typeof pack.pack_id !== 'string') {
                   return null;
                 }
 
@@ -470,47 +446,35 @@ export function ActivatedPacksSection({
                   <TableRow
                     key={pack.pack_id}
                     data-testid={`activated-pack-row-${pack.pack_id}`}
-                    className={
-                      pack.status === "SETTLED" ? "opacity-75" : undefined
-                    }
+                    className={pack.status === 'SETTLED' ? 'opacity-75' : undefined}
                   >
                     {/* Bin Number */}
                     <TableCell className="font-mono text-primary font-semibold text-center">
-                      {typeof pack.bin_number === "number"
-                        ? pack.bin_number
-                        : "--"}
+                      {typeof pack.bin_number === 'number' ? pack.bin_number : '--'}
                     </TableCell>
 
                     {/* Game Name */}
                     <TableCell className="truncate max-w-[200px]">
-                      {typeof pack.game_name === "string"
-                        ? pack.game_name
-                        : "--"}
+                      {typeof pack.game_name === 'string' ? pack.game_name : '--'}
                     </TableCell>
 
                     {/* Price */}
                     <TableCell className="text-right tabular-nums">
-                      {typeof pack.game_price === "number"
+                      {typeof pack.game_price === 'number'
                         ? `$${pack.game_price.toFixed(2)}`
-                        : "--"}
+                        : '--'}
                     </TableCell>
 
                     {/* Pack Number */}
                     <TableCell className="font-mono text-sm">
-                      {typeof pack.pack_number === "string"
-                        ? pack.pack_number
-                        : "--"}
+                      {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
                     </TableCell>
 
                     {/* Activated - Stacked Date/Time */}
                     <TableCell className="text-sm whitespace-nowrap">
                       <div className="flex flex-col">
-                        <span className="text-foreground font-medium">
-                          {parsedDateTime.date}
-                        </span>
-                        <span className="text-muted-foreground text-xs">
-                          {parsedDateTime.time}
-                        </span>
+                        <span className="text-foreground font-medium">{parsedDateTime.date}</span>
+                        <span className="text-muted-foreground text-xs">{parsedDateTime.time}</span>
                       </div>
                     </TableCell>
 

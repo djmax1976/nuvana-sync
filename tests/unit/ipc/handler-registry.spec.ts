@@ -2,7 +2,7 @@
  * IPC Handler Registry Unit Tests
  *
  * Tests for the IPC handler registration system.
- * 
+ *
  *
  * @module tests/unit/ipc/handler-registry
  */

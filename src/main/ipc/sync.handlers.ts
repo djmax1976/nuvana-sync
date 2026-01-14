@@ -9,7 +9,12 @@
  * @security SEC-017: Audit logging for sync actions
  */
 
-import { registerHandler, createSuccessResponse, createErrorResponse, IPCErrorCodes } from './index';
+import {
+  registerHandler,
+  createSuccessResponse,
+  createErrorResponse,
+  IPCErrorCodes,
+} from './index';
 import { syncEngineService } from '../services/sync-engine.service';
 import { syncLogDAL } from '../dal/sync-log.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';

@@ -17,7 +17,9 @@ import { LoadingSpinner } from './components/ui/LoadingSpinner';
 // ============================================================================
 
 // Core pages - MyStore dashboard as main dashboard
-const MyStoreDashboard = lazy(() => import('./pages/MyStoreDashboard').then(m => ({ default: m.MyStoreDashboard })));
+const MyStoreDashboard = lazy(() =>
+  import('./pages/MyStoreDashboard').then((m) => ({ default: m.MyStoreDashboard }))
+);
 const ShiftsPage = lazy(() => import('./pages/ShiftsPage'));
 const ShiftDetailPage = lazy(() => import('./pages/ShiftDetailPage'));
 const TransactionsPage = lazy(() => import('./pages/TransactionsPage'));

@@ -294,9 +294,27 @@ describe('CloudApiService', () => {
     it('should handle all valid roles', async () => {
       const mockResponse = {
         users: [
-          { userId: 'user-1', name: 'Manager', role: 'store_manager', pinHash: '$2b$12$...', active: true },
-          { userId: 'user-2', name: 'Shift Lead', role: 'shift_manager', pinHash: '$2b$12$...', active: true },
-          { userId: 'user-3', name: 'Cashier', role: 'cashier', pinHash: '$2b$12$...', active: true },
+          {
+            userId: 'user-1',
+            name: 'Manager',
+            role: 'store_manager',
+            pinHash: '$2b$12$...',
+            active: true,
+          },
+          {
+            userId: 'user-2',
+            name: 'Shift Lead',
+            role: 'shift_manager',
+            pinHash: '$2b$12$...',
+            active: true,
+          },
+          {
+            userId: 'user-3',
+            name: 'Cashier',
+            role: 'cashier',
+            pinHash: '$2b$12$...',
+            active: true,
+          },
         ],
       };
 
@@ -492,10 +510,7 @@ describe('CloudApiService', () => {
 
       await service.pullBins('2024-01-01T00:00:00Z');
 
-      expect(mockFetch).toHaveBeenCalledWith(
-        expect.stringContaining('since='),
-        expect.any(Object)
-      );
+      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('since='), expect.any(Object));
     });
   });
 
@@ -548,14 +563,15 @@ describe('CloudApiService', () => {
         })
         .mockResolvedValue({
           ok: true,
-          json: () => Promise.resolve({
-            storeId: 'store-123',
-            storeName: 'Test',
-            companyId: 'comp-1',
-            companyName: 'Test Co',
-            timezone: 'UTC',
-            features: [],
-          }),
+          json: () =>
+            Promise.resolve({
+              storeId: 'store-123',
+              storeName: 'Test',
+              companyId: 'comp-1',
+              companyName: 'Test Co',
+              timezone: 'UTC',
+              features: [],
+            }),
         });
 
       // validateApiKey retries on rate limit, unlike healthCheck which catches errors
@@ -573,15 +589,16 @@ describe('CloudApiService', () => {
         })
         .mockResolvedValue({
           ok: true,
-          json: () => Promise.resolve({
-            valid: true,
-            storeId: 'store-123',
-            storeName: 'Test',
-            companyId: 'comp-1',
-            companyName: 'Test Co',
-            timezone: 'UTC',
-            features: [],
-          }),
+          json: () =>
+            Promise.resolve({
+              valid: true,
+              storeId: 'store-123',
+              storeName: 'Test',
+              companyId: 'comp-1',
+              companyName: 'Test Co',
+              timezone: 'UTC',
+              features: [],
+            }),
         });
 
       const result = await service.validateApiKey();

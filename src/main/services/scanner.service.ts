@@ -312,9 +312,7 @@ export function calculateChecksum(partial: string): string {
  * @param barcodes - Array of raw barcode strings
  * @returns Object with parsed results and errors
  */
-export function parseBarcodes(
-  barcodes: string[]
-): {
+export function parseBarcodes(barcodes: string[]): {
   parsed: ParsedBarcode[];
   errors: Array<{ index: number; raw: string; error: string }>;
 } {

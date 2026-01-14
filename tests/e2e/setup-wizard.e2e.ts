@@ -188,9 +188,7 @@ test.describe('Setup Wizard', () => {
 
       // Check that focused element has visible focus indicator
       const focusedElement = window.locator(':focus');
-      const outlineStyle = await focusedElement.evaluate(
-        (el) => getComputedStyle(el).outlineWidth
-      );
+      const outlineStyle = await focusedElement.evaluate((el) => getComputedStyle(el).outlineWidth);
 
       // Should have visible outline (not 0px)
       expect(outlineStyle).not.toBe('0px');

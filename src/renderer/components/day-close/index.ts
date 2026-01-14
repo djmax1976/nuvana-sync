@@ -6,11 +6,11 @@
  * @module day-close
  */
 
-export { ReportScanningStep } from "./ReportScanningStep";
+export { ReportScanningStep } from './ReportScanningStep';
 export type {
   ReportScanningState,
   LotteryReportsData,
   GamingReportsData,
   VendorInvoice,
   CashPayoutsData,
-} from "./ReportScanningStep";
+} from './ReportScanningStep';

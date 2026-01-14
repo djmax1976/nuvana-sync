@@ -69,8 +69,8 @@ describe('SQL Injection Protection', () => {
     "1' OR '1'='1'/*",
     // Special characters
     "O'Brien",
-    "test\x00injection",
-    "test%00injection",
+    'test\x00injection',
+    'test%00injection',
     "admin' AND '1'='1",
   ];
 
@@ -98,29 +98,26 @@ describe('SQL Injection Protection', () => {
         expect(query).not.toContain('pack-001');
       });
 
-      it.each(INJECTION_PAYLOADS)(
-        'should safely handle malicious input: %s',
-        (payload) => {
-          mockPrepare.mockReturnValue({
-            get: vi.fn().mockReturnValue(undefined),
-          });
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious input: %s', (payload) => {
+        mockPrepare.mockReturnValue({
+          get: vi.fn().mockReturnValue(undefined),
+        });
 
-          // This should not throw and should not execute malicious SQL
-          const result = dal.findByPackNumber(payload, payload, payload);
+        // This should not throw and should not execute malicious SQL
+        const result = dal.findByPackNumber(payload, payload, payload);
 
-          // Query should be parameterized, not contain the injection payload
-          const query = mockPrepare.mock.calls[0][0];
-          expect(query).not.toContain('DROP');
-          expect(query).not.toContain('DELETE');
-          expect(query).not.toContain('UNION');
-          expect(query).not.toContain('INSERT');
-          expect(query).not.toContain('UPDATE');
-          expect(query).not.toContain('SLEEP');
+        // Query should be parameterized, not contain the injection payload
+        const query = mockPrepare.mock.calls[0][0];
+        expect(query).not.toContain('DROP');
+        expect(query).not.toContain('DELETE');
+        expect(query).not.toContain('UNION');
+        expect(query).not.toContain('INSERT');
+        expect(query).not.toContain('UPDATE');
+        expect(query).not.toContain('SLEEP');
 
-          // Result should be null/undefined (not found), not an error
-          expect(result).toBeUndefined();
-        }
-      );
+        // Result should be null/undefined (not found), not an error
+        expect(result).toBeUndefined();
+      });
     });
 
     describe('findWithFilters', () => {
@@ -141,27 +138,24 @@ describe('SQL Injection Protection', () => {
         expect((query.match(/\?/g) || []).length).toBeGreaterThanOrEqual(4);
       });
 
-      it.each(INJECTION_PAYLOADS)(
-        'should safely handle malicious filter values: %s',
-        (payload) => {
-          mockPrepare.mockReturnValue({
-            all: vi.fn().mockReturnValue([]),
-          });
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious filter values: %s', (payload) => {
+        mockPrepare.mockReturnValue({
+          all: vi.fn().mockReturnValue([]),
+        });
 
-          // Status must be valid enum, so only test game_id and bin_id with payloads
-          const result = dal.findWithFilters(payload, {
-            game_id: payload,
-            bin_id: payload,
-          });
+        // Status must be valid enum, so only test game_id and bin_id with payloads
+        const result = dal.findWithFilters(payload, {
+          game_id: payload,
+          bin_id: payload,
+        });
 
-          const query = mockPrepare.mock.calls[0][0];
-          expect(query).not.toContain('DROP');
-          expect(query).not.toContain('DELETE');
-          expect(query).not.toContain('UNION');
+        const query = mockPrepare.mock.calls[0][0];
+        expect(query).not.toContain('DROP');
+        expect(query).not.toContain('DELETE');
+        expect(query).not.toContain('UNION');
 
-          expect(result).toEqual([]);
-        }
-      );
+        expect(result).toEqual([]);
+      });
     });
 
     describe('findByStatus', () => {
@@ -199,9 +193,7 @@ describe('SQL Injection Protection', () => {
           pack_number: 'pack-001',
         });
 
-        const insertCall = mockPrepare.mock.calls.find(
-          (call) => call[0].includes('INSERT')
-        );
+        const insertCall = mockPrepare.mock.calls.find((call) => call[0].includes('INSERT'));
         expect(insertCall).toBeDefined();
         expect(insertCall![0]).toContain('VALUES (?, ?, ?, ?,');
       });
@@ -228,22 +220,19 @@ describe('SQL Injection Protection', () => {
         expect(query).not.toContain('store-123');
       });
 
-      it.each(INJECTION_PAYLOADS)(
-        'should safely handle malicious storeId: %s',
-        (payload) => {
-          mockPrepare.mockReturnValue({
-            all: vi.fn().mockReturnValue([]),
-          });
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious storeId: %s', (payload) => {
+        mockPrepare.mockReturnValue({
+          all: vi.fn().mockReturnValue([]),
+        });
 
-          const result = dal.findActiveByStore(payload);
+        const result = dal.findActiveByStore(payload);
 
-          const query = mockPrepare.mock.calls[0][0];
-          expect(query).not.toContain('DROP');
-          expect(query).not.toContain('DELETE');
+        const query = mockPrepare.mock.calls[0][0];
+        expect(query).not.toContain('DROP');
+        expect(query).not.toContain('DELETE');
 
-          expect(result).toEqual([]);
-        }
-      );
+        expect(result).toEqual([]);
+      });
     });
 
     describe('findByGameCode', () => {
@@ -305,42 +294,36 @@ describe('SQL Injection Protection', () => {
     });
 
     describe('findActiveByStore', () => {
-      it.each(INJECTION_PAYLOADS)(
-        'should safely handle malicious storeId: %s',
-        (payload) => {
-          mockPrepare.mockReturnValue({
-            all: vi.fn().mockReturnValue([]),
-          });
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious storeId: %s', (payload) => {
+        mockPrepare.mockReturnValue({
+          all: vi.fn().mockReturnValue([]),
+        });
 
-          const result = dal.findActiveByStore(payload);
+        const result = dal.findActiveByStore(payload);
 
-          const query = mockPrepare.mock.calls[0][0];
-          // Query should be static and parameterized
-          expect(query).toContain('WHERE store_id = ?');
-          expect(query).not.toContain(payload);
+        const query = mockPrepare.mock.calls[0][0];
+        // Query should be static and parameterized
+        expect(query).toContain('WHERE store_id = ?');
+        expect(query).not.toContain(payload);
 
-          expect(result).toEqual([]);
-        }
-      );
+        expect(result).toEqual([]);
+      });
     });
 
     describe('findByCloudId', () => {
-      it.each(INJECTION_PAYLOADS)(
-        'should safely handle malicious cloudId: %s',
-        (payload) => {
-          mockPrepare.mockReturnValue({
-            get: vi.fn().mockReturnValue(undefined),
-          });
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious cloudId: %s', (payload) => {
+        mockPrepare.mockReturnValue({
+          get: vi.fn().mockReturnValue(undefined),
+        });
 
-          const result = dal.findByCloudId(payload);
+        const result = dal.findByCloudId(payload);
 
-          const query = mockPrepare.mock.calls[0][0];
-          expect(query).toContain('WHERE cloud_user_id = ?');
-          expect(query).not.toContain(payload);
+        const query = mockPrepare.mock.calls[0][0];
+        expect(query).toContain('WHERE cloud_user_id = ?');
+        expect(query).not.toContain(payload);
 
-          expect(result).toBeUndefined();
-        }
-      );
+        expect(result).toBeUndefined();
+      });
     });
   });
 
@@ -367,7 +350,7 @@ describe('SQL Injection Protection', () => {
     it('should verify no string interpolation in SQL', () => {
       // Anti-patterns that should never appear
       const antiPatterns = [
-        /`SELECT.*\$\{/,  // Template literal interpolation
+        /`SELECT.*\$\{/, // Template literal interpolation
         /'SELECT.*'\s*\+/, // String concatenation
         /"SELECT.*"\s*\+/, // String concatenation
         /prepare\(`[^`]*\$\{[^`]*`\)/, // Interpolation in prepare
@@ -397,7 +380,7 @@ describe('SQL Injection Protection', () => {
     it('should validate buildOrderByClause against allowlist', () => {
       // Sort columns must be validated against allowlist
       const allowedColumns = new Set(['created_at', 'updated_at', 'name']);
-      const maliciousColumn = "name; DROP TABLE users--";
+      const maliciousColumn = 'name; DROP TABLE users--';
 
       expect(allowedColumns.has(maliciousColumn)).toBe(false);
       expect(allowedColumns.has('created_at')).toBe(true);

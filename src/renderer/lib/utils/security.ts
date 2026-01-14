@@ -9,4 +9,4 @@ export {
   formatCurrency,
   maskSensitiveData,
   maskTransactionId,
-} from "../utils";
+} from '../utils';

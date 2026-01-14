@@ -40,14 +40,8 @@ const BinIdSchema = z.string().uuid('Invalid bin ID format');
  * Create bin schema
  */
 const CreateBinSchema = z.object({
-  name: z
-    .string()
-    .min(1, 'Bin name is required')
-    .max(50, 'Bin name cannot exceed 50 characters'),
-  location: z
-    .string()
-    .max(100, 'Location cannot exceed 100 characters')
-    .optional(),
+  name: z.string().min(1, 'Bin name is required').max(50, 'Bin name cannot exceed 50 characters'),
+  location: z.string().max(100, 'Location cannot exceed 100 characters').optional(),
 });
 
 /**
@@ -116,7 +110,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = z.object({ binId: BinIdSchema }).safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -148,7 +144,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = CreateBinSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -184,7 +182,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = UpdateBinSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -226,7 +226,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = z.object({ binId: BinIdSchema }).safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -269,7 +271,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = ReorderBinsSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -305,7 +309,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = BulkCreateSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -313,7 +319,10 @@ registerHandler(
     const result = binManagementService.bulkCreateBins(count);
 
     if (!result.success) {
-      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, result.error || 'Bulk create failed');
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        result.error || 'Bulk create failed'
+      );
     }
 
     log.info('Bins bulk created via IPC', { count: result.bins?.length });

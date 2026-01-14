@@ -178,9 +178,7 @@ describe('Day Summaries Handlers', () => {
     });
 
     it('should reject if open shifts exist', async () => {
-      const openShifts = [
-        { shift_id: 'shift-1', status: 'OPEN' },
-      ];
+      const openShifts = [{ shift_id: 'shift-1', status: 'OPEN' }];
 
       if (openShifts.length > 0) {
         const response = { error: 'OPEN_SHIFTS', message: 'Cannot close day with open shifts' };

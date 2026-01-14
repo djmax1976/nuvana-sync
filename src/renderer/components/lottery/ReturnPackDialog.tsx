@@ -1,4 +1,3 @@
-
 /**
  * Return Pack Dialog Component
  *
@@ -23,8 +22,8 @@
  * - API-003: ERROR_HANDLING - Graceful error handling with user feedback
  */
 
-import { useState, useCallback, useMemo } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -32,36 +31,33 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
+} from '@/components/ui/dialog';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, AlertTriangle, Undo2, Calculator } from "lucide-react";
-import { usePackDetails, useReturnPack } from "@/hooks/useLottery";
-import type {
-  LotteryPackResponse,
-  ReturnPackInput,
-} from "@/lib/api/lottery";
+} from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, AlertTriangle, Undo2, Calculator } from 'lucide-react';
+import { usePackDetails, useReturnPack } from '@/hooks/useLottery';
+import type { LotteryPackResponse, ReturnPackInput } from '@/lib/api/lottery';
 
 /**
  * Return reason type for lottery packs
  */
 type LotteryPackReturnReason =
-  | "SUPPLIER_RECALL"
-  | "DAMAGED"
-  | "DEFECTIVE"
-  | "EXPIRED"
-  | "INVENTORY_ADJUSTMENT"
-  | "STORE_CLOSURE"
-  | "OTHER";
+  | 'SUPPLIER_RECALL'
+  | 'DAMAGED'
+  | 'DEFECTIVE'
+  | 'EXPIRED'
+  | 'INVENTORY_ADJUSTMENT'
+  | 'STORE_CLOSURE'
+  | 'OTHER';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -103,34 +99,34 @@ const RETURN_REASON_OPTIONS: ReadonlyArray<{
   description: string;
 }> = [
   {
-    value: "SUPPLIER_RECALL",
-    label: "Supplier Recall",
-    description: "Supplier has recalled this pack",
+    value: 'SUPPLIER_RECALL',
+    label: 'Supplier Recall',
+    description: 'Supplier has recalled this pack',
   },
   {
-    value: "DAMAGED",
-    label: "Damaged",
-    description: "Pack is damaged and cannot be sold",
+    value: 'DAMAGED',
+    label: 'Damaged',
+    description: 'Pack is damaged and cannot be sold',
   },
   {
-    value: "EXPIRED",
-    label: "Expired",
-    description: "Pack has expired before being sold",
+    value: 'EXPIRED',
+    label: 'Expired',
+    description: 'Pack has expired before being sold',
   },
   {
-    value: "INVENTORY_ADJUSTMENT",
-    label: "Inventory Adjustment",
-    description: "Inventory correction or reconciliation",
+    value: 'INVENTORY_ADJUSTMENT',
+    label: 'Inventory Adjustment',
+    description: 'Inventory correction or reconciliation',
   },
   {
-    value: "STORE_CLOSURE",
-    label: "Store Closure",
-    description: "Store is closing or relocating",
+    value: 'STORE_CLOSURE',
+    label: 'Store Closure',
+    description: 'Store is closing or relocating',
   },
   {
-    value: "OTHER",
-    label: "Other",
-    description: "Other reason (notes required)",
+    value: 'OTHER',
+    label: 'Other',
+    description: 'Other reason (notes required)',
   },
 ] as const;
 
@@ -165,10 +161,9 @@ export function ReturnPackDialog({
   // FORM STATE
   // MCP: FE-001 STATE_MANAGEMENT - Controlled form state
   // ========================================================================
-  const [returnReason, setReturnReason] =
-    useState<LotteryPackReturnReason | null>(null);
-  const [lastSoldSerial, setLastSoldSerial] = useState("");
-  const [returnNotes, setReturnNotes] = useState("");
+  const [returnReason, setReturnReason] = useState<LotteryPackReturnReason | null>(null);
+  const [lastSoldSerial, setLastSoldSerial] = useState('');
+  const [returnNotes, setReturnNotes] = useState('');
 
   // Fetch pack details only if not provided by parent
   const {
@@ -198,7 +193,7 @@ export function ReturnPackDialog({
     }
 
     const lastSoldNum = parseInt(lastSoldSerial, 10);
-    const serialStartNum = parseInt(packData.opening_serial || "000", 10);
+    const serialStartNum = parseInt(packData.opening_serial || '000', 10);
 
     // Validate parsing succeeded
     if (Number.isNaN(lastSoldNum) || Number.isNaN(serialStartNum)) {
@@ -206,7 +201,7 @@ export function ReturnPackDialog({
     }
 
     // Validate serial is within valid range
-    const serialEndNum = parseInt(packData.closing_serial || "299", 10);
+    const serialEndNum = parseInt(packData.closing_serial || '299', 10);
     if (lastSoldNum < serialStartNum || lastSoldNum > serialEndNum) {
       return null;
     }
@@ -232,10 +227,8 @@ export function ReturnPackDialog({
 
   const isReasonSelected = returnReason !== null;
   const isSerialValid = /^[0-9]{3}$/.test(lastSoldSerial);
-  const isNotesValid =
-    returnReason !== "OTHER" || returnNotes.trim().length >= 3;
-  const isSerialInRange =
-    salesCalculation !== null || lastSoldSerial.length !== 3;
+  const isNotesValid = returnReason !== 'OTHER' || returnNotes.trim().length >= 3;
+  const isSerialInRange = salesCalculation !== null || lastSoldSerial.length !== 3;
 
   const canSubmit =
     isReasonSelected &&
@@ -253,29 +246,23 @@ export function ReturnPackDialog({
    * Handle last sold serial input change
    * MCP: SEC-014 INPUT_VALIDATION - Only allow digits, max 3 chars
    */
-  const handleSerialChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      const value = e.target.value.replace(/[^0-9]/g, "");
-      if (value.length <= 3) {
-        setLastSoldSerial(value);
-      }
-    },
-    [],
-  );
+  const handleSerialChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    const value = e.target.value.replace(/[^0-9]/g, '');
+    if (value.length <= 3) {
+      setLastSoldSerial(value);
+    }
+  }, []);
 
   /**
    * Handle return notes input change
    * MCP: SEC-014 INPUT_VALIDATION - Limit input length
    */
-  const handleNotesChange = useCallback(
-    (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-      const value = e.target.value;
-      if (value.length <= 500) {
-        setReturnNotes(value);
-      }
-    },
-    [],
-  );
+  const handleNotesChange = useCallback((e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    const value = e.target.value;
+    if (value.length <= 500) {
+      setReturnNotes(value);
+    }
+  }, []);
 
   /**
    * Handle form submission
@@ -285,9 +272,9 @@ export function ReturnPackDialog({
   const handleReturn = async () => {
     if (!packId || !packData || !returnReason) {
       toast({
-        title: "Error",
-        description: "Pack information and return reason are required",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Pack information and return reason are required',
+        variant: 'destructive',
       });
       return;
     }
@@ -295,19 +282,19 @@ export function ReturnPackDialog({
     // FE-002: FORM_VALIDATION - Validate serial format
     if (!isSerialValid) {
       toast({
-        title: "Validation Error",
-        description: "Last sold serial must be exactly 3 digits",
-        variant: "destructive",
+        title: 'Validation Error',
+        description: 'Last sold serial must be exactly 3 digits',
+        variant: 'destructive',
       });
       return;
     }
 
     // FE-002: FORM_VALIDATION - Validate notes for OTHER reason
-    if (returnReason === "OTHER" && returnNotes.trim().length < 3) {
+    if (returnReason === 'OTHER' && returnNotes.trim().length < 3) {
       toast({
-        title: "Validation Error",
+        title: 'Validation Error',
         description: "Notes are required when reason is 'Other'",
-        variant: "destructive",
+        variant: 'destructive',
       });
       return;
     }
@@ -326,31 +313,30 @@ export function ReturnPackDialog({
       if (response.success) {
         const salesText = salesCalculation?.salesAmount
           ? ` ($${salesCalculation.salesAmount.toFixed(2)} in sales calculated)`
-          : "";
+          : '';
 
         toast({
-          title: "Pack returned successfully",
+          title: 'Pack returned successfully',
           description: `Pack ${packData.pack_number} has been marked as returned.${salesText}`,
         });
 
         // Reset form state
         setReturnReason(null);
-        setLastSoldSerial("");
-        setReturnNotes("");
+        setLastSoldSerial('');
+        setReturnNotes('');
 
         onOpenChange(false);
         onSuccess?.();
       } else {
-        throw new Error("Failed to return pack");
+        throw new Error('Failed to return pack');
       }
     } catch (error) {
       // API-003: ERROR_HANDLING - Handle API errors gracefully
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to return pack";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to return pack';
       toast({
-        title: "Error",
+        title: 'Error',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     }
   };
@@ -364,8 +350,8 @@ export function ReturnPackDialog({
       if (!newOpen) {
         // Reset form when closing
         setReturnReason(null);
-        setLastSoldSerial("");
-        setReturnNotes("");
+        setLastSoldSerial('');
+        setReturnNotes('');
       }
       onOpenChange(newOpen);
     }
@@ -404,14 +390,8 @@ export function ReturnPackDialog({
             <DialogDescription>Failed to load pack details</DialogDescription>
           </DialogHeader>
           <div className="p-4 text-center">
-            <p className="text-destructive">
-              {packError?.message || "Unknown error"}
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-              className="mt-4"
-            >
+            <p className="text-destructive">{packError?.message || 'Unknown error'}</p>
+            <Button variant="outline" onClick={() => handleOpenChange(false)} className="mt-4">
               Close
             </Button>
           </div>
@@ -425,15 +405,13 @@ export function ReturnPackDialog({
   // ========================================================================
 
   // SEC-004: XSS - React auto-escapes all text content
-  const packNumber = packData?.pack_number || "Unknown";
-  const gameName = packData?.game?.name || "Unknown";
-  const gamePrice = packData?.game?.price
-    ? `$${Number(packData.game.price).toFixed(2)}`
-    : "N/A";
+  const packNumber = packData?.pack_number || 'Unknown';
+  const gameName = packData?.game?.name || 'Unknown';
+  const gamePrice = packData?.game?.price ? `$${Number(packData.game.price).toFixed(2)}` : 'N/A';
   const serialRange = packData
-    ? `${packData.opening_serial || "000"} - ${packData.closing_serial || "299"}`
-    : "N/A";
-  const currentStatus = packData?.status || "Unknown";
+    ? `${packData.opening_serial || '000'} - ${packData.closing_serial || '299'}`
+    : 'N/A';
+  const currentStatus = packData?.status || 'Unknown';
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -447,36 +425,29 @@ export function ReturnPackDialog({
             Return Lottery Pack
           </DialogTitle>
           <DialogDescription id="return-lottery-description">
-            Mark this pack as returned to supplier. Enter the last sold ticket
-            serial to calculate sales before return.
+            Mark this pack as returned to supplier. Enter the last sold ticket serial to calculate
+            sales before return.
           </DialogDescription>
         </DialogHeader>
 
         <div className="space-y-4 py-4">
           {/* Warning for non-returnable packs (only ACTIVATED and RECEIVED can be returned) */}
-          {packData &&
-            packData.status !== "ACTIVATED" &&
-            packData.status !== "RECEIVED" && (
-              <div
-                className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4"
-                role="alert"
-                aria-live="polite"
-              >
-                <AlertTriangle
-                  className="h-5 w-5 text-destructive mt-0.5"
-                  aria-hidden="true"
-                />
-                <div className="flex-1 space-y-1">
-                  <p className="text-sm font-medium text-destructive">
-                    Cannot Return Pack
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    Only ACTIVATED or RECEIVED packs can be returned. This pack is
-                    currently <strong>{currentStatus}</strong>.
-                  </p>
-                </div>
+          {packData && packData.status !== 'ACTIVATED' && packData.status !== 'RECEIVED' && (
+            <div
+              className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4"
+              role="alert"
+              aria-live="polite"
+            >
+              <AlertTriangle className="h-5 w-5 text-destructive mt-0.5" aria-hidden="true" />
+              <div className="flex-1 space-y-1">
+                <p className="text-sm font-medium text-destructive">Cannot Return Pack</p>
+                <p className="text-sm text-muted-foreground">
+                  Only ACTIVATED or RECEIVED packs can be returned. This pack is currently{' '}
+                  <strong>{currentStatus}</strong>.
+                </p>
               </div>
-            )}
+            </div>
+          )}
 
           {/* Pack Details */}
           <div className="space-y-2">
@@ -511,15 +482,10 @@ export function ReturnPackDialog({
               Return Reason <span className="text-destructive">*</span>
             </Label>
             <Select
-              value={returnReason || ""}
-              onValueChange={(value) =>
-                setReturnReason(value as LotteryPackReturnReason)
-              }
+              value={returnReason || ''}
+              onValueChange={(value) => setReturnReason(value as LotteryPackReturnReason)}
             >
-              <SelectTrigger
-                id="return-reason"
-                data-testid="return-reason-select"
-              >
+              <SelectTrigger id="return-reason" data-testid="return-reason-select">
                 <SelectValue placeholder="Select a reason..." />
               </SelectTrigger>
               <SelectContent>
@@ -527,9 +493,7 @@ export function ReturnPackDialog({
                   <SelectItem key={option.value} value={option.value}>
                     <div className="flex flex-col">
                       <span>{option.label}</span>
-                      <span className="text-xs text-muted-foreground">
-                        {option.description}
-                      </span>
+                      <span className="text-xs text-muted-foreground">{option.description}</span>
                     </div>
                   </SelectItem>
                 ))}
@@ -555,13 +519,12 @@ export function ReturnPackDialog({
               aria-describedby="serial-help"
             />
             <p id="serial-help" className="text-xs text-muted-foreground">
-              Enter the 3-digit serial number of the last ticket sold before
-              returning this pack
+              Enter the 3-digit serial number of the last ticket sold before returning this pack
             </p>
             {lastSoldSerial.length === 3 && !salesCalculation && (
               <p className="text-xs text-destructive">
-                Serial must be within range {packData?.opening_serial || "000"} -{" "}
-                {packData?.closing_serial || "299"}
+                Serial must be within range {packData?.opening_serial || '000'} -{' '}
+                {packData?.closing_serial || '299'}
               </p>
             )}
           </div>
@@ -572,20 +535,13 @@ export function ReturnPackDialog({
               className="flex items-start gap-3 rounded-lg border border-primary/20 bg-primary/5 p-4"
               data-testid="sales-calculation-preview"
             >
-              <Calculator
-                className="h-5 w-5 text-primary mt-0.5"
-                aria-hidden="true"
-              />
+              <Calculator className="h-5 w-5 text-primary mt-0.5" aria-hidden="true" />
               <div className="flex-1 space-y-1">
-                <p className="text-sm font-medium text-primary">
-                  Sales Calculation
-                </p>
+                <p className="text-sm font-medium text-primary">Sales Calculation</p>
                 <div className="grid grid-cols-2 gap-2 text-sm">
                   <div>
                     <span className="text-muted-foreground">Tickets Sold:</span>
-                    <span className="ml-2 font-medium">
-                      {salesCalculation.ticketsSold}
-                    </span>
+                    <span className="ml-2 font-medium">{salesCalculation.ticketsSold}</span>
                   </div>
                   <div>
                     <span className="text-muted-foreground">Sales Amount:</span>
@@ -601,17 +557,14 @@ export function ReturnPackDialog({
           {/* Return Notes Input */}
           <div className="space-y-2">
             <Label htmlFor="return-notes" className="text-sm font-medium">
-              Notes{" "}
-              {returnReason === "OTHER" && (
-                <span className="text-destructive">*</span>
-              )}
+              Notes {returnReason === 'OTHER' && <span className="text-destructive">*</span>}
             </Label>
             <Textarea
               id="return-notes"
               placeholder={
-                returnReason === "OTHER"
+                returnReason === 'OTHER'
                   ? "Enter reason details (required for 'Other')..."
-                  : "Optional: Enter additional notes..."
+                  : 'Optional: Enter additional notes...'
               }
               value={returnNotes}
               onChange={handleNotesChange}
@@ -620,14 +573,11 @@ export function ReturnPackDialog({
               data-testid="return-notes-input"
               aria-describedby="notes-help"
             />
-            <div
-              id="notes-help"
-              className="flex justify-between text-xs text-muted-foreground"
-            >
+            <div id="notes-help" className="flex justify-between text-xs text-muted-foreground">
               <span>
-                {returnReason === "OTHER" && returnNotes.trim().length < 3
+                {returnReason === 'OTHER' && returnNotes.trim().length < 3
                   ? "Notes are required when reason is 'Other'"
-                  : "Notes will be recorded in audit log"}
+                  : 'Notes will be recorded in audit log'}
               </span>
               <span>{returnNotes.length}/500</span>
             </div>
@@ -648,21 +598,15 @@ export function ReturnPackDialog({
             variant="default"
             onClick={handleReturn}
             disabled={
-              !canSubmit ||
-              (packData?.status !== "ACTIVATED" && packData?.status !== "RECEIVED")
+              !canSubmit || (packData?.status !== 'ACTIVATED' && packData?.status !== 'RECEIVED')
             }
             data-testid="confirm-return-button"
             aria-label={
-              returnPackMutation.isPending
-                ? "Returning pack..."
-                : `Return pack ${packNumber}`
+              returnPackMutation.isPending ? 'Returning pack...' : `Return pack ${packNumber}`
             }
           >
             {returnPackMutation.isPending && (
-              <Loader2
-                className="mr-2 h-4 w-4 animate-spin"
-                aria-hidden="true"
-              />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             )}
             Return Pack
           </Button>

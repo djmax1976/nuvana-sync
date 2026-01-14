@@ -337,11 +337,7 @@ export class AutoUpdaterService {
       'updater:status',
       async (_event: IpcMainInvokeEvent): Promise<UpdateStatusEvent> => {
         return {
-          status: this.isDownloading
-            ? 'downloading'
-            : this.updateAvailable
-              ? 'available'
-              : 'idle',
+          status: this.isDownloading ? 'downloading' : this.updateAvailable ? 'available' : 'idle',
           version: this.currentVersion ?? undefined,
         };
       }

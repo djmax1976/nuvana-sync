@@ -1,4 +1,3 @@
-
 /**
  * Sales Breakdown Card Component
  *
@@ -12,10 +11,10 @@
  * - FE-005: UI_SECURITY - No sensitive data exposed
  */
 
-import { useCallback, useMemo, useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { TrendingUp } from "lucide-react";
+import { useCallback, useMemo, useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { TrendingUp } from 'lucide-react';
 
 import {
   type SalesBreakdownState,
@@ -24,13 +23,13 @@ import {
   type SalesBreakdownCardProps,
   calculateTotalSalesReports,
   calculateTotalSalesPOS,
-} from "./types";
-import { formatCurrency, sanitizeNumericInput } from "./utils";
+} from './types';
+import { formatCurrency, sanitizeNumericInput } from './utils';
 
 /**
  * Simple horizontal separator
  */
-function Separator({ className = "" }: { className?: string }) {
+function Separator({ className = '' }: { className?: string }) {
   return <hr className={`border-t border-border ${className}`} />;
 }
 
@@ -40,15 +39,9 @@ function Separator({ className = "" }: { className?: string }) {
 function ColumnHeaders() {
   return (
     <div className="grid grid-cols-[1fr_100px_100px] gap-2 pb-2 border-b border-border">
-      <div className="text-sm font-medium text-muted-foreground">
-        Department
-      </div>
-      <div className="text-sm font-medium text-muted-foreground text-right">
-        Reports Totals
-      </div>
-      <div className="text-sm font-medium text-muted-foreground text-right">
-        POS Totals
-      </div>
+      <div className="text-sm font-medium text-muted-foreground">Department</div>
+      <div className="text-sm font-medium text-muted-foreground text-right">Reports Totals</div>
+      <div className="text-sm font-medium text-muted-foreground text-right">POS Totals</div>
     </div>
   );
 }
@@ -120,9 +113,7 @@ function POSOnlyLineItem({
           />
         </div>
       ) : (
-        <div className="text-right font-mono text-sm">
-          {formatCurrency(posValue)}
-        </div>
+        <div className="text-right font-mono text-sm">{formatCurrency(posValue)}</div>
       )}
     </div>
   );
@@ -176,21 +167,19 @@ function DualColumnLineItem({
   }, [inputValue, onReportsChange]);
 
   const rowClass = highlight
-    ? "grid grid-cols-[1fr_100px_100px] gap-2 py-2 items-center bg-green-50 dark:bg-green-950/30 px-2 rounded-md"
-    : "grid grid-cols-[1fr_100px_100px] gap-2 py-2 items-center";
+    ? 'grid grid-cols-[1fr_100px_100px] gap-2 py-2 items-center bg-green-50 dark:bg-green-950/30 px-2 rounded-md'
+    : 'grid grid-cols-[1fr_100px_100px] gap-2 py-2 items-center';
 
   const labelClass = highlight
-    ? "text-sm font-medium text-green-700 dark:text-green-300"
-    : "text-sm font-medium";
+    ? 'text-sm font-medium text-green-700 dark:text-green-300'
+    : 'text-sm font-medium';
 
   return (
     <div className={rowClass} data-testid={`sales-row-${id}`}>
       <div className={labelClass}>{label}</div>
       {readOnly ? (
         // Read-only mode: plain text display
-        <div className="text-right font-mono text-sm">
-          {formatCurrency(reportsValue)}
-        </div>
+        <div className="text-right font-mono text-sm">{formatCurrency(reportsValue)}</div>
       ) : (
         // Edit mode: input field
         <div className="flex items-center justify-end gap-1">
@@ -205,17 +194,15 @@ function DualColumnLineItem({
             disabled={disabled}
             className={`w-20 h-8 text-right font-mono text-sm ${
               highlight
-                ? "bg-green-100 dark:bg-green-900/50 border-green-300 dark:border-green-700"
-                : ""
+                ? 'bg-green-100 dark:bg-green-900/50 border-green-300 dark:border-green-700'
+                : ''
             }`}
             data-testid={`sales-reports-${id}`}
             aria-label={`${label} reports total`}
           />
         </div>
       )}
-      <div className="text-right font-mono text-sm">
-        {formatCurrency(posValue)}
-      </div>
+      <div className="text-right font-mono text-sm">{formatCurrency(posValue)}</div>
     </div>
   );
 }
@@ -276,7 +263,7 @@ export function SalesBreakdownCard({
         onReportsChange({ [field]: value });
       }
     },
-    [onReportsChange],
+    [onReportsChange]
   );
 
   // Create individual field change handlers for POS (for testing)
@@ -286,14 +273,11 @@ export function SalesBreakdownCard({
         onPOSChange({ [field]: value });
       }
     },
-    [onPOSChange],
+    [onPOSChange]
   );
 
   // Memoize total sales calculations - uses defensive null checks inside calculateTotalSalesReports/POS
-  const totalSalesReports = useMemo(
-    () => calculateTotalSalesReports(state),
-    [state],
-  );
+  const totalSalesReports = useMemo(() => calculateTotalSalesReports(state), [state]);
   const totalSalesPOS = useMemo(() => calculateTotalSalesPOS(state), [state]);
 
   // SEC-014: Defensive null checks - return null if state structure is invalid
@@ -319,7 +303,7 @@ export function SalesBreakdownCard({
           id="gas-sales"
           label="Gas Sales"
           posValue={state.pos.gasSales}
-          onPOSChange={createPOSChangeHandler("gasSales")}
+          onPOSChange={createPOSChangeHandler('gasSales')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -327,7 +311,7 @@ export function SalesBreakdownCard({
           id="grocery"
           label="Grocery"
           posValue={state.pos.grocery}
-          onPOSChange={createPOSChangeHandler("grocery")}
+          onPOSChange={createPOSChangeHandler('grocery')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -335,7 +319,7 @@ export function SalesBreakdownCard({
           id="tobacco"
           label="Tobacco"
           posValue={state.pos.tobacco}
-          onPOSChange={createPOSChangeHandler("tobacco")}
+          onPOSChange={createPOSChangeHandler('tobacco')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -343,7 +327,7 @@ export function SalesBreakdownCard({
           id="beverages"
           label="Beverages"
           posValue={state.pos.beverages}
-          onPOSChange={createPOSChangeHandler("beverages")}
+          onPOSChange={createPOSChangeHandler('beverages')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -351,7 +335,7 @@ export function SalesBreakdownCard({
           id="snacks"
           label="Snacks"
           posValue={state.pos.snacks}
-          onPOSChange={createPOSChangeHandler("snacks")}
+          onPOSChange={createPOSChangeHandler('snacks')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -359,7 +343,7 @@ export function SalesBreakdownCard({
           id="other"
           label="Other"
           posValue={state.pos.other}
-          onPOSChange={createPOSChangeHandler("other")}
+          onPOSChange={createPOSChangeHandler('other')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -379,7 +363,7 @@ export function SalesBreakdownCard({
           label="Instant Sales"
           reportsValue={state.reports.scratchOff}
           posValue={state.pos.scratchOff}
-          onReportsChange={createReportsChangeHandler("scratchOff")}
+          onReportsChange={createReportsChangeHandler('scratchOff')}
           highlight
           disabled={disabled}
           readOnly={readOnly}
@@ -389,7 +373,7 @@ export function SalesBreakdownCard({
           label="Instant Cashes"
           reportsValue={state.reports.instantCashes}
           posValue={state.pos.instantCashes}
-          onReportsChange={createReportsChangeHandler("instantCashes")}
+          onReportsChange={createReportsChangeHandler('instantCashes')}
           highlight
           disabled={disabled}
           readOnly={readOnly}
@@ -399,7 +383,7 @@ export function SalesBreakdownCard({
           label="Online Sales"
           reportsValue={state.reports.onlineLottery}
           posValue={state.pos.onlineLottery}
-          onReportsChange={createReportsChangeHandler("onlineLottery")}
+          onReportsChange={createReportsChangeHandler('onlineLottery')}
           highlight
           disabled={disabled}
           readOnly={readOnly}
@@ -409,7 +393,7 @@ export function SalesBreakdownCard({
           label="Online Cashes"
           reportsValue={state.reports.onlineCashes}
           posValue={state.pos.onlineCashes}
-          onReportsChange={createReportsChangeHandler("onlineCashes")}
+          onReportsChange={createReportsChangeHandler('onlineCashes')}
           highlight
           disabled={disabled}
           readOnly={readOnly}
@@ -422,7 +406,7 @@ export function SalesBreakdownCard({
           id="sales-tax"
           label="Sales Tax"
           posValue={state.pos.salesTax}
-          onPOSChange={createPOSChangeHandler("salesTax")}
+          onPOSChange={createPOSChangeHandler('salesTax')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -430,11 +414,7 @@ export function SalesBreakdownCard({
         <Separator className="my-4" />
 
         {/* Total Sales */}
-        <TotalsRow
-          label="Total Sales"
-          reportsValue={totalSalesReports}
-          posValue={totalSalesPOS}
-        />
+        <TotalsRow label="Total Sales" reportsValue={totalSalesReports} posValue={totalSalesPOS} />
       </CardContent>
     </Card>
   );

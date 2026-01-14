@@ -507,8 +507,10 @@ const mockLotteryPacks: MockLotteryPack[] = Array.from({ length: 15 }, (_, i) =>
     store_id: 'store-1',
     bin_id: binId,
     received_at: new Date(Date.now() - (15 - i) * 86400000).toISOString(),
-    activated_at: status !== 'RECEIVED' ? new Date(Date.now() - (10 - i) * 86400000).toISOString() : null,
-    settled_at: status === 'SETTLED' ? new Date(Date.now() - (5 - i) * 86400000).toISOString() : null,
+    activated_at:
+      status !== 'RECEIVED' ? new Date(Date.now() - (10 - i) * 86400000).toISOString() : null,
+    settled_at:
+      status === 'SETTLED' ? new Date(Date.now() - (5 - i) * 86400000).toISOString() : null,
     returned_at: null,
     game: {
       game_id: game.game_id,

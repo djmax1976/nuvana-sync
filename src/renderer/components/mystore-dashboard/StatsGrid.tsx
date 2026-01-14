@@ -1,23 +1,8 @@
-import { Badge } from "../ui/badge";
-import { cn } from "../../lib/utils";
-import {
-  Receipt,
-  Users,
-  Ticket,
-  Scale,
-  TrendingUp,
-  Clock,
-  CheckCircle,
-} from "lucide-react";
-import {
-  AreaChart,
-  Area,
-  ResponsiveContainer,
-  XAxis,
-  YAxis,
-  Tooltip,
-} from "recharts";
-import { maskEmployeeName } from "../../lib/utils/security";
+import { Badge } from '../ui/badge';
+import { cn } from '../../lib/utils';
+import { Receipt, Users, Ticket, Scale, TrendingUp, Clock, CheckCircle } from 'lucide-react';
+import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
+import { maskEmployeeName } from '../../lib/utils/security';
 
 /**
  * StatsGrid Component
@@ -38,66 +23,66 @@ import { maskEmployeeName } from "../../lib/utils/security";
 
 // Sample data for charts - will be replaced with real API data
 const avgTicketData = [
-  { label: "Mon", value: 21.5 },
-  { label: "Tue", value: 22.15 },
-  { label: "Wed", value: 23.8 },
-  { label: "Thu", value: 22.95 },
-  { label: "Fri", value: 24.1 },
-  { label: "Sat", value: 26.45 },
-  { label: "Sun", value: 24.95 },
+  { label: 'Mon', value: 21.5 },
+  { label: 'Tue', value: 22.15 },
+  { label: 'Wed', value: 23.8 },
+  { label: 'Thu', value: 22.95 },
+  { label: 'Fri', value: 24.1 },
+  { label: 'Sat', value: 26.45 },
+  { label: 'Sun', value: 24.95 },
 ];
 
 const lotterySalesData = [
-  { label: "Mon", value: 1520 },
-  { label: "Tue", value: 1680 },
-  { label: "Wed", value: 1890 },
-  { label: "Thu", value: 1750 },
-  { label: "Fri", value: 1620 },
-  { label: "Sat", value: 2100 },
-  { label: "Sun", value: 1847 },
+  { label: 'Mon', value: 1520 },
+  { label: 'Tue', value: 1680 },
+  { label: 'Wed', value: 1890 },
+  { label: 'Thu', value: 1750 },
+  { label: 'Fri', value: 1620 },
+  { label: 'Sat', value: 2100 },
+  { label: 'Sun', value: 1847 },
 ];
 
 const lotteryVarianceData = [
-  { label: "Mon", value: 0 },
-  { label: "Tue", value: -15 },
-  { label: "Wed", value: 0 },
-  { label: "Thu", value: 10 },
-  { label: "Fri", value: -5 },
-  { label: "Sat", value: 0 },
-  { label: "Sun", value: 0 },
+  { label: 'Mon', value: 0 },
+  { label: 'Tue', value: -15 },
+  { label: 'Wed', value: 0 },
+  { label: 'Thu', value: 10 },
+  { label: 'Fri', value: -5 },
+  { label: 'Sat', value: 0 },
+  { label: 'Sun', value: 0 },
 ];
 
 // Sample active cashiers - names will be masked for display
 const activeCashiers = [
-  { name: "Sarah Miller", initials: "SM" },
-  { name: "John Davis", initials: "JD" },
-  { name: "Mike Johnson", initials: "MJ" },
+  { name: 'Sarah Miller', initials: 'SM' },
+  { name: 'John Davis', initials: 'JD' },
+  { name: 'Mike Johnson', initials: 'MJ' },
 ];
 
 /**
  * Color variants for stat card icons
  */
-type IconVariant = "primary" | "success" | "warning" | "error";
+type IconVariant = 'primary' | 'success' | 'warning' | 'error';
 
 const ICON_VARIANT_STYLES: Record<IconVariant, string> = {
-  primary: "bg-primary/10 text-primary",
-  success: "bg-green-500/10 text-green-600",
-  warning: "bg-orange-500/10 text-orange-600",
-  error: "bg-red-500/10 text-red-600",
+  primary: 'bg-primary/10 text-primary',
+  success: 'bg-green-500/10 text-green-600',
+  warning: 'bg-orange-500/10 text-orange-600',
+  error: 'bg-red-500/10 text-red-600',
 };
 
 const CHART_COLORS: Record<IconVariant, string> = {
-  primary: "hsl(var(--primary))",
-  success: "#22c55e",
-  warning: "#f97316",
-  error: "#ef4444",
+  primary: 'hsl(var(--primary))',
+  success: '#22c55e',
+  warning: '#f97316',
+  error: '#ef4444',
 };
 
 const CHART_BG_COLORS: Record<IconVariant, string> = {
-  primary: "rgba(0, 102, 255, 0.1)",
-  success: "rgba(34, 197, 94, 0.1)",
-  warning: "rgba(249, 115, 22, 0.1)",
-  error: "rgba(239, 68, 68, 0.1)",
+  primary: 'rgba(0, 102, 255, 0.1)',
+  success: 'rgba(34, 197, 94, 0.1)',
+  warning: 'rgba(249, 115, 22, 0.1)',
+  error: 'rgba(239, 68, 68, 0.1)',
 };
 
 /**
@@ -105,10 +90,10 @@ const CHART_BG_COLORS: Record<IconVariant, string> = {
  */
 function formatCurrencyK(value: number): string {
   if (Math.abs(value) >= 1000) {
-    return "$" + (value / 1000).toFixed(1) + "k";
+    return '$' + (value / 1000).toFixed(1) + 'k';
   }
   return (
-    "$" +
+    '$' +
     value.toLocaleString(undefined, {
       minimumFractionDigits: 0,
       maximumFractionDigits: 2,
@@ -120,8 +105,8 @@ function formatCurrencyK(value: number): string {
  * Format variance values with +/- prefix
  */
 function formatVariance(value: number): string {
-  if (value === 0) return "$0";
-  const prefix = value > 0 ? "+$" : "-$";
+  if (value === 0) return '$0';
+  const prefix = value > 0 ? '+$' : '-$';
   return prefix + Math.abs(value);
 }
 
@@ -130,7 +115,7 @@ interface ChartDataPoint {
   value: number;
 }
 
-type ChartType = "weekly" | "variance";
+type ChartType = 'weekly' | 'variance';
 
 interface StatCardProps {
   id: string;
@@ -139,7 +124,7 @@ interface StatCardProps {
   trend?: {
     value: string;
     isPositive: boolean;
-    icon?: "trending" | "clock" | "check";
+    icon?: 'trending' | 'clock' | 'check';
   };
   icon: React.ReactNode;
   iconVariant?: IconVariant;
@@ -155,9 +140,9 @@ function StatCard({
   value,
   trend,
   icon,
-  iconVariant = "primary",
+  iconVariant = 'primary',
   chartData,
-  chartType = "weekly",
+  chartType = 'weekly',
   children,
   className,
 }: StatCardProps) {
@@ -172,8 +157,7 @@ function StatCard({
     const minVal = Math.min(...values);
     const maxIdx = values.indexOf(maxVal);
     const minIdx = values.lastIndexOf(minVal);
-    const formatter =
-      chartType === "variance" ? formatVariance : formatCurrencyK;
+    const formatter = chartType === 'variance' ? formatVariance : formatCurrencyK;
 
     return { maxIndex: maxIdx, minIndex: minIdx, formatValue: formatter };
   })();
@@ -184,21 +168,17 @@ function StatCard({
   const chartFillColor = CHART_BG_COLORS[iconVariant];
 
   const TrendIcon =
-    trend?.icon === "clock"
-      ? Clock
-      : trend?.icon === "check"
-        ? CheckCircle
-        : TrendingUp;
+    trend?.icon === 'clock' ? Clock : trend?.icon === 'check' ? CheckCircle : TrendingUp;
 
   // Generate accessible label
-  const ariaLabel = `${label}: ${value}${trend ? `, ${trend.isPositive ? "up" : "down"} ${trend.value}` : ""}`;
+  const ariaLabel = `${label}: ${value}${trend ? `, ${trend.isPositive ? 'up' : 'down'} ${trend.value}` : ''}`;
 
   return (
     <article
       className={cn(
-        "bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow duration-200 hover:shadow-md",
-        "flex flex-col h-[140px] min-w-0 overflow-hidden",
-        className,
+        'bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow duration-200 hover:shadow-md',
+        'flex flex-col h-[140px] min-w-0 overflow-hidden',
+        className
       )}
       data-card-id={id}
       data-testid={`stat-card-${id}`}
@@ -216,19 +196,16 @@ function StatCard({
             {label}
           </span>
           <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span
-              className="text-xl font-bold text-foreground"
-              aria-describedby={`label-${id}`}
-            >
+            <span className="text-xl font-bold text-foreground" aria-describedby={`label-${id}`}>
               {value}
             </span>
             {trend && (
               <span
                 className={cn(
-                  "flex items-center gap-0.5 text-[11px]",
-                  trend.isPositive ? "text-green-600" : "text-red-500",
+                  'flex items-center gap-0.5 text-[11px]',
+                  trend.isPositive ? 'text-green-600' : 'text-red-500'
                 )}
-                aria-label={`Trend: ${trend.isPositive ? "up" : "down"} ${trend.value}`}
+                aria-label={`Trend: ${trend.isPositive ? 'up' : 'down'} ${trend.value}`}
               >
                 <TrendIcon className="w-3 h-3" aria-hidden="true" />
                 <span>{trend.value}</span>
@@ -238,9 +215,9 @@ function StatCard({
         </div>
         <div
           className={cn(
-            "w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0",
+            'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0',
             // eslint-disable-next-line security/detect-object-injection -- Safe: iconVariant is typed IconVariant enum
-            ICON_VARIANT_STYLES[iconVariant],
+            ICON_VARIANT_STYLES[iconVariant]
           )}
           aria-hidden="true"
         >
@@ -250,36 +227,29 @@ function StatCard({
 
       {/* Chart or custom children */}
       {chartData ? (
-        <div
-          className="flex-1 mt-1"
-          style={{ minHeight: 60 }}
-          aria-hidden="true"
-        >
+        <div className="flex-1 mt-1" style={{ minHeight: 60 }} aria-hidden="true">
           <ResponsiveContainer width="100%" height={60}>
-            <AreaChart
-              data={chartData}
-              margin={{ top: 18, right: 12, bottom: 0, left: 12 }}
-            >
+            <AreaChart data={chartData} margin={{ top: 18, right: 12, bottom: 0, left: 12 }}>
               <XAxis
                 dataKey="label"
-                axisLine={{ stroke: "hsl(var(--border))", strokeWidth: 1 }}
+                axisLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
                 tickLine={false}
                 tick={{
                   fontSize: 9,
-                  fill: "hsl(var(--muted-foreground))",
+                  fill: 'hsl(var(--muted-foreground))',
                 }}
                 interval={0}
               />
-              <YAxis domain={["dataMin - 10", "dataMax + 10"]} hide />
+              <YAxis domain={['dataMin - 10', 'dataMax + 10']} hide />
               <Tooltip
                 contentStyle={{
-                  backgroundColor: "hsl(var(--card))",
-                  border: "1px solid hsl(var(--border))",
-                  borderRadius: "8px",
-                  fontSize: "12px",
+                  backgroundColor: 'hsl(var(--card))',
+                  border: '1px solid hsl(var(--border))',
+                  borderRadius: '8px',
+                  fontSize: '12px',
                 }}
                 formatter={(val) => {
-                  const numVal = typeof val === "number" ? val : 0;
+                  const numVal = typeof val === 'number' ? val : 0;
                   return [formatValue(numVal), label];
                 }}
                 labelFormatter={(lbl) => lbl}
@@ -293,9 +263,9 @@ function StatCard({
                 dot={(props) => {
                   const { cx, cy, index } = props;
                   if (
-                    typeof cx !== "number" ||
-                    typeof cy !== "number" ||
-                    typeof index !== "number" ||
+                    typeof cx !== 'number' ||
+                    typeof cy !== 'number' ||
+                    typeof index !== 'number' ||
                     !chartData
                   ) {
                     return <g key="dot-invalid" />;
@@ -308,30 +278,30 @@ function StatCard({
 
                   // Determine colors
                   let dotColor = chartStrokeColor;
-                  let textColor = "hsl(var(--muted-foreground))";
+                  let textColor = 'hsl(var(--muted-foreground))';
 
-                  if (chartType === "variance") {
+                  if (chartType === 'variance') {
                     // For variance charts: green for 0, red for negative, orange for positive
                     if (dataValue === 0) {
-                      dotColor = "#22c55e";
-                      textColor = "#22c55e";
+                      dotColor = '#22c55e';
+                      textColor = '#22c55e';
                     } else if (dataValue < 0) {
-                      dotColor = "#ef4444";
-                      textColor = "#ef4444";
+                      dotColor = '#ef4444';
+                      textColor = '#ef4444';
                     } else {
-                      dotColor = "#f97316";
-                      textColor = "#f97316";
+                      dotColor = '#f97316';
+                      textColor = '#f97316';
                     }
                   } else if (isMax) {
-                    dotColor = "#22c55e";
-                    textColor = "#22c55e";
+                    dotColor = '#22c55e';
+                    textColor = '#22c55e';
                   } else if (isMin) {
-                    dotColor = "#ef4444";
-                    textColor = "#ef4444";
+                    dotColor = '#ef4444';
+                    textColor = '#ef4444';
                   }
 
                   // Show dot for max/min or all points in variance mode
-                  const showDot = isMax || isMin || chartType === "variance";
+                  const showDot = isMax || isMin || chartType === 'variance';
 
                   return (
                     <g key={`dot-${index}`}>
@@ -383,7 +353,7 @@ export function StatsGrid() {
         id="avg-ticket"
         label="Average Ticket"
         value="$24.95"
-        trend={{ value: "+8.3%", isPositive: true }}
+        trend={{ value: '+8.3%', isPositive: true }}
         icon={<Receipt className="w-3.5 h-3.5" aria-hidden="true" />}
         iconVariant="primary"
         chartData={avgTicketData}
@@ -395,15 +365,11 @@ export function StatsGrid() {
         id="active-shifts"
         label="Active Shifts"
         value="3"
-        trend={{ value: "open", isPositive: true, icon: "clock" }}
+        trend={{ value: 'open', isPositive: true, icon: 'clock' }}
         icon={<Users className="w-3.5 h-3.5" aria-hidden="true" />}
         iconVariant="success"
       >
-        <div
-          className="flex flex-wrap gap-1 mt-1"
-          role="list"
-          aria-label="Active cashiers"
-        >
+        <div className="flex flex-wrap gap-1 mt-1" role="list" aria-label="Active cashiers">
           {activeCashiers.map((cashier) => (
             <Badge
               key={cashier.initials}
@@ -423,7 +389,7 @@ export function StatsGrid() {
         id="lottery-sales"
         label="Lottery Sales"
         value="$1,847"
-        trend={{ value: "+8.2%", isPositive: true }}
+        trend={{ value: '+8.2%', isPositive: true }}
         icon={<Ticket className="w-3.5 h-3.5" aria-hidden="true" />}
         iconVariant="warning"
         chartData={lotterySalesData}
@@ -435,7 +401,7 @@ export function StatsGrid() {
         id="lottery-variance"
         label="Lottery Variance"
         value="$0"
-        trend={{ value: "balanced", isPositive: true, icon: "check" }}
+        trend={{ value: 'balanced', isPositive: true, icon: 'check' }}
         icon={<Scale className="w-3.5 h-3.5" aria-hidden="true" />}
         iconVariant="error"
         chartData={lotteryVarianceData}

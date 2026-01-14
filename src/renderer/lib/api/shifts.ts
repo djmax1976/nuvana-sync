@@ -12,8 +12,8 @@
  * - Credential handling (httpOnly cookies)
  */
 
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
-import apiClient from "./client";
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
+import apiClient from './client';
 
 // ============ Types ============
 
@@ -21,13 +21,13 @@ import apiClient from "./client";
  * Shift status enum
  */
 export type ShiftStatus =
-  | "NOT_STARTED"
-  | "OPEN"
-  | "ACTIVE"
-  | "CLOSING"
-  | "RECONCILING"
-  | "CLOSED"
-  | "VARIANCE_REVIEW";
+  | 'NOT_STARTED'
+  | 'OPEN'
+  | 'ACTIVE'
+  | 'CLOSING'
+  | 'RECONCILING'
+  | 'CLOSED'
+  | 'VARIANCE_REVIEW';
 
 /**
  * Shift query filters
@@ -130,34 +130,31 @@ export interface ApiResponse<T> {
 /**
  * Build query string from filters and pagination
  */
-function buildQueryString(
-  filters?: ShiftQueryFilters,
-  pagination?: PaginationOptions,
-): string {
+function buildQueryString(filters?: ShiftQueryFilters, pagination?: PaginationOptions): string {
   const params = new URLSearchParams();
 
   if (filters?.status) {
-    params.append("status", filters.status);
+    params.append('status', filters.status);
   }
   if (filters?.store_id) {
-    params.append("store_id", filters.store_id);
+    params.append('store_id', filters.store_id);
   }
   if (filters?.from) {
-    params.append("from", filters.from);
+    params.append('from', filters.from);
   }
   if (filters?.to) {
-    params.append("to", filters.to);
+    params.append('to', filters.to);
   }
 
   if (pagination?.limit != null) {
-    params.append("limit", pagination.limit.toString());
+    params.append('limit', pagination.limit.toString());
   }
   if (pagination?.offset != null) {
-    params.append("offset", pagination.offset.toString());
+    params.append('offset', pagination.offset.toString());
   }
 
   const queryString = params.toString();
-  return queryString ? `?${queryString}` : "";
+  return queryString ? `?${queryString}` : '';
 }
 
 /**
@@ -168,12 +165,10 @@ function buildQueryString(
  */
 export async function getShifts(
   filters?: ShiftQueryFilters,
-  pagination?: PaginationOptions,
+  pagination?: PaginationOptions
 ): Promise<ApiResponse<ShiftQueryResult>> {
   const queryString = buildQueryString(filters, pagination);
-  const response = await apiClient.get<ApiResponse<ShiftQueryResult>>(
-    `/api/shifts${queryString}`,
-  );
+  const response = await apiClient.get<ApiResponse<ShiftQueryResult>>(`/api/shifts${queryString}`);
   return response.data;
 }
 
@@ -183,12 +178,8 @@ export async function getShifts(
  * @returns Shift detail response with transaction count and variance details
  * Story 4.7: Shift Management UI
  */
-export async function getShiftById(
-  shiftId: string,
-): Promise<ApiResponse<ShiftDetailResponse>> {
-  const response = await apiClient.get<ApiResponse<ShiftDetailResponse>>(
-    `/api/shifts/${shiftId}`,
-  );
+export async function getShiftById(shiftId: string): Promise<ApiResponse<ShiftDetailResponse>> {
+  const response = await apiClient.get<ApiResponse<ShiftDetailResponse>>(`/api/shifts/${shiftId}`);
   return response.data;
 }
 
@@ -260,13 +251,8 @@ export interface ReconcileCashResponse {
  * @param data - Shift opening data
  * @returns Created shift response
  */
-export async function openShift(
-  data: OpenShiftInput,
-): Promise<ApiResponse<OpenShiftResponse>> {
-  const response = await apiClient.post<ApiResponse<OpenShiftResponse>>(
-    "/api/shifts/open",
-    data,
-  );
+export async function openShift(data: OpenShiftInput): Promise<ApiResponse<OpenShiftResponse>> {
+  const response = await apiClient.post<ApiResponse<OpenShiftResponse>>('/api/shifts/open', data);
   return response.data;
 }
 
@@ -290,11 +276,11 @@ export interface CloseShiftInput {
  */
 export async function closeShift(
   shiftId: string,
-  closingCash: number,
+  closingCash: number
 ): Promise<ApiResponse<CloseShiftResponse>> {
   const response = await apiClient.post<ApiResponse<CloseShiftResponse>>(
     `/api/shifts/${shiftId}/close`,
-    { closing_cash: closingCash },
+    { closing_cash: closingCash }
   );
   return response.data;
 }
@@ -307,11 +293,11 @@ export async function closeShift(
  */
 export async function reconcileCash(
   shiftId: string,
-  data: ReconcileCashInput,
+  data: ReconcileCashInput
 ): Promise<ApiResponse<ReconcileCashResponse>> {
   const response = await apiClient.put<ApiResponse<ReconcileCashResponse>>(
     `/api/shifts/${shiftId}/reconcile`,
-    data,
+    data
   );
   return response.data;
 }
@@ -335,7 +321,7 @@ export async function reconcileCash(
 export async function startShift(
   terminalId: string,
   sessionToken: string,
-  openingCash?: number,
+  openingCash?: number
 ): Promise<ApiResponse<ShiftResponse & { shift_number: number | null }>> {
   const response = await apiClient.post<
     ApiResponse<ShiftResponse & { shift_number: number | null }>
@@ -344,9 +330,9 @@ export async function startShift(
     openingCash !== undefined ? { opening_cash: openingCash } : {},
     {
       headers: {
-        "X-Cashier-Session": sessionToken,
+        'X-Cashier-Session': sessionToken,
       },
-    },
+    }
   );
   return response.data;
 }
@@ -356,10 +342,8 @@ export async function startShift(
  * Story 4.92: Terminal Shift Page
  */
 export async function getActiveShift(
-  terminalId: string,
-): Promise<
-  ApiResponse<(ShiftResponse & { shift_number: number | null }) | null>
-> {
+  terminalId: string
+): Promise<ApiResponse<(ShiftResponse & { shift_number: number | null }) | null>> {
   const response = await apiClient.get<
     ApiResponse<(ShiftResponse & { shift_number: number | null }) | null>
   >(`/api/terminals/${terminalId}/shifts/active`);
@@ -381,7 +365,7 @@ export async function getActiveShift(
 export async function updateStartingCash(
   shiftId: string,
   startingCash: number,
-  sessionToken: string,
+  sessionToken: string
 ): Promise<ApiResponse<ShiftResponse & { shift_number: number | null }>> {
   const response = await apiClient.put<
     ApiResponse<ShiftResponse & { shift_number: number | null }>
@@ -390,9 +374,9 @@ export async function updateStartingCash(
     { starting_cash: startingCash },
     {
       headers: {
-        "X-Cashier-Session": sessionToken,
+        'X-Cashier-Session': sessionToken,
       },
-    },
+    }
   );
   return response.data;
 }
@@ -403,18 +387,13 @@ export async function updateStartingCash(
  * Query key factory for shift queries
  */
 export const shiftKeys = {
-  all: ["shifts"] as const,
-  lists: () => [...shiftKeys.all, "list"] as const,
+  all: ['shifts'] as const,
+  lists: () => [...shiftKeys.all, 'list'] as const,
   list: (filters?: ShiftQueryFilters, pagination?: PaginationOptions) =>
-    [
-      ...shiftKeys.lists(),
-      filters || {},
-      pagination || { limit: 50, offset: 0 },
-    ] as const,
-  details: () => [...shiftKeys.all, "detail"] as const,
-  detail: (shiftId: string | undefined) =>
-    [...shiftKeys.details(), shiftId] as const,
-  active: () => [...shiftKeys.all, "active"] as const,
+    [...shiftKeys.lists(), filters || {}, pagination || { limit: 50, offset: 0 }] as const,
+  details: () => [...shiftKeys.all, 'detail'] as const,
+  detail: (shiftId: string | undefined) => [...shiftKeys.details(), shiftId] as const,
+  active: () => [...shiftKeys.all, 'active'] as const,
   activeByTerminal: (terminalId: string | undefined) =>
     [...shiftKeys.active(), terminalId] as const,
 };
@@ -431,7 +410,7 @@ export const shiftKeys = {
 export function useShifts(
   filters?: ShiftQueryFilters,
   pagination?: PaginationOptions,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   const defaultPagination: PaginationOptions = {
     limit: 50,
@@ -442,7 +421,7 @@ export function useShifts(
     queryKey: shiftKeys.list(filters, pagination || defaultPagination),
     queryFn: () => getShifts(filters, pagination || defaultPagination),
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -457,15 +436,13 @@ export function useInvalidateShifts() {
   const queryClient = useQueryClient();
 
   return {
-    invalidateList: () =>
-      queryClient.invalidateQueries({ queryKey: shiftKeys.lists() }),
+    invalidateList: () => queryClient.invalidateQueries({ queryKey: shiftKeys.lists() }),
     invalidateDetail: (shiftId: string) => {
       return queryClient.invalidateQueries({
         queryKey: shiftKeys.detail(shiftId),
       });
     },
-    invalidateAll: () =>
-      queryClient.invalidateQueries({ queryKey: shiftKeys.all }),
+    invalidateAll: () => queryClient.invalidateQueries({ queryKey: shiftKeys.all }),
   };
 }
 
@@ -494,13 +471,8 @@ export function useCloseShift() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      shiftId,
-      closingCash,
-    }: {
-      shiftId: string;
-      closingCash: number;
-    }) => closeShift(shiftId, closingCash),
+    mutationFn: ({ shiftId, closingCash }: { shiftId: string; closingCash: number }) =>
+      closeShift(shiftId, closingCash),
     onSuccess: () => {
       // Invalidate shift list and detail queries to refresh after closing
       queryClient.invalidateQueries({ queryKey: shiftKeys.lists() });
@@ -517,13 +489,8 @@ export function useReconcileCash() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      shiftId,
-      data,
-    }: {
-      shiftId: string;
-      data: ReconcileCashInput;
-    }) => reconcileCash(shiftId, data),
+    mutationFn: ({ shiftId, data }: { shiftId: string; data: ReconcileCashInput }) =>
+      reconcileCash(shiftId, data),
     onSuccess: () => {
       // Invalidate shift list and detail queries to refresh
       queryClient.invalidateQueries({ queryKey: shiftKeys.lists() });
@@ -539,10 +506,7 @@ export function useReconcileCash() {
  * @returns TanStack Query result with shift detail data
  * Story 4.7: Shift Management UI
  */
-export function useShiftDetail(
-  shiftId: string | null,
-  options?: { enabled?: boolean },
-) {
+export function useShiftDetail(shiftId: string | null, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: shiftKeys.detail(shiftId ?? undefined),
     queryFn: () => getShiftById(shiftId!),
@@ -593,10 +557,7 @@ export function useShiftStart() {
  * Hook to get active shift for a terminal
  * Story 4.92: Terminal Shift Page
  */
-export function useActiveShift(
-  terminalId: string | null,
-  options?: { enabled?: boolean },
-) {
+export function useActiveShift(terminalId: string | null, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: shiftKeys.activeByTerminal(terminalId ?? undefined),
     queryFn: () => getActiveShift(terminalId!),
@@ -681,12 +642,12 @@ export interface OpenShiftsCheckResponse {
  */
 export async function checkOpenShifts(
   storeId: string,
-  businessDate?: string,
+  businessDate?: string
 ): Promise<ApiResponse<OpenShiftsCheckResponse>> {
   const params = businessDate ? { business_date: businessDate } : {};
   const response = await apiClient.get<ApiResponse<OpenShiftsCheckResponse>>(
     `/api/stores/${storeId}/shifts/open-check`,
-    { params },
+    { params }
   );
   return response.data;
 }
@@ -695,7 +656,7 @@ export async function checkOpenShifts(
  * Query key for open shifts check
  */
 export const openShiftsCheckKeys = {
-  all: ["open-shifts-check"] as const,
+  all: ['open-shifts-check'] as const,
   check: (storeId: string | undefined, businessDate: string | undefined) =>
     [...openShiftsCheckKeys.all, storeId, businessDate] as const,
 };
@@ -715,7 +676,7 @@ export const openShiftsCheckKeys = {
 export function useOpenShiftsCheck(
   storeId: string | undefined,
   businessDate?: string,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   // BUSINESS RULE: For day close blocking, we check ALL open shifts (no date filter)
   // Only pass businessDate if explicitly provided for reporting use cases
@@ -791,7 +752,7 @@ export interface ActivatedPackSummary {
   game_price: number;
   bin_number: number;
   activated_at: string;
-  status: "ACTIVE" | "DEPLETED" | "RETURNED";
+  status: 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 }
 
 /**
@@ -907,9 +868,8 @@ export interface ShiftLotterySummaryResponse {
  * Query keys for shift lottery summary
  */
 export const shiftLotterySummaryKeys = {
-  all: ["shift-lottery-summary"] as const,
-  detail: (shiftId: string) =>
-    [...shiftLotterySummaryKeys.all, shiftId] as const,
+  all: ['shift-lottery-summary'] as const,
+  detail: (shiftId: string) => [...shiftLotterySummaryKeys.all, shiftId] as const,
 };
 
 /**
@@ -923,11 +883,11 @@ export const shiftLotterySummaryKeys = {
  * @returns Complete lottery summary for the shift
  */
 export async function getShiftLotterySummary(
-  shiftId: string,
+  shiftId: string
 ): Promise<ApiResponse<ShiftLotterySummaryResponse>> {
-  const response = await apiClient.get<
-    ApiResponse<ShiftLotterySummaryResponse>
-  >(`/api/shifts/${shiftId}/lottery-summary`);
+  const response = await apiClient.get<ApiResponse<ShiftLotterySummaryResponse>>(
+    `/api/shifts/${shiftId}/lottery-summary`
+  );
   return response.data;
 }
 
@@ -945,7 +905,7 @@ export async function getShiftLotterySummary(
  */
 export function useShiftLotterySummary(
   shiftId: string | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: shiftLotterySummaryKeys.detail(shiftId!),

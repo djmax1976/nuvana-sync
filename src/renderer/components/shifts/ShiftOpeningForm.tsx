@@ -1,4 +1,3 @@
-
 /**
  * Shift Opening Form Component
  * Form for opening a new shift with cashier, terminal, and opening cash selection
@@ -6,10 +5,10 @@
  * Story: 4.7 - Shift Management UI
  */
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Button } from "@/components/ui/button";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Button } from '@/components/ui/button';
 import {
   Form,
   FormControl,
@@ -18,15 +17,15 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -34,23 +33,23 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useOpenShift, useInvalidateShifts } from "@/lib/api/shifts";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2 } from "lucide-react";
-import { useEffect, useState } from "react";
+} from '@/components/ui/dialog';
+import { useOpenShift, useInvalidateShifts } from '@/lib/api/shifts';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
 
 /**
  * Form validation schema matching backend OpenShiftSchema
  * Mirrors backend validation client-side for immediate feedback
  */
 const openShiftFormSchema = z.object({
-  store_id: z.string().uuid("Store ID must be a valid UUID"),
-  cashier_id: z.string().uuid("Cashier must be selected"),
-  pos_terminal_id: z.string().uuid("Terminal must be selected"),
+  store_id: z.string().uuid('Store ID must be a valid UUID'),
+  cashier_id: z.string().uuid('Cashier must be selected'),
+  pos_terminal_id: z.string().uuid('Terminal must be selected'),
   opening_cash: z
-    .number({ error: "Opening cash must be a number" })
-    .nonnegative({ message: "Opening cash must be a non-negative number" }),
+    .number({ error: 'Opening cash must be a number' })
+    .nonnegative({ message: 'Opening cash must be a non-negative number' }),
 });
 
 type OpenShiftFormValues = z.infer<typeof openShiftFormSchema>;
@@ -101,13 +100,13 @@ export function ShiftOpeningForm({
 
   const form = useForm<OpenShiftFormValues>({
     resolver: zodResolver(openShiftFormSchema),
-    mode: "onSubmit",
-    reValidateMode: "onChange",
+    mode: 'onSubmit',
+    reValidateMode: 'onChange',
     shouldFocusError: true,
     defaultValues: {
       store_id: storeId,
-      cashier_id: "",
-      pos_terminal_id: "",
+      cashier_id: '',
+      pos_terminal_id: '',
       opening_cash: 0,
     },
   });
@@ -117,8 +116,8 @@ export function ShiftOpeningForm({
     if (open) {
       form.reset({
         store_id: storeId,
-        cashier_id: "",
-        pos_terminal_id: "",
+        cashier_id: '',
+        pos_terminal_id: '',
         opening_cash: 0,
       });
     }
@@ -130,8 +129,8 @@ export function ShiftOpeningForm({
       await openShiftMutation.mutateAsync(values);
 
       toast({
-        title: "Success",
-        description: "Shift opened successfully",
+        title: 'Success',
+        description: 'Shift opened successfully',
       });
 
       // Invalidate shift list to refresh
@@ -150,53 +149,51 @@ export function ShiftOpeningForm({
     } catch (error) {
       // Handle validation errors from backend
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to open shift. Please try again.";
+        error instanceof Error ? error.message : 'Failed to open shift. Please try again.';
 
       // Check for specific error codes
-      if (errorMessage.includes("SHIFT_ALREADY_ACTIVE")) {
+      if (errorMessage.includes('SHIFT_ALREADY_ACTIVE')) {
         toast({
-          title: "Error",
+          title: 'Error',
           description:
-            "An active shift already exists for this terminal. Please close the existing shift first.",
-          variant: "destructive",
+            'An active shift already exists for this terminal. Please close the existing shift first.',
+          variant: 'destructive',
         });
-      } else if (errorMessage.includes("CASHIER_NOT_FOUND")) {
+      } else if (errorMessage.includes('CASHIER_NOT_FOUND')) {
         toast({
-          title: "Error",
-          description: "Selected cashier is not valid for this store.",
-          variant: "destructive",
+          title: 'Error',
+          description: 'Selected cashier is not valid for this store.',
+          variant: 'destructive',
         });
-        form.setError("cashier_id", {
-          type: "manual",
-          message: "Cashier is not valid for this store",
+        form.setError('cashier_id', {
+          type: 'manual',
+          message: 'Cashier is not valid for this store',
         });
-      } else if (errorMessage.includes("TERMINAL_NOT_FOUND")) {
+      } else if (errorMessage.includes('TERMINAL_NOT_FOUND')) {
         toast({
-          title: "Error",
-          description: "Selected terminal is not valid for this store.",
-          variant: "destructive",
+          title: 'Error',
+          description: 'Selected terminal is not valid for this store.',
+          variant: 'destructive',
         });
-        form.setError("pos_terminal_id", {
-          type: "manual",
-          message: "Terminal is not valid for this store",
+        form.setError('pos_terminal_id', {
+          type: 'manual',
+          message: 'Terminal is not valid for this store',
         });
-      } else if (errorMessage.includes("INVALID_OPENING_CASH")) {
+      } else if (errorMessage.includes('INVALID_OPENING_CASH')) {
         toast({
-          title: "Error",
-          description: "Opening cash amount is invalid.",
-          variant: "destructive",
+          title: 'Error',
+          description: 'Opening cash amount is invalid.',
+          variant: 'destructive',
         });
-        form.setError("opening_cash", {
-          type: "manual",
-          message: "Opening cash must be a non-negative number",
+        form.setError('opening_cash', {
+          type: 'manual',
+          message: 'Opening cash must be a non-negative number',
         });
       } else {
         toast({
-          title: "Error",
+          title: 'Error',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
       }
     } finally {
@@ -210,8 +207,7 @@ export function ShiftOpeningForm({
         <DialogHeader>
           <DialogTitle>Open New Shift</DialogTitle>
           <DialogDescription>
-            Select cashier, terminal, and enter opening cash amount to open a
-            new shift.
+            Select cashier, terminal, and enter opening cash amount to open a new shift.
           </DialogDescription>
         </DialogHeader>
 
@@ -265,9 +261,7 @@ export function ShiftOpeningForm({
                       )}
                     </SelectContent>
                   </Select>
-                  <FormDescription>
-                    Select a cashier assigned to this store
-                  </FormDescription>
+                  <FormDescription>Select a cashier assigned to this store</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -308,9 +302,7 @@ export function ShiftOpeningForm({
                       )}
                     </SelectContent>
                   </Select>
-                  <FormDescription>
-                    Select a POS terminal for this shift
-                  </FormDescription>
+                  <FormDescription>Select a POS terminal for this shift</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -333,7 +325,7 @@ export function ShiftOpeningForm({
                         const value = e.target.value;
                         // Allow negative values to pass through for validation
                         // Convert empty string to 0, otherwise parse as number
-                        if (value === "") {
+                        if (value === '') {
                           field.onChange(0);
                         } else {
                           const numValue = parseFloat(value);
@@ -345,14 +337,12 @@ export function ShiftOpeningForm({
                           }
                         }
                       }}
-                      value={field.value === 0 ? "" : field.value}
+                      value={field.value === 0 ? '' : field.value}
                       disabled={isSubmitting}
                       data-testid="opening-cash-input"
                     />
                   </FormControl>
-                  <FormDescription>
-                    Enter the starting cash amount (must be ≥ 0)
-                  </FormDescription>
+                  <FormDescription>Enter the starting cash amount (must be ≥ 0)</FormDescription>
                   <FormMessage />
                 </FormItem>
               )}
@@ -369,16 +359,10 @@ export function ShiftOpeningForm({
               </Button>
               <Button
                 type="submit"
-                disabled={
-                  isSubmitting ||
-                  cashiers.length === 0 ||
-                  terminals.length === 0
-                }
+                disabled={isSubmitting || cashiers.length === 0 || terminals.length === 0}
                 data-testid="submit-shift-opening"
               >
-                {isSubmitting && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Open Shift
               </Button>
             </DialogFooter>

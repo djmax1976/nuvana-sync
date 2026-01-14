@@ -1,4 +1,3 @@
-
 /**
  * New Game Modal Component
  * Modal for creating a new lottery game when an unknown game code is encountered
@@ -14,10 +13,10 @@
  * Story: 6.x - Lottery Configuration Values Enhancement
  */
 
-import { useState, useCallback, useEffect, useMemo } from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+import { useState, useCallback, useEffect, useMemo } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Dialog,
   DialogContent,
@@ -25,21 +24,17 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
+} from '@/components/ui/dialog';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, AlertCircle } from "lucide-react";
-import {
-  createGame,
-  getLotteryConfigValues,
-  type LotteryConfigValueItem,
-} from "@/lib/api/lottery";
+} from '@/components/ui/select';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, AlertCircle } from 'lucide-react';
+import { createGame, getLotteryConfigValues, type LotteryConfigValueItem } from '@/lib/api/lottery';
 
 interface GameToCreate {
   serial: string;
@@ -59,7 +54,7 @@ interface NewGameModalProps {
     createdGames: Map<
       string,
       { name: string; price: number; pack_value: number; total_tickets: number }
-    >,
+    >
   ) => void;
   onCancel: () => void;
 }
@@ -79,29 +74,22 @@ export function NewGameModal({
   const { toast } = useToast();
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [currentIndex, setCurrentIndex] = useState(0);
-  const [gameName, setGameName] = useState("");
-  const [selectedPrice, setSelectedPrice] = useState<string>("");
-  const [selectedPackValue, setSelectedPackValue] = useState<string>("");
+  const [gameName, setGameName] = useState('');
+  const [selectedPrice, setSelectedPrice] = useState<string>('');
+  const [selectedPackValue, setSelectedPackValue] = useState<string>('');
   const [createdGameCodes, setCreatedGameCodes] = useState<string[]>([]);
   const [createdGames, setCreatedGames] = useState<
-    Map<
-      string,
-      { name: string; price: number; pack_value: number; total_tickets: number }
-    >
+    Map<string, { name: string; price: number; pack_value: number; total_tickets: number }>
   >(new Map());
 
   // Configuration values from API
-  const [ticketPrices, setTicketPrices] = useState<LotteryConfigValueItem[]>(
-    [],
-  );
+  const [ticketPrices, setTicketPrices] = useState<LotteryConfigValueItem[]>([]);
   const [packValues, setPackValues] = useState<LotteryConfigValueItem[]>([]);
   const [isLoadingConfig, setIsLoadingConfig] = useState(false);
   const [configError, setConfigError] = useState<string | null>(null);
 
   // Get unique game codes (multiple packs might have same game code)
-  const uniqueGameCodes = Array.from(
-    new Map(gamesToCreate.map((g) => [g.game_code, g])).values(),
-  );
+  const uniqueGameCodes = Array.from(new Map(gamesToCreate.map((g) => [g.game_code, g])).values());
 
   // eslint-disable-next-line security/detect-object-injection -- currentIndex is a controlled state variable bounded by array length
   const currentGame = uniqueGameCodes[currentIndex];
@@ -112,9 +100,9 @@ export function NewGameModal({
   useEffect(() => {
     if (open) {
       setCurrentIndex(0);
-      setGameName("");
-      setSelectedPrice("");
-      setSelectedPackValue("");
+      setGameName('');
+      setSelectedPrice('');
+      setSelectedPackValue('');
       setCreatedGameCodes([]);
       setCreatedGames(new Map());
       setConfigError(null);
@@ -128,18 +116,16 @@ export function NewGameModal({
             setTicketPrices(response.data.ticket_prices);
             setPackValues(response.data.pack_values);
           } else {
-            throw new Error("Failed to load configuration values");
+            throw new Error('Failed to load configuration values');
           }
         } catch (error) {
           const errorMessage =
-            error instanceof Error
-              ? error.message
-              : "Failed to load configuration values";
+            error instanceof Error ? error.message : 'Failed to load configuration values';
           setConfigError(errorMessage);
           toast({
-            title: "Configuration Error",
+            title: 'Configuration Error',
             description: errorMessage,
-            variant: "destructive",
+            variant: 'destructive',
           });
         } finally {
           setIsLoadingConfig(false);
@@ -171,12 +157,9 @@ export function NewGameModal({
   }, [selectedPrice, selectedPackValue]);
 
   // Handle game name input with auto-uppercase
-  const handleGameNameChange = useCallback(
-    (e: React.ChangeEvent<HTMLInputElement>) => {
-      setGameName(e.target.value.toUpperCase());
-    },
-    [],
-  );
+  const handleGameNameChange = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
+    setGameName(e.target.value.toUpperCase());
+  }, []);
 
   // Handle price dropdown selection
   const handlePriceChange = useCallback((value: string) => {
@@ -192,9 +175,9 @@ export function NewGameModal({
   const handleCreateGame = useCallback(async () => {
     if (!currentGame || !gameName.trim()) {
       toast({
-        title: "Error",
-        description: "Game name is required",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Game name is required',
+        variant: 'destructive',
       });
       return;
     }
@@ -204,28 +187,28 @@ export function NewGameModal({
 
     if (!selectedPrice || price <= 0) {
       toast({
-        title: "Error",
-        description: "Please select a ticket price",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Please select a ticket price',
+        variant: 'destructive',
       });
       return;
     }
 
     if (!selectedPackValue || packValue <= 0) {
       toast({
-        title: "Error",
-        description: "Please select a pack value",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Please select a pack value',
+        variant: 'destructive',
       });
       return;
     }
 
     if (!isDivisible) {
       toast({
-        title: "Error",
+        title: 'Error',
         description:
-          "Pack value must be evenly divisible by ticket price (whole number of tickets)",
-        variant: "destructive",
+          'Pack value must be evenly divisible by ticket price (whole number of tickets)',
+        variant: 'destructive',
       });
       return;
     }
@@ -257,7 +240,7 @@ export function NewGameModal({
         setCreatedGames(newCreatedGames);
 
         toast({
-          title: "Game created",
+          title: 'Game created',
           description: `Game "${gameName.trim()}" (${currentGame.game_code}) - $${price.toFixed(2)} ticket / $${packValue.toFixed(2)} pack (${totalTickets} tickets) created successfully`,
         });
 
@@ -268,20 +251,19 @@ export function NewGameModal({
         } else {
           // Move to next game
           setCurrentIndex((prev) => prev + 1);
-          setGameName("");
-          setSelectedPrice("");
-          setSelectedPackValue("");
+          setGameName('');
+          setSelectedPrice('');
+          setSelectedPackValue('');
         }
       } else {
-        throw new Error("Failed to create game");
+        throw new Error('Failed to create game');
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to create game";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to create game';
       toast({
-        title: "Error",
+        title: 'Error',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsSubmitting(false);
@@ -311,7 +293,7 @@ export function NewGameModal({
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (
-        e.key === "Enter" &&
+        e.key === 'Enter' &&
         gameName.trim() &&
         selectedPrice &&
         selectedPackValue &&
@@ -322,14 +304,7 @@ export function NewGameModal({
         handleCreateGame();
       }
     },
-    [
-      gameName,
-      selectedPrice,
-      selectedPackValue,
-      isDivisible,
-      isSubmitting,
-      handleCreateGame,
-    ],
+    [gameName, selectedPrice, selectedPackValue, isDivisible, isSubmitting, handleCreateGame]
   );
 
   if (!currentGame) {
@@ -342,11 +317,9 @@ export function NewGameModal({
         <DialogHeader>
           <DialogTitle>New Game Found</DialogTitle>
           <DialogDescription>
-            {totalGames > 1
-              ? `Game ${currentIndex + 1} of ${totalGames}: `
-              : ""}
-            The game code <strong>{currentGame.game_code}</strong> was not found
-            in the database. Please enter a name for this game to continue.
+            {totalGames > 1 ? `Game ${currentIndex + 1} of ${totalGames}: ` : ''}
+            The game code <strong>{currentGame.game_code}</strong> was not found in the database.
+            Please enter a name for this game to continue.
           </DialogDescription>
         </DialogHeader>
 
@@ -355,9 +328,7 @@ export function NewGameModal({
           {isLoadingConfig && (
             <div className="flex items-center justify-center py-4">
               <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-              <span className="ml-2 text-muted-foreground">
-                Loading configuration...
-              </span>
+              <span className="ml-2 text-muted-foreground">Loading configuration...</span>
             </div>
           )}
 
@@ -373,9 +344,7 @@ export function NewGameModal({
               {/* Game Code Display */}
               <div className="space-y-2">
                 <Label className="text-muted-foreground">Game Code</Label>
-                <div className="text-lg font-mono font-semibold">
-                  {currentGame.game_code}
-                </div>
+                <div className="text-lg font-mono font-semibold">{currentGame.game_code}</div>
               </div>
 
               {/* Game Name Input */}
@@ -410,26 +379,18 @@ export function NewGameModal({
                   onValueChange={handlePriceChange}
                   disabled={isSubmitting}
                 >
-                  <SelectTrigger
-                    id="game-price"
-                    data-testid="new-game-price-select"
-                  >
+                  <SelectTrigger id="game-price" data-testid="new-game-price-select">
                     <SelectValue placeholder="Select ticket price" />
                   </SelectTrigger>
                   <SelectContent>
                     {ticketPrices.map((item) => (
-                      <SelectItem
-                        key={item.config_value_id}
-                        value={item.amount.toString()}
-                      >
+                      <SelectItem key={item.config_value_id} value={item.amount.toString()}>
                         ${item.amount.toFixed(2)}
                       </SelectItem>
                     ))}
                   </SelectContent>
                 </Select>
-                <p className="text-xs text-muted-foreground">
-                  Select the price per lottery ticket
-                </p>
+                <p className="text-xs text-muted-foreground">Select the price per lottery ticket</p>
               </div>
 
               {/* Pack Value Dropdown */}
@@ -442,18 +403,12 @@ export function NewGameModal({
                   onValueChange={handlePackValueChange}
                   disabled={isSubmitting}
                 >
-                  <SelectTrigger
-                    id="game-pack-value"
-                    data-testid="new-game-pack-value-select"
-                  >
+                  <SelectTrigger id="game-pack-value" data-testid="new-game-pack-value-select">
                     <SelectValue placeholder="Select pack value" />
                   </SelectTrigger>
                   <SelectContent>
                     {packValues.map((item) => (
-                      <SelectItem
-                        key={item.config_value_id}
-                        value={item.amount.toString()}
-                      >
+                      <SelectItem key={item.config_value_id} value={item.amount.toString()}>
                         ${item.amount.toFixed(2)}
                       </SelectItem>
                     ))}
@@ -479,9 +434,7 @@ export function NewGameModal({
                 <div className="bg-primary/10 p-3 rounded-md">
                   <div className="flex justify-between items-center">
                     <span className="text-sm font-medium">Total Tickets:</span>
-                    <span className="text-lg font-bold text-primary">
-                      {calculatedTotalTickets}
-                    </span>
+                    <span className="text-lg font-bold text-primary">{calculatedTotalTickets}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1">
                     Serial numbers: 0 to {calculatedTotalTickets - 1}
@@ -498,12 +451,7 @@ export function NewGameModal({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            type="button"
-            variant="outline"
-            onClick={handleCancel}
-            disabled={isSubmitting}
-          >
+          <Button type="button" variant="outline" onClick={handleCancel} disabled={isSubmitting}>
             Cancel Reception
           </Button>
           <Button
@@ -521,7 +469,7 @@ export function NewGameModal({
             data-testid="create-game-button"
           >
             {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isLastGame ? "Create & Receive Packs" : "Create & Next"}
+            {isLastGame ? 'Create & Receive Packs' : 'Create & Next'}
           </Button>
         </DialogFooter>
       </DialogContent>

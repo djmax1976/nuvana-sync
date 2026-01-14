@@ -1,7 +1,7 @@
-import React, { Component, ReactNode } from "react";
-import { AlertTriangle, RefreshCw } from "lucide-react";
-import { Button } from "./button";
-import { Card } from "./card";
+import React, { Component, ReactNode } from 'react';
+import { AlertTriangle, RefreshCw } from 'lucide-react';
+import { Button } from './button';
+import { Card } from './card';
 
 /**
  * Chart Error Boundary
@@ -48,16 +48,14 @@ export class ChartErrorBoundary extends Component<
     };
   }
 
-  static getDerivedStateFromError(
-    error: Error,
-  ): Partial<ChartErrorBoundaryState> {
+  static getDerivedStateFromError(error: Error): Partial<ChartErrorBoundaryState> {
     return { hasError: true, error };
   }
 
   componentDidCatch(error: Error, errorInfo: React.ErrorInfo): void {
     // Log error for monitoring
-    console.error("[ChartErrorBoundary] Chart rendering failed:", {
-      chartName: this.props.chartName || "Unknown",
+    console.error('[ChartErrorBoundary] Chart rendering failed:', {
+      chartName: this.props.chartName || 'Unknown',
       error: error.message,
       stack: error.stack,
       componentStack: errorInfo.componentStack,
@@ -80,7 +78,7 @@ export class ChartErrorBoundary extends Component<
 
   render(): ReactNode {
     const { hasError, error, retryCount } = this.state;
-    const { children, chartName, fallback, height = "200px" } = this.props;
+    const { children, chartName, fallback, height = '200px' } = this.props;
 
     if (hasError) {
       // Use custom fallback if provided
@@ -93,33 +91,25 @@ export class ChartErrorBoundary extends Component<
         <Card
           className="flex flex-col items-center justify-center bg-muted/30 border-dashed"
           style={{
-            height: typeof height === "number" ? `${height}px` : height,
+            height: typeof height === 'number' ? `${height}px` : height,
           }}
           role="alert"
           aria-live="polite"
         >
           <div className="flex flex-col items-center gap-3 p-4 text-center">
             <div className="p-2 rounded-full bg-warning/10">
-              <AlertTriangle
-                className="w-5 h-5 text-warning"
-                aria-hidden="true"
-              />
+              <AlertTriangle className="w-5 h-5 text-warning" aria-hidden="true" />
             </div>
             <div className="space-y-1">
               <p className="text-sm font-medium text-foreground">
-                Unable to load {chartName || "chart"}
+                Unable to load {chartName || 'chart'}
               </p>
               <p className="text-xs text-muted-foreground">
-                {error?.message || "An unexpected error occurred"}
+                {error?.message || 'An unexpected error occurred'}
               </p>
             </div>
             {retryCount < this.MAX_RETRIES && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={this.handleRetry}
-                className="mt-2"
-              >
+              <Button variant="outline" size="sm" onClick={this.handleRetry} className="mt-2">
                 <RefreshCw className="w-3 h-3 mr-1.5" aria-hidden="true" />
                 Try Again
               </Button>
@@ -146,7 +136,7 @@ export function useChartError() {
   const [error, setError] = React.useState<Error | null>(null);
 
   const reportError = React.useCallback((err: Error) => {
-    console.error("[useChartError] Error reported:", err);
+    console.error('[useChartError] Error reported:', err);
     setError(err);
   }, []);
 

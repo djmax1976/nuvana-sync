@@ -1,55 +1,33 @@
-
-import { useState, useMemo, useCallback } from "react";
-import { useClientAuth } from "@/contexts/ClientAuthContext";
-import { useClientDashboard } from "@/lib/api/client-dashboard";
-import {
-  Loader2,
-  AlertCircle,
-  Plus,
-  Zap,
-  PenLine,
-  X,
-  Save,
-} from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useMemo, useCallback } from 'react';
+import { useClientAuth } from '@/contexts/ClientAuthContext';
+import { useClientDashboard } from '@/lib/api/client-dashboard';
+import { Loader2, AlertCircle, Plus, Zap, PenLine, X, Save } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   useLotteryPacks,
   usePackReception,
   usePackDetails,
   useInvalidateLottery,
   useLotteryDayBins,
-} from "@/hooks/useLottery";
-import {
-  DayBinsTable,
-  type BinValidationError,
-} from "@/components/lottery/DayBinsTable";
-import { validateManualEntryEnding } from "@/lib/services/lottery-closing-validation";
-import { DepletedPacksSection } from "@/components/lottery/DepletedPacksSection";
-import { ReturnedPacksSection } from "@/components/lottery/ReturnedPacksSection";
-import { ActivatedPacksSection } from "@/components/lottery/ActivatedPacksSection";
-import { PackReceptionForm } from "@/components/lottery/PackReceptionForm";
-import { EnhancedPackActivationForm } from "@/components/lottery/EnhancedPackActivationForm";
-import {
-  PackDetailsModal,
-  type PackDetailsData,
-} from "@/components/lottery/PackDetailsModal";
-import { ManualEntryAuthModal } from "@/components/lottery/ManualEntryAuthModal";
-import { MarkSoldOutDialog } from "@/components/lottery/MarkSoldOutDialog";
-import { ManualEntryIndicator } from "@/components/lottery/ManualEntryIndicator";
-import { ReturnPackDialog } from "@/components/lottery/ReturnPackDialog";
-import {
-  receivePack,
-  closeLotteryDay,
-  type LotteryPackResponse,
-} from "@/lib/api/lottery";
-import { useToast } from "@/hooks/use-toast";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { CheckCircle2 } from "lucide-react";
-import {
-  formatBusinessDateFull,
-  formatDateTimeShort,
-} from "@/utils/date-format.utils";
-import { useStoreTimezone } from "@/contexts/StoreContext";
+} from '@/hooks/useLottery';
+import { DayBinsTable, type BinValidationError } from '@/components/lottery/DayBinsTable';
+import { validateManualEntryEnding } from '@/lib/services/lottery-closing-validation';
+import { DepletedPacksSection } from '@/components/lottery/DepletedPacksSection';
+import { ReturnedPacksSection } from '@/components/lottery/ReturnedPacksSection';
+import { ActivatedPacksSection } from '@/components/lottery/ActivatedPacksSection';
+import { PackReceptionForm } from '@/components/lottery/PackReceptionForm';
+import { EnhancedPackActivationForm } from '@/components/lottery/EnhancedPackActivationForm';
+import { PackDetailsModal, type PackDetailsData } from '@/components/lottery/PackDetailsModal';
+import { ManualEntryAuthModal } from '@/components/lottery/ManualEntryAuthModal';
+import { MarkSoldOutDialog } from '@/components/lottery/MarkSoldOutDialog';
+import { ManualEntryIndicator } from '@/components/lottery/ManualEntryIndicator';
+import { ReturnPackDialog } from '@/components/lottery/ReturnPackDialog';
+import { receivePack, closeLotteryDay, type LotteryPackResponse } from '@/lib/api/lottery';
+import { useToast } from '@/hooks/use-toast';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { CheckCircle2 } from 'lucide-react';
+import { formatBusinessDateFull, formatDateTimeShort } from '@/utils/date-format.utils';
+import { useStoreTimezone } from '@/contexts/StoreContext';
 
 /**
  * Manual entry state interface
@@ -117,9 +95,7 @@ export default function LotteryManagementPage() {
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
   // Mark Sold Out dialog state
   const [markSoldOutDialogOpen, setMarkSoldOutDialogOpen] = useState(false);
-  const [packIdToMarkSoldOut, setPackIdToMarkSoldOut] = useState<string | null>(
-    null,
-  );
+  const [packIdToMarkSoldOut, setPackIdToMarkSoldOut] = useState<string | null>(null);
 
   /**
    * Return Pack dialog state
@@ -128,12 +104,10 @@ export default function LotteryManagementPage() {
    */
   const [returnPackDialogOpen, setReturnPackDialogOpen] = useState(false);
   const [packIdToReturn, setPackIdToReturn] = useState<string | null>(null);
-  const [packDataToReturn, setPackDataToReturn] =
-    useState<LotteryPackResponse | null>(null);
+  const [packDataToReturn, setPackDataToReturn] = useState<LotteryPackResponse | null>(null);
 
   // Manual entry state management
-  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] =
-    useState(false);
+  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] = useState(false);
   const [manualEntryState, setManualEntryState] = useState<ManualEntryState>({
     isActive: false,
     authorizedBy: null,
@@ -141,21 +115,17 @@ export default function LotteryManagementPage() {
   });
 
   // Manual entry values - keyed by bin_id
-  const [manualEndingValues, setManualEndingValues] = useState<
-    Record<string, string>
-  >({});
+  const [manualEndingValues, setManualEndingValues] = useState<Record<string, string>>({});
 
   // Validation errors for manual entry - keyed by bin_id
-  const [validationErrors, setValidationErrors] = useState<
-    Record<string, BinValidationError>
-  >({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, BinValidationError>>({});
 
   // Submission state for manual entry close day
   const [isSubmittingManualClose, setIsSubmittingManualClose] = useState(false);
 
   // Get first active store ID from user's accessible stores
   const storeId =
-    dashboardData?.stores.find((s) => s.status === "ACTIVE")?.store_id ||
+    dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
     dashboardData?.stores[0]?.store_id;
 
   // Fetch day bins data for the new table view
@@ -167,13 +137,12 @@ export default function LotteryManagementPage() {
   } = useLotteryDayBins(storeId);
 
   // Fetch lottery packs for checking if there are RECEIVED packs (for button state)
-  const { data: packs } = useLotteryPacks(storeId, { status: "RECEIVED" });
+  const { data: packs } = useLotteryPacks(storeId, { status: 'RECEIVED' });
 
   // Fetch pack details when selected
-  const { data: packDetails, isLoading: packDetailsLoading } = usePackDetails(
-    selectedPackId,
-    { enabled: !!selectedPackId && detailsDialogOpen },
-  );
+  const { data: packDetails, isLoading: packDetailsLoading } = usePackDetails(selectedPackId, {
+    enabled: !!selectedPackId && detailsDialogOpen,
+  });
 
   // Mutations
   const packReceptionMutation = usePackReception();
@@ -205,7 +174,7 @@ export default function LotteryManagementPage() {
    */
   const handleMarkSoldOutSuccess = useCallback(() => {
     invalidateAll(); // Refresh all lottery data including day bins
-    setSuccessMessage("Pack marked as sold out successfully");
+    setSuccessMessage('Pack marked as sold out successfully');
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
 
@@ -227,20 +196,20 @@ export default function LotteryManagementPage() {
         // Transform DayBinPack to LotteryPackResponse format for the dialog
         const packData: LotteryPackResponse = {
           pack_id: bin.pack.pack_id,
-          game_id: "", // Not needed for display, dialog uses game.name and game.price
+          game_id: '', // Not needed for display, dialog uses game.name and game.price
           pack_number: bin.pack.pack_number,
           opening_serial: bin.pack.starting_serial,
           closing_serial: bin.pack.serial_end,
-          status: "ACTIVATED", // Pack in bins is always ACTIVATED
-          store_id: storeId || "",
+          status: 'ACTIVATED', // Pack in bins is always ACTIVATED
+          store_id: storeId || '',
           bin_id: bin.bin_id,
-          received_at: "", // Not needed for display
+          received_at: '', // Not needed for display
           activated_at: null,
           settled_at: null,
           returned_at: null,
           game: {
-            game_id: "",
-            game_code: "",
+            game_id: '',
+            game_code: '',
             name: bin.pack.game_name,
             price: bin.pack.game_price,
             tickets_per_pack: 300, // Default value
@@ -254,7 +223,7 @@ export default function LotteryManagementPage() {
       setPackIdToReturn(packId);
       setReturnPackDialogOpen(true);
     },
-    [dayBinsData?.bins, storeId],
+    [dayBinsData?.bins, storeId]
   );
 
   /**
@@ -268,18 +237,16 @@ export default function LotteryManagementPage() {
   const handleReturnPackSuccess = useCallback(() => {
     invalidateAll(); // Refresh all lottery data including day bins
     setPackDataToReturn(null); // Clear pack data state
-    setSuccessMessage("Pack returned successfully");
+    setSuccessMessage('Pack returned successfully');
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
 
-  const handlePackReception = async (
-    data: Parameters<typeof receivePack>[0],
-  ) => {
+  const handlePackReception = async (data: Parameters<typeof receivePack>[0]) => {
     try {
       await packReceptionMutation.mutateAsync(data);
       invalidateAll(); // Invalidate all lottery data including day bins
       setReceptionDialogOpen(false);
-      setSuccessMessage("Pack received successfully");
+      setSuccessMessage('Pack received successfully');
       setTimeout(() => setSuccessMessage(null), 5000);
     } catch (error) {
       throw error; // Error handling is done in the form component
@@ -292,7 +259,7 @@ export default function LotteryManagementPage() {
    */
   const handleActivationSuccess = useCallback(() => {
     invalidateAll(); // Invalidate all lottery data including day bins
-    setSuccessMessage("Pack activated successfully");
+    setSuccessMessage('Pack activated successfully');
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
 
@@ -322,11 +289,11 @@ export default function LotteryManagementPage() {
       setValidationErrors({});
 
       toast({
-        title: "Manual Entry Enabled",
+        title: 'Manual Entry Enabled',
         description: `Authorized by ${authorizedBy.name}. You can now enter ending serial numbers.`,
       });
     },
-    [toast],
+    [toast]
   );
 
   /**
@@ -343,8 +310,8 @@ export default function LotteryManagementPage() {
     setValidationErrors({});
 
     toast({
-      title: "Manual Entry Cancelled",
-      description: "Manual entry mode has been deactivated.",
+      title: 'Manual Entry Cancelled',
+      description: 'Manual entry mode has been deactivated.',
     });
   }, [toast]);
 
@@ -352,15 +319,12 @@ export default function LotteryManagementPage() {
    * Handle ending value change in manual entry mode
    * Called when user types in an ending serial input
    */
-  const handleEndingValueChange = useCallback(
-    (binId: string, value: string) => {
-      setManualEndingValues((prev) => ({
-        ...prev,
-        [binId]: value,
-      }));
-    },
-    [],
-  );
+  const handleEndingValueChange = useCallback((binId: string, value: string) => {
+    setManualEndingValues((prev) => ({
+      ...prev,
+      [binId]: value,
+    }));
+  }, []);
 
   /**
    * Handle input complete (3 digits entered)
@@ -380,7 +344,7 @@ export default function LotteryManagementPage() {
     async (
       binId: string,
       value: string,
-      packData: { starting_serial: string; serial_end: string },
+      packData: { starting_serial: string; serial_end: string }
     ) => {
       const result = await validateManualEntryEnding(value, packData);
 
@@ -393,12 +357,12 @@ export default function LotteryManagementPage() {
           // Set error for this bin
           return {
             ...prev,
-            [binId]: { message: result.error || "Invalid ending number" },
+            [binId]: { message: result.error || 'Invalid ending number' },
           };
         }
       });
     },
-    [],
+    []
   );
 
   /**
@@ -418,12 +382,7 @@ export default function LotteryManagementPage() {
       const value = manualEndingValues[bin.bin_id];
       return value && /^\d{3}$/.test(value);
     });
-  }, [
-    manualEntryState.isActive,
-    dayBinsData?.bins,
-    manualEndingValues,
-    validationErrors,
-  ]);
+  }, [manualEntryState.isActive, dayBinsData?.bins, manualEndingValues, validationErrors]);
 
   /**
    * Handle Close Day in manual entry mode
@@ -463,34 +422,26 @@ export default function LotteryManagementPage() {
         invalidateAll();
 
         toast({
-          title: "Lottery Closed Successfully",
+          title: 'Lottery Closed Successfully',
           description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_date}`,
         });
 
-        setSuccessMessage("Lottery closed successfully via manual entry");
+        setSuccessMessage('Lottery closed successfully via manual entry');
         setTimeout(() => setSuccessMessage(null), 5000);
       } else {
-        throw new Error("Failed to close lottery");
+        throw new Error('Failed to close lottery');
       }
     } catch (error) {
-      const errorMessage =
-        error instanceof Error ? error.message : "Failed to close lottery";
+      const errorMessage = error instanceof Error ? error.message : 'Failed to close lottery';
       toast({
-        title: "Close Lottery Failed",
+        title: 'Close Lottery Failed',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     } finally {
       setIsSubmittingManualClose(false);
     }
-  }, [
-    canCloseManualEntry,
-    storeId,
-    dayBinsData?.bins,
-    manualEndingValues,
-    invalidateAll,
-    toast,
-  ]);
+  }, [canCloseManualEntry, storeId, dayBinsData?.bins, manualEndingValues, invalidateAll, toast]);
 
   // ============ RENDER ============
   // Loading state - waiting for auth or dashboard data
@@ -498,9 +449,7 @@ export default function LotteryManagementPage() {
     return (
       <div className="space-y-6" data-testid="lottery-management-page">
         <div className="space-y-1">
-          <h1 className="text-heading-2 font-bold text-foreground">
-            Lottery Management
-          </h1>
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
           <p className="text-muted-foreground">Loading...</p>
         </div>
         <div className="flex items-center justify-center p-8">
@@ -515,25 +464,20 @@ export default function LotteryManagementPage() {
     return (
       <div className="space-y-6" data-testid="lottery-management-page">
         <div className="space-y-1">
-          <h1 className="text-heading-2 font-bold text-foreground">
-            Lottery Management
-          </h1>
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
           <p className="text-destructive">
-            Failed to load store information:{" "}
-            {dashboardErrorObj?.message || "Unknown error"}
+            Failed to load store information: {dashboardErrorObj?.message || 'Unknown error'}
           </p>
         </div>
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-5 w-5 text-destructive" />
-            <p className="text-sm font-medium text-destructive">
-              Error loading dashboard
-            </p>
+            <p className="text-sm font-medium text-destructive">Error loading dashboard</p>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {dashboardErrorObj instanceof Error
               ? dashboardErrorObj.message
-              : "An unknown error occurred"}
+              : 'An unknown error occurred'}
           </p>
         </div>
       </div>
@@ -545,9 +489,7 @@ export default function LotteryManagementPage() {
     return (
       <div className="space-y-6" data-testid="lottery-management-page">
         <div className="space-y-1">
-          <h1 className="text-heading-2 font-bold text-foreground">
-            Lottery Management
-          </h1>
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
           <p className="text-muted-foreground">No active store available</p>
         </div>
         <div className="rounded-lg border p-8 text-center">
@@ -561,19 +503,14 @@ export default function LotteryManagementPage() {
 
   // Get store name and current date for subtitle
   // Use centralized timezone-aware utilities to avoid timezone drift issues
-  const storeName =
-    dashboardData?.stores.find((s) => s.store_id === storeId)?.name ||
-    "your store";
+  const storeName = dashboardData?.stores.find((s) => s.store_id === storeId)?.name || 'your store';
   const currentDate = dayBinsData?.business_day?.date
     ? formatBusinessDateFull(dayBinsData.business_day.date)
-    : formatBusinessDateFull(new Date().toISOString().split("T")[0]);
+    : formatBusinessDateFull(new Date().toISOString().split('T')[0]);
 
   // Format day start time if available using centralized utility
   const dayStartTime = dayBinsData?.business_day?.first_shift_opened_at
-    ? formatDateTimeShort(
-        dayBinsData.business_day.first_shift_opened_at,
-        storeTimezone,
-      )
+    ? formatDateTimeShort(dayBinsData.business_day.first_shift_opened_at, storeTimezone)
     : null;
 
   // Convert pack details to modal format
@@ -584,12 +521,12 @@ export default function LotteryManagementPage() {
     ? ({
         pack_id: packDetails.pack_id,
         pack_number: packDetails.pack_number,
-        serial_start: packDetails.opening_serial || "",
-        serial_end: packDetails.closing_serial || "",
+        serial_start: packDetails.opening_serial || '',
+        serial_end: packDetails.closing_serial || '',
         status: packDetails.status,
         game: packDetails.game || {
           game_id: packDetails.game_id,
-          name: "Unknown Game",
+          name: 'Unknown Game',
         },
         bin: packDetails.bin
           ? {
@@ -614,16 +551,12 @@ export default function LotteryManagementPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div className="space-y-1">
-          <h1 className="text-heading-2 font-bold text-foreground">
-            Lottery Management
-          </h1>
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
           <p className="text-muted-foreground">
             {storeName} &bull; {currentDate}
           </p>
           {dayStartTime && (
-            <p className="text-sm text-muted-foreground">
-              Day started: {dayStartTime}
-            </p>
+            <p className="text-sm text-muted-foreground">Day started: {dayStartTime}</p>
           )}
         </div>
         <div className="flex flex-wrap gap-2">
@@ -711,9 +644,7 @@ export default function LotteryManagementPage() {
       {dayBinsLoading && (
         <div className="flex items-center justify-center p-8">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
-          <span className="ml-2 text-sm text-muted-foreground">
-            Loading bins...
-          </span>
+          <span className="ml-2 text-sm text-muted-foreground">Loading bins...</span>
         </div>
       )}
 
@@ -722,14 +653,12 @@ export default function LotteryManagementPage() {
         <div className="rounded-lg border border-destructive bg-destructive/10 p-4">
           <div className="flex items-center gap-2">
             <AlertCircle className="h-5 w-5 text-destructive" />
-            <p className="text-sm font-medium text-destructive">
-              Failed to load bins
-            </p>
+            <p className="text-sm font-medium text-destructive">Failed to load bins</p>
           </div>
           <p className="mt-1 text-sm text-muted-foreground">
             {dayBinsErrorObj instanceof Error
               ? dayBinsErrorObj.message
-              : "Please try refreshing the page."}
+              : 'Please try refreshing the page.'}
           </p>
         </div>
       )}
@@ -777,8 +706,7 @@ export default function LotteryManagementPage() {
       {!dayBinsLoading && !dayBinsError && dayBinsData?.bins.length === 0 && (
         <div className="rounded-lg border p-8 text-center">
           <p className="text-sm text-muted-foreground">
-            No bins configured for this store. Contact your administrator to set
-            up lottery bins.
+            No bins configured for this store. Contact your administrator to set up lottery bins.
           </p>
         </div>
       )}

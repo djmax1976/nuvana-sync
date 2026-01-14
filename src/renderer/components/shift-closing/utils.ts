@@ -15,9 +15,9 @@
  * @returns Formatted currency string (e.g., "$1,234.56")
  */
 export function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
@@ -36,12 +36,12 @@ export function formatCurrency(amount: number): string {
  */
 export function sanitizeNumericInput(value: string): number {
   // Remove all characters except digits and decimal point
-  let sanitized = value.replace(/[^0-9.]/g, "");
+  let sanitized = value.replace(/[^0-9.]/g, '');
 
   // Ensure only one decimal point
-  const parts = sanitized.split(".");
+  const parts = sanitized.split('.');
   if (parts.length > 2) {
-    sanitized = parts[0] + "." + parts.slice(1).join("");
+    sanitized = parts[0] + '.' + parts.slice(1).join('');
   }
 
   // Parse and return, defaulting to 0 for invalid values
@@ -56,19 +56,19 @@ export function sanitizeNumericInput(value: string): number {
  * @returns Formatted date string (e.g., "Thursday, December 18, 2025")
  */
 export function formatBusinessDate(dateString: string | undefined): string {
-  if (!dateString) return "Today";
+  if (!dateString) return 'Today';
 
   try {
     // Add noon time to avoid timezone issues
-    const date = new Date(dateString + "T12:00:00");
+    const date = new Date(dateString + 'T12:00:00');
     return date.toLocaleDateString(undefined, {
-      weekday: "long",
-      year: "numeric",
-      month: "long",
-      day: "numeric",
+      weekday: 'long',
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
     });
   } catch {
-    return "Today";
+    return 'Today';
   }
 }
 
@@ -97,13 +97,13 @@ export function truncateUuid(uuid: string, length = 8): string {
  */
 export function validateRequiredFields(
   values: Record<string, number>,
-  requiredFields: string[],
+  requiredFields: string[]
 ): boolean {
   // Convert to Map for safe property access (avoids prototype pollution)
   const valuesMap = new Map(Object.entries(values));
 
   return requiredFields.every((field) => {
     const value = valuesMap.get(field);
-    return typeof value === "number" && value > 0;
+    return typeof value === 'number' && value > 0;
   });
 }

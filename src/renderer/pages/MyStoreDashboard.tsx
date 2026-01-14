@@ -7,7 +7,7 @@ import {
   RecentActivity,
   RecentVoids,
   RecentShiftHistory,
-} from "../components/mystore-dashboard";
+} from '../components/mystore-dashboard';
 
 /**
  * MyStore Terminal Dashboard Home Page

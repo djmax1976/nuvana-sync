@@ -142,10 +142,13 @@ const log = createLogger('lottery-business-days-dal');
  * Key: day_id, Value: closings data
  * This is cleared when commit or cancel is called
  */
-const pendingClosingsCache = new Map<string, {
-  closings: PackClosingData[];
-  timestamp: number;
-}>();
+const pendingClosingsCache = new Map<
+  string,
+  {
+    closings: PackClosingData[];
+    timestamp: number;
+  }
+>();
 
 // ============================================================================
 // Lottery Business Days DAL
@@ -276,11 +279,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
    * @param endDate - End date (YYYY-MM-DD)
    * @returns Array of business days
    */
-  findByDateRange(
-    storeId: string,
-    startDate: string,
-    endDate: string
-  ): LotteryBusinessDay[] {
+  findByDateRange(storeId: string, startDate: string, endDate: string): LotteryBusinessDay[] {
     const stmt = this.db.prepare(`
       SELECT * FROM lottery_business_days
       WHERE store_id = ? AND business_date >= ? AND business_date <= ?

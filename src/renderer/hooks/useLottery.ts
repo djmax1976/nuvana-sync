@@ -5,9 +5,9 @@
  * Story: 6.10 - Lottery Management UI
  */
 
-"use client";
+'use client';
 
-import { useQuery, useQueryClient, useMutation } from "@tanstack/react-query";
+import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
 import {
   receivePack,
   activatePack,
@@ -37,7 +37,7 @@ import {
   type MarkPackAsSoldOutInput,
   type FullActivatePackInput,
   type ReturnPackInput,
-} from "../lib/api/lottery";
+} from '../lib/api/lottery';
 
 // ============ TanStack Query Keys ============
 
@@ -45,22 +45,21 @@ import {
  * Query key factory for lottery queries
  */
 export const lotteryKeys = {
-  all: ["lottery"] as const,
-  packs: () => [...lotteryKeys.all, "packs"] as const,
+  all: ['lottery'] as const,
+  packs: () => [...lotteryKeys.all, 'packs'] as const,
   packList: (filters?: LotteryPackQueryFilters) =>
-    [...lotteryKeys.packs(), "list", filters || {}] as const,
-  packDetail: (packId: string | undefined) =>
-    [...lotteryKeys.packs(), "detail", packId] as const,
+    [...lotteryKeys.packs(), 'list', filters || {}] as const,
+  packDetail: (packId: string | undefined) => [...lotteryKeys.packs(), 'detail', packId] as const,
   packsByGame: (gameId: string | undefined, storeId: string | undefined) =>
-    [...lotteryKeys.packs(), "byGame", gameId, storeId] as const,
-  variances: () => [...lotteryKeys.all, "variances"] as const,
+    [...lotteryKeys.packs(), 'byGame', gameId, storeId] as const,
+  variances: () => [...lotteryKeys.all, 'variances'] as const,
   varianceList: (filters?: VarianceQueryFilters) =>
-    [...lotteryKeys.variances(), "list", filters || {}] as const,
-  dayBins: () => [...lotteryKeys.all, "dayBins"] as const,
+    [...lotteryKeys.variances(), 'list', filters || {}] as const,
+  dayBins: () => [...lotteryKeys.all, 'dayBins'] as const,
   dayBinsList: (storeId: string | undefined, date?: string) =>
     [...lotteryKeys.dayBins(), storeId, date] as const,
-  games: () => [...lotteryKeys.all, "games"] as const,
-  gameList: () => [...lotteryKeys.games(), "list"] as const,
+  games: () => [...lotteryKeys.all, 'games'] as const,
+  gameList: () => [...lotteryKeys.games(), 'list'] as const,
 };
 
 // ============ Query Hooks ============
@@ -74,17 +73,14 @@ export const lotteryKeys = {
  */
 export function useLotteryPacks(
   storeId: string | null | undefined,
-  filters?: Omit<LotteryPackQueryFilters, "store_id">,
-  options?: { enabled?: boolean },
+  filters?: Omit<LotteryPackQueryFilters, 'store_id'>,
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: lotteryKeys.packList(
-      storeId ? { ...filters, store_id: storeId } : filters,
-    ),
-    queryFn: () =>
-      getPacks(storeId ? { ...filters, store_id: storeId } : filters),
+    queryKey: lotteryKeys.packList(storeId ? { ...filters, store_id: storeId } : filters),
+    queryFn: () => getPacks(storeId ? { ...filters, store_id: storeId } : filters),
     enabled: options?.enabled !== false && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -97,10 +93,7 @@ export function useLotteryPacks(
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with pack detail data
  */
-export function usePackDetails(
-  packId: string | null,
-  options?: { enabled?: boolean },
-) {
+export function usePackDetails(packId: string | null, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: lotteryKeys.packDetail(packId ?? undefined),
     queryFn: () => getPackDetails(packId!),
@@ -121,17 +114,14 @@ export function usePackDetails(
  */
 export function useLotteryVariances(
   storeId: string | null | undefined,
-  filters?: Omit<VarianceQueryFilters, "store_id">,
-  options?: { enabled?: boolean },
+  filters?: Omit<VarianceQueryFilters, 'store_id'>,
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: lotteryKeys.varianceList(
-      storeId ? { ...filters, store_id: storeId } : filters,
-    ),
-    queryFn: () =>
-      getVariances(storeId ? { ...filters, store_id: storeId } : filters),
+    queryKey: lotteryKeys.varianceList(storeId ? { ...filters, store_id: storeId } : filters),
+    queryFn: () => getVariances(storeId ? { ...filters, store_id: storeId } : filters),
     enabled: options?.enabled !== false && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -148,17 +138,14 @@ export function useInvalidateLottery() {
   const queryClient = useQueryClient();
 
   return {
-    invalidatePacks: () =>
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() }),
+    invalidatePacks: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() }),
     invalidatePackDetail: (packId: string) => {
       return queryClient.invalidateQueries({
         queryKey: lotteryKeys.packDetail(packId),
       });
     },
-    invalidateVariances: () =>
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.variances() }),
-    invalidateAll: () =>
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.all }),
+    invalidateVariances: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.variances() }),
+    invalidateAll: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.all }),
   };
 }
 
@@ -242,9 +229,9 @@ export function useDeletePack() {
  */
 export function useActivePacksByStore(
   storeId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
-  return useLotteryPacks(storeId, { status: "ACTIVATED" }, options);
+  return useLotteryPacks(storeId, { status: 'ACTIVATED' }, options);
 }
 
 /**
@@ -255,13 +242,8 @@ export function useVarianceApproval() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      shiftId,
-      data,
-    }: {
-      shiftId: string;
-      data: ApproveVarianceInput;
-    }) => approveVariance(shiftId, data),
+    mutationFn: ({ shiftId, data }: { shiftId: string; data: ApproveVarianceInput }) =>
+      approveVariance(shiftId, data),
     onSuccess: () => {
       // Invalidate variance list queries to refresh after approval
       queryClient.invalidateQueries({ queryKey: lotteryKeys.variances() });
@@ -284,13 +266,13 @@ export function useVarianceApproval() {
 export function useLotteryDayBins(
   storeId: string | null | undefined,
   date?: string,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
     queryKey: lotteryKeys.dayBinsList(storeId ?? undefined, date),
     queryFn: () => getLotteryDayBins(storeId!, date),
     enabled: options?.enabled !== false && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -307,13 +289,8 @@ export function useLotteryDayClose() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      data,
-    }: {
-      storeId: string;
-      data: CloseLotteryDayInput;
-    }) => closeLotteryDay(storeId, data),
+    mutationFn: ({ storeId, data }: { storeId: string; data: CloseLotteryDayInput }) =>
+      closeLotteryDay(storeId, data),
     onSuccess: () => {
       // Invalidate day bins to refresh the ending serials
       queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
@@ -375,18 +352,15 @@ export function useMarkPackAsSoldOut() {
 export function usePackSearch(
   storeId: string | null | undefined,
   search: string | undefined,
-  filters?: Omit<LotteryPackQueryFilters, "store_id" | "search">,
-  options?: { enabled?: boolean },
+  filters?: Omit<LotteryPackQueryFilters, 'store_id' | 'search'>,
+  options?: { enabled?: boolean }
 ) {
   // Only search if we have 2+ characters
   const searchEnabled = (search?.length ?? 0) >= 2;
 
   return useQuery({
-    queryKey: lotteryKeys.packList(
-      storeId ? { ...filters, store_id: storeId, search } : filters,
-    ),
-    queryFn: () =>
-      getPacks(storeId ? { ...filters, store_id: storeId, search } : filters),
+    queryKey: lotteryKeys.packList(storeId ? { ...filters, store_id: storeId, search } : filters),
+    queryFn: () => getPacks(storeId ? { ...filters, store_id: storeId, search } : filters),
     enabled: options?.enabled !== false && !!storeId && searchEnabled,
     refetchOnMount: false,
     refetchOnWindowFocus: false,
@@ -450,10 +424,10 @@ export function useFullPackActivation() {
 export function useCashierActiveShift(
   storeId: string | null | undefined,
   cashierId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: ["shifts", "active", storeId, cashierId] as const,
+    queryKey: ['shifts', 'active', storeId, cashierId] as const,
     queryFn: () => getCashierActiveShift(storeId!, cashierId!),
     enabled: options?.enabled !== false && !!storeId && !!cashierId,
     refetchOnMount: true,
@@ -481,7 +455,7 @@ export function useLotteryGames(options?: { enabled?: boolean }) {
     queryKey: lotteryKeys.gameList(),
     queryFn: () => getGames(),
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -504,16 +478,13 @@ export function useLotteryGames(options?: { enabled?: boolean }) {
 export function usePacksByGame(
   gameId: string | null | undefined,
   storeId: string | null | undefined,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: lotteryKeys.packsByGame(
-      gameId ?? undefined,
-      storeId ?? undefined,
-    ),
+    queryKey: lotteryKeys.packsByGame(gameId ?? undefined, storeId ?? undefined),
     queryFn: () => getPacksByGame(gameId!, storeId!),
     enabled: options?.enabled !== false && !!gameId && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
     select: (response) => response.data,
@@ -561,13 +532,8 @@ export function useDepletePack() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      packId,
-      closingSerial,
-    }: {
-      packId: string;
-      closingSerial?: string;
-    }) => depletePack(packId, closingSerial),
+    mutationFn: ({ packId, closingSerial }: { packId: string; closingSerial?: string }) =>
+      depletePack(packId, closingSerial),
     onSuccess: (_, { packId }) => {
       // Invalidate packs list to refresh after depletion
       queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() });
@@ -613,8 +579,7 @@ export function useReturnPack() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ packId, data }: ReturnPackMutationInput) =>
-      returnPack(packId, data),
+    mutationFn: ({ packId, data }: ReturnPackMutationInput) => returnPack(packId, data),
     onSuccess: (_, { packId }) => {
       // Invalidate packs list to refresh after return
       queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() });

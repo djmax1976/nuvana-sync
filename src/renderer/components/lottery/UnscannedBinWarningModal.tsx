@@ -1,4 +1,3 @@
-
 /**
  * Unscanned Bin Warning Modal Component
  *
@@ -21,8 +20,8 @@
  * - FE-001: STATE_MANAGEMENT - Secure state management with explicit types
  */
 
-import { useState, useCallback, useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -30,18 +29,18 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Checkbox } from "@/components/ui/checkbox";
-import { AlertTriangle } from "lucide-react";
-import { cn } from "@/lib/utils";
+} from '@/components/ui/dialog';
+import { Checkbox } from '@/components/ui/checkbox';
+import { AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 /**
  * Action types for unscanned bins
  * Each action has clear business meaning and audit implications
  */
 export type UnscannedBinAction =
-  | "SOLD_OUT" // Pack fully sold - ending = serial_end, mark DEPLETED
-  | "RETURN_TO_SCAN"; // User wants to go back and scan/enter
+  | 'SOLD_OUT' // Pack fully sold - ending = serial_end, mark DEPLETED
+  | 'RETURN_TO_SCAN'; // User wants to go back and scan/enter
 
 /**
  * Decision record for a single bin
@@ -111,7 +110,7 @@ interface UnscannedBinWarningModalProps {
  */
 function truncateGameName(name: string, maxLength: number = 18): string {
   if (name.length <= maxLength) return name;
-  return name.substring(0, maxLength - 3) + "...";
+  return name.substring(0, maxLength - 3) + '...';
 }
 
 /**
@@ -147,12 +146,10 @@ export function UnscannedBinWarningModal({
    */
   const selectAllState = (() => {
     if (unscannedBins.length === 0) return false;
-    const checkedCount = unscannedBins.filter(
-      (bin) => soldOutBins[bin.bin_id],
-    ).length;
+    const checkedCount = unscannedBins.filter((bin) => soldOutBins[bin.bin_id]).length;
     if (checkedCount === 0) return false;
     if (checkedCount === unscannedBins.length) return true;
-    return "indeterminate" as const;
+    return 'indeterminate' as const;
   })();
 
   /**
@@ -175,7 +172,7 @@ export function UnscannedBinWarningModal({
         setSoldOutBins({});
       }
     },
-    [unscannedBins],
+    [unscannedBins]
   );
 
   /**
@@ -226,7 +223,7 @@ export function UnscannedBinWarningModal({
   const calculateTicketsSoldForDepletion = useCallback(
     (serialEnd: string, startingSerial: string): number => {
       // SEC-014: Validate input types before processing
-      if (typeof serialEnd !== "string" || typeof startingSerial !== "string") {
+      if (typeof serialEnd !== 'string' || typeof startingSerial !== 'string') {
         return 0;
       }
 
@@ -260,7 +257,7 @@ export function UnscannedBinWarningModal({
       // Math.max provides defense-in-depth against data integrity issues
       return Math.max(0, ticketsSold);
     },
-    [],
+    []
   );
 
   /**
@@ -281,16 +278,11 @@ export function UnscannedBinWarningModal({
         // For sold out pack, use depletion formula: (serial_end + 1) - starting
         // serial_end is the LAST ticket index, so +1 converts to count
         // SEC-014: INPUT_VALIDATION - Calculation uses validated helper function
-        const ticketsSold = calculateTicketsSoldForDepletion(
-          bin.serial_end,
-          bin.starting_serial,
-        );
+        const ticketsSold = calculateTicketsSoldForDepletion(bin.serial_end, bin.starting_serial);
 
         // FE-005: UI_SECURITY - Ensure price is valid before multiplication
         const validPrice =
-          typeof bin.game_price === "number" && !Number.isNaN(bin.game_price)
-            ? bin.game_price
-            : 0;
+          typeof bin.game_price === 'number' && !Number.isNaN(bin.game_price) ? bin.game_price : 0;
         const salesAmount = ticketsSold * validPrice;
 
         return {
@@ -302,7 +294,7 @@ export function UnscannedBinWarningModal({
           game_price: bin.game_price,
           starting_serial: bin.starting_serial,
           serial_end: bin.serial_end,
-          action: "SOLD_OUT" as const,
+          action: 'SOLD_OUT' as const,
           ending_serial: bin.serial_end,
           tickets_sold: ticketsSold,
           sales_amount: salesAmount,
@@ -314,13 +306,7 @@ export function UnscannedBinWarningModal({
       decisions: decisions.length > 0 ? decisions : undefined,
     });
     onOpenChange(false);
-  }, [
-    unscannedBins,
-    soldOutBins,
-    onConfirm,
-    onOpenChange,
-    calculateTicketsSoldForDepletion,
-  ]);
+  }, [unscannedBins, soldOutBins, onConfirm, onOpenChange, calculateTicketsSoldForDepletion]);
 
   /**
    * Handle cancel - reset state and close
@@ -350,7 +336,7 @@ export function UnscannedBinWarningModal({
       // Note: State reset is handled by useEffect on `open` prop
       onOpenChange(newOpen);
     },
-    [onOpenChange],
+    [onOpenChange]
   );
 
   // Don't render if no unscanned bins
@@ -360,18 +346,13 @@ export function UnscannedBinWarningModal({
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
-      <DialogContent
-        className="sm:max-w-xl"
-        data-testid="unscanned-bin-warning-modal"
-      >
+      <DialogContent className="sm:max-w-xl" data-testid="unscanned-bin-warning-modal">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2 text-amber-600 dark:text-amber-500">
             <AlertTriangle className="h-5 w-5" />
             Bins Without Ending Serials
           </DialogTitle>
-          <DialogDescription>
-            If the pack is sold please mark it sold
-          </DialogDescription>
+          <DialogDescription>If the pack is sold please mark it sold</DialogDescription>
         </DialogHeader>
 
         {/* Compact Table */}
@@ -388,13 +369,9 @@ export function UnscannedBinWarningModal({
                     <span>Sold Out</span>
                     <Checkbox
                       checked={
-                        selectAllState === "indeterminate"
-                          ? "indeterminate"
-                          : selectAllState
+                        selectAllState === 'indeterminate' ? 'indeterminate' : selectAllState
                       }
-                      onCheckedChange={(checked) =>
-                        handleSelectAll(checked === true)
-                      }
+                      onCheckedChange={(checked) => handleSelectAll(checked === true)}
                       data-testid="select-all-sold-out"
                       aria-label="Select all bins as sold out"
                     />
@@ -410,9 +387,9 @@ export function UnscannedBinWarningModal({
                   <tr
                     key={bin.bin_id}
                     className={cn(
-                      "border-b last:border-b-0 h-10",
-                      isChecked && "bg-green-50 dark:bg-green-950/20",
-                      index % 2 === 0 && !isChecked && "bg-muted/20",
+                      'border-b last:border-b-0 h-10',
+                      isChecked && 'bg-green-50 dark:bg-green-950/20',
+                      index % 2 === 0 && !isChecked && 'bg-muted/20'
                     )}
                     data-testid={`unscanned-bin-row-${bin.bin_id}`}
                   >
@@ -421,9 +398,7 @@ export function UnscannedBinWarningModal({
                       {truncateGameName(bin.game_name)}
                     </td>
                     <td className="py-2 px-3">${bin.game_price}</td>
-                    <td className="py-2 px-3 font-mono text-xs">
-                      {bin.pack_number}
-                    </td>
+                    <td className="py-2 px-3 font-mono text-xs">{bin.pack_number}</td>
                     <td className="py-2 px-3 text-center">
                       <Checkbox
                         checked={isChecked}
@@ -442,17 +417,10 @@ export function UnscannedBinWarningModal({
         </div>
 
         <DialogFooter className="gap-2 sm:gap-0">
-          <Button
-            variant="outline"
-            onClick={handleCancel}
-            data-testid="unscanned-bin-modal-cancel"
-          >
+          <Button variant="outline" onClick={handleCancel} data-testid="unscanned-bin-modal-cancel">
             Cancel
           </Button>
-          <Button
-            onClick={handleReturnToScan}
-            data-testid="unscanned-bin-modal-return"
-          >
+          <Button onClick={handleReturnToScan} data-testid="unscanned-bin-modal-return">
             Return to Scan
           </Button>
         </DialogFooter>

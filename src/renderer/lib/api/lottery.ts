@@ -761,7 +761,9 @@ export async function checkPackExists(
  * @param data - Pack reception data
  * @returns Created pack response
  */
-export async function receivePack(data: ReceivePackInput): Promise<ApiResponse<ReceivePackResponse>> {
+export async function receivePack(
+  data: ReceivePackInput
+): Promise<ApiResponse<ReceivePackResponse>> {
   try {
     const result = await ipcClient.invoke<ReceivePackResponse>('lottery:receivePack', data);
     return wrapSuccess(result);
@@ -801,9 +803,10 @@ export async function activatePack(
 ): Promise<ApiResponse<ActivatePackResponse>> {
   try {
     // Handle legacy single-arg call (just packId) - will fail without bin_id but maintains compat
-    const data = typeof dataOrPackId === 'string'
-      ? { pack_id: dataOrPackId, bin_id: '', opening_serial: '000' }
-      : dataOrPackId;
+    const data =
+      typeof dataOrPackId === 'string'
+        ? { pack_id: dataOrPackId, bin_id: '', opening_serial: '000' }
+        : dataOrPackId;
     const result = await ipcClient.invoke<ActivatePackResponse>('lottery:activatePack', data);
     return wrapSuccess(result);
   } catch (error) {
@@ -823,9 +826,10 @@ export async function depletePack(
   closingSerial?: string
 ): Promise<ApiResponse<DepletePackResponse>> {
   try {
-    const data = typeof dataOrPackId === 'string'
-      ? { pack_id: dataOrPackId, closing_serial: closingSerial || '299' }
-      : dataOrPackId;
+    const data =
+      typeof dataOrPackId === 'string'
+        ? { pack_id: dataOrPackId, closing_serial: closingSerial || '299' }
+        : dataOrPackId;
     const result = await ipcClient.invoke<DepletePackResponse>('lottery:depletePack', data);
     return wrapSuccess(result);
   } catch (error) {
@@ -880,10 +884,9 @@ export async function getPackDetails(
   packId: string
 ): Promise<ApiResponse<LotteryPackDetailResponse>> {
   try {
-    const result = await ipcClient.invoke<LotteryPackDetailResponse>(
-      'lottery:getPackDetails',
-      { pack_id: packId }
-    );
+    const result = await ipcClient.invoke<LotteryPackDetailResponse>('lottery:getPackDetails', {
+      pack_id: packId,
+    });
     return wrapSuccess(result);
   } catch (error) {
     return handleIPCError(error);
@@ -1009,9 +1012,7 @@ export async function approveVariance(
  * @param data - Game creation data
  * @returns Created game response
  */
-export async function createGame(
-  data: CreateGameInput
-): Promise<ApiResponse<LotteryGameResponse>> {
+export async function createGame(data: CreateGameInput): Promise<ApiResponse<LotteryGameResponse>> {
   try {
     const result = await ipcClient.invoke<LotteryGameResponse>('lottery:createGame', data);
     return wrapSuccess(result);
@@ -1228,11 +1229,10 @@ export const lotteryAPI = {
   cancelDayClose: () => ipcClient.invoke<CancelLotteryDayCloseResponse>('lottery:cancelDayClose'),
 
   // Barcode
-  parseBarcode: (raw: string) => ipcClient.invoke<ParsedBarcode | null>('lottery:parseBarcode', raw),
+  parseBarcode: (raw: string) =>
+    ipcClient.invoke<ParsedBarcode | null>('lottery:parseBarcode', raw),
 };
 
 // ============ Export Types ============
 
-export type {
-  ParsedBarcode,
-};
+export type { ParsedBarcode };

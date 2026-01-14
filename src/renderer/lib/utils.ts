@@ -1,5 +1,5 @@
-import { type ClassValue, clsx } from "clsx";
-import { twMerge } from "tailwind-merge";
+import { type ClassValue, clsx } from 'clsx';
+import { twMerge } from 'tailwind-merge';
 
 export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs));
@@ -25,8 +25,8 @@ function getFormatterKey(locale: string, currency: string): string {
  * @returns Intl.NumberFormat instance
  */
 function getCurrencyFormatter(
-  locale: string = "en-US",
-  currency: string = "USD",
+  locale: string = 'en-US',
+  currency: string = 'USD'
 ): Intl.NumberFormat {
   const key = getFormatterKey(locale, currency);
 
@@ -34,9 +34,9 @@ function getCurrencyFormatter(
     currencyFormatterCache.set(
       key,
       new Intl.NumberFormat(locale, {
-        style: "currency",
+        style: 'currency',
         currency,
-      }),
+      })
     );
   }
 
@@ -57,12 +57,8 @@ function getCurrencyFormatter(
  * formatCurrency(1234.56, "EUR") // "€1,234.56"
  * formatCurrency(1234.56, "GBP", "en-GB") // "£1,234.56"
  */
-export function formatCurrency(
-  value: number,
-  currency?: string,
-  locale?: string,
-): string {
-  const formatter = getCurrencyFormatter(locale ?? "en-US", currency ?? "USD");
+export function formatCurrency(value: number, currency?: string, locale?: string): string {
+  const formatter = getCurrencyFormatter(locale ?? 'en-US', currency ?? 'USD');
   return formatter.format(value);
 }
 
@@ -71,13 +67,13 @@ export function formatCurrency(
  * Prevents XSS by escaping HTML special characters
  */
 export function sanitizeForDisplay(value: string | null | undefined): string {
-  if (value == null) return "";
+  if (value == null) return '';
   return String(value)
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#x27;");
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#x27;');
 }
 
 /**
@@ -85,11 +81,11 @@ export function sanitizeForDisplay(value: string | null | undefined): string {
  * Removes special characters and spaces
  */
 export function sanitizeId(value: string | null | undefined): string {
-  if (value == null) return "";
+  if (value == null) return '';
   return String(value)
-    .replace(/[^a-zA-Z0-9-_]/g, "-")
-    .replace(/-+/g, "-")
-    .replace(/^-|-$/g, "");
+    .replace(/[^a-zA-Z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '');
 }
 
 /**
@@ -97,11 +93,11 @@ export function sanitizeId(value: string | null | undefined): string {
  * Shows first name and first letter of last name
  */
 export function maskEmployeeName(name: string | null | undefined): string {
-  if (!name) return "Unknown";
+  if (!name) return 'Unknown';
   const parts = name.trim().split(/\s+/);
   if (parts.length === 1) return parts[0];
   const firstName = parts[0];
-  const lastInitial = parts[parts.length - 1]?.[0] ?? "";
+  const lastInitial = parts[parts.length - 1]?.[0] ?? '';
   return `${firstName} ${lastInitial}.`;
 }
 
@@ -111,9 +107,9 @@ export function maskEmployeeName(name: string | null | undefined): string {
  */
 export function maskSensitiveData(
   value: string | null | undefined,
-  visibleChars: number = 4,
+  visibleChars: number = 4
 ): string {
-  if (!value) return "";
+  if (!value) return '';
   if (value.length <= visibleChars) return value;
   const visible = value.slice(-visibleChars);
   return `***${visible}`;

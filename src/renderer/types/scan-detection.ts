@@ -16,7 +16,7 @@
 /**
  * Input method classification
  */
-export type InputMethod = "SCANNED" | "MANUAL" | "UNKNOWN";
+export type InputMethod = 'SCANNED' | 'MANUAL' | 'UNKNOWN';
 
 /**
  * Configuration for scan detection thresholds

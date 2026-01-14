@@ -26,8 +26,8 @@ import type {
   ScanDetectionResult,
   KeystrokeEvent,
   InputMethod,
-} from "@/types/scan-detection";
-import { DEFAULT_SCAN_DETECTION_CONFIG } from "@/types/scan-detection";
+} from '@/types/scan-detection';
+import { DEFAULT_SCAN_DETECTION_CONFIG } from '@/types/scan-detection';
 
 /**
  * Calculate standard deviation of an array of numbers
@@ -72,7 +72,7 @@ export function calculateIntervals(keystrokes: KeystrokeEvent[]): number[] {
  */
 export function analyzeScanMetrics(
   keystrokes: KeystrokeEvent[],
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): ScanMetrics {
   const charCount = keystrokes.length;
   const timestamps = keystrokes.map((k) => k.timestamp);
@@ -87,7 +87,7 @@ export function analyzeScanMetrics(
       interKeyStdDevMs: 0,
       charCount,
       keystrokeTimestamps: timestamps,
-      inputMethod: "UNKNOWN",
+      inputMethod: 'UNKNOWN',
       confidence: 0,
       rejectionReason: `Insufficient data: ${charCount} chars (need ${config.minCharsForDetection})`,
       analyzedAt: new Date().toISOString(),
@@ -110,17 +110,13 @@ export function analyzeScanMetrics(
   }
 
   // Calculate statistics
-  const totalInputTimeMs =
-    charCount > 1 ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
+  const totalInputTimeMs = charCount > 1 ? timestamps[timestamps.length - 1] - timestamps[0] : 0;
   const avgInterKeyDelayMs =
     analysisIntervals.length > 0
-      ? analysisIntervals.reduce((sum, val) => sum + val, 0) /
-        analysisIntervals.length
+      ? analysisIntervals.reduce((sum, val) => sum + val, 0) / analysisIntervals.length
       : 0;
-  const maxInterKeyDelayMs =
-    analysisIntervals.length > 0 ? Math.max(...analysisIntervals) : 0;
-  const minInterKeyDelayMs =
-    analysisIntervals.length > 0 ? Math.min(...analysisIntervals) : 0;
+  const maxInterKeyDelayMs = analysisIntervals.length > 0 ? Math.max(...analysisIntervals) : 0;
+  const minInterKeyDelayMs = analysisIntervals.length > 0 ? Math.min(...analysisIntervals) : 0;
   const interKeyStdDevMs = calculateStdDev(analysisIntervals);
 
   // Classify input method based on multiple factors
@@ -132,7 +128,7 @@ export function analyzeScanMetrics(
       interKeyStdDevMs,
       charCount,
     },
-    config,
+    config
   );
 
   return {
@@ -176,7 +172,7 @@ interface ClassificationFactors {
  */
 function classifyInputMethod(
   factors: ClassificationFactors,
-  config: ScanDetectionConfig,
+  config: ScanDetectionConfig
 ): { inputMethod: InputMethod; confidence: number; rejectionReason?: string } {
   const reasons: string[] = [];
   let scanScore = 0;
@@ -189,7 +185,7 @@ function classifyInputMethod(
     scanScore += avgDelayWeight;
   } else {
     reasons.push(
-      `Average keystroke delay ${factors.avgInterKeyDelayMs.toFixed(1)}ms exceeds ${config.maxAvgInterKeyDelay}ms threshold`,
+      `Average keystroke delay ${factors.avgInterKeyDelayMs.toFixed(1)}ms exceeds ${config.maxAvgInterKeyDelay}ms threshold`
     );
   }
 
@@ -200,7 +196,7 @@ function classifyInputMethod(
     scanScore += totalTimeWeight;
   } else {
     reasons.push(
-      `Total input time ${factors.totalInputTimeMs.toFixed(0)}ms exceeds ${config.maxTotalInputTime}ms threshold`,
+      `Total input time ${factors.totalInputTimeMs.toFixed(0)}ms exceeds ${config.maxTotalInputTime}ms threshold`
     );
   }
 
@@ -211,7 +207,7 @@ function classifyInputMethod(
     scanScore += stdDevWeight;
   } else {
     reasons.push(
-      `Keystroke timing inconsistent (std dev ${factors.interKeyStdDevMs.toFixed(1)}ms > ${config.maxInterKeyStdDev}ms)`,
+      `Keystroke timing inconsistent (std dev ${factors.interKeyStdDevMs.toFixed(1)}ms > ${config.maxInterKeyStdDev}ms)`
     );
   }
 
@@ -223,9 +219,7 @@ function classifyInputMethod(
   if (factors.maxInterKeyDelayMs <= maxGapThreshold) {
     scanScore += maxGapWeight;
   } else {
-    reasons.push(
-      `Long pause detected (${factors.maxInterKeyDelayMs.toFixed(0)}ms gap)`,
-    );
+    reasons.push(`Long pause detected (${factors.maxInterKeyDelayMs.toFixed(0)}ms gap)`);
   }
 
   // Calculate confidence as percentage of factors passed
@@ -234,27 +228,27 @@ function classifyInputMethod(
   // Determine classification based on confidence threshold
   if (confidence >= config.minConfidence) {
     return {
-      inputMethod: "SCANNED",
+      inputMethod: 'SCANNED',
       confidence,
     };
   } else if (confidence <= 1 - config.minConfidence) {
     return {
-      inputMethod: "MANUAL",
+      inputMethod: 'MANUAL',
       confidence: 1 - confidence, // Invert for manual confidence
-      rejectionReason: reasons.join(". "),
+      rejectionReason: reasons.join('. '),
     };
   } else {
     // Ambiguous - classify based on which side of 0.5
     if (confidence >= 0.5) {
       return {
-        inputMethod: "SCANNED",
+        inputMethod: 'SCANNED',
         confidence,
       };
     } else {
       return {
-        inputMethod: "MANUAL",
+        inputMethod: 'MANUAL',
         confidence: 1 - confidence,
-        rejectionReason: reasons.join(". "),
+        rejectionReason: reasons.join('. '),
       };
     }
   }
@@ -269,7 +263,7 @@ function classifyInputMethod(
  */
 export function createDetectionResult(
   metrics: ScanMetrics | null,
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): ScanDetectionResult {
   if (!metrics) {
     return {
@@ -277,7 +271,7 @@ export function createDetectionResult(
       isManual: false,
       isPending: true,
       confidence: 0,
-      inputMethod: "UNKNOWN",
+      inputMethod: 'UNKNOWN',
       metrics: null,
     };
   }
@@ -285,8 +279,8 @@ export function createDetectionResult(
   const isPending = metrics.charCount < config.minCharsForDetection;
 
   return {
-    isScanned: metrics.inputMethod === "SCANNED",
-    isManual: metrics.inputMethod === "MANUAL",
+    isScanned: metrics.inputMethod === 'SCANNED',
+    isManual: metrics.inputMethod === 'MANUAL',
     isPending,
     confidence: metrics.confidence,
     inputMethod: metrics.inputMethod,
@@ -305,7 +299,7 @@ export function createDetectionResult(
  */
 export function validateScanMetricsServerSide(
   metrics: ScanMetrics,
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): {
   valid: boolean;
   reanalyzedMetrics: ScanMetrics;
@@ -313,14 +307,11 @@ export function validateScanMetricsServerSide(
   tamperReason?: string;
 } {
   // Reconstruct keystrokes from timestamps
-  const keystrokes: KeystrokeEvent[] = metrics.keystrokeTimestamps.map(
-    (timestamp, index) => ({
-      char: "", // We don't need the actual chars for validation
-      timestamp,
-      intervalMs:
-        index > 0 ? timestamp - metrics.keystrokeTimestamps[index - 1] : null,
-    }),
-  );
+  const keystrokes: KeystrokeEvent[] = metrics.keystrokeTimestamps.map((timestamp, index) => ({
+    char: '', // We don't need the actual chars for validation
+    timestamp,
+    intervalMs: index > 0 ? timestamp - metrics.keystrokeTimestamps[index - 1] : null,
+  }));
 
   // Re-analyze the metrics
   const reanalyzedMetrics = analyzeScanMetrics(keystrokes, config);
@@ -328,23 +319,19 @@ export function validateScanMetricsServerSide(
   // Check for tampering - compare client metrics vs reanalyzed
   const toleranceMs = 5; // Allow 5ms tolerance for floating point
   const tamperedDetected =
-    Math.abs(
-      metrics.avgInterKeyDelayMs - reanalyzedMetrics.avgInterKeyDelayMs,
-    ) > toleranceMs ||
-    Math.abs(metrics.totalInputTimeMs - reanalyzedMetrics.totalInputTimeMs) >
-      toleranceMs;
+    Math.abs(metrics.avgInterKeyDelayMs - reanalyzedMetrics.avgInterKeyDelayMs) > toleranceMs ||
+    Math.abs(metrics.totalInputTimeMs - reanalyzedMetrics.totalInputTimeMs) > toleranceMs;
 
   let tamperReason: string | undefined;
   if (tamperedDetected) {
-    tamperReason = "Client-provided metrics do not match timestamp analysis";
+    tamperReason = 'Client-provided metrics do not match timestamp analysis';
   }
 
   // Check timestamps are reasonable (not in future)
   // NOTE: Staleness check removed - database validations provide security
   // MCP SEC-014: Database-level validation is the authoritative security layer
   const now = Date.now();
-  const lastTimestamp =
-    metrics.keystrokeTimestamps[metrics.keystrokeTimestamps.length - 1];
+  const lastTimestamp = metrics.keystrokeTimestamps[metrics.keystrokeTimestamps.length - 1];
 
   if (lastTimestamp > now + 1000) {
     // 1 second tolerance for clock skew
@@ -352,13 +339,13 @@ export function validateScanMetricsServerSide(
       valid: false,
       reanalyzedMetrics,
       tamperedDetected: true,
-      tamperReason: "Timestamps are in the future",
+      tamperReason: 'Timestamps are in the future',
     };
   }
 
   return {
     valid:
-      reanalyzedMetrics.inputMethod === "SCANNED" &&
+      reanalyzedMetrics.inputMethod === 'SCANNED' &&
       reanalyzedMetrics.confidence >= config.minConfidence,
     reanalyzedMetrics,
     tamperedDetected,
@@ -373,11 +360,11 @@ export function validateScanMetricsServerSide(
  * @returns Human-readable summary
  */
 export function formatMetricsForDisplay(metrics: ScanMetrics): string {
-  if (metrics.inputMethod === "UNKNOWN") {
+  if (metrics.inputMethod === 'UNKNOWN') {
     return `Analyzing... (${metrics.charCount} characters)`;
   }
 
-  const method = metrics.inputMethod === "SCANNED" ? "Scanner" : "Manual";
+  const method = metrics.inputMethod === 'SCANNED' ? 'Scanner' : 'Manual';
   const confidence = (metrics.confidence * 100).toFixed(0);
 
   return `${method} input detected (${confidence}% confidence). Avg delay: ${metrics.avgInterKeyDelayMs.toFixed(1)}ms`;
@@ -397,7 +384,7 @@ export function formatMetricsForDisplay(metrics: ScanMetrics): string {
  */
 export function quickScanCheck(
   keystrokes: KeystrokeEvent[],
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): { likelyScan: boolean; confidence: number } {
   // Need at least 2 keystrokes to have 1 interval
   if (keystrokes.length < 2) {
@@ -413,14 +400,12 @@ export function quickScanCheck(
   // Check ALL intervals - if ANY interval is too slow, it's manual entry
   // This catches manual typing immediately after the second keystroke
   const maxInterval = Math.max(...intervals);
-  const avgRecent =
-    intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
+  const avgRecent = intervals.reduce((sum, val) => sum + val, 0) / intervals.length;
 
   // If max interval exceeds threshold, it's definitely manual
   // Also check average to catch consistent slow typing
   const likelyScan =
-    maxInterval <= config.maxAvgInterKeyDelay * 2 &&
-    avgRecent <= config.maxAvgInterKeyDelay;
+    maxInterval <= config.maxAvgInterKeyDelay * 2 && avgRecent <= config.maxAvgInterKeyDelay;
 
   const confidence = likelyScan
     ? Math.min(1, config.maxAvgInterKeyDelay / Math.max(avgRecent, 1))

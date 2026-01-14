@@ -8,9 +8,9 @@
  * to pass timezone explicitly to every formatting call.
  */
 
-"use client";
+'use client';
 
-import { useStoreTimezone } from "@/contexts/StoreContext";
+import { useStoreTimezone } from '@/contexts/StoreContext';
 import {
   formatDateTime,
   formatDate,
@@ -36,7 +36,7 @@ import {
   isValidBusinessDate,
   compareBusinessDates,
   extractBusinessDateFromTimestamp,
-} from "@/utils/date-format.utils";
+} from '@/utils/date-format.utils';
 
 /**
  * Date formatting hook
@@ -105,8 +105,7 @@ export function useDateFormat() {
      * Format time with seconds
      * @example "10:30:45 PM"
      */
-    formatTimeWithSeconds: (date: Date | string) =>
-      formatTimeWithSeconds(date, timezone),
+    formatTimeWithSeconds: (date: Date | string) => formatTimeWithSeconds(date, timezone),
 
     /**
      * Format date for API (YYYY-MM-DD)
@@ -118,8 +117,7 @@ export function useDateFormat() {
      * Format datetime for API (ISO 8601 in store timezone)
      * @example "2025-11-25T22:00:00"
      */
-    formatDateTimeISO: (date: Date | string) =>
-      formatDateTimeISO(date, timezone),
+    formatDateTimeISO: (date: Date | string) => formatDateTimeISO(date, timezone),
 
     /**
      * Format short date (MM/DD/YYYY)
@@ -185,17 +183,14 @@ export function useDateFormat() {
      * Use for `business_date` fields that represent conceptual days.
      * @example formatBusinessDate("2026-01-06") → "January 6, 2026"
      */
-    formatBusinessDate: (
-      dateStr: string | null | undefined,
-      formatString?: string,
-    ) => formatBusinessDate(dateStr, formatString),
+    formatBusinessDate: (dateStr: string | null | undefined, formatString?: string) =>
+      formatBusinessDate(dateStr, formatString),
 
     /**
      * Format business date in full format with day of week.
      * @example formatBusinessDateFull("2026-01-06") → "Tuesday, January 6, 2026"
      */
-    formatBusinessDateFull: (dateStr: string | null | undefined) =>
-      formatBusinessDateFull(dateStr),
+    formatBusinessDateFull: (dateStr: string | null | undefined) => formatBusinessDateFull(dateStr),
 
     /**
      * Format business date in short format.
@@ -241,8 +236,7 @@ export function useDateFormat() {
      * Use this when you need to derive a business date from a timestamp.
      * @example extractBusinessDateFromTimestamp("2026-01-06T22:05:45Z") → "2026-01-06"
      */
-    extractBusinessDateFromTimestamp: (
-      isoTimestamp: string | null | undefined,
-    ) => extractBusinessDateFromTimestamp(isoTimestamp, timezone),
+    extractBusinessDateFromTimestamp: (isoTimestamp: string | null | undefined) =>
+      extractBusinessDateFromTimestamp(isoTimestamp, timezone),
   };
 }

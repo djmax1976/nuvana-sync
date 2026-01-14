@@ -1,4 +1,3 @@
-
 /**
  * Bin Selection Modal Component
  * Sub-modal for selecting a bin during batch pack activation
@@ -17,8 +16,8 @@
  * - SEC-004: XSS - React auto-escapes output
  */
 
-import { useState, useEffect } from "react";
-import { Button } from "@/components/ui/button";
+import { useState, useEffect } from 'react';
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -26,11 +25,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Package } from "lucide-react";
-import { BinSelector } from "./BinSelector";
-import type { PackSearchOption } from "./PackSearchCombobox";
-import type { DayBin } from "@/lib/api/lottery";
+} from '@/components/ui/dialog';
+import { Package } from 'lucide-react';
+import { BinSelector } from './BinSelector';
+import type { PackSearchOption } from './PackSearchCombobox';
+import type { DayBin } from '@/lib/api/lottery';
 
 /**
  * Props for BinSelectionModal
@@ -63,21 +62,19 @@ export function BinSelectionModal({
   onConfirm,
 }: BinSelectionModalProps) {
   // Selected bin state
-  const [selectedBinId, setSelectedBinId] = useState<string>("");
+  const [selectedBinId, setSelectedBinId] = useState<string>('');
 
   // Reset selection when modal opens with new pack
   useEffect(() => {
     if (open) {
-      setSelectedBinId("");
+      setSelectedBinId('');
     }
   }, [open, pack?.pack_id]);
 
   // Filter out bins that are already assigned in the pending list
   // SEC-014: INPUT_VALIDATION - Prevent duplicate bin assignment at UI level
   // Backend also validates this, but removing from dropdown provides better UX
-  const availableBins = bins.filter(
-    (bin) => !pendingBinIds.includes(bin.bin_id),
-  );
+  const availableBins = bins.filter((bin) => !pendingBinIds.includes(bin.bin_id));
 
   // Find the selected bin (from available bins only for consistency)
   const selectedBin = availableBins.find((b) => b.bin_id === selectedBinId);
@@ -123,18 +120,15 @@ export function BinSelectionModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-[400px]"
-        data-testid="bin-selection-modal"
-      >
+      <DialogContent className="sm:max-w-[400px]" data-testid="bin-selection-modal">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Package className="h-5 w-5" />
             Select Bin
           </DialogTitle>
           <DialogDescription>
-            Choose a bin for this pack. If the bin is occupied, the existing
-            pack will be marked as sold.
+            Choose a bin for this pack. If the bin is occupied, the existing pack will be marked as
+            sold.
           </DialogDescription>
         </DialogHeader>
 
@@ -144,20 +138,16 @@ export function BinSelectionModal({
           <div className="mt-2 space-y-1 text-sm text-muted-foreground">
             <div className="flex justify-between">
               <span>Game:</span>
-              <span className="font-medium text-foreground">
-                {pack.game_name}
-              </span>
+              <span className="font-medium text-foreground">{pack.game_name}</span>
             </div>
             <div className="flex justify-between">
               <span>Pack #:</span>
-              <span className="font-medium text-foreground">
-                {pack.pack_number}
-              </span>
+              <span className="font-medium text-foreground">{pack.pack_number}</span>
             </div>
             <div className="flex justify-between">
               <span>Price:</span>
               <span className="font-medium text-foreground">
-                {pack.game_price !== null ? `$${pack.game_price}` : "N/A"}
+                {pack.game_price !== null ? `$${pack.game_price}` : 'N/A'}
               </span>
             </div>
             <div className="flex justify-between">

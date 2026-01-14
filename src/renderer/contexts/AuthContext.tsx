@@ -9,14 +9,7 @@
  * @security SEC-017: Session events logged in main process for audit trail
  */
 
-import {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useEffect,
-  type ReactNode,
-} from 'react';
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 
 // ============================================================================
 // Types
@@ -150,9 +143,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     const checkAuth = async () => {
       try {
-        const response = await window.electronAPI.invoke<CurrentUserResponse>(
-          'auth:getCurrentUser'
-        );
+        const response =
+          await window.electronAPI.invoke<CurrentUserResponse>('auth:getCurrentUser');
 
         if (response.success && response.data?.authenticated && response.data.user) {
           setUser(response.data.user);
@@ -207,10 +199,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(true);
 
     try {
-      const response = await window.electronAPI.invoke<LoginResponse>(
-        'auth:login',
-        { pin }
-      );
+      const response = await window.electronAPI.invoke<LoginResponse>('auth:login', { pin });
 
       if (response.success && response.data) {
         setUser(response.data.user);
@@ -236,39 +225,36 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * Login with specific user ID and PIN
    */
-  const loginWithUser = useCallback(
-    async (userId: string, pin: string): Promise<boolean> => {
-      setLoginError(null);
-      setIsLoading(true);
+  const loginWithUser = useCallback(async (userId: string, pin: string): Promise<boolean> => {
+    setLoginError(null);
+    setIsLoading(true);
 
-      try {
-        const response = await window.electronAPI.invoke<LoginResponse>(
-          'auth:loginWithUser',
-          { userId, pin }
-        );
+    try {
+      const response = await window.electronAPI.invoke<LoginResponse>('auth:loginWithUser', {
+        userId,
+        pin,
+      });
 
-        if (response.success && response.data) {
-          setUser(response.data.user);
-          setSession({
-            loginAt: response.data.session.loginAt,
-            lastActivityAt: response.data.session.loginAt,
-            timeoutIn: response.data.session.timeoutIn,
-          });
-          return true;
-        } else {
-          setLoginError(response.error || 'Authentication failed');
-          return false;
-        }
-      } catch (error) {
-        const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
-        setLoginError(errorMessage);
+      if (response.success && response.data) {
+        setUser(response.data.user);
+        setSession({
+          loginAt: response.data.session.loginAt,
+          lastActivityAt: response.data.session.loginAt,
+          timeoutIn: response.data.session.timeoutIn,
+        });
+        return true;
+      } else {
+        setLoginError(response.error || 'Authentication failed');
         return false;
-      } finally {
-        setIsLoading(false);
       }
-    },
-    []
-  );
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Authentication failed';
+      setLoginError(errorMessage);
+      return false;
+    } finally {
+      setIsLoading(false);
+    }
+  }, []);
 
   /**
    * Logout current user
@@ -307,21 +293,24 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   /**
    * Check if user has a specific permission
    */
-  const hasPermission = useCallback(async (permission: string): Promise<boolean> => {
-    if (!user) return false;
+  const hasPermission = useCallback(
+    async (permission: string): Promise<boolean> => {
+      if (!user) return false;
 
-    try {
-      const response = await window.electronAPI.invoke<{
-        success: boolean;
-        data?: { hasPermission: boolean };
-      }>('auth:hasPermission', { permission });
+      try {
+        const response = await window.electronAPI.invoke<{
+          success: boolean;
+          data?: { hasPermission: boolean };
+        }>('auth:hasPermission', { permission });
 
-      return response.success && response.data?.hasPermission === true;
-    } catch (error) {
-      console.error('[AuthContext] Permission check error:', error);
-      return false;
-    }
-  }, [user]);
+        return response.success && response.data?.hasPermission === true;
+      } catch (error) {
+        console.error('[AuthContext] Permission check error:', error);
+        return false;
+      }
+    },
+    [user]
+  );
 
   /**
    * Check if user has at least the specified role

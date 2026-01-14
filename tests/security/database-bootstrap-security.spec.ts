@@ -27,16 +27,18 @@ const { mockDbInstance, mockFs, logCalls } = vi.hoisted(() => {
   const mockDbInstance = {
     prepare: vi.fn().mockReturnValue({
       get: vi.fn().mockReturnValue({ result: 1 }),
-      all: vi.fn().mockReturnValue([
-        { name: 'stores' },
-        { name: 'users' },
-        { name: 'shifts' },
-        { name: 'day_summaries' },
-        { name: 'transactions' },
-        { name: 'sync_queue' },
-        { name: 'processed_files' },
-        { name: 'schema_migrations' },
-      ]),
+      all: vi
+        .fn()
+        .mockReturnValue([
+          { name: 'stores' },
+          { name: 'users' },
+          { name: 'shifts' },
+          { name: 'day_summaries' },
+          { name: 'transactions' },
+          { name: 'sync_queue' },
+          { name: 'processed_files' },
+          { name: 'schema_migrations' },
+        ]),
     }),
     pragma: vi.fn().mockReturnValue([{ integrity_check: 'ok' }]),
   };
@@ -137,9 +139,8 @@ describe('Database Bootstrap Security', () => {
         throw new Error('SQLITE_CANTOPEN: /var/lib/data/secret/path/database.db');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -154,9 +155,8 @@ describe('Database Bootstrap Security', () => {
         throw new Error('SQLITE_ERROR: near "SELECT": syntax error at line 42');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -176,9 +176,8 @@ describe('Database Bootstrap Security', () => {
         throw error;
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -194,9 +193,8 @@ describe('Database Bootstrap Security', () => {
         throw new Error('Error in C:\\Users\\admin\\AppData\\Local\\nuvana\\');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -221,9 +219,8 @@ describe('Database Bootstrap Security', () => {
           throw new Error(scenario.input);
         });
 
-        const { bootstrapDatabase } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { bootstrapDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -241,9 +238,8 @@ describe('Database Bootstrap Security', () => {
 
   describe('Path Traversal Prevention', () => {
     it('should reject backup paths with path traversal attempts', async () => {
-      const { restoreFromBackup } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { restoreFromBackup } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       // Attempt path traversal in backup restore
       const maliciousPath = '/mock/backups/../../../etc/passwd';
@@ -293,9 +289,8 @@ describe('Database Bootstrap Security', () => {
         throw new Error('Test error');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const result = await bootstrapDatabase({ skipBackup: true });
 
@@ -304,9 +299,8 @@ describe('Database Bootstrap Security', () => {
     });
 
     it('should log correlation ID with all operations', async () => {
-      const { bootstrapDatabase, shutdownDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase, shutdownDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
       shutdownDatabase();
@@ -343,9 +337,8 @@ describe('Database Bootstrap Security', () => {
 
   describe('Sensitive Data Protection', () => {
     it('should not log encryption keys or passwords', async () => {
-      const { bootstrapDatabase, shutdownDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase, shutdownDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
       shutdownDatabase();
@@ -366,9 +359,8 @@ describe('Database Bootstrap Security', () => {
         throw new Error('EACCES: permission denied, open /secret/path/database.db');
       });
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
 
@@ -387,9 +379,8 @@ describe('Database Bootstrap Security', () => {
       mockFs.existsSync.mockReturnValue(true);
       mockFs.readdirSync.mockReturnValue(['nuvana_v1_2024-01-01T00-00-00.db']);
 
-      const { getAvailableBackups } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { getAvailableBackups } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       const backups = getAvailableBackups();
 
@@ -465,7 +456,9 @@ describe('Database Bootstrap Security', () => {
       expect(result.error?.recoveryAction).toBeDefined();
       expect(result.error?.recoveryAction?.length).toBeGreaterThan(10);
       // Should be user-actionable advice (check file, restart, close, delete, or contact)
-      expect(result.error?.recoveryAction).toMatch(/(restart|close|delete|contact|file|permission)/i);
+      expect(result.error?.recoveryAction).toMatch(
+        /(restart|close|delete|contact|file|permission)/i
+      );
     });
 
     it('should include recovery actions in error responses', async () => {
@@ -492,9 +485,8 @@ describe('Database Bootstrap Security', () => {
     it('should use recursive directory creation safely', async () => {
       mockFs.existsSync.mockReturnValue(false);
 
-      const { bootstrapDatabase } = await import(
-        '../../src/main/services/database-bootstrap.service'
-      );
+      const { bootstrapDatabase } =
+        await import('../../src/main/services/database-bootstrap.service');
 
       await bootstrapDatabase({ skipBackup: true });
 

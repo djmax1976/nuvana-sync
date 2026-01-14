@@ -18,7 +18,7 @@
  * - ANY: User needs at least one of the listed permissions
  * - ALL: User needs all listed permissions
  */
-export type PermissionRequirementMode = "ANY" | "ALL";
+export type PermissionRequirementMode = 'ANY' | 'ALL';
 
 /**
  * Menu permission configuration for a single menu item
@@ -46,69 +46,68 @@ export interface MenuPermissionConfig {
  */
 export const PERMISSION_CODES = {
   // Shift Operations
-  SHIFT_OPEN: "SHIFT_OPEN",
-  SHIFT_CLOSE: "SHIFT_CLOSE",
-  SHIFT_READ: "SHIFT_READ",
-  SHIFT_RECONCILE: "SHIFT_RECONCILE",
-  SHIFT_REPORT_VIEW: "SHIFT_REPORT_VIEW",
+  SHIFT_OPEN: 'SHIFT_OPEN',
+  SHIFT_CLOSE: 'SHIFT_CLOSE',
+  SHIFT_READ: 'SHIFT_READ',
+  SHIFT_RECONCILE: 'SHIFT_RECONCILE',
+  SHIFT_REPORT_VIEW: 'SHIFT_REPORT_VIEW',
 
   // Transactions
-  TRANSACTION_CREATE: "TRANSACTION_CREATE",
-  TRANSACTION_READ: "TRANSACTION_READ",
+  TRANSACTION_CREATE: 'TRANSACTION_CREATE',
+  TRANSACTION_READ: 'TRANSACTION_READ',
 
   // Inventory
-  INVENTORY_READ: "INVENTORY_READ",
-  INVENTORY_ADJUST: "INVENTORY_ADJUST",
-  INVENTORY_ORDER: "INVENTORY_ORDER",
+  INVENTORY_READ: 'INVENTORY_READ',
+  INVENTORY_ADJUST: 'INVENTORY_ADJUST',
+  INVENTORY_ORDER: 'INVENTORY_ORDER',
 
   // Lottery
-  LOTTERY_PACK_RECEIVE: "LOTTERY_PACK_RECEIVE",
-  LOTTERY_SHIFT_RECONCILE: "LOTTERY_SHIFT_RECONCILE",
-  LOTTERY_REPORT: "LOTTERY_REPORT",
+  LOTTERY_PACK_RECEIVE: 'LOTTERY_PACK_RECEIVE',
+  LOTTERY_SHIFT_RECONCILE: 'LOTTERY_SHIFT_RECONCILE',
+  LOTTERY_REPORT: 'LOTTERY_REPORT',
 
   // Reports
-  REPORT_SHIFT: "REPORT_SHIFT",
-  REPORT_DAILY: "REPORT_DAILY",
-  REPORT_ANALYTICS: "REPORT_ANALYTICS",
-  REPORT_EXPORT: "REPORT_EXPORT",
+  REPORT_SHIFT: 'REPORT_SHIFT',
+  REPORT_DAILY: 'REPORT_DAILY',
+  REPORT_ANALYTICS: 'REPORT_ANALYTICS',
+  REPORT_EXPORT: 'REPORT_EXPORT',
 
   // Client Employee Management
-  CLIENT_EMPLOYEE_CREATE: "CLIENT_EMPLOYEE_CREATE",
-  CLIENT_EMPLOYEE_READ: "CLIENT_EMPLOYEE_READ",
-  CLIENT_EMPLOYEE_DELETE: "CLIENT_EMPLOYEE_DELETE",
+  CLIENT_EMPLOYEE_CREATE: 'CLIENT_EMPLOYEE_CREATE',
+  CLIENT_EMPLOYEE_READ: 'CLIENT_EMPLOYEE_READ',
+  CLIENT_EMPLOYEE_DELETE: 'CLIENT_EMPLOYEE_DELETE',
 
   // Client Role Management
-  CLIENT_ROLE_MANAGE: "CLIENT_ROLE_MANAGE",
+  CLIENT_ROLE_MANAGE: 'CLIENT_ROLE_MANAGE',
 
   // Cashier Management
-  CASHIER_CREATE: "CASHIER_CREATE",
-  CASHIER_READ: "CASHIER_READ",
-  CASHIER_UPDATE: "CASHIER_UPDATE",
-  CASHIER_DELETE: "CASHIER_DELETE",
+  CASHIER_CREATE: 'CASHIER_CREATE',
+  CASHIER_READ: 'CASHIER_READ',
+  CASHIER_UPDATE: 'CASHIER_UPDATE',
+  CASHIER_DELETE: 'CASHIER_DELETE',
 
   // Store Management
-  STORE_READ: "STORE_READ",
-  STORE_UPDATE: "STORE_UPDATE",
+  STORE_READ: 'STORE_READ',
+  STORE_UPDATE: 'STORE_UPDATE',
 
   // Client Dashboard
-  CLIENT_DASHBOARD_ACCESS: "CLIENT_DASHBOARD_ACCESS",
+  CLIENT_DASHBOARD_ACCESS: 'CLIENT_DASHBOARD_ACCESS',
 
   // Configuration & Lookup Tables
-  CONFIG_READ: "CONFIG_READ",
-  CONFIG_MANAGE: "CONFIG_MANAGE",
-  TENDER_TYPE_READ: "TENDER_TYPE_READ",
-  TENDER_TYPE_MANAGE: "TENDER_TYPE_MANAGE",
-  DEPARTMENT_READ: "DEPARTMENT_READ",
-  DEPARTMENT_MANAGE: "DEPARTMENT_MANAGE",
-  TAX_RATE_READ: "TAX_RATE_READ",
-  TAX_RATE_MANAGE: "TAX_RATE_MANAGE",
+  CONFIG_READ: 'CONFIG_READ',
+  CONFIG_MANAGE: 'CONFIG_MANAGE',
+  TENDER_TYPE_READ: 'TENDER_TYPE_READ',
+  TENDER_TYPE_MANAGE: 'TENDER_TYPE_MANAGE',
+  DEPARTMENT_READ: 'DEPARTMENT_READ',
+  DEPARTMENT_MANAGE: 'DEPARTMENT_MANAGE',
+  TAX_RATE_READ: 'TAX_RATE_READ',
+  TAX_RATE_MANAGE: 'TAX_RATE_MANAGE',
 
   // POS Integration
-  POS_SYNC_TRIGGER: "POS_SYNC_TRIGGER",
+  POS_SYNC_TRIGGER: 'POS_SYNC_TRIGGER',
 } as const;
 
-export type PermissionCode =
-  (typeof PERMISSION_CODES)[keyof typeof PERMISSION_CODES];
+export type PermissionCode = (typeof PERMISSION_CODES)[keyof typeof PERMISSION_CODES];
 
 /**
  * Client Dashboard Menu Permission Configuration
@@ -122,112 +121,112 @@ export type PermissionCode =
 export const CLIENT_MENU_PERMISSIONS: MenuPermissionConfig[] = [
   // Dashboard - Always visible to authenticated client users
   {
-    menuKey: "dashboard",
-    menuTitle: "Dashboard",
+    menuKey: 'dashboard',
+    menuTitle: 'Dashboard',
     requiredPermissions: [PERMISSION_CODES.CLIENT_DASHBOARD_ACCESS],
     alwaysVisible: true, // Core navigation, always shown
   },
 
   // Shift Management - Requires shift-related permissions
   {
-    menuKey: "shifts",
-    menuTitle: "Shift Management",
+    menuKey: 'shifts',
+    menuTitle: 'Shift Management',
     requiredPermissions: [
       PERMISSION_CODES.SHIFT_READ,
       PERMISSION_CODES.SHIFT_OPEN,
       PERMISSION_CODES.SHIFT_CLOSE,
       PERMISSION_CODES.SHIFT_RECONCILE,
     ],
-    mode: "ANY", // Show if user can do ANY shift operation
+    mode: 'ANY', // Show if user can do ANY shift operation
   },
 
   // Daily Summary - Requires shift or report viewing permissions
   {
-    menuKey: "shift-and-day",
-    menuTitle: "Daily Summary",
+    menuKey: 'shift-and-day',
+    menuTitle: 'Daily Summary',
     requiredPermissions: [
       PERMISSION_CODES.SHIFT_READ,
       PERMISSION_CODES.SHIFT_REPORT_VIEW,
       PERMISSION_CODES.REPORT_DAILY,
       PERMISSION_CODES.REPORT_SHIFT,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Inventory - Requires inventory permissions
   {
-    menuKey: "inventory",
-    menuTitle: "Inventory",
+    menuKey: 'inventory',
+    menuTitle: 'Inventory',
     requiredPermissions: [
       PERMISSION_CODES.INVENTORY_READ,
       PERMISSION_CODES.INVENTORY_ADJUST,
       PERMISSION_CODES.INVENTORY_ORDER,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Lottery - Requires lottery permissions
   {
-    menuKey: "lottery",
-    menuTitle: "Lottery",
+    menuKey: 'lottery',
+    menuTitle: 'Lottery',
     requiredPermissions: [
       PERMISSION_CODES.LOTTERY_PACK_RECEIVE,
       PERMISSION_CODES.LOTTERY_SHIFT_RECONCILE,
       PERMISSION_CODES.LOTTERY_REPORT,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Employees - Requires employee management permissions
   {
-    menuKey: "employees",
-    menuTitle: "Employees",
+    menuKey: 'employees',
+    menuTitle: 'Employees',
     requiredPermissions: [
       PERMISSION_CODES.CLIENT_EMPLOYEE_READ,
       PERMISSION_CODES.CLIENT_EMPLOYEE_CREATE,
       PERMISSION_CODES.CLIENT_EMPLOYEE_DELETE,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Cashiers - Requires cashier management permissions
   {
-    menuKey: "cashiers",
-    menuTitle: "Cashiers",
+    menuKey: 'cashiers',
+    menuTitle: 'Cashiers',
     requiredPermissions: [
       PERMISSION_CODES.CASHIER_READ,
       PERMISSION_CODES.CASHIER_CREATE,
       PERMISSION_CODES.CASHIER_UPDATE,
       PERMISSION_CODES.CASHIER_DELETE,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Roles & Permissions - Requires role management permission
   {
-    menuKey: "roles",
-    menuTitle: "Roles & Permissions",
+    menuKey: 'roles',
+    menuTitle: 'Roles & Permissions',
     requiredPermissions: [PERMISSION_CODES.CLIENT_ROLE_MANAGE],
-    mode: "ALL", // Requires explicit role management permission
+    mode: 'ALL', // Requires explicit role management permission
   },
 
   // Reports - Requires report permissions
   {
-    menuKey: "reports",
-    menuTitle: "Reports",
+    menuKey: 'reports',
+    menuTitle: 'Reports',
     requiredPermissions: [
       PERMISSION_CODES.REPORT_SHIFT,
       PERMISSION_CODES.REPORT_DAILY,
       PERMISSION_CODES.REPORT_ANALYTICS,
       PERMISSION_CODES.REPORT_EXPORT,
     ],
-    mode: "ANY",
+    mode: 'ANY',
   },
 
   // Configuration - Requires config or lookup table permissions
   {
-    menuKey: "config",
-    menuTitle: "Configuration",
+    menuKey: 'config',
+    menuTitle: 'Configuration',
     requiredPermissions: [
       PERMISSION_CODES.CONFIG_READ,
       PERMISSION_CODES.CONFIG_MANAGE,
@@ -238,14 +237,14 @@ export const CLIENT_MENU_PERMISSIONS: MenuPermissionConfig[] = [
       PERMISSION_CODES.TAX_RATE_READ,
       PERMISSION_CODES.TAX_RATE_MANAGE,
     ],
-    mode: "ANY", // Show if user can read or manage any config
+    mode: 'ANY', // Show if user can read or manage any config
   },
 
   // POS Integration - Always visible, requires re-authentication before access
   // Any user can see the link, but must authenticate as someone with POS_SYNC_TRIGGER
   {
-    menuKey: "pos_integration",
-    menuTitle: "POS Integration",
+    menuKey: 'pos_integration',
+    menuTitle: 'POS Integration',
     requiredPermissions: [], // No permission required for visibility
     alwaysVisible: true, // Link is always visible
     requiresAuth: true, // Flag for sidebar to show auth modal before navigation
@@ -253,16 +252,16 @@ export const CLIENT_MENU_PERMISSIONS: MenuPermissionConfig[] = [
 
   // AI Assistant - Always visible (feature toggle, not permission-based)
   {
-    menuKey: "ai",
-    menuTitle: "AI Assistant",
+    menuKey: 'ai',
+    menuTitle: 'AI Assistant',
     requiredPermissions: [],
     alwaysVisible: true,
   },
 
   // Settings - Always visible for account management
   {
-    menuKey: "settings",
-    menuTitle: "Settings",
+    menuKey: 'settings',
+    menuTitle: 'Settings',
     requiredPermissions: [],
     alwaysVisible: true,
   },
@@ -273,9 +272,7 @@ export const CLIENT_MENU_PERMISSIONS: MenuPermissionConfig[] = [
  * @param menuKey - The menu item key (path segment)
  * @returns The permission configuration or undefined if not found
  */
-export function getMenuPermissionConfig(
-  menuKey: string,
-): MenuPermissionConfig | undefined {
+export function getMenuPermissionConfig(menuKey: string): MenuPermissionConfig | undefined {
   return CLIENT_MENU_PERMISSIONS.find((config) => config.menuKey === menuKey);
 }
 
@@ -286,20 +283,20 @@ export function getMenuPermissionConfig(
  */
 export function extractMenuKeyFromHref(href: string): string {
   // Remove leading slash and split by path segments
-  const segments = href.replace(/^\//, "").split("/");
+  const segments = href.replace(/^\//, '').split('/');
 
   // For /client-dashboard, return "dashboard"
-  if (segments.length === 1 && segments[0] === "client-dashboard") {
-    return "dashboard";
+  if (segments.length === 1 && segments[0] === 'client-dashboard') {
+    return 'dashboard';
   }
 
   // For /client-dashboard/xxx, return "xxx"
-  if (segments.length >= 2 && segments[0] === "client-dashboard") {
+  if (segments.length >= 2 && segments[0] === 'client-dashboard') {
     return segments[1];
   }
 
   // Fallback: return last segment
-  return segments[segments.length - 1] || "dashboard";
+  return segments[segments.length - 1] || 'dashboard';
 }
 
 /**
@@ -311,7 +308,7 @@ export function extractMenuKeyFromHref(href: string): string {
  */
 export function hasMenuPermission(
   userPermissions: string[],
-  config: MenuPermissionConfig,
+  config: MenuPermissionConfig
 ): boolean {
   // Always visible items bypass permission check
   if (config.alwaysVisible) {
@@ -323,19 +320,15 @@ export function hasMenuPermission(
     return true;
   }
 
-  const mode = config.mode || "ANY";
+  const mode = config.mode || 'ANY';
 
-  if (mode === "ALL") {
+  if (mode === 'ALL') {
     // User must have ALL required permissions
-    return config.requiredPermissions.every((perm) =>
-      userPermissions.includes(perm),
-    );
+    return config.requiredPermissions.every((perm) => userPermissions.includes(perm));
   }
 
   // mode === "ANY": User must have at least one permission
-  return config.requiredPermissions.some((perm) =>
-    userPermissions.includes(perm),
-  );
+  return config.requiredPermissions.some((perm) => userPermissions.includes(perm));
 }
 
 /**
@@ -345,7 +338,7 @@ export function hasMenuPermission(
  * @returns Array of menu keys the user can access
  */
 export function getAccessibleMenuKeys(userPermissions: string[]): string[] {
-  return CLIENT_MENU_PERMISSIONS.filter((config) =>
-    hasMenuPermission(userPermissions, config),
-  ).map((config) => config.menuKey);
+  return CLIENT_MENU_PERMISSIONS.filter((config) => hasMenuPermission(userPermissions, config)).map(
+    (config) => config.menuKey
+  );
 }

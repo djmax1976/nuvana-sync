@@ -1,5 +1,5 @@
-import React from "react";
-import { ChartErrorBoundary } from "./chart-error-boundary";
+import React from 'react';
+import { ChartErrorBoundary } from './chart-error-boundary';
 
 /**
  * Accessible Chart Wrapper
@@ -55,15 +55,15 @@ export function AccessibleChart({
   title,
   description,
   summary,
-  height = "100%",
+  height = '100%',
   data,
-  xKey = "name",
-  yKey = "value",
-  xLabel = "Category",
-  yLabel = "Value",
+  xKey = 'name',
+  yKey = 'value',
+  xLabel = 'Category',
+  yLabel = 'Value',
   formatValue = (v) => String(v),
   showDataTable = true,
-  className = "",
+  className = '',
 }: AccessibleChartProps) {
   const chartId = React.useId();
   const descriptionId = `${chartId}-desc`;
@@ -73,7 +73,7 @@ export function AccessibleChart({
     <ChartErrorBoundary chartName={title} height={height}>
       <div
         className={`relative ${className}`}
-        style={{ height: typeof height === "number" ? `${height}px` : height }}
+        style={{ height: typeof height === 'number' ? `${height}px` : height }}
       >
         {/* Visible chart container with ARIA attributes */}
         <div
@@ -94,11 +94,7 @@ export function AccessibleChart({
 
         {/* Accessible data table for screen readers (visually hidden) */}
         {data && showDataTable && (
-          <table
-            id={tableId}
-            className="sr-only"
-            aria-label={`Data table for ${title}`}
-          >
+          <table id={tableId} className="sr-only" aria-label={`Data table for ${title}`}>
             <caption>{title} - Tabular Data</caption>
             <thead>
               <tr>
@@ -109,7 +105,7 @@ export function AccessibleChart({
             <tbody>
               {data.map((item, index) => {
                 // eslint-disable-next-line security/detect-object-injection -- Safe: xKey/yKey are props passed by caller
-                const xValue = String(item[xKey] ?? "");
+                const xValue = String(item[xKey] ?? '');
                 // eslint-disable-next-line security/detect-object-injection -- Safe: xKey/yKey are props passed by caller
                 const yValue = formatValue(Number(item[yKey]) || 0);
                 return (
@@ -149,11 +145,11 @@ export function AccessibleChart({
  */
 export function generateChartDescription(
   data: Array<{ name: string; value: number }>,
-  chartType: "line" | "bar" | "pie" | "donut",
-  formatValue: (v: number) => string = (v) => String(v),
+  chartType: 'line' | 'bar' | 'pie' | 'donut',
+  formatValue: (v: number) => string = (v) => String(v)
 ): string {
   if (!data || data.length === 0) {
-    return "No data available";
+    return 'No data available';
   }
 
   const values = data.map((d) => d.value);
@@ -165,13 +161,13 @@ export function generateChartDescription(
   const avg = total / values.length;
 
   const chartTypeDesc =
-    chartType === "line"
-      ? "trend line"
-      : chartType === "bar"
-        ? "bar chart"
-        : chartType === "pie" || chartType === "donut"
-          ? "pie chart"
-          : "chart";
+    chartType === 'line'
+      ? 'trend line'
+      : chartType === 'bar'
+        ? 'bar chart'
+        : chartType === 'pie' || chartType === 'donut'
+          ? 'pie chart'
+          : 'chart';
 
   let description = `This ${chartTypeDesc} displays ${data.length} data points. `;
 
@@ -180,11 +176,11 @@ export function generateChartDescription(
     description += `The lowest value is ${formatValue(min)} for ${minItem.name}. `;
   }
 
-  if (chartType === "pie" || chartType === "donut") {
+  if (chartType === 'pie' || chartType === 'donut') {
     description += `Total is ${formatValue(total)}. `;
     // Add percentage breakdown for top 3
     const sorted = [...data].sort((a, b) => b.value - a.value).slice(0, 3);
-    description += `Top categories: ${sorted.map((d) => `${d.name} (${((d.value / total) * 100).toFixed(0)}%)`).join(", ")}.`;
+    description += `Top categories: ${sorted.map((d) => `${d.name} (${((d.value / total) * 100).toFixed(0)}%)`).join(', ')}.`;
   } else {
     description += `Average is ${formatValue(avg)}.`;
   }
@@ -198,7 +194,7 @@ export function generateChartDescription(
 export function getTrendAnnouncement(
   currentValue: number,
   previousValue: number,
-  formatValue: (v: number) => string = (v) => String(v),
+  formatValue: (v: number) => string = (v) => String(v)
 ): string {
   if (currentValue === previousValue) {
     return `Value unchanged at ${formatValue(currentValue)}`;
@@ -206,7 +202,7 @@ export function getTrendAnnouncement(
 
   const change = currentValue - previousValue;
   const percentChange = ((change / previousValue) * 100).toFixed(1);
-  const direction = change > 0 ? "increased" : "decreased";
+  const direction = change > 0 ? 'increased' : 'decreased';
 
-  return `Value ${direction} from ${formatValue(previousValue)} to ${formatValue(currentValue)}, a ${Math.abs(Number(percentChange))}% ${direction.replace("ed", "")}`;
+  return `Value ${direction} from ${formatValue(previousValue)} to ${formatValue(currentValue)}, a ${Math.abs(Number(percentChange))}% ${direction.replace('ed', '')}`;
 }

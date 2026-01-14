@@ -405,7 +405,10 @@ describe('BinManagementService', () => {
     });
 
     it('should calculate correct statistics', () => {
-      vi.mocked(lotteryBinsDAL.findAllByStore).mockReturnValue([mockBin, { ...mockBin, bin_id: 'bin-002' }]);
+      vi.mocked(lotteryBinsDAL.findAllByStore).mockReturnValue([
+        mockBin,
+        { ...mockBin, bin_id: 'bin-002' },
+      ]);
       vi.mocked(lotteryBinsDAL.findActiveByStore).mockReturnValue([mockBin]);
       vi.mocked(lotteryBinsDAL.getPackCount).mockReturnValue(2);
 

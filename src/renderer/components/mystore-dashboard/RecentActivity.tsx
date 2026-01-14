@@ -1,8 +1,5 @@
-import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
-import {
-  sanitizeForDisplay,
-  maskEmployeeName,
-} from "../../lib/utils/security";
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { sanitizeForDisplay, maskEmployeeName } from '../../lib/utils/security';
 
 /**
  * RecentActivity Component
@@ -21,51 +18,51 @@ import {
 // Sample activity data - will be replaced with real API data
 const activities = [
   {
-    id: "1",
-    initials: "JD",
-    fullName: "John Davis",
-    title: "John Davis closed Shift #445",
-    time: "32 minutes ago",
-    meta: "$3,245.00",
-    color: "primary" as const,
-    activityType: "shift_close" as const,
+    id: '1',
+    initials: 'JD',
+    fullName: 'John Davis',
+    title: 'John Davis closed Shift #445',
+    time: '32 minutes ago',
+    meta: '$3,245.00',
+    color: 'primary' as const,
+    activityType: 'shift_close' as const,
   },
   {
-    id: "2",
-    initials: "SM",
-    fullName: "Sarah Miller",
-    title: "Sarah Miller opened current shift",
-    time: "1 hour ago",
-    meta: "Shift #446",
-    color: "success" as const,
-    activityType: "shift_open" as const,
+    id: '2',
+    initials: 'SM',
+    fullName: 'Sarah Miller',
+    title: 'Sarah Miller opened current shift',
+    time: '1 hour ago',
+    meta: 'Shift #446',
+    color: 'success' as const,
+    activityType: 'shift_open' as const,
   },
   {
-    id: "3",
-    initials: "LP",
-    fullName: "Lottery Pack",
-    title: "Lottery Pack #2847 activated",
-    time: "1 hour ago",
-    meta: "$5 Game",
-    color: "warning" as const,
-    activityType: "lottery_activation" as const,
+    id: '3',
+    initials: 'LP',
+    fullName: 'Lottery Pack',
+    title: 'Lottery Pack #2847 activated',
+    time: '1 hour ago',
+    meta: '$5 Game',
+    color: 'warning' as const,
+    activityType: 'lottery_activation' as const,
   },
   {
-    id: "4",
-    initials: "JD",
-    fullName: "John Davis",
-    title: "Cash drop performed",
-    time: "2 hours ago",
-    meta: "$500.00",
-    color: "primary" as const,
-    activityType: "cash_drop" as const,
+    id: '4',
+    initials: 'JD',
+    fullName: 'John Davis',
+    title: 'Cash drop performed',
+    time: '2 hours ago',
+    meta: '$500.00',
+    color: 'primary' as const,
+    activityType: 'cash_drop' as const,
   },
 ];
 
 const avatarColors = {
-  primary: "bg-primary/10 text-primary",
-  success: "bg-success/10 text-success",
-  warning: "bg-warning/10 text-warning",
+  primary: 'bg-primary/10 text-primary',
+  success: 'bg-success/10 text-success',
+  warning: 'bg-warning/10 text-warning',
 };
 
 // Mask activity titles to protect employee names
@@ -76,16 +73,9 @@ function maskActivityTitle(title: string, fullName: string): string {
 
 export function RecentActivity() {
   return (
-    <Card
-      data-testid="recent-activity"
-      role="region"
-      aria-labelledby="recent-activity-title"
-    >
+    <Card data-testid="recent-activity" role="region" aria-labelledby="recent-activity-title">
       <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle
-          id="recent-activity-title"
-          className="text-base font-semibold"
-        >
+        <CardTitle id="recent-activity-title" className="text-base font-semibold">
           Recent Activity
         </CardTitle>
         <span
@@ -96,17 +86,12 @@ export function RecentActivity() {
         </span>
       </CardHeader>
       <CardContent className="p-5">
-        <ul
-          className="space-y-0"
-          role="feed"
-          aria-label="Store activity feed"
-          aria-live="polite"
-        >
+        <ul className="space-y-0" role="feed" aria-label="Store activity feed" aria-live="polite">
           {activities.map((activity, index) => {
             // Sanitize all display values (SEC-004)
             const safeInitials = sanitizeForDisplay(activity.initials);
             const safeTitle = sanitizeForDisplay(
-              maskActivityTitle(activity.title, activity.fullName),
+              maskActivityTitle(activity.title, activity.fullName)
             );
             const safeTime = sanitizeForDisplay(activity.time);
             const safeMeta = sanitizeForDisplay(activity.meta);
@@ -114,7 +99,7 @@ export function RecentActivity() {
             return (
               <li
                 key={activity.id}
-                className={`flex gap-3 py-3.5 ${index < activities.length - 1 ? "border-b" : ""}`}
+                className={`flex gap-3 py-3.5 ${index < activities.length - 1 ? 'border-b' : ''}`}
                 role="article"
                 aria-label={`${safeTitle}, ${safeTime}`}
               >

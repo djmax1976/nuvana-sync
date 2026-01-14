@@ -2,7 +2,7 @@
  * Preload Script Unit Tests
  *
  * Tests for IPC channel validation and security in the preload script.
- * 
+ *
  *
  * @module tests/unit/ipc/preload
  */

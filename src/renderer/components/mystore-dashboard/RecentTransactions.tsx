@@ -1,20 +1,13 @@
-import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { Button } from '../ui/button';
+import { Badge } from '../ui/badge';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import {
   maskTransactionId,
   formatCurrency,
   sanitizeForDisplay,
   sanitizeId,
-} from "../../lib/utils/security";
+} from '../../lib/utils/security';
 
 /**
  * RecentTransactions Component
@@ -33,50 +26,50 @@ import {
 // Sample transaction data - will be replaced with real API data
 const transactions = [
   {
-    id: "TXN-8847291",
-    type: "Credit" as const,
-    time: "4:32 PM",
+    id: 'TXN-8847291',
+    type: 'Credit' as const,
+    time: '4:32 PM',
     amount: 47.85,
   },
   {
-    id: "TXN-8847290",
-    type: "Cash" as const,
-    time: "4:28 PM",
+    id: 'TXN-8847290',
+    type: 'Cash' as const,
+    time: '4:28 PM',
     amount: 23.5,
   },
   {
-    id: "TXN-8847289",
-    type: "EBT" as const,
-    time: "4:21 PM",
+    id: 'TXN-8847289',
+    type: 'EBT' as const,
+    time: '4:21 PM',
     amount: 156.32,
   },
   {
-    id: "TXN-8847288",
-    type: "Debit" as const,
-    time: "4:15 PM",
+    id: 'TXN-8847288',
+    type: 'Debit' as const,
+    time: '4:15 PM',
     amount: 12.99,
   },
   {
-    id: "TXN-8847287",
-    type: "Cash" as const,
-    time: "4:08 PM",
+    id: 'TXN-8847287',
+    type: 'Cash' as const,
+    time: '4:08 PM',
     amount: 8.75,
   },
 ];
 
-const typeVariants: Record<string, "default" | "success" | "warning"> = {
-  Credit: "default",
-  Debit: "default",
-  Cash: "success",
-  EBT: "warning",
+const typeVariants: Record<string, 'default' | 'success' | 'warning'> = {
+  Credit: 'default',
+  Debit: 'default',
+  Cash: 'success',
+  EBT: 'warning',
 };
 
 // Type labels for screen readers
 const typeAriaLabels: Record<string, string> = {
-  Credit: "Credit card payment",
-  Debit: "Debit card payment",
-  Cash: "Cash payment",
-  EBT: "Electronic Benefits Transfer payment",
+  Credit: 'Credit card payment',
+  Debit: 'Debit card payment',
+  Cash: 'Cash payment',
+  EBT: 'Electronic Benefits Transfer payment',
 };
 
 export function RecentTransactions() {
@@ -87,18 +80,10 @@ export function RecentTransactions() {
       aria-labelledby="recent-transactions-title"
     >
       <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle
-          id="recent-transactions-title"
-          className="text-base font-semibold"
-        >
+        <CardTitle id="recent-transactions-title" className="text-base font-semibold">
           Recent Transactions
         </CardTitle>
-        <Button
-          variant="outline"
-          size="sm"
-          className="text-xs"
-          aria-label="View all transactions"
-        >
+        <Button variant="outline" size="sm" className="text-xs" aria-label="View all transactions">
           View All
         </Button>
       </CardHeader>
@@ -106,28 +91,16 @@ export function RecentTransactions() {
         <Table aria-label="Recent transactions table">
           <TableHeader>
             <TableRow>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Transaction ID
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Type
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Time
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Amount
               </TableHead>
             </TableRow>
@@ -167,10 +140,7 @@ export function RecentTransactions() {
                     <time dateTime={safeTime}>{safeTime}</time>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className="font-semibold"
-                      aria-label={`Amount: ${formattedAmount}`}
-                    >
+                    <span className="font-semibold" aria-label={`Amount: ${formattedAmount}`}>
                       {formattedAmount}
                     </span>
                   </TableCell>

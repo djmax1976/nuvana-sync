@@ -99,7 +99,9 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
         });
         setStep('storeConfirm');
       } else {
-        setError(result.data?.error || result.error || 'Invalid API key. Please check and try again.');
+        setError(
+          result.data?.error || result.error || 'Invalid API key. Please check and try again.'
+        );
       }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to validate API key');

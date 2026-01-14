@@ -6,8 +6,8 @@
  * converted to store timezone for display.
  */
 
-import { format, isValid, parseISO } from "date-fns";
-import { formatInTimeZone, toZonedTime } from "date-fns-tz";
+import { format, isValid, parseISO } from 'date-fns';
+import { formatInTimeZone, toZonedTime } from 'date-fns-tz';
 
 // =============================================================================
 // BUSINESS DATE UTILITIES
@@ -53,7 +53,7 @@ const BUSINESS_DATE_REGEX = /^\d{4}-(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])$/;
  * isValidBusinessDate("2026-1-6");   // false (must be zero-padded)
  */
 export function isValidBusinessDate(value: string): boolean {
-  if (!value || typeof value !== "string") {
+  if (!value || typeof value !== 'string') {
     return false;
   }
 
@@ -64,15 +64,15 @@ export function isValidBusinessDate(value: string): boolean {
 
   // Validate semantic correctness (the date actually exists)
   // Parse with time component to avoid UTC interpretation issues
-  const parsed = new Date(value + "T12:00:00");
+  const parsed = new Date(value + 'T12:00:00');
   if (!isValid(parsed)) {
     return false;
   }
 
   // Verify the parsed date matches the input (catches invalid dates like Feb 31)
   const year = parsed.getFullYear();
-  const month = String(parsed.getMonth() + 1).padStart(2, "0");
-  const day = String(parsed.getDate()).padStart(2, "0");
+  const month = String(parsed.getMonth() + 1).padStart(2, '0');
+  const day = String(parsed.getDate()).padStart(2, '0');
   const reconstructed = `${year}-${month}-${day}`;
 
   return reconstructed === value;
@@ -106,16 +106,16 @@ export function isValidBusinessDate(value: string): boolean {
  */
 export function formatBusinessDate(
   dateStr: string | null | undefined,
-  formatString: string = "MMMM d, yyyy",
+  formatString: string = 'MMMM d, yyyy'
 ): string {
   // Handle null/undefined/empty
   if (!dateStr) {
-    return "—";
+    return '—';
   }
 
   // Type check for runtime safety
-  if (typeof dateStr !== "string") {
-    return "—";
+  if (typeof dateStr !== 'string') {
+    return '—';
   }
 
   // Validate format before processing
@@ -128,7 +128,7 @@ export function formatBusinessDate(
   // Parse as local noon to avoid any timezone edge cases
   // Using T12:00:00 ensures we're solidly in the middle of the day
   // regardless of the browser's timezone
-  const localDate = new Date(dateStr + "T12:00:00");
+  const localDate = new Date(dateStr + 'T12:00:00');
 
   // Final safety check (should never fail after isValidBusinessDate)
   if (!isValid(localDate)) {
@@ -163,16 +163,14 @@ export function formatBusinessDate(
  * extractDayFromBusinessDate("invalid");
  * // Returns: null
  */
-export function extractDayFromBusinessDate(
-  dateStr: string | null | undefined,
-): number | null {
+export function extractDayFromBusinessDate(dateStr: string | null | undefined): number | null {
   // Handle null/undefined/empty
   if (!dateStr) {
     return null;
   }
 
   // Type check for runtime safety
-  if (typeof dateStr !== "string") {
+  if (typeof dateStr !== 'string') {
     return null;
   }
 
@@ -184,7 +182,7 @@ export function extractDayFromBusinessDate(
   // Parse as local noon to avoid any timezone edge cases
   // Using T12:00:00 ensures we're solidly in the middle of the day
   // regardless of the browser's timezone
-  const localDate = new Date(dateStr + "T12:00:00");
+  const localDate = new Date(dateStr + 'T12:00:00');
 
   // Final safety check (should never fail after isValidBusinessDate)
   if (!isValid(localDate)) {
@@ -204,10 +202,8 @@ export function extractDayFromBusinessDate(
  * formatBusinessDateFull("2026-01-06");
  * // Returns: "Tuesday, January 6, 2026"
  */
-export function formatBusinessDateFull(
-  dateStr: string | null | undefined,
-): string {
-  return formatBusinessDate(dateStr, "EEEE, MMMM d, yyyy");
+export function formatBusinessDateFull(dateStr: string | null | undefined): string {
+  return formatBusinessDate(dateStr, 'EEEE, MMMM d, yyyy');
 }
 
 /**
@@ -220,10 +216,8 @@ export function formatBusinessDateFull(
  * formatBusinessDateShort("2026-01-06");
  * // Returns: "Jan 6, 2026"
  */
-export function formatBusinessDateShort(
-  dateStr: string | null | undefined,
-): string {
-  return formatBusinessDate(dateStr, "MMM d, yyyy");
+export function formatBusinessDateShort(dateStr: string | null | undefined): string {
+  return formatBusinessDate(dateStr, 'MMM d, yyyy');
 }
 
 /**
@@ -236,10 +230,8 @@ export function formatBusinessDateShort(
  * formatBusinessDateCompact("2026-01-06");
  * // Returns: "01/06/2026"
  */
-export function formatBusinessDateCompact(
-  dateStr: string | null | undefined,
-): string {
-  return formatBusinessDate(dateStr, "MM/dd/yyyy");
+export function formatBusinessDateCompact(dateStr: string | null | undefined): string {
+  return formatBusinessDate(dateStr, 'MM/dd/yyyy');
 }
 
 /**
@@ -261,17 +253,17 @@ export function formatBusinessDateCompact(
  * // Returns: "2026-01-06" (8 AM in Tokyo)
  */
 export function getTodayBusinessDate(storeTimezone: string): string {
-  if (!storeTimezone || typeof storeTimezone !== "string") {
+  if (!storeTimezone || typeof storeTimezone !== 'string') {
     // Fallback to UTC if timezone is invalid - log would be ideal here
     // but we avoid side effects in utility functions
-    return formatInTimeZone(new Date(), "UTC", "yyyy-MM-dd");
+    return formatInTimeZone(new Date(), 'UTC', 'yyyy-MM-dd');
   }
 
   try {
-    return formatInTimeZone(new Date(), storeTimezone, "yyyy-MM-dd");
+    return formatInTimeZone(new Date(), storeTimezone, 'yyyy-MM-dd');
   } catch {
     // Invalid timezone string - fallback to UTC
-    return formatInTimeZone(new Date(), "UTC", "yyyy-MM-dd");
+    return formatInTimeZone(new Date(), 'UTC', 'yyyy-MM-dd');
   }
 }
 
@@ -292,7 +284,7 @@ export function getTodayBusinessDate(storeTimezone: string): string {
  */
 export function isBusinessDateToday(
   dateStr: string | null | undefined,
-  storeTimezone: string,
+  storeTimezone: string
 ): boolean {
   if (!dateStr || !isValidBusinessDate(dateStr)) {
     return false;
@@ -317,7 +309,7 @@ export function isBusinessDateToday(
  */
 export function compareBusinessDates(
   dateA: string | null | undefined,
-  dateB: string | null | undefined,
+  dateB: string | null | undefined
 ): -1 | 0 | 1 | null {
   if (!dateA || !dateB) {
     return null;
@@ -354,13 +346,13 @@ export function compareBusinessDates(
  */
 export function extractBusinessDateFromTimestamp(
   isoTimestamp: string | null | undefined,
-  storeTimezone: string,
+  storeTimezone: string
 ): string | null {
-  if (!isoTimestamp || typeof isoTimestamp !== "string") {
+  if (!isoTimestamp || typeof isoTimestamp !== 'string') {
     return null;
   }
 
-  if (!storeTimezone || typeof storeTimezone !== "string") {
+  if (!storeTimezone || typeof storeTimezone !== 'string') {
     return null;
   }
 
@@ -372,7 +364,7 @@ export function extractBusinessDateFromTimestamp(
     }
 
     // Format in store timezone to get the business date
-    return formatInTimeZone(date, storeTimezone, "yyyy-MM-dd");
+    return formatInTimeZone(date, storeTimezone, 'yyyy-MM-dd');
   } catch {
     return null;
   }
@@ -397,9 +389,9 @@ export function extractBusinessDateFromTimestamp(
 export function formatInStoreTime(
   date: Date | string,
   storeTimezone: string,
-  formatString: string,
+  formatString: string
 ): string {
-  const dateObj = typeof date === "string" ? new Date(date) : date;
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
   return formatInTimeZone(dateObj, storeTimezone, formatString);
 }
 
@@ -414,11 +406,8 @@ export function formatInStoreTime(
  * formatDateTime('2025-11-26T05:30:00Z', 'America/Denver');
  * // Returns: "Nov 25, 2025 10:30 PM MST"
  */
-export function formatDateTime(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  return formatInStoreTime(date, storeTimezone, "MMM d, yyyy h:mm a zzz");
+export function formatDateTime(date: Date | string, storeTimezone: string): string {
+  return formatInStoreTime(date, storeTimezone, 'MMM d, yyyy h:mm a zzz');
 }
 
 /**
@@ -442,7 +431,7 @@ export function formatDateTime(
  * }
  */
 export function formatDate(date: Date | string, storeTimezone: string): string {
-  return formatInStoreTime(date, storeTimezone, "MMM d, yyyy");
+  return formatInStoreTime(date, storeTimezone, 'MMM d, yyyy');
 }
 
 /**
@@ -456,11 +445,8 @@ export function formatDate(date: Date | string, storeTimezone: string): string {
  * formatDateFull('2025-11-26T05:00:00Z', 'America/Denver');
  * // Returns: "Monday, November 25, 2025"
  */
-export function formatDateFull(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  return formatInStoreTime(date, storeTimezone, "EEEE, MMMM d, yyyy");
+export function formatDateFull(date: Date | string, storeTimezone: string): string {
+  return formatInStoreTime(date, storeTimezone, 'EEEE, MMMM d, yyyy');
 }
 
 /**
@@ -475,7 +461,7 @@ export function formatDateFull(
  * // Returns: "10:30 PM"
  */
 export function formatTime(date: Date | string, storeTimezone: string): string {
-  return formatInStoreTime(date, storeTimezone, "h:mm a");
+  return formatInStoreTime(date, storeTimezone, 'h:mm a');
 }
 
 /**
@@ -489,11 +475,8 @@ export function formatTime(date: Date | string, storeTimezone: string): string {
  * formatTimeWithSeconds('2025-11-26T05:30:45Z', 'America/Denver');
  * // Returns: "10:30:45 PM"
  */
-export function formatTimeWithSeconds(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  return formatInStoreTime(date, storeTimezone, "h:mm:ss a");
+export function formatTimeWithSeconds(date: Date | string, storeTimezone: string): string {
+  return formatInStoreTime(date, storeTimezone, 'h:mm:ss a');
 }
 
 /**
@@ -507,11 +490,8 @@ export function formatTimeWithSeconds(
  * formatDateISO('2025-11-26T05:00:00Z', 'America/Denver');
  * // Returns: "2025-11-25"
  */
-export function formatDateISO(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  return formatInStoreTime(date, storeTimezone, "yyyy-MM-dd");
+export function formatDateISO(date: Date | string, storeTimezone: string): string {
+  return formatInStoreTime(date, storeTimezone, 'yyyy-MM-dd');
 }
 
 /**
@@ -525,10 +505,7 @@ export function formatDateISO(
  * formatDateTimeISO('2025-11-26T05:00:00Z', 'America/Denver');
  * // Returns: "2025-11-25T22:00:00"
  */
-export function formatDateTimeISO(
-  date: Date | string,
-  storeTimezone: string,
-): string {
+export function formatDateTimeISO(date: Date | string, storeTimezone: string): string {
   return formatInStoreTime(date, storeTimezone, "yyyy-MM-dd'T'HH:mm:ss");
 }
 
@@ -543,11 +520,8 @@ export function formatDateTimeISO(
  * formatDateShort('2025-11-26T05:00:00Z', 'America/Denver');
  * // Returns: "11/25/2025"
  */
-export function formatDateShort(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  return formatInStoreTime(date, storeTimezone, "MM/dd/yyyy");
+export function formatDateShort(date: Date | string, storeTimezone: string): string {
+  return formatInStoreTime(date, storeTimezone, 'MM/dd/yyyy');
 }
 
 /**
@@ -564,11 +538,8 @@ export function formatDateShort(
  * formatRelative(new Date(Date.now() - 2 * 60 * 60 * 1000), 'America/Denver');
  * // Returns: "2 hours ago"
  */
-export function formatRelative(
-  date: Date | string,
-  storeTimezone: string,
-): string {
-  const dateObj = typeof date === "string" ? new Date(date) : date;
+export function formatRelative(date: Date | string, storeTimezone: string): string {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
   const now = new Date();
   const diffMs = now.getTime() - dateObj.getTime();
   const diffMinutes = Math.floor(diffMs / (1000 * 60));
@@ -576,13 +547,13 @@ export function formatRelative(
   const diffDays = Math.floor(diffMs / (1000 * 60 * 60 * 24));
 
   if (diffMinutes < 1) {
-    return "Just now";
+    return 'Just now';
   } else if (diffMinutes < 60) {
-    return `${diffMinutes} minute${diffMinutes === 1 ? "" : "s"} ago`;
+    return `${diffMinutes} minute${diffMinutes === 1 ? '' : 's'} ago`;
   } else if (diffHours < 24) {
-    return `${diffHours} hour${diffHours === 1 ? "" : "s"} ago`;
+    return `${diffHours} hour${diffHours === 1 ? '' : 's'} ago`;
   } else if (diffDays < 7) {
-    return `${diffDays} day${diffDays === 1 ? "" : "s"} ago`;
+    return `${diffDays} day${diffDays === 1 ? '' : 's'} ago`;
   } else {
     // For older dates, show absolute time in store timezone
     return formatDateTime(dateObj, storeTimezone);
@@ -600,11 +571,8 @@ export function formatRelative(
  * const storeDate = toStoreTimezone('2025-11-26T05:00:00Z', 'America/Denver');
  * // storeDate represents 10 PM on Nov 25 in Denver
  */
-export function toStoreTimezone(
-  date: Date | string,
-  storeTimezone: string,
-): Date {
-  const dateObj = typeof date === "string" ? new Date(date) : date;
+export function toStoreTimezone(date: Date | string, storeTimezone: string): Date {
+  const dateObj = typeof date === 'string' ? new Date(date) : date;
   return toZonedTime(dateObj, storeTimezone);
 }
 
@@ -628,7 +596,7 @@ export function toStoreTimezone(
 export function formatDateRange(
   startDate: Date | string,
   endDate: Date | string,
-  storeTimezone: string,
+  storeTimezone: string
 ): string {
   try {
     const start = formatDate(startDate, storeTimezone);
@@ -665,13 +633,9 @@ export function formatDateRange(
 export function formatDateTimeRange(
   startDate: Date | string,
   endDate: Date | string,
-  storeTimezone: string,
+  storeTimezone: string
 ): string {
-  const startFormatted = formatInStoreTime(
-    startDate,
-    storeTimezone,
-    "MMM d, h:mm a",
-  );
+  const startFormatted = formatInStoreTime(startDate, storeTimezone, 'MMM d, h:mm a');
   const endFormatted = formatDateTime(endDate, storeTimezone);
 
   return `${startFormatted} - ${endFormatted}`;
@@ -691,11 +655,8 @@ export function formatDateTimeRange(
  * getTimezoneAbbr('America/Denver', new Date('2025-07-25'));
  * // Returns: "MDT" (summer, daylight saving)
  */
-export function getTimezoneAbbr(
-  storeTimezone: string,
-  date: Date = new Date(),
-): string {
-  return formatInTimeZone(date, storeTimezone, "zzz");
+export function getTimezoneAbbr(storeTimezone: string, date: Date = new Date()): string {
+  return formatInTimeZone(date, storeTimezone, 'zzz');
 }
 
 /**
@@ -712,9 +673,6 @@ export function getTimezoneAbbr(
  * formatDateTimeShort('2025-11-26T05:30:00Z', 'America/Denver');
  * // Returns: "Nov 25 at 10:30 PM"
  */
-export function formatDateTimeShort(
-  date: Date | string,
-  storeTimezone: string,
-): string {
+export function formatDateTimeShort(date: Date | string, storeTimezone: string): string {
   return formatInStoreTime(date, storeTimezone, "MMM d 'at' h:mm a");
 }

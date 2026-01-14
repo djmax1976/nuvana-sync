@@ -11,12 +11,7 @@ import React, { useState, useEffect } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { MyStoreSidebar } from './MyStoreSidebar';
 import { Header } from './Header';
-import {
-  Sheet,
-  SheetContent,
-  SheetTitle,
-  SheetDescription,
-} from '../ui/sheet';
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../ui/sheet';
 import { Button } from '../ui/button';
 import { Menu } from 'lucide-react';
 import { ClientAuthProvider } from '../../contexts/ClientAuthContext';
@@ -80,10 +75,7 @@ export function AppLayout() {
   return (
     <ClientAuthProvider>
       <StoreProvider value={defaultStoreValue}>
-        <div
-          className="flex h-screen overflow-hidden"
-          data-testid="app-layout"
-        >
+        <div className="flex h-screen overflow-hidden" data-testid="app-layout">
           {/* Desktop Sidebar */}
           <aside className="hidden lg:block">
             <MyStoreSidebar />

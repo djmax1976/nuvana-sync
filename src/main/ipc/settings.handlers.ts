@@ -39,10 +39,7 @@ const log = createLogger('settings-handlers');
  * API Key validation schema
  */
 const ApiKeySchema = z.object({
-  apiKey: z
-    .string()
-    .min(1, 'API key is required')
-    .max(500, 'API key too long'),
+  apiKey: z.string().min(1, 'API key is required').max(500, 'API key too long'),
 });
 
 /**
@@ -57,10 +54,7 @@ const LocalSettingsUpdateSchema = z.object({
  * Folder path validation schema
  */
 const FolderPathSchema = z.object({
-  folderPath: z
-    .string()
-    .min(1, 'Folder path is required')
-    .max(500, 'Path too long'),
+  folderPath: z.string().min(1, 'Folder path is required').max(500, 'Path too long'),
 });
 
 // ============================================================================
@@ -105,7 +99,9 @@ registerHandler(
     // API-001: Validate input schema
     const parseResult = LocalSettingsUpdateSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -176,7 +172,9 @@ registerHandler(
     // API-001: Validate input schema
     const parseResult = ApiKeySchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -259,7 +257,9 @@ registerHandler(
     // API-001: Validate input schema
     const parseResult = LocalSettingsUpdateSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -359,7 +359,9 @@ registerHandler(
     // API-001: Validate input schema
     const parseResult = FolderPathSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createSuccessResponse({
         valid: false,
         error: errorMessage,

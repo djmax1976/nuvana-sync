@@ -1,13 +1,5 @@
-
-import {
-  createContext,
-  useContext,
-  useState,
-  useEffect,
-  ReactNode,
-  useCallback,
-} from "react";
-import { useNavigate } from "react-router-dom";
+import { createContext, useContext, useState, useEffect, ReactNode, useCallback } from 'react';
+import { useNavigate } from 'react-router-dom';
 
 /**
  * Client user interface with is_client_user flag and user_role
@@ -37,11 +29,9 @@ interface ClientAuthContextType {
   refreshUser: () => Promise<void>;
 }
 
-const ClientAuthContext = createContext<ClientAuthContextType | undefined>(
-  undefined,
-);
+const ClientAuthContext = createContext<ClientAuthContextType | undefined>(undefined);
 
-const STORAGE_KEY = "auth_session";
+const STORAGE_KEY = 'auth_session';
 
 /**
  * Client Auth Provider
@@ -54,7 +44,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
   const [isLoading, setIsLoading] = useState(true);
   const navigate = useNavigate();
 
-  const backendUrl = "http://localhost:3001";
+  const backendUrl = 'http://localhost:3001';
 
   // Validate session with backend on mount
   useEffect(() => {
@@ -65,7 +55,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         // Check localStorage first for quick initial state
         // Clear legacy key if present to prevent conflicts
         try {
-          localStorage.removeItem("client_auth_session");
+          localStorage.removeItem('client_auth_session');
         } catch (storageError) {
           // Non-fatal: failed to clear legacy key
         }
@@ -76,10 +66,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         } catch (storageError) {
           // localStorage access failed (e.g., private browsing, storage disabled)
           console.warn(
-            "Failed to access localStorage for auth session:",
-            storageError instanceof Error
-              ? storageError.message
-              : "Unknown error",
+            'Failed to access localStorage for auth session:',
+            storageError instanceof Error ? storageError.message : 'Unknown error'
           );
           setIsLoading(false);
           return;
@@ -96,14 +84,12 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
           if (!data.authenticated || !data.user) {
             try {
               localStorage.removeItem(STORAGE_KEY);
-              localStorage.removeItem("client_auth_session");
+              localStorage.removeItem('client_auth_session');
             } catch (storageError) {
               // Non-fatal: failed to remove invalid session
               console.warn(
-                "Failed to remove invalid session from localStorage:",
-                storageError instanceof Error
-                  ? storageError.message
-                  : "Unknown error",
+                'Failed to remove invalid session from localStorage:',
+                storageError instanceof Error ? storageError.message : 'Unknown error'
               );
             }
             setIsLoading(false);
@@ -116,7 +102,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             // Not a client user - clear session and return
             try {
               localStorage.removeItem(STORAGE_KEY);
-              localStorage.removeItem("client_auth_session");
+              localStorage.removeItem('client_auth_session');
             } catch (storageError) {
               // Non-fatal: failed to remove session
             }
@@ -130,8 +116,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
           timeout = setTimeout(() => controller.abort(), 5000); // 5 second timeout
 
           const response = await fetch(`${backendUrl}/api/auth/me`, {
-            method: "GET",
-            credentials: "include", // Send httpOnly cookies
+            method: 'GET',
+            credentials: 'include', // Send httpOnly cookies
             signal: controller.signal,
           });
 
@@ -142,38 +128,30 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             const validatedData = await response.json();
 
             // Store-level roles that should access /mystore
-            const storeRoles = [
-              "CLIENT_USER",
-              "STORE_MANAGER",
-              "SHIFT_MANAGER",
-              "CASHIER",
-            ];
+            const storeRoles = ['CLIENT_USER', 'STORE_MANAGER', 'SHIFT_MANAGER', 'CASHIER'];
 
             // Check if user has store-level access (for /mystore dashboard)
             // Only store-level roles should access /mystore
             const isStoreUser = validatedData.user.roles?.some((r: string) =>
-              storeRoles.includes(r),
+              storeRoles.includes(r)
             );
 
             // Check if user is CLIENT_OWNER or SUPPORT (for /client-dashboard)
             // SUPPORT has COMPANY scope like CLIENT_OWNER - can access company and all stores
-            const isClientOwner =
-              validatedData.user.roles?.includes("CLIENT_OWNER");
-            const isSupportUser = validatedData.user.roles?.includes("SUPPORT");
+            const isClientOwner = validatedData.user.roles?.includes('CLIENT_OWNER');
+            const isSupportUser = validatedData.user.roles?.includes('SUPPORT');
 
             // Check if user has any client access (including CLIENT_OWNER and SUPPORT)
             const hasClientAccess =
-              validatedData.user.permissions?.includes(
-                "CLIENT_DASHBOARD_ACCESS",
-              ) ||
+              validatedData.user.permissions?.includes('CLIENT_DASHBOARD_ACCESS') ||
               validatedData.user.roles?.some(
                 (r: string) =>
-                  r === "CLIENT_USER" ||
-                  r === "CLIENT_OWNER" ||
-                  r === "SUPPORT" ||
-                  r === "STORE_MANAGER" ||
-                  r === "SHIFT_MANAGER" ||
-                  r === "CASHIER",
+                  r === 'CLIENT_USER' ||
+                  r === 'CLIENT_OWNER' ||
+                  r === 'SUPPORT' ||
+                  r === 'STORE_MANAGER' ||
+                  r === 'SHIFT_MANAGER' ||
+                  r === 'CASHIER'
               );
 
             // Allow store-level users, CLIENT_OWNER, and SUPPORT to be authenticated
@@ -182,7 +160,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
               // User doesn't have client access at all - clear session
               try {
                 localStorage.removeItem(STORAGE_KEY);
-                localStorage.removeItem("client_auth_session");
+                localStorage.removeItem('client_auth_session');
               } catch (storageError) {
                 // Non-fatal: failed to clear session
               }
@@ -196,18 +174,18 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             // Priority: CLIENT_OWNER > SUPPORT > Store-level roles
             let userRole: string | undefined;
             const roles = validatedData.user.roles || [];
-            if (roles.includes("CLIENT_OWNER")) {
-              userRole = "CLIENT_OWNER";
-            } else if (roles.includes("SUPPORT")) {
-              userRole = "SUPPORT";
-            } else if (roles.includes("CLIENT_USER")) {
-              userRole = "CLIENT_USER";
-            } else if (roles.includes("STORE_MANAGER")) {
-              userRole = "STORE_MANAGER";
-            } else if (roles.includes("SHIFT_MANAGER")) {
-              userRole = "SHIFT_MANAGER";
-            } else if (roles.includes("CASHIER")) {
-              userRole = "CASHIER";
+            if (roles.includes('CLIENT_OWNER')) {
+              userRole = 'CLIENT_OWNER';
+            } else if (roles.includes('SUPPORT')) {
+              userRole = 'SUPPORT';
+            } else if (roles.includes('CLIENT_USER')) {
+              userRole = 'CLIENT_USER';
+            } else if (roles.includes('STORE_MANAGER')) {
+              userRole = 'STORE_MANAGER';
+            } else if (roles.includes('SHIFT_MANAGER')) {
+              userRole = 'SHIFT_MANAGER';
+            } else if (roles.includes('CASHIER')) {
+              userRole = 'CASHIER';
             }
 
             const userData: ClientUser = {
@@ -225,7 +203,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             // Update localStorage with validated user data
             // Clear legacy key to prevent conflicts
             try {
-              localStorage.removeItem("client_auth_session");
+              localStorage.removeItem('client_auth_session');
               localStorage.setItem(
                 STORAGE_KEY,
                 JSON.stringify({
@@ -234,15 +212,13 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
                   isClientUser: hasClientAccess,
                   isStoreUser: isStoreUser,
                   userRole: userRole,
-                }),
+                })
               );
             } catch (storageError) {
               // Non-fatal: failed to save session, but user is still authenticated
               console.warn(
-                "Failed to save validated session to localStorage:",
-                storageError instanceof Error
-                  ? storageError.message
-                  : "Unknown error",
+                'Failed to save validated session to localStorage:',
+                storageError instanceof Error ? storageError.message : 'Unknown error'
               );
             }
 
@@ -251,14 +227,12 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             // Token invalid or expired - clear localStorage and stay logged out
             try {
               localStorage.removeItem(STORAGE_KEY);
-              localStorage.removeItem("client_auth_session");
+              localStorage.removeItem('client_auth_session');
             } catch (storageError) {
               // Non-fatal: failed to clear expired session
               console.warn(
-                "Failed to clear expired session from localStorage:",
-                storageError instanceof Error
-                  ? storageError.message
-                  : "Unknown error",
+                'Failed to clear expired session from localStorage:',
+                storageError instanceof Error ? storageError.message : 'Unknown error'
               );
             }
             setUser(null);
@@ -271,29 +245,25 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
           }
 
           // Handle AbortError (timeout) specifically
-          if (error instanceof Error && error.name === "AbortError") {
-            console.warn(
-              "Session validation request timed out after 5 seconds",
-            );
+          if (error instanceof Error && error.name === 'AbortError') {
+            console.warn('Session validation request timed out after 5 seconds');
             // Treat timeout as invalid session - clear and stay logged out
           } else {
             // JSON parse error or other processing error
             console.warn(
-              "Error during session validation:",
-              error instanceof Error ? error.message : "Unknown error",
+              'Error during session validation:',
+              error instanceof Error ? error.message : 'Unknown error'
             );
           }
 
           try {
             localStorage.removeItem(STORAGE_KEY);
-            localStorage.removeItem("client_auth_session");
+            localStorage.removeItem('client_auth_session');
           } catch (storageError) {
             // Non-fatal: failed to remove corrupted session
             console.warn(
-              "Failed to remove corrupted session from localStorage:",
-              storageError instanceof Error
-                ? storageError.message
-                : "Unknown error",
+              'Failed to remove corrupted session from localStorage:',
+              storageError instanceof Error ? storageError.message : 'Unknown error'
             );
           }
           setUser(null);
@@ -302,8 +272,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
       } catch (error) {
         // Catch any unexpected errors to prevent propagation
         console.warn(
-          "Unexpected error during session validation:",
-          error instanceof Error ? error.message : "Unknown error",
+          'Unexpected error during session validation:',
+          error instanceof Error ? error.message : 'Unknown error'
         );
         setUser(null);
         setPermissions([]);
@@ -324,8 +294,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const response = await fetch(`${backendUrl}/api/auth/logout`, {
-        method: "POST",
-        credentials: "include",
+        method: 'POST',
+        credentials: 'include',
         signal: controller.signal,
       });
 
@@ -335,23 +305,21 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
       // Check response status - treat non-2xx as errors
       if (!response.ok) {
         const errorData = await response.json().catch(() => ({}));
-        throw new Error(
-          errorData.message || `Logout failed with status ${response.status}`,
-        );
+        throw new Error(errorData.message || `Logout failed with status ${response.status}`);
       }
     } catch (error) {
       // Clear timeout in case of error
       clearTimeout(timeoutId);
 
       // Handle AbortError (timeout) specifically
-      if (error instanceof Error && error.name === "AbortError") {
-        console.error("Logout request timed out after 5 seconds");
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error('Logout request timed out after 5 seconds');
         // Proceed with local logout as fallback
       } else if (error instanceof Error) {
-        console.error("Logout error:", error.message);
+        console.error('Logout error:', error.message);
         // Proceed with local logout as fallback
       } else {
-        console.error("Logout error: Unknown error occurred");
+        console.error('Logout error: Unknown error occurred');
         // Proceed with local logout as fallback
       }
     }
@@ -359,19 +327,19 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
     // Clear state regardless of backend success (safe fallback)
     try {
       localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem("client_auth_session");
+      localStorage.removeItem('client_auth_session');
     } catch (storageError) {
       // Non-fatal: failed to clear session from localStorage
       // Log error but continue with logout cleanup
       console.warn(
-        "Failed to clear session from localStorage:",
-        storageError instanceof Error ? storageError.message : "Unknown error",
+        'Failed to clear session from localStorage:',
+        storageError instanceof Error ? storageError.message : 'Unknown error'
       );
     } finally {
       // Always execute cleanup regardless of storage errors
       setUser(null);
       setPermissions([]);
-      navigate("/login");
+      navigate('/login');
     }
   }, [backendUrl]);
 
@@ -391,8 +359,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const response = await fetch(`${backendUrl}/api/auth/refresh`, {
-          method: "POST",
-          credentials: "include", // Send refresh token cookie
+          method: 'POST',
+          credentials: 'include', // Send refresh token cookie
           signal: controller.signal,
         });
 
@@ -408,8 +376,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         clearTimeout(timeoutId);
 
         // Handle AbortError (timeout) - treat as failed refresh
-        if (error instanceof Error && error.name === "AbortError") {
-          console.error("Token refresh request timed out after 5 seconds");
+        if (error instanceof Error && error.name === 'AbortError') {
+          console.error('Token refresh request timed out after 5 seconds');
           // Treat timeout as failed refresh - logout to prevent stale tokens
           await logout();
         } else {
@@ -429,18 +397,18 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
    */
   const login = async (email: string, password: string) => {
     const response = await fetch(`${backendUrl}/api/auth/login`, {
-      method: "POST",
+      method: 'POST',
       headers: {
-        "Content-Type": "application/json",
+        'Content-Type': 'application/json',
       },
-      credentials: "include",
+      credentials: 'include',
       body: JSON.stringify({ email, password }),
     });
 
     const data = await response.json();
 
     if (!response.ok) {
-      throw new Error(data.message || "Login failed");
+      throw new Error(data.message || 'Login failed');
     }
 
     // Verify the user has client access
@@ -452,8 +420,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 
       try {
         const response = await fetch(`${backendUrl}/api/auth/logout`, {
-          method: "POST",
-          credentials: "include",
+          method: 'POST',
+          credentials: 'include',
           signal: controller.signal,
         });
 
@@ -465,7 +433,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
           const errorData = await response.json().catch(() => ({}));
           console.error(
             `Logout failed with status ${response.status}:`,
-            errorData.message || "Unknown error",
+            errorData.message || 'Unknown error'
           );
           // Continue with error throw even if logout fails
         }
@@ -474,46 +442,46 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         clearTimeout(timeoutId);
 
         // Handle AbortError (timeout) specifically
-        if (error instanceof Error && error.name === "AbortError") {
-          console.error("Logout request timed out after 5 seconds");
+        if (error instanceof Error && error.name === 'AbortError') {
+          console.error('Logout request timed out after 5 seconds');
           // Continue with error throw even if logout times out
         } else if (error instanceof Error) {
-          console.error("Logout error:", error.message);
+          console.error('Logout error:', error.message);
           // Continue with error throw even if logout fails
         } else {
-          console.error("Logout error: Unknown error occurred");
+          console.error('Logout error: Unknown error occurred');
           // Continue with error throw even if logout fails
         }
       }
 
-      throw new Error("This account does not have client portal access");
+      throw new Error('This account does not have client portal access');
     }
 
     // Determine user_role for routing (same logic as initial validation)
     // Priority: CLIENT_OWNER > SUPPORT > Store-level roles
     const roles = data.user?.roles || [];
     let userRole: string | undefined;
-    if (roles.includes("CLIENT_OWNER")) {
-      userRole = "CLIENT_OWNER";
-    } else if (roles.includes("SUPPORT")) {
-      userRole = "SUPPORT";
-    } else if (roles.includes("CLIENT_USER")) {
-      userRole = "CLIENT_USER";
-    } else if (roles.includes("STORE_MANAGER")) {
-      userRole = "STORE_MANAGER";
-    } else if (roles.includes("SHIFT_MANAGER")) {
-      userRole = "SHIFT_MANAGER";
-    } else if (roles.includes("CASHIER")) {
-      userRole = "CASHIER";
+    if (roles.includes('CLIENT_OWNER')) {
+      userRole = 'CLIENT_OWNER';
+    } else if (roles.includes('SUPPORT')) {
+      userRole = 'SUPPORT';
+    } else if (roles.includes('CLIENT_USER')) {
+      userRole = 'CLIENT_USER';
+    } else if (roles.includes('STORE_MANAGER')) {
+      userRole = 'STORE_MANAGER';
+    } else if (roles.includes('SHIFT_MANAGER')) {
+      userRole = 'SHIFT_MANAGER';
+    } else if (roles.includes('CASHIER')) {
+      userRole = 'CASHIER';
     }
 
     // Determine if this is a store-level user (for /mystore routing)
     // SUPPORT is NOT a store-level user - has COMPANY scope like CLIENT_OWNER
     const isStoreUser =
-      roles.includes("CLIENT_USER") ||
-      roles.includes("STORE_MANAGER") ||
-      roles.includes("SHIFT_MANAGER") ||
-      roles.includes("CASHIER");
+      roles.includes('CLIENT_USER') ||
+      roles.includes('STORE_MANAGER') ||
+      roles.includes('SHIFT_MANAGER') ||
+      roles.includes('CASHIER');
 
     const userData: ClientUser = {
       id: data.user.id,
@@ -530,7 +498,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
     // Store user info - clear legacy key to prevent conflicts
     // Include userRole and isStoreUser for LoginForm routing
     try {
-      localStorage.removeItem("client_auth_session");
+      localStorage.removeItem('client_auth_session');
       localStorage.setItem(
         STORAGE_KEY,
         JSON.stringify({
@@ -539,13 +507,13 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
           isClientUser: true,
           isStoreUser: isStoreUser,
           userRole: userRole,
-        }),
+        })
       );
     } catch (storageError) {
       // Non-fatal: failed to save session, but user is still authenticated
       console.warn(
-        "Failed to save login session to localStorage:",
-        storageError instanceof Error ? storageError.message : "Unknown error",
+        'Failed to save login session to localStorage:',
+        storageError instanceof Error ? storageError.message : 'Unknown error'
       );
       // Continue with authentication even if storage fails
     }
@@ -562,8 +530,8 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 
     try {
       const response = await fetch(`${backendUrl}/api/auth/me`, {
-        method: "GET",
-        credentials: "include",
+        method: 'GET',
+        credentials: 'include',
         signal: controller.signal,
       });
 
@@ -582,20 +550,20 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         // Determine user_role for routing (priority order)
         // Priority: CLIENT_OWNER > SUPPORT > Store-level roles > SUPERADMIN
         let userRole: string | undefined;
-        if (roles.includes("CLIENT_OWNER")) {
-          userRole = "CLIENT_OWNER";
-        } else if (roles.includes("SUPPORT")) {
-          userRole = "SUPPORT";
-        } else if (roles.includes("CLIENT_USER")) {
-          userRole = "CLIENT_USER";
-        } else if (roles.includes("STORE_MANAGER")) {
-          userRole = "STORE_MANAGER";
-        } else if (roles.includes("SHIFT_MANAGER")) {
-          userRole = "SHIFT_MANAGER";
-        } else if (roles.includes("CASHIER")) {
-          userRole = "CASHIER";
-        } else if (roles.includes("SUPERADMIN")) {
-          userRole = "SUPERADMIN";
+        if (roles.includes('CLIENT_OWNER')) {
+          userRole = 'CLIENT_OWNER';
+        } else if (roles.includes('SUPPORT')) {
+          userRole = 'SUPPORT';
+        } else if (roles.includes('CLIENT_USER')) {
+          userRole = 'CLIENT_USER';
+        } else if (roles.includes('STORE_MANAGER')) {
+          userRole = 'STORE_MANAGER';
+        } else if (roles.includes('SHIFT_MANAGER')) {
+          userRole = 'SHIFT_MANAGER';
+        } else if (roles.includes('CASHIER')) {
+          userRole = 'CASHIER';
+        } else if (roles.includes('SUPERADMIN')) {
+          userRole = 'SUPERADMIN';
         } else if (roles.length > 0) {
           // Future-proof: use first role if none of the known ones match
           userRole = roles[0];
@@ -615,7 +583,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 
         // Clear legacy key to prevent conflicts
         try {
-          localStorage.removeItem("client_auth_session");
+          localStorage.removeItem('client_auth_session');
           localStorage.setItem(
             STORAGE_KEY,
             JSON.stringify({
@@ -623,11 +591,11 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
               authenticated: true,
               isClientUser: userData.is_client_user,
               userRole: userRole,
-            }),
+            })
           );
         } catch (storageError) {
           console.error(
-            `Failed to save user session to localStorage: ${storageError instanceof Error ? storageError.message : String(storageError)}`,
+            `Failed to save user session to localStorage: ${storageError instanceof Error ? storageError.message : String(storageError)}`
           );
         }
 
@@ -636,10 +604,10 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         // Token invalid or expired
         try {
           localStorage.removeItem(STORAGE_KEY);
-          localStorage.removeItem("client_auth_session");
+          localStorage.removeItem('client_auth_session');
         } catch (storageError) {
           console.error(
-            `Failed to remove expired session from localStorage: ${storageError instanceof Error ? storageError.message : String(storageError)}`,
+            `Failed to remove expired session from localStorage: ${storageError instanceof Error ? storageError.message : String(storageError)}`
           );
         }
         setUser(null);
@@ -650,19 +618,19 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
       clearTimeout(timeoutId);
 
       // Handle AbortError (timeout) - treat as refresh failure
-      if (error instanceof Error && error.name === "AbortError") {
-        console.error("Refresh user request timed out after 5 seconds");
+      if (error instanceof Error && error.name === 'AbortError') {
+        console.error('Refresh user request timed out after 5 seconds');
       } else {
-        console.error("Failed to refresh user:", error);
+        console.error('Failed to refresh user:', error);
       }
 
       // Remove STORAGE_KEY and setUser(null) on error (including abort)
       try {
         localStorage.removeItem(STORAGE_KEY);
-        localStorage.removeItem("client_auth_session");
+        localStorage.removeItem('client_auth_session');
       } catch (storageError) {
         console.error(
-          `Failed to remove session from localStorage on error: ${storageError instanceof Error ? storageError.message : String(storageError)}`,
+          `Failed to remove session from localStorage on error: ${storageError instanceof Error ? storageError.message : String(storageError)}`
         );
       }
       setUser(null);
@@ -671,12 +639,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
   }, [backendUrl, setUser]);
 
   // Determine if user is a store-level user (should access /mystore)
-  const storeRoles = [
-    "CLIENT_USER",
-    "STORE_MANAGER",
-    "SHIFT_MANAGER",
-    "CASHIER",
-  ];
+  const storeRoles = ['CLIENT_USER', 'STORE_MANAGER', 'SHIFT_MANAGER', 'CASHIER'];
   const isStoreUser = user?.roles?.some((r) => storeRoles.includes(r)) ?? false;
 
   return (
@@ -707,7 +670,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
 export function useClientAuth() {
   const context = useContext(ClientAuthContext);
   if (context === undefined) {
-    throw new Error("useClientAuth must be used within a ClientAuthProvider");
+    throw new Error('useClientAuth must be used within a ClientAuthProvider');
   }
   // Defensive: ensure permissions is always an array
   return {

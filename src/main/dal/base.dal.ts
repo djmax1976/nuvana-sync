@@ -11,7 +11,11 @@
  * @security DB-001: ORM-like patterns with safe query building
  */
 
-import { getDatabase, isDatabaseInitialized, type DatabaseInstance } from '../services/database.service';
+import {
+  getDatabase,
+  isDatabaseInitialized,
+  type DatabaseInstance,
+} from '../services/database.service';
 import { randomUUID } from 'crypto';
 import { createLogger } from '../utils/logger';
 
@@ -118,7 +122,7 @@ export abstract class BaseDAL<T extends BaseEntity> {
     if (!isDatabaseInitialized()) {
       throw new Error(
         `Database not initialized. Cannot perform ${this.tableName} operations. ` +
-        'Ensure bootstrapDatabase() completes before accessing DAL.'
+          'Ensure bootstrapDatabase() completes before accessing DAL.'
       );
     }
     return getDatabase();

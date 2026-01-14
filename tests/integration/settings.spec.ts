@@ -194,7 +194,8 @@ describe('Settings Integration', () => {
         },
       }));
 
-      const { BinManagementService } = await import('../../src/main/services/bin-management.service');
+      const { BinManagementService } =
+        await import('../../src/main/services/bin-management.service');
       const service = new BinManagementService();
 
       // Create bin
@@ -242,7 +243,8 @@ describe('Settings Integration', () => {
         },
       }));
 
-      const { BinManagementService } = await import('../../src/main/services/bin-management.service');
+      const { BinManagementService } =
+        await import('../../src/main/services/bin-management.service');
       const service = new BinManagementService();
 
       const deleteResult = service.deleteBin('bin-001');
@@ -264,7 +266,8 @@ describe('Settings Integration', () => {
         },
       }));
 
-      const { BinManagementService } = await import('../../src/main/services/bin-management.service');
+      const { BinManagementService } =
+        await import('../../src/main/services/bin-management.service');
       const service = new BinManagementService();
 
       // Invalid characters
@@ -319,7 +322,8 @@ describe('Settings Integration', () => {
         },
       }));
 
-      const { BinManagementService } = await import('../../src/main/services/bin-management.service');
+      const { BinManagementService } =
+        await import('../../src/main/services/bin-management.service');
       const service = new BinManagementService();
 
       service.createBin({ name: 'Test Bin' });

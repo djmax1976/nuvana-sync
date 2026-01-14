@@ -1,8 +1,8 @@
-"use client";
+'use client';
 
-import { useState, useCallback, useRef } from "react";
+import { useState, useCallback, useRef } from 'react';
 
-const STORAGE_KEY = "lottery-sound-enabled";
+const STORAGE_KEY = 'lottery-sound-enabled';
 
 /**
  * Hook for playing notification sounds using Web Audio API
@@ -18,11 +18,11 @@ const STORAGE_KEY = "lottery-sound-enabled";
 export function useNotificationSound() {
   // Initialize muted state from localStorage (default: not muted = sounds enabled)
   const [isMuted, setIsMuted] = useState<boolean>(() => {
-    if (typeof window === "undefined") return false;
+    if (typeof window === 'undefined') return false;
     const stored = localStorage.getItem(STORAGE_KEY);
     // If stored value is "false", user disabled sounds (isMuted = true)
     // If no preference or "true", sounds are enabled (isMuted = false)
-    return stored === "false";
+    return stored === 'false';
   });
 
   // Keep a ref to AudioContext to reuse it
@@ -33,7 +33,7 @@ export function useNotificationSound() {
    * Lazy initialization to comply with browser autoplay policies
    */
   const getAudioContext = useCallback((): AudioContext | null => {
-    if (typeof window === "undefined") return null;
+    if (typeof window === 'undefined') return null;
 
     if (!audioContextRef.current) {
       try {
@@ -46,13 +46,13 @@ export function useNotificationSound() {
           ).webkitAudioContext
         )();
       } catch {
-        console.warn("Web Audio API not supported");
+        console.warn('Web Audio API not supported');
         return null;
       }
     }
 
     // Resume if suspended (browser autoplay policy)
-    if (audioContextRef.current.state === "suspended") {
+    if (audioContextRef.current.state === 'suspended') {
       audioContextRef.current.resume();
     }
 
@@ -64,7 +64,7 @@ export function useNotificationSound() {
    * Uses sine wave with envelope for smooth sound
    */
   const playTone = useCallback(
-    (frequency: number, duration: number, type: OscillatorType = "sine") => {
+    (frequency: number, duration: number, type: OscillatorType = 'sine') => {
       if (isMuted) return;
 
       const audioContext = getAudioContext();
@@ -78,10 +78,7 @@ export function useNotificationSound() {
         gainNode.connect(audioContext.destination);
 
         oscillator.type = type;
-        oscillator.frequency.setValueAtTime(
-          frequency,
-          audioContext.currentTime,
-        );
+        oscillator.frequency.setValueAtTime(frequency, audioContext.currentTime);
 
         // Envelope for smooth attack and release (prevents clicking)
         const now = audioContext.currentTime;
@@ -92,10 +89,10 @@ export function useNotificationSound() {
         oscillator.start(now);
         oscillator.stop(now + duration);
       } catch (error) {
-        console.warn("Failed to play notification sound:", error);
+        console.warn('Failed to play notification sound:', error);
       }
     },
-    [isMuted, getAudioContext],
+    [isMuted, getAudioContext]
   );
 
   /**
@@ -104,8 +101,8 @@ export function useNotificationSound() {
    */
   const playSuccess = useCallback(() => {
     // Play two tones together as a chord for a rich "ding" sound
-    playTone(880, 0.12, "sine"); // A5
-    playTone(1100, 0.12, "sine"); // C#6 - plays simultaneously
+    playTone(880, 0.12, 'sine'); // A5
+    playTone(1100, 0.12, 'sine'); // C#6 - plays simultaneously
   }, [playTone]);
 
   /**
@@ -114,8 +111,8 @@ export function useNotificationSound() {
    */
   const playError = useCallback(() => {
     // Play two tones together - slight dissonance signals "wrong"
-    playTone(300, 0.15, "square"); // Lower tone
-    playTone(350, 0.15, "square"); // Slightly higher - creates buzzy dissonance
+    playTone(300, 0.15, 'square'); // Lower tone
+    playTone(350, 0.15, 'square'); // Slightly higher - creates buzzy dissonance
   }, [playTone]);
 
   /**
@@ -125,9 +122,9 @@ export function useNotificationSound() {
   const toggleMute = useCallback(() => {
     setIsMuted((prev) => {
       const newMuted = !prev;
-      if (typeof window !== "undefined") {
+      if (typeof window !== 'undefined') {
         // Store enabled state (opposite of muted)
-        localStorage.setItem(STORAGE_KEY, newMuted ? "false" : "true");
+        localStorage.setItem(STORAGE_KEY, newMuted ? 'false' : 'true');
       }
       return newMuted;
     });
@@ -138,9 +135,9 @@ export function useNotificationSound() {
    */
   const setMuted = useCallback((muted: boolean) => {
     setIsMuted(muted);
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       // Store enabled state (opposite of muted)
-      localStorage.setItem(STORAGE_KEY, muted ? "false" : "true");
+      localStorage.setItem(STORAGE_KEY, muted ? 'false' : 'true');
     }
   }, []);
 

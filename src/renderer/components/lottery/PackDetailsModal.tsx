@@ -1,4 +1,3 @@
-
 /**
  * Pack Details Modal Component
  * Displays full pack details including serial range, status, game, bin, activation timestamp,
@@ -19,23 +18,14 @@ import {
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
-import {
-  getPackStatusBadgeVariant,
-  getPackStatusText,
-} from "./pack-status-badge";
-import { Loader2, Package, Calendar, MapPin } from "lucide-react";
-import { useDateFormat } from "@/hooks/useDateFormat";
+} from '@/components/ui/dialog';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Badge } from '@/components/ui/badge';
+import { getPackStatusBadgeVariant, getPackStatusText } from './pack-status-badge';
+import { Loader2, Package, Calendar, MapPin } from 'lucide-react';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
-export type PackStatus = "RECEIVED" | "ACTIVE" | "DEPLETED" | "RETURNED";
+export type PackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
 export interface PackDetailsData {
   pack_id: string;
@@ -109,7 +99,7 @@ interface PackDetailsModalProps {
 function calculateTicketsRemaining(
   serialStart: string,
   serialEnd: string,
-  providedRemaining?: number,
+  providedRemaining?: number
 ): number {
   if (providedRemaining !== undefined) {
     return providedRemaining;
@@ -157,7 +147,7 @@ export function PackDetailsModal({
    * - SEC-014: INPUT_VALIDATION - Handles null/undefined gracefully
    */
   const formatTimestamp = (timestamp: string | null | undefined): string => {
-    if (!timestamp) return "—";
+    if (!timestamp) return '—';
     try {
       return formatDateTime(timestamp);
     } catch {
@@ -170,16 +160,10 @@ export function PackDetailsModal({
     return null;
   }
 
-  const statusVariant = pack
-    ? getPackStatusBadgeVariant(pack.status)
-    : "outline";
-  const statusText = pack ? getPackStatusText(pack.status) : "";
+  const statusVariant = pack ? getPackStatusBadgeVariant(pack.status) : 'outline';
+  const statusText = pack ? getPackStatusText(pack.status) : '';
   const ticketsRemaining = pack
-    ? calculateTicketsRemaining(
-        pack.serial_start,
-        pack.serial_end,
-        pack.tickets_remaining,
-      )
+    ? calculateTicketsRemaining(pack.serial_start, pack.serial_end, pack.tickets_remaining)
     : 0;
 
   return (
@@ -188,16 +172,14 @@ export function PackDetailsModal({
         <DialogHeader>
           <DialogTitle>Pack Details</DialogTitle>
           <DialogDescription>
-            Complete information for pack {pack?.pack_number || ""}
+            Complete information for pack {pack?.pack_number || ''}
           </DialogDescription>
         </DialogHeader>
 
         {isLoading && (
           <div className="flex items-center justify-center py-8">
             <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-            <span className="ml-2 text-sm text-muted-foreground">
-              Loading pack details...
-            </span>
+            <span className="ml-2 text-sm text-muted-foreground">Loading pack details...</span>
           </div>
         )}
 
@@ -208,9 +190,7 @@ export function PackDetailsModal({
               <CardHeader>
                 <div className="flex items-start justify-between">
                   <div>
-                    <CardTitle className="text-lg">
-                      {pack.pack_number}
-                    </CardTitle>
+                    <CardTitle className="text-lg">{pack.pack_number}</CardTitle>
                     <CardDescription>{pack.game.name}</CardDescription>
                   </div>
                   <Badge variant={statusVariant}>{statusText}</Badge>
@@ -219,17 +199,13 @@ export function PackDetailsModal({
               <CardContent className="space-y-3">
                 <div className="grid grid-cols-2 gap-4 text-sm">
                   <div>
-                    <div className="font-medium text-muted-foreground">
-                      Serial Range
-                    </div>
+                    <div className="font-medium text-muted-foreground">Serial Range</div>
                     <div className="mt-1">
                       {pack.serial_start} - {pack.serial_end}
                     </div>
                   </div>
                   <div>
-                    <div className="font-medium text-muted-foreground">
-                      Tickets Remaining
-                    </div>
+                    <div className="font-medium text-muted-foreground">Tickets Remaining</div>
                     <div className="mt-1">{ticketsRemaining}</div>
                   </div>
                 </div>
@@ -238,15 +214,10 @@ export function PackDetailsModal({
                   <div className="flex items-center gap-2 text-sm">
                     <MapPin className="h-4 w-4 text-muted-foreground" />
                     <div>
-                      <span className="font-medium text-muted-foreground">
-                        Bin:{" "}
-                      </span>
+                      <span className="font-medium text-muted-foreground">Bin: </span>
                       <span>{pack.bin.name}</span>
                       {pack.bin.location && (
-                        <span className="text-muted-foreground">
-                          {" "}
-                          ({pack.bin.location})
-                        </span>
+                        <span className="text-muted-foreground"> ({pack.bin.location})</span>
                       )}
                     </div>
                   </div>
@@ -254,21 +225,15 @@ export function PackDetailsModal({
 
                 {pack.game.price && (
                   <div className="text-sm">
-                    <div className="font-medium text-muted-foreground">
-                      Game Price
-                    </div>
+                    <div className="font-medium text-muted-foreground">Game Price</div>
                     <div className="mt-1">${pack.game.price.toFixed(2)}</div>
                   </div>
                 )}
 
                 {pack.game.description && (
                   <div className="text-sm">
-                    <div className="font-medium text-muted-foreground">
-                      Game Description
-                    </div>
-                    <div className="mt-1 text-muted-foreground">
-                      {pack.game.description}
-                    </div>
+                    <div className="font-medium text-muted-foreground">Game Description</div>
+                    <div className="mt-1 text-muted-foreground">{pack.game.description}</div>
                   </div>
                 )}
               </CardContent>
@@ -320,14 +285,9 @@ export function PackDetailsModal({
                 <CardContent>
                   <div className="space-y-2">
                     {pack.shift_openings.map((opening) => (
-                      <div
-                        key={opening.opening_id}
-                        className="rounded-md border p-3 text-sm"
-                      >
+                      <div key={opening.opening_id} className="rounded-md border p-3 text-sm">
                         <div className="font-medium">
-                          Shift #
-                          {opening.shift?.shift_number ||
-                            opening.shift_id.substring(0, 8)}
+                          Shift #{opening.shift?.shift_number || opening.shift_id.substring(0, 8)}
                         </div>
                         <div className="mt-1 text-muted-foreground">
                           Opening Serial: {opening.opening_serial}
@@ -354,14 +314,9 @@ export function PackDetailsModal({
                 <CardContent>
                   <div className="space-y-2">
                     {pack.shift_closings.map((closing) => (
-                      <div
-                        key={closing.closing_id}
-                        className="rounded-md border p-3 text-sm"
-                      >
+                      <div key={closing.closing_id} className="rounded-md border p-3 text-sm">
                         <div className="font-medium">
-                          Shift #
-                          {closing.shift?.shift_number ||
-                            closing.shift_id.substring(0, 8)}
+                          Shift #{closing.shift?.shift_number || closing.shift_id.substring(0, 8)}
                         </div>
                         <div className="mt-1 grid grid-cols-2 gap-2 text-muted-foreground">
                           <div>Opening: {closing.opening_serial}</div>
@@ -372,7 +327,7 @@ export function PackDetailsModal({
                         {closing.has_variance && (
                           <div className="mt-2 text-sm">
                             <Badge variant="destructive">
-                              Variance: {closing.difference > 0 ? "+" : ""}
+                              Variance: {closing.difference > 0 ? '+' : ''}
                               {closing.difference}
                             </Badge>
                           </div>

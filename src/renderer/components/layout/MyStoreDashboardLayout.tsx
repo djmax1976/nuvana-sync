@@ -1,14 +1,9 @@
-import { useState } from "react";
-import { MyStoreSidebar } from "./MyStoreSidebar";
-import { Header } from "./Header";
-import {
-  Sheet,
-  SheetContent,
-  SheetTitle,
-  SheetDescription,
-} from "../ui/sheet";
-import { Button } from "../ui/button";
-import { Menu } from "lucide-react";
+import { useState } from 'react';
+import { MyStoreSidebar } from './MyStoreSidebar';
+import { Header } from './Header';
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../ui/sheet';
+import { Button } from '../ui/button';
+import { Menu } from 'lucide-react';
 
 interface MyStoreDashboardLayoutProps {
   children: React.ReactNode;
@@ -22,16 +17,11 @@ interface MyStoreDashboardLayoutProps {
  * - AC #1: Simplified dashboard layout with sidebar navigation
  * - AC #2: Sidebar shows navigation links for desktop app
  */
-export function MyStoreDashboardLayout({
-  children,
-}: MyStoreDashboardLayoutProps) {
+export function MyStoreDashboardLayout({ children }: MyStoreDashboardLayoutProps) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
 
   return (
-    <div
-      className="flex h-screen overflow-hidden"
-      data-testid="mystore-dashboard-layout"
-    >
+    <div className="flex h-screen overflow-hidden" data-testid="mystore-dashboard-layout">
       {/* Desktop Sidebar */}
       <aside className="hidden lg:block">
         <MyStoreSidebar />
@@ -77,9 +67,7 @@ export function MyStoreDashboardLayout({
         </div>
 
         {/* Page Content */}
-        <main className="flex-1 overflow-y-auto bg-background p-6">
-          {children}
-        </main>
+        <main className="flex-1 overflow-y-auto bg-background p-6">{children}</main>
       </div>
     </div>
   );

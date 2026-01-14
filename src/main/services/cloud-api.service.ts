@@ -17,10 +17,7 @@ import { safeStorage } from 'electron';
 import Store from 'electron-store';
 import { z } from 'zod';
 import { createLogger } from '../utils/logger';
-import {
-  licenseService,
-  LicenseApiResponseSchema,
-} from './license.service';
+import { licenseService, LicenseApiResponseSchema } from './license.service';
 import type { SyncQueueItem } from '../dal/sync-queue.dal';
 
 // ============================================================================
@@ -305,9 +302,8 @@ export interface CloudGamesResponse {
 // ============================================================================
 
 /** Default API base URL */
-const DEFAULT_API_URL = process.env.NODE_ENV === 'development'
-  ? 'http://localhost:3001'
-  : 'https://api.nuvanaapp.com';
+const DEFAULT_API_URL =
+  process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : 'https://api.nuvanaapp.com';
 
 /** Request timeout in milliseconds */
 const REQUEST_TIMEOUT_MS = 30000;
@@ -583,13 +579,15 @@ export class CloudApiService {
 
         // LICENSE: Handle 401/403 - Check response body before making license decisions
         if (response.status === 401 || response.status === 403) {
-          const errorBody = await response.json().catch(() => ({})) as Record<string, unknown>;
+          const errorBody = (await response.json().catch(() => ({}))) as Record<string, unknown>;
 
           // Extract error code - handle nested structures
           const errorCode = (
-            typeof errorBody.code === 'string' ? errorBody.code :
-            typeof (errorBody.error as Record<string, unknown>)?.code === 'string' ? (errorBody.error as Record<string, unknown>).code as string :
-            ''
+            typeof errorBody.code === 'string'
+              ? errorBody.code
+              : typeof (errorBody.error as Record<string, unknown>)?.code === 'string'
+                ? ((errorBody.error as Record<string, unknown>).code as string)
+                : ''
           ).toLowerCase();
 
           // Extract error message - handle nested structures like {message: {code: "...", message: "..."}}
@@ -598,7 +596,8 @@ export class CloudApiService {
             errorMessage = errorBody.message;
           } else if (typeof errorBody.message === 'object' && errorBody.message !== null) {
             const msgObj = errorBody.message as Record<string, unknown>;
-            errorMessage = typeof msgObj.message === 'string' ? msgObj.message : JSON.stringify(msgObj);
+            errorMessage =
+              typeof msgObj.message === 'string' ? msgObj.message : JSON.stringify(msgObj);
           } else if (typeof errorBody.error === 'string') {
             errorMessage = errorBody.error;
           }
@@ -661,7 +660,9 @@ export class CloudApiService {
           if (response.status === 401) {
             throw new Error(errorMessage || 'Authentication failed. Please check your API key.');
           } else {
-            throw new Error(errorMessage || 'Access denied. Please verify your API key is correct.');
+            throw new Error(
+              errorMessage || 'Access denied. Please verify your API key is correct.'
+            );
           }
         }
 
@@ -732,15 +733,15 @@ export class CloudApiService {
    * @param response - API response data
    */
   private extractAndUpdateLicense(response: unknown): void {
-    if (
-      typeof response !== 'object' ||
-      response === null ||
-      !('license' in response)
-    ) {
+    if (typeof response !== 'object' || response === null || !('license' in response)) {
       return;
     }
 
-    const responseWithLicense = response as { license?: unknown; storeId?: string; companyId?: string };
+    const responseWithLicense = response as {
+      license?: unknown;
+      storeId?: string;
+      companyId?: string;
+    };
 
     if (!responseWithLicense.license) {
       return;
@@ -787,12 +788,11 @@ export class CloudApiService {
    */
   async healthCheck(): Promise<boolean> {
     try {
-      await this.request<{ status: string }>(
-        'GET',
-        '/api/v1/health',
-        undefined,
-        { timeout: HEALTH_CHECK_TIMEOUT_MS, retries: 0, skipAuth: true }
-      );
+      await this.request<{ status: string }>('GET', '/api/v1/health', undefined, {
+        timeout: HEALTH_CHECK_TIMEOUT_MS,
+        retries: 0,
+        skipAuth: true,
+      });
       return true;
     } catch {
       return false;
@@ -811,7 +811,9 @@ export class CloudApiService {
     // Generate device fingerprint from machine-specific info
     // node-machine-id is a CommonJS module, handle both ESM and CJS import patterns
     const machineIdModule = await import('node-machine-id');
-    const machineIdSync = machineIdModule.machineIdSync || (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
+    const machineIdSync =
+      machineIdModule.machineIdSync ||
+      (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
     if (typeof machineIdSync !== 'function') {
       log.error('Failed to import machineIdSync function');
       throw new Error('Device fingerprint generation unavailable');
@@ -843,8 +845,10 @@ export class CloudApiService {
     } catch (error) {
       // If already activated, that's fine - continue to identity check
       const errorMsg = error instanceof Error ? error.message : String(error);
-      if (errorMsg.toLowerCase().includes('already activated') ||
-          errorMsg.toLowerCase().includes('already active')) {
+      if (
+        errorMsg.toLowerCase().includes('already activated') ||
+        errorMsg.toLowerCase().includes('already active')
+      ) {
         log.info('API key already activated');
         return { success: true, message: 'Already activated' };
       }
@@ -884,8 +888,10 @@ export class CloudApiService {
       const errorMsg = error instanceof Error ? error.message : String(error);
       // Allow through if already activated or if it's just an auth/format error
       // (identity endpoint will give a clearer error)
-      if (!errorMsg.toLowerCase().includes('already') &&
-          !errorMsg.toLowerCase().includes('activated')) {
+      if (
+        !errorMsg.toLowerCase().includes('already') &&
+        !errorMsg.toLowerCase().includes('activated')
+      ) {
         log.warn('API key activation failed, attempting identity check anyway', {
           error: errorMsg,
         });
@@ -893,14 +899,18 @@ export class CloudApiService {
     }
 
     // Step 2: Get identity/store information
-    const response = await this.request<CloudApiKeyValidationResponse>('GET', '/api/v1/keys/identity');
+    const response = await this.request<CloudApiKeyValidationResponse>(
+      'GET',
+      '/api/v1/keys/identity'
+    );
 
     // SEC-017: Log response structure for debugging (no sensitive data)
     // Log the actual keys present to understand the response structure
     const responseKeys = Object.keys(response || {});
-    const dataKeys = response && typeof response === 'object' && 'data' in response && response.data
-      ? Object.keys(response.data)
-      : [];
+    const dataKeys =
+      response && typeof response === 'object' && 'data' in response && response.data
+        ? Object.keys(response.data)
+        : [];
 
     log.debug('Received API key validation response', {
       hasSuccess: 'success' in response,
@@ -1170,7 +1180,9 @@ export class CloudApiService {
    * @param bins - Bin records to push
    * @returns Push result
    */
-  async pushBins(bins: CloudBin[]): Promise<{ results: Array<{ bin_id: string; status: string }> }> {
+  async pushBins(
+    bins: CloudBin[]
+  ): Promise<{ results: Array<{ bin_id: string; status: string }> }> {
     if (bins.length === 0) {
       return { results: [] };
     }
@@ -1186,7 +1198,9 @@ export class CloudApiService {
    * @param games - Game records to push
    * @returns Push result
    */
-  async pushGames(games: CloudGame[]): Promise<{ results: Array<{ game_id: string; status: string }> }> {
+  async pushGames(
+    games: CloudGame[]
+  ): Promise<{ results: Array<{ game_id: string; status: string }> }> {
     if (games.length === 0) {
       return { results: [] };
     }
@@ -1215,7 +1229,9 @@ export class CloudApiService {
   ): Promise<SyncSessionResponse> {
     // Generate device fingerprint (required per API documentation)
     const machineIdModule = await import('node-machine-id');
-    const machineIdSync = machineIdModule.machineIdSync || (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
+    const machineIdSync =
+      machineIdModule.machineIdSync ||
+      (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
     if (typeof machineIdSync !== 'function') {
       throw new Error('Device fingerprint generation unavailable');
     }
@@ -1226,7 +1242,10 @@ export class CloudApiService {
     const os = osModule.default || osModule;
     const osInfo = `${os.platform()} ${os.release()} ${os.arch()}`;
 
-    log.debug('Starting sync session', { deviceFingerprint: deviceFingerprint.substring(0, 8) + '...', lastSyncSequence });
+    log.debug('Starting sync session', {
+      deviceFingerprint: deviceFingerprint.substring(0, 8) + '...',
+      lastSyncSequence,
+    });
 
     // API requires deviceFingerprint and appVersion (per documentation)
     const rawResponse = await this.request<{ success: boolean; data: SyncSessionResponse }>(
@@ -1319,7 +1338,10 @@ export class CloudApiService {
     const path = `/api/v1/sync/cashiers?${params.toString()}`;
 
     // API returns { success: true, data: { cashiers: [...], syncMetadata: {...} } }
-    const rawResponse = await this.request<{ success: boolean; data: CloudCashiersResponse }>('GET', path);
+    const rawResponse = await this.request<{ success: boolean; data: CloudCashiersResponse }>(
+      'GET',
+      path
+    );
 
     // Log raw response structure for debugging
     log.debug('Cashiers raw response', {
@@ -1445,7 +1467,9 @@ export class CloudApiService {
    * @returns Cloud bins
    */
   async pullBins(since?: string): Promise<CloudBinsResponse> {
-    const path = since ? `/api/v1/sync/bins?since=${encodeURIComponent(since)}` : '/api/v1/sync/bins';
+    const path = since
+      ? `/api/v1/sync/bins?since=${encodeURIComponent(since)}`
+      : '/api/v1/sync/bins';
 
     log.debug('Pulling bins from cloud', { since: since || 'full' });
 
@@ -1463,7 +1487,9 @@ export class CloudApiService {
    * @returns Cloud games
    */
   async pullGames(since?: string): Promise<CloudGamesResponse> {
-    const path = since ? `/api/v1/sync/games?since=${encodeURIComponent(since)}` : '/api/v1/sync/games';
+    const path = since
+      ? `/api/v1/sync/games?since=${encodeURIComponent(since)}`
+      : '/api/v1/sync/games';
 
     log.debug('Pulling games from cloud', { since: since || 'full' });
 

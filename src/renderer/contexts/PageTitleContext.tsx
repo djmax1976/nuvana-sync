@@ -17,7 +17,6 @@
  * - Separate contexts for state and dispatch to optimize consumer re-renders
  */
 
-
 import {
   createContext,
   useContext,
@@ -26,7 +25,7 @@ import {
   useMemo,
   useEffect,
   type ReactNode,
-} from "react";
+} from 'react';
 
 /**
  * Page title state interface
@@ -57,20 +56,16 @@ const defaultState: PageTitleState = {
  * Page Title State Context
  * Provides read-only access to the current page title
  */
-const PageTitleStateContext = createContext<PageTitleState | undefined>(
-  undefined,
-);
-PageTitleStateContext.displayName = "PageTitleStateContext";
+const PageTitleStateContext = createContext<PageTitleState | undefined>(undefined);
+PageTitleStateContext.displayName = 'PageTitleStateContext';
 
 /**
  * Page Title Dispatch Context
  * Provides the setter function for updating page title
  * Separated from state to prevent re-renders in components that only set title
  */
-const PageTitleDispatchContext = createContext<PageTitleDispatch | undefined>(
-  undefined,
-);
-PageTitleDispatchContext.displayName = "PageTitleDispatchContext";
+const PageTitleDispatchContext = createContext<PageTitleDispatch | undefined>(undefined);
+PageTitleDispatchContext.displayName = 'PageTitleDispatchContext';
 
 /**
  * Page Title Provider Props
@@ -109,7 +104,7 @@ export function PageTitleProvider({ children }: PageTitleProviderProps) {
     () => ({
       title,
     }),
-    [title],
+    [title]
   );
 
   // Memoize dispatch value to maintain referential stability
@@ -117,7 +112,7 @@ export function PageTitleProvider({ children }: PageTitleProviderProps) {
     () => ({
       setPageTitle,
     }),
-    [setPageTitle],
+    [setPageTitle]
   );
 
   return (
@@ -153,7 +148,7 @@ export function usePageTitle(): PageTitleState {
   const context = useContext(PageTitleStateContext);
 
   if (context === undefined) {
-    throw new Error("usePageTitle must be used within a PageTitleProvider");
+    throw new Error('usePageTitle must be used within a PageTitleProvider');
   }
 
   return context;
@@ -214,7 +209,7 @@ export function useSetPageTitle(): PageTitleDispatch {
   const context = useContext(PageTitleDispatchContext);
 
   if (context === undefined) {
-    throw new Error("useSetPageTitle must be used within a PageTitleProvider");
+    throw new Error('useSetPageTitle must be used within a PageTitleProvider');
   }
 
   return context;

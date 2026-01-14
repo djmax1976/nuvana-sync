@@ -1,10 +1,10 @@
-import * as React from "react";
-import { cn } from "../../lib/utils";
+import * as React from 'react';
+import { cn } from '../../lib/utils';
 
 interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
   value?: number;
   max?: number;
-  "aria-label"?: string;
+  'aria-label'?: string;
 }
 
 /**
@@ -16,10 +16,7 @@ interface ProgressProps extends React.HTMLAttributes<HTMLDivElement> {
  * @accessibility Includes proper ARIA attributes for screen readers
  */
 const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
-  (
-    { className, value = 0, max = 100, "aria-label": ariaLabel, ...props },
-    ref,
-  ) => {
+  ({ className, value = 0, max = 100, 'aria-label': ariaLabel, ...props }, ref) => {
     const percentage = Math.min(100, Math.max(0, (value / max) * 100));
 
     return (
@@ -31,8 +28,8 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
         aria-valuemax={max}
         aria-label={ariaLabel}
         className={cn(
-          "relative h-2 w-full overflow-hidden rounded-full bg-secondary/20",
-          className,
+          'relative h-2 w-full overflow-hidden rounded-full bg-secondary/20',
+          className
         )}
         {...props}
       >
@@ -42,10 +39,10 @@ const Progress = React.forwardRef<HTMLDivElement, ProgressProps>(
         />
       </div>
     );
-  },
+  }
 );
 
-Progress.displayName = "Progress";
+Progress.displayName = 'Progress';
 
 export { Progress };
 export type { ProgressProps };

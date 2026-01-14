@@ -9,30 +9,24 @@
  * Route: /terminal/:terminalId/shift
  */
 
-import { useParams, useNavigate } from "react-router-dom";
-import { format } from "date-fns";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "../components/ui/card";
-import { Button } from "../components/ui/button";
-import { DollarSign, Receipt, XCircle, CalendarCheck, Loader2 } from "lucide-react";
+import { useParams, useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../components/ui/card';
+import { Button } from '../components/ui/button';
+import { DollarSign, Receipt, XCircle, CalendarCheck, Loader2 } from 'lucide-react';
 
-import { useClientAuth } from "../contexts/ClientAuthContext";
-import { useClientDashboard } from "../lib/api/client-dashboard";
-import { useStoreTerminals } from "../lib/api/stores";
-import { useActiveShift } from "../lib/api/shifts";
+import { useClientAuth } from '../contexts/ClientAuthContext';
+import { useClientDashboard } from '../lib/api/client-dashboard';
+import { useStoreTerminals } from '../lib/api/stores';
+import { useActiveShift } from '../lib/api/shifts';
 
 /**
  * Format currency for display
  */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
@@ -52,21 +46,21 @@ export default function TerminalShiftPage() {
 
   // Get store ID from user's accessible stores
   const storeId =
-    dashboardData?.stores.find((s) => s.status === "ACTIVE")?.store_id ||
+    dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
     dashboardData?.stores[0]?.store_id;
 
   // Fetch terminals for the store
-  const { data: terminals = [], isLoading: isLoadingTerminals } =
-    useStoreTerminals(storeId, { enabled: !!storeId });
+  const { data: terminals = [], isLoading: isLoadingTerminals } = useStoreTerminals(storeId, {
+    enabled: !!storeId,
+  });
 
   // Find the terminal
   const terminal = terminals.find((t) => t.pos_terminal_id === terminalId);
 
   // Fetch the current open shift for this terminal
-  const { data: shiftData, isLoading: shiftLoading } = useActiveShift(
-    terminalId ?? null,
-    { enabled: !!terminalId },
-  );
+  const { data: shiftData, isLoading: shiftLoading } = useActiveShift(terminalId ?? null, {
+    enabled: !!terminalId,
+  });
 
   // Loading state
   if (authLoading || dashboardLoading || isLoadingTerminals || shiftLoading) {
@@ -86,9 +80,7 @@ export default function TerminalShiftPage() {
       <div className="container mx-auto p-6">
         <Card className="border-destructive">
           <CardContent className="pt-6">
-            <p className="text-destructive">
-              Failed to load dashboard data. Please try again.
-            </p>
+            <p className="text-destructive">Failed to load dashboard data. Please try again.</p>
           </CardContent>
         </Card>
       </div>
@@ -101,9 +93,7 @@ export default function TerminalShiftPage() {
       <div className="container mx-auto p-6">
         <Card>
           <CardContent className="pt-6">
-            <p className="text-muted-foreground text-center">
-              Terminal not found.
-            </p>
+            <p className="text-muted-foreground text-center">Terminal not found.</p>
           </CardContent>
         </Card>
       </div>
@@ -116,9 +106,7 @@ export default function TerminalShiftPage() {
       <div className="container mx-auto p-6">
         <Card>
           <CardContent className="pt-6">
-            <p className="text-muted-foreground text-center">
-              No open shift for this terminal.
-            </p>
+            <p className="text-muted-foreground text-center">No open shift for this terminal.</p>
           </CardContent>
         </Card>
       </div>
@@ -126,17 +114,12 @@ export default function TerminalShiftPage() {
   }
 
   // Format shift start date and time combined
-  const shiftStartDateTime = format(
-    new Date(shiftData.opened_at),
-    "MMM d, yyyy 'at' h:mm a",
-  );
+  const shiftStartDateTime = format(new Date(shiftData.opened_at), "MMM d, yyyy 'at' h:mm a");
 
   // Format shift number for display
-  const shiftNumberDisplay = shiftData.shift_number
-    ? `#${shiftData.shift_number}`
-    : null;
+  const shiftNumberDisplay = shiftData.shift_number ? `#${shiftData.shift_number}` : null;
 
-  const cashierName = shiftData.cashier_name || "Unknown Cashier";
+  const cashierName = shiftData.cashier_name || 'Unknown Cashier';
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -144,9 +127,7 @@ export default function TerminalShiftPage() {
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">{terminal.name}</h1>
         {shiftNumberDisplay && (
-          <span className="text-lg text-muted-foreground">
-            Shift {shiftNumberDisplay}
-          </span>
+          <span className="text-lg text-muted-foreground">Shift {shiftNumberDisplay}</span>
         )}
       </div>
 
@@ -162,10 +143,7 @@ export default function TerminalShiftPage() {
               <span className="text-muted-foreground">Started:</span>
               <span className="font-medium">{shiftStartDateTime}</span>
             </div>
-            <div
-              className="flex items-center gap-2"
-              data-testid="opening-cash-display"
-            >
+            <div className="flex items-center gap-2" data-testid="opening-cash-display">
               <span className="text-muted-foreground">Opening Cash:</span>
               <span className="font-semibold text-green-600">
                 {formatCurrency(shiftData.opening_cash)}
@@ -189,9 +167,7 @@ export default function TerminalShiftPage() {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Sales
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Sales</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>
@@ -200,9 +176,7 @@ export default function TerminalShiftPage() {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Tax Collected
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Tax Collected</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>
@@ -211,9 +185,7 @@ export default function TerminalShiftPage() {
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <XCircle className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Voids
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Voids</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>

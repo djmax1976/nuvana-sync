@@ -176,7 +176,9 @@ export class SyncEngineService {
 
     this.intervalId = setInterval(() => {
       this.runSync().catch((err) => {
-        log.error('Scheduled sync failed', { error: err instanceof Error ? err.message : 'Unknown' });
+        log.error('Scheduled sync failed', {
+          error: err instanceof Error ? err.message : 'Unknown',
+        });
       });
     }, this.syncIntervalMs);
 
@@ -214,9 +216,10 @@ export class SyncEngineService {
    * @returns Current sync status
    */
   getStatus(): SyncStatus {
-    const nextSyncIn = this.intervalId && this.lastSyncAt
-      ? Math.max(0, this.syncIntervalMs - (Date.now() - this.lastSyncAt.getTime()))
-      : 0;
+    const nextSyncIn =
+      this.intervalId && this.lastSyncAt
+        ? Math.max(0, this.syncIntervalMs - (Date.now() - this.lastSyncAt.getTime()))
+        : 0;
 
     return {
       isRunning: this.isRunning,

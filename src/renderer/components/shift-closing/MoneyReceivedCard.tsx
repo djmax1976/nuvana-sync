@@ -1,4 +1,3 @@
-
 /**
  * Money Received Card Component
  *
@@ -12,10 +11,10 @@
  * - FE-005: UI_SECURITY - No sensitive data exposed
  */
 
-import { useCallback, useMemo, useState, useEffect } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Input } from "@/components/ui/input";
-import { DollarSign } from "lucide-react";
+import { useCallback, useMemo, useState, useEffect } from 'react';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { DollarSign } from 'lucide-react';
 
 import {
   type MoneyReceivedState,
@@ -24,13 +23,13 @@ import {
   type MoneyReceivedCardProps,
   calculateNetCashReports,
   calculateNetCashPOS,
-} from "./types";
-import { formatCurrency, sanitizeNumericInput } from "./utils";
+} from './types';
+import { formatCurrency, sanitizeNumericInput } from './utils';
 
 /**
  * Simple horizontal separator
  */
-function Separator({ className = "" }: { className?: string }) {
+function Separator({ className = '' }: { className?: string }) {
   return <hr className={`border-t border-border ${className}`} />;
 }
 
@@ -40,15 +39,9 @@ function Separator({ className = "" }: { className?: string }) {
 function ColumnHeaders() {
   return (
     <div className="grid grid-cols-[1fr_100px_100px] gap-2 pb-2 border-b border-border">
-      <div className="text-sm font-medium text-muted-foreground">
-        Payment Type
-      </div>
-      <div className="text-sm font-medium text-muted-foreground text-right">
-        Reports Totals
-      </div>
-      <div className="text-sm font-medium text-muted-foreground text-right">
-        POS Totals
-      </div>
+      <div className="text-sm font-medium text-muted-foreground">Payment Type</div>
+      <div className="text-sm font-medium text-muted-foreground text-right">Reports Totals</div>
+      <div className="text-sm font-medium text-muted-foreground text-right">POS Totals</div>
     </div>
   );
 }
@@ -120,9 +113,7 @@ function POSOnlyLineItem({
           />
         </div>
       ) : (
-        <div className="text-right font-mono text-sm">
-          {formatCurrency(posValue)}
-        </div>
+        <div className="text-right font-mono text-sm">{formatCurrency(posValue)}</div>
       )}
     </div>
   );
@@ -185,19 +176,15 @@ function DualColumnLineItem({
         // Read-only mode: plain text display
         <div
           className={`text-right font-mono text-sm ${
-            isNegative ? "text-red-600 dark:text-red-400" : ""
+            isNegative ? 'text-red-600 dark:text-red-400' : ''
           }`}
         >
-          {isNegative
-            ? `(${formatCurrency(reportsValue)})`
-            : formatCurrency(reportsValue)}
+          {isNegative ? `(${formatCurrency(reportsValue)})` : formatCurrency(reportsValue)}
         </div>
       ) : (
         // Edit mode: input field
         <div className="flex items-center justify-end gap-1">
-          {isNegative && (
-            <span className="text-muted-foreground text-xs">(</span>
-          )}
+          {isNegative && <span className="text-muted-foreground text-xs">(</span>}
           <span className="text-muted-foreground text-xs">$</span>
           <Input
             id={`reports-${id}`}
@@ -208,24 +195,20 @@ function DualColumnLineItem({
             onBlur={handleBlur}
             disabled={disabled}
             className={`w-20 h-8 text-right font-mono text-sm ${
-              isNegative ? "text-red-600 dark:text-red-400" : ""
+              isNegative ? 'text-red-600 dark:text-red-400' : ''
             }`}
             data-testid={`money-reports-${id}`}
             aria-label={`${label} reports total`}
           />
-          {isNegative && (
-            <span className="text-muted-foreground text-xs">)</span>
-          )}
+          {isNegative && <span className="text-muted-foreground text-xs">)</span>}
         </div>
       )}
       <div
         className={`text-right font-mono text-sm ${
-          isNegative ? "text-red-600 dark:text-red-400" : ""
+          isNegative ? 'text-red-600 dark:text-red-400' : ''
         }`}
       >
-        {isNegative
-          ? `(${formatCurrency(posValue)})`
-          : formatCurrency(posValue)}
+        {isNegative ? `(${formatCurrency(posValue)})` : formatCurrency(posValue)}
       </div>
     </div>
   );
@@ -242,13 +225,9 @@ interface TotalsRowProps {
 
 function TotalsRow({ label, reportsValue, posValue }: TotalsRowProps) {
   const reportsColor =
-    reportsValue < 0
-      ? "text-red-600 dark:text-red-400"
-      : "text-green-600 dark:text-green-400";
+    reportsValue < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400';
   const posColor =
-    posValue < 0
-      ? "text-red-600 dark:text-red-400"
-      : "text-green-600 dark:text-green-400";
+    posValue < 0 ? 'text-red-600 dark:text-red-400' : 'text-green-600 dark:text-green-400';
 
   return (
     <div
@@ -295,7 +274,7 @@ export function MoneyReceivedCard({
         onReportsChange({ [field]: value });
       }
     },
-    [onReportsChange],
+    [onReportsChange]
   );
 
   // Create individual field change handlers for POS (for testing)
@@ -305,7 +284,7 @@ export function MoneyReceivedCard({
         onPOSChange({ [field]: value });
       }
     },
-    [onPOSChange],
+    [onPOSChange]
   );
 
   // Memoize net cash calculations - uses defensive null checks inside calculateNetCashReports/POS
@@ -335,7 +314,7 @@ export function MoneyReceivedCard({
           id="cash"
           label="Cash"
           posValue={state.pos.cash}
-          onPOSChange={createPOSChangeHandler("cash")}
+          onPOSChange={createPOSChangeHandler('cash')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -343,7 +322,7 @@ export function MoneyReceivedCard({
           id="credit-card"
           label="Credit Card"
           posValue={state.pos.creditCard}
-          onPOSChange={createPOSChangeHandler("creditCard")}
+          onPOSChange={createPOSChangeHandler('creditCard')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -351,7 +330,7 @@ export function MoneyReceivedCard({
           id="debit-card"
           label="Debit Card"
           posValue={state.pos.debitCard}
-          onPOSChange={createPOSChangeHandler("debitCard")}
+          onPOSChange={createPOSChangeHandler('debitCard')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -359,7 +338,7 @@ export function MoneyReceivedCard({
           id="ebt"
           label="EBT"
           posValue={state.pos.ebt}
-          onPOSChange={createPOSChangeHandler("ebt")}
+          onPOSChange={createPOSChangeHandler('ebt')}
           editable={editablePOS}
           disabled={disabled}
         />
@@ -367,9 +346,7 @@ export function MoneyReceivedCard({
         <Separator className="my-4" />
 
         {/* Payouts section header */}
-        <div className="text-sm font-semibold text-muted-foreground py-1">
-          Payouts
-        </div>
+        <div className="text-sm font-semibold text-muted-foreground py-1">Payouts</div>
 
         {/* Payout items - Both columns */}
         <DualColumnLineItem
@@ -377,7 +354,7 @@ export function MoneyReceivedCard({
           label="Cash Payouts"
           reportsValue={state.reports.cashPayouts}
           posValue={state.pos.cashPayouts}
-          onReportsChange={createReportsChangeHandler("cashPayouts")}
+          onReportsChange={createReportsChangeHandler('cashPayouts')}
           isNegative
           disabled={disabled}
           readOnly={readOnly}
@@ -387,7 +364,7 @@ export function MoneyReceivedCard({
           label="Lottery Payouts"
           reportsValue={state.reports.lotteryPayouts}
           posValue={state.pos.lotteryPayouts}
-          onReportsChange={createReportsChangeHandler("lotteryPayouts")}
+          onReportsChange={createReportsChangeHandler('lotteryPayouts')}
           isNegative
           disabled={disabled}
           readOnly={readOnly}
@@ -397,7 +374,7 @@ export function MoneyReceivedCard({
           label="Gaming Payouts"
           reportsValue={state.reports.gamingPayouts}
           posValue={state.pos.gamingPayouts}
-          onReportsChange={createReportsChangeHandler("gamingPayouts")}
+          onReportsChange={createReportsChangeHandler('gamingPayouts')}
           isNegative
           disabled={disabled}
           readOnly={readOnly}
@@ -406,11 +383,7 @@ export function MoneyReceivedCard({
         <Separator className="my-4" />
 
         {/* Net Cash Total */}
-        <TotalsRow
-          label="Net Cash"
-          reportsValue={netCashReports}
-          posValue={netCashPOS}
-        />
+        <TotalsRow label="Net Cash" reportsValue={netCashReports} posValue={netCashPOS} />
       </CardContent>
     </Card>
   );

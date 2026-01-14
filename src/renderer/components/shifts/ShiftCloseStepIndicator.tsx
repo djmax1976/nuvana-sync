@@ -1,4 +1,3 @@
-
 /**
  * Shift Close Step Indicator Component
  *
@@ -12,7 +11,7 @@
  * - FE-005: UI_SECURITY - No sensitive data displayed
  */
 
-import { Check } from "lucide-react";
+import { Check } from 'lucide-react';
 
 export type ShiftCloseStep = 1 | 2;
 
@@ -34,10 +33,10 @@ export function ShiftCloseStepIndicator({
   const steps = [
     {
       number: 1 as const,
-      label: "Report Scanning",
+      label: 'Report Scanning',
       completed: reportScanningCompleted,
     },
-    { number: 2 as const, label: "Close Shift", completed: false },
+    { number: 2 as const, label: 'Close Shift', completed: false },
   ];
 
   return (
@@ -51,10 +50,10 @@ export function ShiftCloseStepIndicator({
                 <div
                   className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-colors ${
                     step.completed
-                      ? "bg-green-600 text-white"
+                      ? 'bg-green-600 text-white'
                       : currentStep === step.number
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground"
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground'
                   }`}
                   data-testid={`shift-close-step-${step.number}-indicator`}
                 >
@@ -63,10 +62,10 @@ export function ShiftCloseStepIndicator({
                 <span
                   className={`ml-3 font-medium ${
                     step.completed
-                      ? "text-green-600"
+                      ? 'text-green-600'
                       : currentStep === step.number
-                        ? "text-primary"
-                        : "text-muted-foreground"
+                        ? 'text-primary'
+                        : 'text-muted-foreground'
                   }`}
                 >
                   {step.label}
@@ -77,7 +76,7 @@ export function ShiftCloseStepIndicator({
               {index < steps.length - 1 && (
                 <div
                   className={`w-24 h-1 mx-4 transition-colors ${
-                    step.completed ? "bg-green-600" : "bg-muted"
+                    step.completed ? 'bg-green-600' : 'bg-muted'
                   }`}
                 />
               )}

@@ -6,8 +6,7 @@
  * timezone for proper date formatting and display.
  */
 
-
-import { createContext, useContext, ReactNode } from "react";
+import { createContext, useContext, ReactNode } from 'react';
 
 /**
  * Store context value interface
@@ -34,7 +33,7 @@ export interface StoreContextValue {
  */
 const defaultContextValue: StoreContextValue = {
   storeId: null,
-  timezone: "UTC",
+  timezone: 'UTC',
   storeName: null,
   companyId: null,
   clientId: null,
@@ -75,9 +74,7 @@ export interface StoreProviderProps {
  * ```
  */
 export function StoreProvider({ children, value }: StoreProviderProps) {
-  return (
-    <StoreContext.Provider value={value}>{children}</StoreContext.Provider>
-  );
+  return <StoreContext.Provider value={value}>{children}</StoreContext.Provider>;
 }
 
 /**
@@ -107,7 +104,7 @@ export function useStore(): StoreContextValue {
   const context = useContext(StoreContext);
 
   if (!context) {
-    throw new Error("useStore must be used within a StoreProvider");
+    throw new Error('useStore must be used within a StoreProvider');
   }
 
   return context;

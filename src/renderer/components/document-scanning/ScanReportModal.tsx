@@ -1,4 +1,3 @@
-
 /**
  * Scan Report Modal Component
  *
@@ -18,26 +17,18 @@
  * @security SEC-015: FILE_SECURITY - MIME type and magic byte validation on backend
  */
 
-import { useState, useRef, useCallback } from "react";
+import { useState, useRef, useCallback } from 'react';
 import {
   Dialog,
   DialogContent,
   DialogDescription,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Button } from "@/components/ui/button";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import {
-  Camera,
-  Upload,
-  RotateCcw,
-  Loader2,
-  AlertCircle,
-  Check,
-  X,
-} from "lucide-react";
-import { cn } from "@/lib/utils";
+} from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Camera, Upload, RotateCcw, Loader2, AlertCircle, Check, X } from 'lucide-react';
+import { cn } from '@/lib/utils';
 
 // Types from document-scanning.types.ts
 export interface LotteryWizardFields {
@@ -78,10 +69,7 @@ interface ScanReportModalProps {
   /** Business date for validation */
   businessDate: string;
   /** Document type being scanned */
-  documentType:
-    | "LOTTERY_SALES_REPORT"
-    | "LOTTERY_INVOICE_REPORT"
-    | "GAMING_REPORT";
+  documentType: 'LOTTERY_SALES_REPORT' | 'LOTTERY_INVOICE_REPORT' | 'GAMING_REPORT';
   /** Callback when scan completes successfully with verified data */
   onScanComplete: (wizardFields: LotteryWizardFields) => void;
   /** Optional shift context */
@@ -93,16 +81,15 @@ interface ScanReportModalProps {
 }
 
 // Allowed MIME types matching backend validation
-const ALLOWED_MIME_TYPES = ["image/jpeg", "image/png", "image/webp"] as const;
+const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
 // Maximum file size (10MB)
 const MAX_FILE_SIZE = 10 * 1024 * 1024;
 
 // Backend URL for API calls
-const BACKEND_URL =
-  process.env.NEXT_PUBLIC_BACKEND_URL || "http://localhost:3001";
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:3001';
 
-type ScanState = "idle" | "previewing" | "processing" | "verifying" | "error";
+type ScanState = 'idle' | 'previewing' | 'processing' | 'verifying' | 'error';
 
 export function ScanReportModal({
   open,
@@ -116,7 +103,7 @@ export function ScanReportModal({
   lotteryDayId,
 }: ScanReportModalProps) {
   // State
-  const [state, setState] = useState<ScanState>("idle");
+  const [state, setState] = useState<ScanState>('idle');
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [scanResult, setScanResult] = useState<DocumentScanResult | null>(null);
@@ -130,7 +117,7 @@ export function ScanReportModal({
    * Reset modal state to initial values
    */
   const resetState = useCallback(() => {
-    setState("idle");
+    setState('idle');
     setSelectedFile(null);
     setPreviewUrl(null);
     setScanResult(null);
@@ -155,11 +142,7 @@ export function ScanReportModal({
    */
   const validateFile = useCallback((file: File): string | null => {
     // Check MIME type
-    if (
-      !ALLOWED_MIME_TYPES.includes(
-        file.type as (typeof ALLOWED_MIME_TYPES)[number],
-      )
-    ) {
+    if (!ALLOWED_MIME_TYPES.includes(file.type as (typeof ALLOWED_MIME_TYPES)[number])) {
       return `Invalid file type: ${file.type}. Allowed types: JPEG, PNG, WebP`;
     }
 
@@ -183,7 +166,7 @@ export function ScanReportModal({
       const validationError = validateFile(file);
       if (validationError) {
         setErrorMessage(validationError);
-        setState("error");
+        setState('error');
         return;
       }
 
@@ -191,13 +174,13 @@ export function ScanReportModal({
       const url = URL.createObjectURL(file);
       setPreviewUrl(url);
       setSelectedFile(file);
-      setState("previewing");
+      setState('previewing');
       setErrorMessage(null);
 
       // Reset input so same file can be selected again
-      event.target.value = "";
+      event.target.value = '';
     },
-    [validateFile],
+    [validateFile]
   );
 
   /**
@@ -210,7 +193,7 @@ export function ScanReportModal({
       reader.onload = () => {
         // Remove data URL prefix to get pure base64
         const result = reader.result as string;
-        const base64 = result.split(",")[1];
+        const base64 = result.split(',')[1];
         resolve(base64);
       };
       reader.onerror = (error) => reject(error);
@@ -223,7 +206,7 @@ export function ScanReportModal({
   const handleProcessDocument = useCallback(async () => {
     if (!selectedFile) return;
 
-    setState("processing");
+    setState('processing');
     setErrorMessage(null);
 
     try {
@@ -232,11 +215,11 @@ export function ScanReportModal({
 
       // Submit to API
       const response = await fetch(`${BACKEND_URL}/api/documents/scan`, {
-        method: "POST",
+        method: 'POST',
         headers: {
-          "Content-Type": "application/json",
+          'Content-Type': 'application/json',
         },
-        credentials: "include", // Include auth cookies
+        credentials: 'include', // Include auth cookies
         body: JSON.stringify({
           storeId,
           documentType,
@@ -254,23 +237,21 @@ export function ScanReportModal({
       const result = await response.json();
 
       if (!response.ok) {
-        throw new Error(result.message || "Failed to process document");
+        throw new Error(result.message || 'Failed to process document');
       }
 
       // Check if OCR succeeded
       if (!result.success) {
-        throw new Error(result.message || "Document scanning failed");
+        throw new Error(result.message || 'Document scanning failed');
       }
 
       // Store result and move to verification
       setScanResult(result);
-      setState("verifying");
+      setState('verifying');
     } catch (error) {
-      console.error("[ScanReportModal] OCR processing error:", error);
-      setErrorMessage(
-        error instanceof Error ? error.message : "An unexpected error occurred",
-      );
-      setState("error");
+      console.error('[ScanReportModal] OCR processing error:', error);
+      setErrorMessage(error instanceof Error ? error.message : 'An unexpected error occurred');
+      setState('error');
     }
   }, [
     selectedFile,
@@ -291,13 +272,13 @@ export function ScanReportModal({
       // Submit verification to backend (for audit trail)
       if (scanResult) {
         fetch(`${BACKEND_URL}/api/documents/verify`, {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          credentials: "include",
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             documentId: scanResult.documentId,
             confirmedWizardFields: wizardFields,
-            action: "accept",
+            action: 'accept',
           }),
         }).catch(console.error); // Fire and forget for audit
       }
@@ -306,7 +287,7 @@ export function ScanReportModal({
       onScanComplete(wizardFields);
       handleClose();
     },
-    [scanResult, onScanComplete, handleClose],
+    [scanResult, onScanComplete, handleClose]
   );
 
   /**
@@ -316,9 +297,9 @@ export function ScanReportModal({
     // Submit rejection to backend (for audit trail)
     if (scanResult) {
       fetch(`${BACKEND_URL}/api/documents/verify`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        credentials: "include",
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
         body: JSON.stringify({
           documentId: scanResult.documentId,
           confirmedWizardFields: {
@@ -326,8 +307,8 @@ export function ScanReportModal({
             onlineCashes: 0,
             instantCashes: 0,
           },
-          action: "reject",
-          rejectionReason: "User rejected OCR results",
+          action: 'reject',
+          rejectionReason: 'User rejected OCR results',
         }),
       }).catch(console.error);
     }
@@ -339,7 +320,7 @@ export function ScanReportModal({
   // Render content based on state
   const renderContent = () => {
     switch (state) {
-      case "idle":
+      case 'idle':
         return (
           <div className="space-y-4">
             <div className="text-center py-8 border-2 border-dashed rounded-lg">
@@ -393,15 +374,14 @@ export function ScanReportModal({
             <Alert>
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                For best results, ensure the report is well-lit and the text is
-                clearly visible. The report date will be validated against:{" "}
-                <strong>{businessDate}</strong>
+                For best results, ensure the report is well-lit and the text is clearly visible. The
+                report date will be validated against: <strong>{businessDate}</strong>
               </AlertDescription>
             </Alert>
           </div>
         );
 
-      case "previewing":
+      case 'previewing':
         return (
           <div className="space-y-4">
             {/* Image preview */}
@@ -426,18 +406,11 @@ export function ScanReportModal({
 
             {/* Actions */}
             <div className="flex justify-center gap-4">
-              <Button
-                variant="outline"
-                onClick={resetState}
-                data-testid="scan-retake-btn"
-              >
+              <Button variant="outline" onClick={resetState} data-testid="scan-retake-btn">
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Retake
               </Button>
-              <Button
-                onClick={handleProcessDocument}
-                data-testid="scan-process-btn"
-              >
+              <Button onClick={handleProcessDocument} data-testid="scan-process-btn">
                 <Check className="mr-2 h-4 w-4" />
                 Process Document
               </Button>
@@ -445,7 +418,7 @@ export function ScanReportModal({
           </div>
         );
 
-      case "processing":
+      case 'processing':
         return (
           <div className="py-12 text-center">
             <Loader2 className="mx-auto h-12 w-12 animate-spin text-primary mb-4" />
@@ -456,7 +429,7 @@ export function ScanReportModal({
           </div>
         );
 
-      case "verifying":
+      case 'verifying':
         return (
           <OCRVerificationView
             scanResult={scanResult!}
@@ -466,23 +439,18 @@ export function ScanReportModal({
           />
         );
 
-      case "error":
+      case 'error':
         return (
           <div className="space-y-4">
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertDescription>
-                {errorMessage ||
-                  "An error occurred while processing the document"}
+                {errorMessage || 'An error occurred while processing the document'}
               </AlertDescription>
             </Alert>
 
             <div className="flex justify-center gap-4">
-              <Button
-                variant="outline"
-                onClick={resetState}
-                data-testid="scan-retry-btn"
-              >
+              <Button variant="outline" onClick={resetState} data-testid="scan-retry-btn">
                 <RotateCcw className="mr-2 h-4 w-4" />
                 Try Again
               </Button>
@@ -499,17 +467,17 @@ export function ScanReportModal({
     <Dialog open={open} onOpenChange={handleClose}>
       <DialogContent
         className={cn(
-          "max-w-2xl",
+          'max-w-2xl',
           // Use wider modal in verification state for side-by-side comparison
-          state === "verifying" && "max-w-4xl",
+          state === 'verifying' && 'max-w-4xl'
         )}
       >
         <DialogHeader>
           <DialogTitle>Scan Lottery Report</DialogTitle>
           <DialogDescription>
-            {state === "verifying"
-              ? "Review and confirm the extracted data"
-              : "Capture or upload your lottery sales report for automatic data extraction"}
+            {state === 'verifying'
+              ? 'Review and confirm the extracted data'
+              : 'Capture or upload your lottery sales report for automatic data extraction'}
           </DialogDescription>
         </DialogHeader>
 
@@ -546,8 +514,7 @@ function OCRVerificationView({
   };
 
   // Editable state for corrections
-  const [editedFields, setEditedFields] =
-    useState<LotteryWizardFields>(extractedFields);
+  const [editedFields, setEditedFields] = useState<LotteryWizardFields>(extractedFields);
 
   // Field confidence scores
   const fieldConfidence = scanResult.ocrResult?.fieldConfidence ?? {};
@@ -562,11 +529,8 @@ function OCRVerificationView({
   /**
    * Handle field edit
    */
-  const handleFieldChange = (
-    field: keyof LotteryWizardFields,
-    value: string,
-  ) => {
-    const numValue = parseFloat(value.replace(/[^0-9.]/g, "")) || 0;
+  const handleFieldChange = (field: keyof LotteryWizardFields, value: string) => {
+    const numValue = parseFloat(value.replace(/[^0-9.]/g, '')) || 0;
     setEditedFields((prev) => ({ ...prev, [field]: numValue }));
   };
 
@@ -574,18 +538,18 @@ function OCRVerificationView({
    * Get confidence color class
    */
   const getConfidenceColor = (confidence: number) => {
-    if (confidence >= 80) return "text-green-600";
-    if (confidence >= 50) return "text-amber-600";
-    return "text-red-600";
+    if (confidence >= 80) return 'text-green-600';
+    if (confidence >= 50) return 'text-amber-600';
+    return 'text-red-600';
   };
 
   /**
    * Format currency for display
    */
   const formatCurrency = (value: number) => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
     }).format(value);
   };
 
@@ -632,9 +596,7 @@ function OCRVerificationView({
             )}
           </div>
           <div className="flex items-center justify-between text-xs text-muted-foreground">
-            <span>
-              Confidence: {scanResult.ocrResult?.confidence?.toFixed(0) ?? 0}%
-            </span>
+            <span>Confidence: {scanResult.ocrResult?.confidence?.toFixed(0) ?? 0}%</span>
             <span>Processed in {scanResult.processingTimeMs}ms</span>
           </div>
         </div>
@@ -648,20 +610,15 @@ function OCRVerificationView({
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Online Sales</label>
                 <span
-                  className={cn(
-                    "text-xs",
-                    getConfidenceColor(fieldConfidence.onlineSales ?? 0),
-                  )}
+                  className={cn('text-xs', getConfidenceColor(fieldConfidence.onlineSales ?? 0))}
                 >
                   {fieldConfidence.onlineSales?.toFixed(0) ?? 0}% confident
                 </span>
               </div>
               <input
                 type="text"
-                value={editedFields.onlineSales || ""}
-                onChange={(e) =>
-                  handleFieldChange("onlineSales", e.target.value)
-                }
+                value={editedFields.onlineSales || ''}
+                onChange={(e) => handleFieldChange('onlineSales', e.target.value)}
                 className="w-full px-3 py-2 border rounded-md font-mono text-right"
                 data-testid="verify-online-sales"
               />
@@ -672,20 +629,15 @@ function OCRVerificationView({
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Online Cashes</label>
                 <span
-                  className={cn(
-                    "text-xs",
-                    getConfidenceColor(fieldConfidence.onlineCashes ?? 0),
-                  )}
+                  className={cn('text-xs', getConfidenceColor(fieldConfidence.onlineCashes ?? 0))}
                 >
                   {fieldConfidence.onlineCashes?.toFixed(0) ?? 0}% confident
                 </span>
               </div>
               <input
                 type="text"
-                value={editedFields.onlineCashes || ""}
-                onChange={(e) =>
-                  handleFieldChange("onlineCashes", e.target.value)
-                }
+                value={editedFields.onlineCashes || ''}
+                onChange={(e) => handleFieldChange('onlineCashes', e.target.value)}
                 className="w-full px-3 py-2 border rounded-md font-mono text-right"
                 data-testid="verify-online-cashes"
               />
@@ -696,20 +648,15 @@ function OCRVerificationView({
               <div className="flex items-center justify-between">
                 <label className="text-sm font-medium">Instant Cashes</label>
                 <span
-                  className={cn(
-                    "text-xs",
-                    getConfidenceColor(fieldConfidence.instantCashes ?? 0),
-                  )}
+                  className={cn('text-xs', getConfidenceColor(fieldConfidence.instantCashes ?? 0))}
                 >
                   {fieldConfidence.instantCashes?.toFixed(0) ?? 0}% confident
                 </span>
               </div>
               <input
                 type="text"
-                value={editedFields.instantCashes || ""}
-                onChange={(e) =>
-                  handleFieldChange("instantCashes", e.target.value)
-                }
+                value={editedFields.instantCashes || ''}
+                onChange={(e) => handleFieldChange('instantCashes', e.target.value)}
                 className="w-full px-3 py-2 border rounded-md font-mono text-right"
                 data-testid="verify-instant-cashes"
               />
@@ -719,16 +666,12 @@ function OCRVerificationView({
             <div className="border-t pt-3 mt-3">
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total Sales</span>
-                <span className="font-medium">
-                  {formatCurrency(editedFields.onlineSales)}
-                </span>
+                <span className="font-medium">{formatCurrency(editedFields.onlineSales)}</span>
               </div>
               <div className="flex justify-between text-sm">
                 <span className="text-muted-foreground">Total Cashes</span>
                 <span className="font-medium text-destructive">
-                  {formatCurrency(
-                    -(editedFields.onlineCashes + editedFields.instantCashes),
-                  )}
+                  {formatCurrency(-(editedFields.onlineCashes + editedFields.instantCashes))}
                 </span>
               </div>
             </div>
@@ -738,18 +681,11 @@ function OCRVerificationView({
 
       {/* Actions */}
       <div className="flex justify-end gap-4 pt-4 border-t">
-        <Button
-          variant="outline"
-          onClick={onReject}
-          data-testid="verify-reject-btn"
-        >
+        <Button variant="outline" onClick={onReject} data-testid="verify-reject-btn">
           <X className="mr-2 h-4 w-4" />
           Reject & Retry
         </Button>
-        <Button
-          onClick={() => onConfirm(editedFields)}
-          data-testid="verify-confirm-btn"
-        >
+        <Button onClick={() => onConfirm(editedFields)} data-testid="verify-confirm-btn">
           <Check className="mr-2 h-4 w-4" />
           Confirm Values
         </Button>

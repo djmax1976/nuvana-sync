@@ -10,13 +10,13 @@
  * - Credential handling (httpOnly cookies)
  */
 
-import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
-import apiClient from "./client";
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import apiClient from './client';
 
 /**
  * Store status values
  */
-export type StoreStatus = "ACTIVE" | "INACTIVE" | "CLOSED";
+export type StoreStatus = 'ACTIVE' | 'INACTIVE' | 'CLOSED';
 
 /**
  * Location JSON structure
@@ -83,14 +83,8 @@ export type StoreManager = StoreLogin;
 export interface TerminalInput {
   name: string;
   device_id?: string;
-  connection_type?: "NETWORK" | "API" | "WEBHOOK" | "FILE" | "MANUAL";
-  vendor_type?:
-    | "GENERIC"
-    | "SQUARE"
-    | "CLOVER"
-    | "TOAST"
-    | "LIGHTSPEED"
-    | "CUSTOM";
+  connection_type?: 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
+  vendor_type?: 'GENERIC' | 'SQUARE' | 'CLOVER' | 'TOAST' | 'LIGHTSPEED' | 'CUSTOM';
   connection_config?: Record<string, unknown>;
 }
 
@@ -183,7 +177,7 @@ export interface StoreWithCompany extends Store {
  * Supports formats like: America/New_York, Europe/London, UTC, GMT+5, GMT-3
  */
 function validateTimezone(timezone: string): boolean {
-  if (timezone === "UTC") {
+  if (timezone === 'UTC') {
     return true;
   }
   if (/^GMT[+-]\d{1,2}$/.test(timezone)) {
@@ -194,7 +188,7 @@ function validateTimezone(timezone: string): boolean {
     return false;
   }
   // Split and validate each segment instead of using nested quantifiers
-  const parts = timezone.split("/");
+  const parts = timezone.split('/');
   if (parts.length < 2 || parts.length > 3) {
     return false;
   }
@@ -223,7 +217,7 @@ export async function getAllStores(params?: ListStoresParams): Promise<{
   const response = await apiClient.get<{
     data: StoreWithCompany[];
     meta: { total: number; limit: number; offset: number };
-  }>("/api/stores", { params });
+  }>('/api/stores', { params });
   return response.data;
 }
 
@@ -242,7 +236,7 @@ export async function getClientStores(params?: ListStoresParams): Promise<{
     success: boolean;
     data: StoreWithCompany[];
     meta: { total: number; limit: number; offset: number };
-  }>("/api/client/stores", { params });
+  }>('/api/client/stores', { params });
   return response.data;
 }
 
@@ -254,16 +248,15 @@ export async function getClientStores(params?: ListStoresParams): Promise<{
  */
 export async function getStoresByCompany(
   companyId: string,
-  params?: ListStoresParams,
+  params?: ListStoresParams
 ): Promise<ListStoresResponse> {
   if (!companyId) {
-    throw new Error("Company ID is required");
+    throw new Error('Company ID is required');
   }
 
-  const response = await apiClient.get<ListStoresResponse>(
-    `/api/companies/${companyId}/stores`,
-    { params },
-  );
+  const response = await apiClient.get<ListStoresResponse>(`/api/companies/${companyId}/stores`, {
+    params,
+  });
   return response.data;
 }
 
@@ -274,7 +267,7 @@ export async function getStoresByCompany(
  */
 export async function getStoreById(storeId: string): Promise<Store> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   const response = await apiClient.get<Store>(`/api/stores/${storeId}`);
@@ -287,36 +280,28 @@ export async function getStoreById(storeId: string): Promise<Store> {
  * @param data - Store creation data
  * @returns Created store
  */
-export async function createStore(
-  companyId: string,
-  data: CreateStoreInput,
-): Promise<Store> {
+export async function createStore(companyId: string, data: CreateStoreInput): Promise<Store> {
   if (!companyId) {
-    throw new Error("Company ID is required");
+    throw new Error('Company ID is required');
   }
 
   if (!data.name || data.name.trim().length === 0) {
-    throw new Error("Store name is required");
+    throw new Error('Store name is required');
   }
 
   if (data.name.length > 255) {
-    throw new Error("Store name must be 255 characters or less");
+    throw new Error('Store name must be 255 characters or less');
   }
 
   if (data.timezone && !validateTimezone(data.timezone)) {
-    throw new Error(
-      "Timezone must be in IANA format (e.g., America/New_York, Europe/London)",
-    );
+    throw new Error('Timezone must be in IANA format (e.g., America/New_York, Europe/London)');
   }
 
   if (data.location_json) {
     validateLocationJson(data.location_json);
   }
 
-  const response = await apiClient.post<Store>(
-    `/api/companies/${companyId}/stores`,
-    data,
-  );
+  const response = await apiClient.post<Store>(`/api/companies/${companyId}/stores`, data);
   return response.data;
 }
 
@@ -326,26 +311,21 @@ export async function createStore(
  * @param data - Store update data
  * @returns Updated store
  */
-export async function updateStore(
-  storeId: string,
-  data: UpdateStoreInput,
-): Promise<Store> {
+export async function updateStore(storeId: string, data: UpdateStoreInput): Promise<Store> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (data.name !== undefined && data.name.trim().length === 0) {
-    throw new Error("Store name cannot be empty");
+    throw new Error('Store name cannot be empty');
   }
 
   if (data.name !== undefined && data.name.length > 255) {
-    throw new Error("Store name must be 255 characters or less");
+    throw new Error('Store name must be 255 characters or less');
   }
 
   if (data.timezone && !validateTimezone(data.timezone)) {
-    throw new Error(
-      "Timezone must be in IANA format (e.g., America/New_York, Europe/London)",
-    );
+    throw new Error('Timezone must be in IANA format (e.g., America/New_York, Europe/London)');
   }
 
   if (data.location_json) {
@@ -362,7 +342,7 @@ export async function updateStore(
  */
 export async function deleteStore(storeId: string): Promise<void> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   await apiClient.delete(`/api/stores/${storeId}`);
@@ -374,13 +354,12 @@ export async function deleteStore(storeId: string): Promise<void> {
  * Query key factory for store queries
  */
 export const storeKeys = {
-  all: ["stores"] as const,
-  lists: () => [...storeKeys.all, "list"] as const,
-  listAll: (params?: ListStoresParams) =>
-    [...storeKeys.lists(), "all", params] as const,
+  all: ['stores'] as const,
+  lists: () => [...storeKeys.all, 'list'] as const,
+  listAll: (params?: ListStoresParams) => [...storeKeys.lists(), 'all', params] as const,
   list: (companyId: string, params?: ListStoresParams) =>
     [...storeKeys.lists(), companyId, params] as const,
-  details: () => [...storeKeys.all, "detail"] as const,
+  details: () => [...storeKeys.all, 'detail'] as const,
   detail: (id: string) => [...storeKeys.details(), id] as const,
 };
 
@@ -390,15 +369,12 @@ export const storeKeys = {
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with all stores data
  */
-export function useAllStores(
-  params?: ListStoresParams,
-  options?: { enabled?: boolean },
-) {
+export function useAllStores(params?: ListStoresParams, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: storeKeys.listAll(params),
     queryFn: () => getAllStores(params),
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
 }
@@ -425,15 +401,12 @@ export function useAllStores(
  * const stores = storesData?.data || [];
  * ```
  */
-export function useStores(
-  params?: ListStoresParams,
-  options?: { enabled?: boolean },
-) {
+export function useStores(params?: ListStoresParams, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: [...storeKeys.lists(), "client", params] as const,
+    queryKey: [...storeKeys.lists(), 'client', params] as const,
     queryFn: () => getClientStores(params),
     enabled: options?.enabled !== false,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 30000, // Consider data fresh for 30 seconds
   });
@@ -449,13 +422,13 @@ export function useStores(
 export function useStoresByCompany(
   companyId: string | undefined,
   params?: ListStoresParams,
-  options?: { enabled?: boolean },
+  options?: { enabled?: boolean }
 ) {
   return useQuery({
-    queryKey: storeKeys.list(companyId || "", params),
+    queryKey: storeKeys.list(companyId || '', params),
     queryFn: () => getStoresByCompany(companyId!, params),
     enabled: options?.enabled !== false && !!companyId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
 }
@@ -466,12 +439,9 @@ export function useStoresByCompany(
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with store data
  */
-export function useStore(
-  storeId: string | undefined,
-  options?: { enabled?: boolean },
-) {
+export function useStore(storeId: string | undefined, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: storeKeys.detail(storeId || ""),
+    queryKey: storeKeys.detail(storeId || ''),
     queryFn: () => getStoreById(storeId!),
     enabled: options?.enabled !== false && !!storeId,
   });
@@ -485,18 +455,13 @@ export function useCreateStore() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      companyId,
-      data,
-    }: {
-      companyId: string;
-      data: CreateStoreInput;
-    }) => createStore(companyId, data),
+    mutationFn: ({ companyId, data }: { companyId: string; data: CreateStoreInput }) =>
+      createStore(companyId, data),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists refresh
       queryClient.invalidateQueries({
         queryKey: storeKeys.all,
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -510,18 +475,13 @@ export function useUpdateStore() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      data,
-    }: {
-      storeId: string;
-      data: UpdateStoreInput;
-    }) => updateStore(storeId, data),
+    mutationFn: ({ storeId, data }: { storeId: string; data: UpdateStoreInput }) =>
+      updateStore(storeId, data),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists and details refresh
       queryClient.invalidateQueries({
         queryKey: storeKeys.all,
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -555,26 +515,21 @@ export interface StoreConfigurationInput {
  */
 export async function updateStoreConfiguration(
   storeId: string,
-  config: StoreConfigurationInput,
+  config: StoreConfigurationInput
 ): Promise<Store> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (config.timezone && !validateTimezone(config.timezone)) {
-    throw new Error(
-      "Timezone must be in IANA format (e.g., America/New_York, Europe/London)",
-    );
+    throw new Error('Timezone must be in IANA format (e.g., America/New_York, Europe/London)');
   }
 
   if (config.location) {
     validateLocationJson(config.location);
   }
 
-  const response = await apiClient.put<Store>(
-    `/api/stores/${storeId}/configuration`,
-    config,
-  );
+  const response = await apiClient.put<Store>(`/api/stores/${storeId}/configuration`, config);
   return response.data;
 }
 
@@ -586,18 +541,13 @@ export function useUpdateStoreConfiguration() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      config,
-    }: {
-      storeId: string;
-      config: StoreConfigurationInput;
-    }) => updateStoreConfiguration(storeId, config),
+    mutationFn: ({ storeId, config }: { storeId: string; config: StoreConfigurationInput }) =>
+      updateStoreConfiguration(storeId, config),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists and details refresh
       queryClient.invalidateQueries({
         queryKey: storeKeys.all,
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -611,18 +561,13 @@ export function useDeleteStore() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      companyId,
-    }: {
-      storeId: string;
-      companyId: string;
-    }) => deleteStore(storeId),
+    mutationFn: ({ storeId, companyId }: { storeId: string; companyId: string }) =>
+      deleteStore(storeId),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists refresh
       queryClient.invalidateQueries({
         queryKey: storeKeys.all,
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -644,18 +589,12 @@ export interface TerminalWithStatus {
   created_at: string;
   updated_at: string;
   // Connection fields (Story 4.82)
-  connection_type?: "NETWORK" | "API" | "WEBHOOK" | "FILE" | "MANUAL";
+  connection_type?: 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
   connection_config?: Record<string, unknown> | null;
-  vendor_type?:
-    | "GENERIC"
-    | "SQUARE"
-    | "CLOVER"
-    | "TOAST"
-    | "LIGHTSPEED"
-    | "CUSTOM";
-  terminal_status?: "ACTIVE" | "INACTIVE" | "PENDING" | "ERROR";
+  vendor_type?: 'GENERIC' | 'SQUARE' | 'CLOVER' | 'TOAST' | 'LIGHTSPEED' | 'CUSTOM';
+  terminal_status?: 'ACTIVE' | 'INACTIVE' | 'PENDING' | 'ERROR';
   last_sync_at?: string | null;
-  sync_status?: "NEVER" | "SUCCESS" | "FAILED" | "IN_PROGRESS";
+  sync_status?: 'NEVER' | 'SUCCESS' | 'FAILED' | 'IN_PROGRESS';
 }
 
 /**
@@ -664,16 +603,12 @@ export interface TerminalWithStatus {
  * @param storeId - Store UUID
  * @returns Array of terminals with has_active_shift boolean flag
  */
-export async function getStoreTerminals(
-  storeId: string,
-): Promise<TerminalWithStatus[]> {
+export async function getStoreTerminals(storeId: string): Promise<TerminalWithStatus[]> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
-  const response = await apiClient.get<TerminalWithStatus[]>(
-    `/api/stores/${storeId}/terminals`,
-  );
+  const response = await apiClient.get<TerminalWithStatus[]>(`/api/stores/${storeId}/terminals`);
   return response.data;
 }
 
@@ -684,15 +619,12 @@ export async function getStoreTerminals(
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with terminals data
  */
-export function useStoreTerminals(
-  storeId: string | undefined,
-  options?: { enabled?: boolean },
-) {
+export function useStoreTerminals(storeId: string | undefined, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: [...storeKeys.details(), storeId || "", "terminals"],
+    queryKey: [...storeKeys.details(), storeId || '', 'terminals'],
     queryFn: () => getStoreTerminals(storeId!),
     enabled: options?.enabled !== false && !!storeId,
-    refetchOnMount: "always",
+    refetchOnMount: 'always',
     refetchOnWindowFocus: true,
   });
 }
@@ -717,15 +649,9 @@ export interface Terminal {
 export interface CreateTerminalInput {
   name: string;
   device_id?: string;
-  connection_type?: "NETWORK" | "API" | "WEBHOOK" | "FILE" | "MANUAL";
+  connection_type?: 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
   connection_config?: Record<string, unknown> | null;
-  vendor_type?:
-    | "GENERIC"
-    | "SQUARE"
-    | "CLOVER"
-    | "TOAST"
-    | "LIGHTSPEED"
-    | "CUSTOM";
+  vendor_type?: 'GENERIC' | 'SQUARE' | 'CLOVER' | 'TOAST' | 'LIGHTSPEED' | 'CUSTOM';
 }
 
 /**
@@ -735,15 +661,9 @@ export interface CreateTerminalInput {
 export interface UpdateTerminalInput {
   name?: string;
   device_id?: string;
-  connection_type?: "NETWORK" | "API" | "WEBHOOK" | "FILE" | "MANUAL";
+  connection_type?: 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
   connection_config?: Record<string, unknown> | null;
-  vendor_type?:
-    | "GENERIC"
-    | "SQUARE"
-    | "CLOVER"
-    | "TOAST"
-    | "LIGHTSPEED"
-    | "CUSTOM";
+  vendor_type?: 'GENERIC' | 'SQUARE' | 'CLOVER' | 'TOAST' | 'LIGHTSPEED' | 'CUSTOM';
 }
 
 /**
@@ -754,24 +674,21 @@ export interface UpdateTerminalInput {
  */
 export async function createTerminal(
   storeId: string,
-  data: CreateTerminalInput,
+  data: CreateTerminalInput
 ): Promise<Terminal> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!data.name || data.name.trim().length === 0) {
-    throw new Error("Terminal name is required");
+    throw new Error('Terminal name is required');
   }
 
   if (data.name.length > 100) {
-    throw new Error("Terminal name must be 100 characters or less");
+    throw new Error('Terminal name must be 100 characters or less');
   }
 
-  const response = await apiClient.post<Terminal>(
-    `/api/stores/${storeId}/terminals`,
-    data,
-  );
+  const response = await apiClient.post<Terminal>(`/api/stores/${storeId}/terminals`, data);
   return response.data;
 }
 
@@ -785,27 +702,27 @@ export async function createTerminal(
 export async function updateTerminal(
   storeId: string,
   terminalId: string,
-  data: UpdateTerminalInput,
+  data: UpdateTerminalInput
 ): Promise<Terminal> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!terminalId) {
-    throw new Error("Terminal ID is required");
+    throw new Error('Terminal ID is required');
   }
 
   if (data.name !== undefined && data.name.trim().length === 0) {
-    throw new Error("Terminal name cannot be empty");
+    throw new Error('Terminal name cannot be empty');
   }
 
   if (data.name !== undefined && data.name.length > 100) {
-    throw new Error("Terminal name must be 100 characters or less");
+    throw new Error('Terminal name must be 100 characters or less');
   }
 
   const response = await apiClient.put<Terminal>(
     `/api/stores/${storeId}/terminals/${terminalId}`,
-    data,
+    data
   );
   return response.data;
 }
@@ -815,16 +732,13 @@ export async function updateTerminal(
  * @param storeId - Store UUID
  * @param terminalId - Terminal UUID
  */
-export async function deleteTerminal(
-  storeId: string,
-  terminalId: string,
-): Promise<void> {
+export async function deleteTerminal(storeId: string, terminalId: string): Promise<void> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!terminalId) {
-    throw new Error("Terminal ID is required");
+    throw new Error('Terminal ID is required');
   }
 
   await apiClient.delete(`/api/stores/${storeId}/terminals/${terminalId}`);
@@ -838,23 +752,18 @@ export function useCreateTerminal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      data,
-    }: {
-      storeId: string;
-      data: CreateTerminalInput;
-    }) => createTerminal(storeId, data),
+    mutationFn: ({ storeId, data }: { storeId: string; data: CreateTerminalInput }) =>
+      createTerminal(storeId, data),
     onSuccess: (_, variables) => {
       // Invalidate terminals query for the store
       queryClient.invalidateQueries({
-        queryKey: [...storeKeys.details(), variables.storeId, "terminals"],
-        refetchType: "all",
+        queryKey: [...storeKeys.details(), variables.storeId, 'terminals'],
+        refetchType: 'all',
       });
       // Also invalidate store details to refresh terminal count if needed
       queryClient.invalidateQueries({
         queryKey: storeKeys.detail(variables.storeId),
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -880,8 +789,8 @@ export function useUpdateTerminal() {
     onSuccess: (_, variables) => {
       // Invalidate terminals query for the store
       queryClient.invalidateQueries({
-        queryKey: [...storeKeys.details(), variables.storeId, "terminals"],
-        refetchType: "all",
+        queryKey: [...storeKeys.details(), variables.storeId, 'terminals'],
+        refetchType: 'all',
       });
     },
   });
@@ -895,23 +804,18 @@ export function useDeleteTerminal() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      storeId,
-      terminalId,
-    }: {
-      storeId: string;
-      terminalId: string;
-    }) => deleteTerminal(storeId, terminalId),
+    mutationFn: ({ storeId, terminalId }: { storeId: string; terminalId: string }) =>
+      deleteTerminal(storeId, terminalId),
     onSuccess: (_, variables) => {
       // Invalidate terminals query for the store
       queryClient.invalidateQueries({
-        queryKey: [...storeKeys.details(), variables.storeId, "terminals"],
-        refetchType: "all",
+        queryKey: [...storeKeys.details(), variables.storeId, 'terminals'],
+        refetchType: 'all',
       });
       // Also invalidate store details to refresh terminal count if needed
       queryClient.invalidateQueries({
         queryKey: storeKeys.detail(variables.storeId),
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -924,21 +828,17 @@ export function useDeleteTerminal() {
  * @param storeId - Store UUID
  * @returns Store login info or null if no login credential exists
  */
-export async function getStoreLogin(
-  storeId: string,
-): Promise<StoreLogin | null> {
+export async function getStoreLogin(storeId: string): Promise<StoreLogin | null> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   try {
-    const response = await apiClient.get<StoreLogin>(
-      `/api/stores/${storeId}/login`,
-    );
+    const response = await apiClient.get<StoreLogin>(`/api/stores/${storeId}/login`);
     return response.data;
   } catch (error: any) {
     // Return null if no login found (404)
-    if (error.message?.includes("does not have a login")) {
+    if (error.message?.includes('does not have a login')) {
       return null;
     }
     throw error;
@@ -958,24 +858,21 @@ export const getStoreManager = getStoreLogin;
  */
 export async function createStoreLogin(
   storeId: string,
-  data: { email: string; password: string },
+  data: { email: string; password: string }
 ): Promise<StoreLogin> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!data.email || data.email.trim().length === 0) {
-    throw new Error("Email is required");
+    throw new Error('Email is required');
   }
 
   if (!data.password || data.password.length < 8) {
-    throw new Error("Password must be at least 8 characters");
+    throw new Error('Password must be at least 8 characters');
   }
 
-  const response = await apiClient.post<StoreLogin>(
-    `/api/stores/${storeId}/login`,
-    data,
-  );
+  const response = await apiClient.post<StoreLogin>(`/api/stores/${storeId}/login`, data);
   return response.data;
 }
 
@@ -992,20 +889,17 @@ export const createStoreManager = createStoreLogin;
  */
 export async function updateStoreLogin(
   storeId: string,
-  data: { email?: string; password?: string },
+  data: { email?: string; password?: string }
 ): Promise<StoreLogin> {
   if (!storeId) {
-    throw new Error("Store ID is required");
+    throw new Error('Store ID is required');
   }
 
   if (!data.email && !data.password) {
-    throw new Error("At least one of email or password must be provided");
+    throw new Error('At least one of email or password must be provided');
   }
 
-  const response = await apiClient.put<StoreLogin>(
-    `/api/stores/${storeId}/login`,
-    data,
-  );
+  const response = await apiClient.put<StoreLogin>(`/api/stores/${storeId}/login`, data);
   return response.data;
 }
 
@@ -1020,12 +914,9 @@ export const updateStoreManager = updateStoreLogin;
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with login data
  */
-export function useStoreLogin(
-  storeId: string | undefined,
-  options?: { enabled?: boolean },
-) {
+export function useStoreLogin(storeId: string | undefined, options?: { enabled?: boolean }) {
   return useQuery({
-    queryKey: [...storeKeys.details(), storeId || "", "login"],
+    queryKey: [...storeKeys.details(), storeId || '', 'login'],
     queryFn: () => getStoreLogin(storeId!),
     enabled: options?.enabled !== false && !!storeId,
     refetchOnMount: true,
@@ -1055,13 +946,13 @@ export function useCreateStoreLogin() {
     onSuccess: (_, variables) => {
       // Invalidate login query
       queryClient.invalidateQueries({
-        queryKey: [...storeKeys.details(), variables.storeId, "login"],
-        refetchType: "all",
+        queryKey: [...storeKeys.details(), variables.storeId, 'login'],
+        refetchType: 'all',
       });
       // Also invalidate store details
       queryClient.invalidateQueries({
         queryKey: storeKeys.detail(variables.storeId),
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });
@@ -1090,8 +981,8 @@ export function useUpdateStoreLogin() {
     onSuccess: (_, variables) => {
       // Invalidate login query
       queryClient.invalidateQueries({
-        queryKey: [...storeKeys.details(), variables.storeId, "login"],
-        refetchType: "all",
+        queryKey: [...storeKeys.details(), variables.storeId, 'login'],
+        refetchType: 'all',
       });
     },
   });
@@ -1112,24 +1003,22 @@ export const useUpdateStoreManager = useUpdateStoreLogin;
  */
 export async function createStoreWithLogin(
   companyId: string,
-  data: CreateStoreWithLoginInput,
+  data: CreateStoreWithLoginInput
 ): Promise<CreateStoreWithLoginResponse> {
   if (!companyId) {
-    throw new Error("Company ID is required");
+    throw new Error('Company ID is required');
   }
 
   if (!data.name || data.name.trim().length === 0) {
-    throw new Error("Store name is required");
+    throw new Error('Store name is required');
   }
 
   if (data.name.length > 255) {
-    throw new Error("Store name must be 255 characters or less");
+    throw new Error('Store name must be 255 characters or less');
   }
 
   if (data.timezone && !validateTimezone(data.timezone)) {
-    throw new Error(
-      "Timezone must be in IANA format (e.g., America/New_York, Europe/London)",
-    );
+    throw new Error('Timezone must be in IANA format (e.g., America/New_York, Europe/London)');
   }
 
   if (data.location_json) {
@@ -1138,7 +1027,7 @@ export async function createStoreWithLogin(
 
   const response = await apiClient.post<CreateStoreWithLoginResponse>(
     `/api/companies/${companyId}/stores`,
-    data,
+    data
   );
   return response.data;
 }
@@ -1156,18 +1045,13 @@ export function useCreateStoreWithLogin() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({
-      companyId,
-      data,
-    }: {
-      companyId: string;
-      data: CreateStoreWithLoginInput;
-    }) => createStoreWithLogin(companyId, data),
+    mutationFn: ({ companyId, data }: { companyId: string; data: CreateStoreWithLoginInput }) =>
+      createStoreWithLogin(companyId, data),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists refresh
       queryClient.invalidateQueries({
         queryKey: storeKeys.all,
-        refetchType: "all",
+        refetchType: 'all',
       });
     },
   });

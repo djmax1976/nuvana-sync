@@ -12,39 +12,29 @@
  * Data flows through the wizard steps - lottery totals are imported into Step 3.
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
-import { Card, CardContent } from "../components/ui/card";
-import { formatDateTime } from "../utils/date-format.utils";
-import { useStoreTimezone } from "../contexts/StoreContext";
-import { Button } from "../components/ui/button";
-import { Badge } from "../components/ui/badge";
-import {
-  CalendarCheck,
-  Loader2,
-  AlertCircle,
-  Check,
-  ArrowRight,
-  ArrowLeft,
-} from "lucide-react";
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useSearchParams, useNavigate } from 'react-router-dom';
+import { Card, CardContent } from '../components/ui/card';
+import { formatDateTime } from '../utils/date-format.utils';
+import { useStoreTimezone } from '../contexts/StoreContext';
+import { Button } from '../components/ui/button';
+import { Badge } from '../components/ui/badge';
+import { CalendarCheck, Loader2, AlertCircle, Check, ArrowRight, ArrowLeft } from 'lucide-react';
 
-import { useClientAuth } from "../contexts/ClientAuthContext";
-import { useClientDashboard } from "../lib/api/client-dashboard";
-import { useLotteryDayBins } from "../hooks/useLottery";
-import { ShiftClosingForm } from "../components/shifts/ShiftClosingForm";
-import { useShiftDetail, useOpenShiftsCheck } from "../lib/api/shifts";
-import { useStoreTerminals } from "../lib/api/stores";
-import { useCashiers } from "../lib/api/cashiers";
-import {
-  commitLotteryDayClose,
-  cancelLotteryDayClose,
-} from "../lib/api/lottery";
-import { useToast } from "../hooks/use-toast";
+import { useClientAuth } from '../contexts/ClientAuthContext';
+import { useClientDashboard } from '../lib/api/client-dashboard';
+import { useLotteryDayBins } from '../hooks/useLottery';
+import { ShiftClosingForm } from '../components/shifts/ShiftClosingForm';
+import { useShiftDetail, useOpenShiftsCheck } from '../lib/api/shifts';
+import { useStoreTerminals } from '../lib/api/stores';
+import { useCashiers } from '../lib/api/cashiers';
+import { commitLotteryDayClose, cancelLotteryDayClose } from '../lib/api/lottery';
+import { useToast } from '../hooks/use-toast';
 import {
   DayCloseModeScanner,
   type LotteryCloseResult,
   type ScannedBin,
-} from "../components/lottery/DayCloseModeScanner";
+} from '../components/lottery/DayCloseModeScanner';
 
 // Import shared shift-closing components for Step 3
 import {
@@ -59,16 +49,16 @@ import {
   type SalesBreakdownReportsState,
   DEFAULT_MONEY_RECEIVED_STATE,
   DEFAULT_SALES_BREAKDOWN_STATE,
-} from "../components/shift-closing";
+} from '../components/shift-closing';
 
 // Import Step 2 component
-import { ReportScanningStep } from "../components/day-close/ReportScanningStep";
-import type { ReportScanningState } from "../components/day-close/ReportScanningStep";
+import { ReportScanningStep } from '../components/day-close/ReportScanningStep';
+import type { ReportScanningState } from '../components/day-close/ReportScanningStep';
 
 // Import lottery pack sections for Step 3
-import { ReturnedPacksSection } from "../components/lottery/ReturnedPacksSection";
-import { DepletedPacksSection } from "../components/lottery/DepletedPacksSection";
-import { ActivatedPacksSection } from "../components/lottery/ActivatedPacksSection";
+import { ReturnedPacksSection } from '../components/lottery/ReturnedPacksSection';
+import { DepletedPacksSection } from '../components/lottery/DepletedPacksSection';
+import { ActivatedPacksSection } from '../components/lottery/ActivatedPacksSection';
 
 // ============ TYPES ============
 
@@ -102,9 +92,9 @@ function StepIndicator({
   reportScanningCompleted,
 }: StepIndicatorProps) {
   const steps = [
-    { number: 1, label: "Lottery Close", completed: lotteryCompleted },
-    { number: 2, label: "Report Scanning", completed: reportScanningCompleted },
-    { number: 3, label: "Day Close", completed: false },
+    { number: 1, label: 'Lottery Close', completed: lotteryCompleted },
+    { number: 2, label: 'Report Scanning', completed: reportScanningCompleted },
+    { number: 3, label: 'Day Close', completed: false },
   ];
 
   return (
@@ -118,10 +108,10 @@ function StepIndicator({
                 <div
                   className={`w-10 h-10 rounded-full flex items-center justify-center font-bold text-lg transition-colors ${
                     step.completed
-                      ? "bg-green-600 text-white"
+                      ? 'bg-green-600 text-white'
                       : currentStep === step.number
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-muted text-muted-foreground"
+                        ? 'bg-primary text-primary-foreground'
+                        : 'bg-muted text-muted-foreground'
                   }`}
                   data-testid={`step-${step.number}-indicator`}
                 >
@@ -130,10 +120,10 @@ function StepIndicator({
                 <span
                   className={`ml-3 font-medium ${
                     step.completed
-                      ? "text-green-600"
+                      ? 'text-green-600'
                       : currentStep === step.number
-                        ? "text-primary"
-                        : "text-muted-foreground"
+                        ? 'text-primary'
+                        : 'text-muted-foreground'
                   }`}
                 >
                   {step.label}
@@ -144,7 +134,7 @@ function StepIndicator({
               {index < steps.length - 1 && (
                 <div
                   className={`flex-1 h-1 mx-4 transition-colors ${
-                    step.completed ? "bg-green-600" : "bg-muted"
+                    step.completed ? 'bg-green-600' : 'bg-muted'
                   }`}
                 />
               )}
@@ -162,7 +152,7 @@ export default function DayCloseWizardPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { toast } = useToast();
-  const shiftId = searchParams.get("shiftId");
+  const shiftId = searchParams.get('shiftId');
 
   // ========================================================================
   // HOOKS
@@ -179,16 +169,17 @@ export default function DayCloseWizardPage() {
 
   // Get store ID from user's accessible stores
   const storeId =
-    dashboardData?.stores.find((s) => s.status === "ACTIVE")?.store_id ||
+    dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
     dashboardData?.stores[0]?.store_id;
 
   // Fetch shift details to check if already closed
   const { data: shiftData, isLoading: shiftLoading } = useShiftDetail(shiftId);
-  const isShiftClosed = shiftData?.status === "CLOSED";
+  const isShiftClosed = shiftData?.status === 'CLOSED';
 
   // Fetch terminals for the store to get terminal name
-  const { data: terminals = [], isLoading: isLoadingTerminals } =
-    useStoreTerminals(storeId, { enabled: !!storeId });
+  const { data: terminals = [], isLoading: isLoadingTerminals } = useStoreTerminals(storeId, {
+    enabled: !!storeId,
+  });
 
   // Find terminal info by ID from shift data
   const terminal = shiftData
@@ -197,16 +188,16 @@ export default function DayCloseWizardPage() {
 
   // Get cashiers to find cashier name (fallback if not in shiftData)
   const { data: cashiers = [], isLoading: isLoadingCashiers } = useCashiers(
-    storeId || "",
+    storeId || '',
     { is_active: true },
-    { enabled: !!storeId },
+    { enabled: !!storeId }
   );
 
   // Find cashier info from shift - prefer shiftData.cashier_name, fallback to lookup
   const cashierName =
     shiftData?.cashier_name ||
     cashiers.find((c) => c.cashier_id === shiftData?.cashier_id)?.name ||
-    "Unknown Cashier";
+    'Unknown Cashier';
 
   // Lottery day bins data
   const {
@@ -223,15 +214,13 @@ export default function DayCloseWizardPage() {
   } = useOpenShiftsCheck(storeId);
 
   // Exclude current shift from blocking list
-  const otherOpenShifts =
-    openShiftsData?.open_shifts?.filter((s) => s.shift_id !== shiftId) ?? [];
+  const otherOpenShifts = openShiftsData?.open_shifts?.filter((s) => s.shift_id !== shiftId) ?? [];
   const hasOtherOpenShifts = otherOpenShifts.length > 0;
   const openShiftsCheckComplete = !!storeId && openShiftsFetched;
 
   // Check if lottery is already closed for today
   // Use the business_day.status field which is "CLOSED" when lottery was closed
-  const isLotteryAlreadyClosed =
-    !!dayBinsData && dayBinsData.business_day?.status === "CLOSED";
+  const isLotteryAlreadyClosed = !!dayBinsData && dayBinsData.business_day?.status === 'CLOSED';
 
   // ============================================================================
   // LOTTERY CLOSE DATA FROM API (Enterprise Pattern)
@@ -244,7 +233,7 @@ export default function DayCloseWizardPage() {
     if (summary && summary.bins_closed.length > 0) {
       return {
         closings_created: summary.closings_count,
-        business_date: dayBinsData.business_day?.date || "",
+        business_date: dayBinsData.business_day?.date || '',
         lottery_total: summary.lottery_total,
         bins_closed: summary.bins_closed.map((bin) => ({
           bin_number: bin.bin_number,
@@ -261,14 +250,12 @@ export default function DayCloseWizardPage() {
 
     // Fallback: For backward compatibility
     const closedBins = dayBinsData.bins.filter(
-      (bin) => bin.is_active && bin.pack && bin.pack.ending_serial,
+      (bin) => bin.is_active && bin.pack && bin.pack.ending_serial
     );
 
     if (closedBins.length === 0) return null;
 
-    console.warn(
-      "[DayClosePage] Using fallback calculation - day_close_summary not available.",
-    );
+    console.warn('[DayClosePage] Using fallback calculation - day_close_summary not available.');
 
     let lotteryTotal = 0;
     const binsClosedData = closedBins.map((bin) => {
@@ -307,7 +294,7 @@ export default function DayCloseWizardPage() {
 
     return {
       closings_created: closedBins.length,
-      business_date: dayBinsData.business_day?.date || "",
+      business_date: dayBinsData.business_day?.date || '',
       lottery_total: lotteryTotal,
       bins_closed: binsClosedData,
     };
@@ -331,12 +318,14 @@ export default function DayCloseWizardPage() {
   const [shiftClosingFormOpen, setShiftClosingFormOpen] = useState(false);
 
   // Money received state (Step 3 - dual-column)
-  const [moneyReceivedState, setMoneyReceivedState] =
-    useState<MoneyReceivedState>(DEFAULT_MONEY_RECEIVED_STATE);
+  const [moneyReceivedState, setMoneyReceivedState] = useState<MoneyReceivedState>(
+    DEFAULT_MONEY_RECEIVED_STATE
+  );
 
   // Sales breakdown state (Step 3 - dual-column)
-  const [salesBreakdownState, setSalesBreakdownState] =
-    useState<SalesBreakdownState>(DEFAULT_SALES_BREAKDOWN_STATE);
+  const [salesBreakdownState, setSalesBreakdownState] = useState<SalesBreakdownState>(
+    DEFAULT_SALES_BREAKDOWN_STATE
+  );
 
   // ============ DERIVED STATE ============
   const {
@@ -370,12 +359,7 @@ export default function DayCloseWizardPage() {
         }));
       }
     }
-  }, [
-    isLotteryAlreadyClosed,
-    lotteryCompleted,
-    currentStep,
-    calculatedLotteryData,
-  ]);
+  }, [isLotteryAlreadyClosed, lotteryCompleted, currentStep, calculatedLotteryData]);
 
   // Calculate scratch off total from lottery data
   const scratchOffTotal = lotteryData?.lottery_total ?? 0;
@@ -418,42 +402,38 @@ export default function DayCloseWizardPage() {
         // Ignore errors - will auto-expire
       }
     }
-    navigate("/mystore");
+    navigate('/mystore');
   }, [pendingLotteryDayId, storeId, navigate]);
 
   // ============ STEP 2 HANDLERS ============
-  const handleReportScanningComplete = useCallback(
-    (data: ReportScanningState) => {
-      setWizardState((prev) => ({
-        ...prev,
-        reportScanningData: data,
-        currentStep: 3,
-      }));
+  const handleReportScanningComplete = useCallback((data: ReportScanningState) => {
+    setWizardState((prev) => ({
+      ...prev,
+      reportScanningData: data,
+      currentStep: 3,
+    }));
 
-      const totalLotteryCashes =
-        (data.lotteryReports?.instantCashes ?? 0) +
-        (data.lotteryReports?.onlineCashes ?? 0);
+    const totalLotteryCashes =
+      (data.lotteryReports?.instantCashes ?? 0) + (data.lotteryReports?.onlineCashes ?? 0);
 
-      setMoneyReceivedState((prev) => ({
-        ...prev,
-        reports: {
-          ...prev.reports,
-          lotteryPayouts: totalLotteryCashes,
-        },
-      }));
+    setMoneyReceivedState((prev) => ({
+      ...prev,
+      reports: {
+        ...prev.reports,
+        lotteryPayouts: totalLotteryCashes,
+      },
+    }));
 
-      setSalesBreakdownState((prev) => ({
-        ...prev,
-        reports: {
-          ...prev.reports,
-          instantCashes: data.lotteryReports?.instantCashes ?? 0,
-          onlineLottery: data.lotteryReports?.onlineSales ?? 0,
-          onlineCashes: data.lotteryReports?.onlineCashes ?? 0,
-        },
-      }));
-    },
-    [],
-  );
+    setSalesBreakdownState((prev) => ({
+      ...prev,
+      reports: {
+        ...prev.reports,
+        instantCashes: data.lotteryReports?.instantCashes ?? 0,
+        onlineLottery: data.lotteryReports?.onlineSales ?? 0,
+        onlineCashes: data.lotteryReports?.onlineCashes ?? 0,
+      },
+    }));
+  }, []);
 
   const handleReportScanningBack = useCallback(() => {
     if (!isLotteryAlreadyClosed) {
@@ -465,25 +445,19 @@ export default function DayCloseWizardPage() {
   }, [isLotteryAlreadyClosed]);
 
   // ============ STEP 3 HANDLERS ============
-  const handleMoneyReportsChange = useCallback(
-    (changes: Partial<MoneyReceivedReportsState>) => {
-      setMoneyReceivedState((prev) => ({
-        ...prev,
-        reports: { ...prev.reports, ...changes },
-      }));
-    },
-    [],
-  );
+  const handleMoneyReportsChange = useCallback((changes: Partial<MoneyReceivedReportsState>) => {
+    setMoneyReceivedState((prev) => ({
+      ...prev,
+      reports: { ...prev.reports, ...changes },
+    }));
+  }, []);
 
-  const handleSalesReportsChange = useCallback(
-    (changes: Partial<SalesBreakdownReportsState>) => {
-      setSalesBreakdownState((prev) => ({
-        ...prev,
-        reports: { ...prev.reports, ...changes },
-      }));
-    },
-    [],
-  );
+  const handleSalesReportsChange = useCallback((changes: Partial<SalesBreakdownReportsState>) => {
+    setSalesBreakdownState((prev) => ({
+      ...prev,
+      reports: { ...prev.reports, ...changes },
+    }));
+  }, []);
 
   const handleOpenShiftClosingForm = useCallback(async () => {
     if (pendingLotteryDayId && storeId) {
@@ -493,7 +467,7 @@ export default function DayCloseWizardPage() {
 
         if (result.success) {
           toast({
-            title: "Lottery Closed",
+            title: 'Lottery Closed',
             description: `Lottery day closed successfully. ${result.data?.closings_created || 0} pack(s) recorded.`,
           });
 
@@ -503,17 +477,15 @@ export default function DayCloseWizardPage() {
             pendingLotteryCloseExpiresAt: null,
           }));
         } else {
-          throw new Error("Failed to commit lottery close");
+          throw new Error('Failed to commit lottery close');
         }
       } catch (error) {
         const errorMessage =
-          error instanceof Error
-            ? error.message
-            : "Failed to finalize lottery close";
+          error instanceof Error ? error.message : 'Failed to finalize lottery close';
         toast({
-          title: "Error",
+          title: 'Error',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
         setIsCommittingLottery(false);
         return;
@@ -526,7 +498,7 @@ export default function DayCloseWizardPage() {
 
   const handleShiftClosingSuccess = useCallback(() => {
     setShiftClosingFormOpen(false);
-    navigate("/mystore");
+    navigate('/mystore');
   }, [navigate]);
 
   const handleStep3Back = useCallback(() => {
@@ -537,9 +509,7 @@ export default function DayCloseWizardPage() {
   }, []);
 
   const handleCancelWizard = useCallback(async () => {
-    if (
-      !confirm("Are you sure you want to cancel? All progress will be lost.")
-    ) {
+    if (!confirm('Are you sure you want to cancel? All progress will be lost.')) {
       return;
     }
 
@@ -551,13 +521,13 @@ export default function DayCloseWizardPage() {
       }
     }
 
-    navigate("/mystore");
+    navigate('/mystore');
   }, [pendingLotteryDayId, storeId, navigate]);
 
   // ============ REDIRECT IF SHIFT CLOSED ============
   useEffect(() => {
     if (isShiftClosed) {
-      navigate("/mystore", { replace: true });
+      navigate('/mystore', { replace: true });
     }
   }, [isShiftClosed, navigate]);
 
@@ -566,15 +536,14 @@ export default function DayCloseWizardPage() {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
       if (pendingLotteryDayId && storeId) {
         e.preventDefault();
-        e.returnValue =
-          "You have unsaved changes. Are you sure you want to leave?";
+        e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
         return e.returnValue;
       }
     };
 
-    window.addEventListener("beforeunload", handleBeforeUnload);
+    window.addEventListener('beforeunload', handleBeforeUnload);
     return () => {
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      window.removeEventListener('beforeunload', handleBeforeUnload);
     };
   }, [pendingLotteryDayId, storeId]);
 
@@ -604,18 +573,15 @@ export default function DayCloseWizardPage() {
   // ============ ERROR STATE ============
   if (dashboardError || dayBinsError) {
     return (
-      <div
-        className="container mx-auto p-6"
-        data-testid="day-close-wizard-error"
-      >
+      <div className="container mx-auto p-6" data-testid="day-close-wizard-error">
         <Card className="border-destructive">
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-destructive">
               <AlertCircle className="h-5 w-5" />
               <p>
                 {dayBinsError
-                  ? "Failed to load lottery bins data. Please restart the backend server and try again."
-                  : "Failed to load dashboard data. Please try again."}
+                  ? 'Failed to load lottery bins data. Please restart the backend server and try again.'
+                  : 'Failed to load dashboard data. Please try again.'}
               </p>
             </div>
           </CardContent>
@@ -627,10 +593,7 @@ export default function DayCloseWizardPage() {
   // ============ NO STORE STATE ============
   if (!storeId) {
     return (
-      <div
-        className="container mx-auto p-6"
-        data-testid="day-close-wizard-no-store"
-      >
+      <div className="container mx-auto p-6" data-testid="day-close-wizard-no-store">
         <Card>
           <CardContent className="pt-6">
             <p className="text-muted-foreground text-center">
@@ -643,11 +606,8 @@ export default function DayCloseWizardPage() {
   }
 
   // Get store name and format date
-  const storeName =
-    dashboardData?.stores.find((s) => s.store_id === storeId)?.name ||
-    "Your Store";
-  const businessDate =
-    lotteryData?.business_date || dayBinsData?.business_day?.date;
+  const storeName = dashboardData?.stores.find((s) => s.store_id === storeId)?.name || 'Your Store';
+  const businessDate = lotteryData?.business_date || dayBinsData?.business_day?.date;
   const formattedDate = formatBusinessDate(businessDate);
 
   // Transform open shifts to blocking format for DayCloseModeScanner
@@ -659,19 +619,19 @@ export default function DayCloseWizardPage() {
   }));
 
   // Terminal and shift display values
-  const terminalName = terminal?.name || "Terminal";
+  const terminalName = terminal?.name || 'Terminal';
   const shiftNumber = shiftData?.shift_number;
   const shiftNumberDisplay = shiftNumber ? `#${shiftNumber}` : null;
   const shiftStartDateTime = shiftData?.opened_at
     ? formatDateTime(shiftData.opened_at, storeTimezone)
-    : "";
+    : '';
   const openingCash = shiftData?.opening_cash ?? 0;
 
   // Format currency helper
   const formatCurrency = (amount: number): string => {
-    return new Intl.NumberFormat("en-US", {
-      style: "currency",
-      currency: "USD",
+    return new Intl.NumberFormat('en-US', {
+      style: 'currency',
+      currency: 'USD',
       minimumFractionDigits: 2,
       maximumFractionDigits: 2,
     }).format(amount);
@@ -679,10 +639,7 @@ export default function DayCloseWizardPage() {
 
   // ============ RENDER ============
   return (
-    <div
-      className="container mx-auto p-6 space-y-6"
-      data-testid="day-close-wizard"
-    >
+    <div className="container mx-auto p-6 space-y-6" data-testid="day-close-wizard">
       {/* Header - All shift info in one card on one line */}
       <Card className="border-muted" data-testid="shift-info-header">
         <CardContent className="py-3 px-4">
@@ -705,14 +662,9 @@ export default function DayCloseWizardPage() {
               <span className="text-muted-foreground">Started:</span>
               <span className="font-medium">{shiftStartDateTime}</span>
             </div>
-            <div
-              className="flex items-center gap-2"
-              data-testid="opening-cash-display"
-            >
+            <div className="flex items-center gap-2" data-testid="opening-cash-display">
               <span className="text-muted-foreground">Opening Cash:</span>
-              <span className="font-semibold text-green-600">
-                {formatCurrency(openingCash)}
-              </span>
+              <span className="font-semibold text-green-600">{formatCurrency(openingCash)}</span>
             </div>
           </div>
         </CardContent>
@@ -780,7 +732,7 @@ export default function DayCloseWizardPage() {
 
             {/* Lottery Status Banner */}
             <LotteryStatusBanner
-              status={pendingLotteryDayId ? "pending" : "closed"}
+              status={pendingLotteryDayId ? 'pending' : 'closed'}
               lotteryData={lotteryData}
               lotteryTotal={scratchOffTotal}
               isRequired={true}
@@ -801,24 +753,17 @@ export default function DayCloseWizardPage() {
                           Cannot Close Day – Open Shifts Found
                         </h3>
                         <p className="text-sm text-muted-foreground mt-1">
-                          All shifts must be closed before the day can be
-                          closed.
+                          All shifts must be closed before the day can be closed.
                         </p>
                       </div>
                       <ul className="space-y-2">
                         {otherOpenShifts.map((shift) => (
-                          <li
-                            key={shift.shift_id}
-                            className="text-sm flex items-center gap-2"
-                          >
-                            <Badge
-                              variant="outline"
-                              className="text-amber-600 border-amber-300"
-                            >
+                          <li key={shift.shift_id} className="text-sm flex items-center gap-2">
+                            <Badge variant="outline" className="text-amber-600 border-amber-300">
                               {shift.status}
                             </Badge>
                             <span className="font-medium">
-                              {shift.terminal_name || "Unknown Terminal"}
+                              {shift.terminal_name || 'Unknown Terminal'}
                             </span>
                             <span className="text-muted-foreground">•</span>
                             <span>{shift.cashier_name}</span>
@@ -850,39 +795,33 @@ export default function DayCloseWizardPage() {
             {lotteryData && <LotterySalesDetails data={lotteryData} />}
 
             {/* Pack Sections */}
-            {((dayBinsData?.returned_packs &&
-              dayBinsData.returned_packs.length > 0) ||
-              (dayBinsData?.depleted_packs &&
-                dayBinsData.depleted_packs.length > 0) ||
-              (dayBinsData?.activated_packs &&
-                dayBinsData.activated_packs.length > 0)) && (
+            {((dayBinsData?.returned_packs && dayBinsData.returned_packs.length > 0) ||
+              (dayBinsData?.depleted_packs && dayBinsData.depleted_packs.length > 0) ||
+              (dayBinsData?.activated_packs && dayBinsData.activated_packs.length > 0)) && (
               <div className="space-y-4" data-testid="step3-packs-sections">
-                {dayBinsData?.returned_packs &&
-                  dayBinsData.returned_packs.length > 0 && (
-                    <ReturnedPacksSection
-                      returnedPacks={dayBinsData.returned_packs}
-                      openBusinessPeriod={dayBinsData.open_business_period}
-                      defaultOpen={false}
-                    />
-                  )}
+                {dayBinsData?.returned_packs && dayBinsData.returned_packs.length > 0 && (
+                  <ReturnedPacksSection
+                    returnedPacks={dayBinsData.returned_packs}
+                    openBusinessPeriod={dayBinsData.open_business_period}
+                    defaultOpen={false}
+                  />
+                )}
 
-                {dayBinsData?.depleted_packs &&
-                  dayBinsData.depleted_packs.length > 0 && (
-                    <DepletedPacksSection
-                      depletedPacks={dayBinsData.depleted_packs}
-                      openBusinessPeriod={dayBinsData.open_business_period}
-                      defaultOpen={false}
-                    />
-                  )}
+                {dayBinsData?.depleted_packs && dayBinsData.depleted_packs.length > 0 && (
+                  <DepletedPacksSection
+                    depletedPacks={dayBinsData.depleted_packs}
+                    openBusinessPeriod={dayBinsData.open_business_period}
+                    defaultOpen={false}
+                  />
+                )}
 
-                {dayBinsData?.activated_packs &&
-                  dayBinsData.activated_packs.length > 0 && (
-                    <ActivatedPacksSection
-                      activatedPacks={dayBinsData.activated_packs}
-                      openBusinessPeriod={dayBinsData.open_business_period}
-                      defaultOpen={false}
-                    />
-                  )}
+                {dayBinsData?.activated_packs && dayBinsData.activated_packs.length > 0 && (
+                  <ActivatedPacksSection
+                    activatedPacks={dayBinsData.activated_packs}
+                    openBusinessPeriod={dayBinsData.open_business_period}
+                    defaultOpen={false}
+                  />
+                )}
               </div>
             )}
 
@@ -892,8 +831,8 @@ export default function DayCloseWizardPage() {
                 <div className="flex items-center justify-between">
                   <p className="text-sm text-muted-foreground">
                     {pendingLotteryDayId
-                      ? "Lottery scanned and ready. Click Complete Day Close to finalize lottery and shift."
-                      : "Lottery is closed. Complete the day close when ready."}
+                      ? 'Lottery scanned and ready. Click Complete Day Close to finalize lottery and shift.'
+                      : 'Lottery is closed. Complete the day close when ready.'}
                   </p>
                   <div className="flex gap-3">
                     <Button
@@ -912,9 +851,7 @@ export default function DayCloseWizardPage() {
                       Cancel
                     </Button>
                     <Button
-                      disabled={
-                        hasOtherOpenShifts || !shiftId || isCommittingLottery
-                      }
+                      disabled={hasOtherOpenShifts || !shiftId || isCommittingLottery}
                       data-testid="complete-day-close-btn"
                       onClick={handleOpenShiftClosingForm}
                       className="bg-green-600 hover:bg-green-700 text-white"

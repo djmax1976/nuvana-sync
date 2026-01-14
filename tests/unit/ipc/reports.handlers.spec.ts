@@ -212,9 +212,7 @@ describe('Reports Handlers', () => {
       const startDate = new Date('2024-01-01');
       const endDate = new Date('2024-12-31');
 
-      const daysDiff = Math.ceil(
-        (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
 
       expect(daysDiff <= maxDays).toBe(true);
     });
@@ -234,9 +232,7 @@ describe('Reports Handlers', () => {
       const startDate = new Date('2023-01-01');
       const endDate = new Date('2024-12-31');
 
-      const daysDiff = Math.ceil(
-        (endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24)
-      );
+      const daysDiff = Math.ceil((endDate.getTime() - startDate.getTime()) / (1000 * 60 * 60 * 24));
 
       if (daysDiff > maxDays) {
         const response = { error: 'VALIDATION_ERROR', message: 'Date range exceeds maximum' };

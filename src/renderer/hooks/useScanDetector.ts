@@ -31,19 +31,19 @@
  * - Metrics export for server validation
  */
 
-import { useState, useCallback, useRef, useMemo } from "react";
+import { useState, useCallback, useRef, useMemo } from 'react';
 import type {
   ScanDetectionConfig,
   ScanDetectionResult,
   ScanMetrics,
   KeystrokeEvent,
-} from "@/types/scan-detection";
-import { DEFAULT_SCAN_DETECTION_CONFIG } from "@/types/scan-detection";
+} from '@/types/scan-detection';
+import { DEFAULT_SCAN_DETECTION_CONFIG } from '@/types/scan-detection';
 import {
   analyzeScanMetrics,
   createDetectionResult,
   quickScanCheck,
-} from "@/lib/utils/scan-detector";
+} from '@/lib/utils/scan-detector';
 
 /**
  * Hook configuration options
@@ -144,9 +144,7 @@ export interface UseScanDetectorReturn {
  *
  * Tracks keystroke timing to detect barcode scanner vs manual entry.
  */
-export function useScanDetector(
-  options: UseScanDetectorOptions = {},
-): UseScanDetectorReturn {
+export function useScanDetector(options: UseScanDetectorOptions = {}): UseScanDetectorReturn {
   const {
     expectedLength = 24,
     config: customConfig,
@@ -163,13 +161,13 @@ export function useScanDetector(
       expectedCharCount: expectedLength,
       ...customConfig,
     }),
-    [expectedLength, customConfig],
+    [expectedLength, customConfig]
   );
 
   // State
   const [keystrokes, setKeystrokes] = useState<KeystrokeEvent[]>([]);
   const [result, setResult] = useState<ScanDetectionResult>(() =>
-    createDetectionResult(null, config),
+    createDetectionResult(null, config)
   );
   const [isComplete, setIsComplete] = useState(false);
 
@@ -227,9 +225,9 @@ export function useScanDetector(
             // Fire callbacks
             callbacksRef.current.onComplete?.(metrics);
 
-            if (metrics.inputMethod === "MANUAL") {
+            if (metrics.inputMethod === 'MANUAL') {
               callbacksRef.current.onManualDetected?.(metrics);
-            } else if (metrics.inputMethod === "SCANNED") {
+            } else if (metrics.inputMethod === 'SCANNED') {
               callbacksRef.current.onScanDetected?.(metrics);
             }
           }
@@ -238,7 +236,7 @@ export function useScanDetector(
         return updated;
       });
     },
-    [enabled, config],
+    [enabled, config]
   );
 
   /**
@@ -248,7 +246,7 @@ export function useScanDetector(
   const handleChange = useCallback(
     (e: React.ChangeEvent<HTMLInputElement>): string => {
       const rawValue = e.target.value;
-      const cleanedValue = rawValue.replace(/\D/g, ""); // Digits only
+      const cleanedValue = rawValue.replace(/\D/g, ''); // Digits only
 
       // If value was cleared or shortened, reset detector
       if (cleanedValue.length < keystrokes.length) {
@@ -261,7 +259,7 @@ export function useScanDetector(
 
       return cleanedValue;
     },
-    [keystrokes.length, config],
+    [keystrokes.length, config]
   );
 
   /**
@@ -288,10 +286,7 @@ export function useScanDetector(
   /**
    * Quick check for real-time UI feedback (uses React state - may be stale)
    */
-  const quickCheck = useMemo(
-    () => quickScanCheck(keystrokes, config),
-    [keystrokes, config],
-  );
+  const quickCheck = useMemo(() => quickScanCheck(keystrokes, config), [keystrokes, config]);
 
   /**
    * SYNCHRONOUS quick check using ref - for real-time blocking
@@ -308,10 +303,7 @@ export function useScanDetector(
    * Whether rejection should be shown
    * Only show after input is complete and manual entry was detected
    */
-  const shouldReject = useMemo(
-    () => isComplete && result.isManual,
-    [isComplete, result.isManual],
-  );
+  const shouldReject = useMemo(() => isComplete && result.isManual, [isComplete, result.isManual]);
 
   return {
     handleKeyDown,
@@ -333,7 +325,7 @@ export function useScanDetector(
  */
 export function createMockScanDetector(
   value: string,
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): ScanMetrics {
   const timestamps: number[] = [];
   const baseTime = Date.now();
@@ -343,7 +335,7 @@ export function createMockScanDetector(
     timestamps.push(baseTime + i * 10);
   }
 
-  const keystrokes: KeystrokeEvent[] = value.split("").map((char, index) => ({
+  const keystrokes: KeystrokeEvent[] = value.split('').map((char, index) => ({
     char,
     // eslint-disable-next-line security/detect-object-injection -- index is controlled loop variable
     timestamp: timestamps[index],
@@ -360,7 +352,7 @@ export function createMockScanDetector(
  */
 export function createMockManualDetector(
   value: string,
-  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG,
+  config: ScanDetectionConfig = DEFAULT_SCAN_DETECTION_CONFIG
 ): ScanMetrics {
   const timestamps: number[] = [];
   const baseTime = Date.now();
@@ -372,7 +364,7 @@ export function createMockManualDetector(
     currentTime += 200 + Math.random() * 200; // 200-400ms
   }
 
-  const keystrokes: KeystrokeEvent[] = value.split("").map((char, index) => ({
+  const keystrokes: KeystrokeEvent[] = value.split('').map((char, index) => ({
     char,
     // eslint-disable-next-line security/detect-object-injection -- index is controlled loop variable
     timestamp: timestamps[index],

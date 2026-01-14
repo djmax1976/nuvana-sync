@@ -1,4 +1,3 @@
-
 /**
  * Terminal Shift Page Content Component
  *
@@ -17,17 +16,11 @@
  * - FE-001: No sensitive data exposed in UI
  */
 
-import { useNavigate } from "react-router-dom";
-import { format } from "date-fns";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
-import { Button } from "@/components/ui/button";
-import { DollarSign, Receipt, XCircle, CalendarCheck } from "lucide-react";
+import { useNavigate } from 'react-router-dom';
+import { format } from 'date-fns';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { Button } from '@/components/ui/button';
+import { DollarSign, Receipt, XCircle, CalendarCheck } from 'lucide-react';
 
 /**
  * Props for TerminalShiftPageContent
@@ -58,9 +51,9 @@ interface TerminalShiftPageContentProps {
  * @returns Formatted currency string
  */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
@@ -85,15 +78,10 @@ export function TerminalShiftPageContent({
   const navigate = useNavigate();
 
   // Format shift start date and time combined
-  const shiftStartDateTime = format(
-    new Date(shift.opened_at),
-    "MMM d, yyyy 'at' h:mm a",
-  );
+  const shiftStartDateTime = format(new Date(shift.opened_at), "MMM d, yyyy 'at' h:mm a");
 
   // Format shift number for display
-  const shiftNumberDisplay = shift.shift_number
-    ? `#${shift.shift_number}`
-    : null;
+  const shiftNumberDisplay = shift.shift_number ? `#${shift.shift_number}` : null;
 
   return (
     <div className="container mx-auto p-6 space-y-6">
@@ -101,9 +89,7 @@ export function TerminalShiftPageContent({
       <div className="flex items-center gap-3">
         <h1 className="text-2xl font-bold">{terminalName}</h1>
         {shiftNumberDisplay && (
-          <span className="text-lg text-muted-foreground">
-            Shift {shiftNumberDisplay}
-          </span>
+          <span className="text-lg text-muted-foreground">Shift {shiftNumberDisplay}</span>
         )}
       </div>
 
@@ -119,10 +105,7 @@ export function TerminalShiftPageContent({
               <span className="text-muted-foreground">Started:</span>
               <span className="font-medium">{shiftStartDateTime}</span>
             </div>
-            <div
-              className="flex items-center gap-2"
-              data-testid="opening-cash-display"
-            >
+            <div className="flex items-center gap-2" data-testid="opening-cash-display">
               <span className="text-muted-foreground">Opening Cash:</span>
               <span className="font-semibold text-green-600">
                 {formatCurrency(shift.opening_cash)}
@@ -146,9 +129,7 @@ export function TerminalShiftPageContent({
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <Receipt className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Sales
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Sales</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>
@@ -157,9 +138,7 @@ export function TerminalShiftPageContent({
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <DollarSign className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Tax Collected
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Tax Collected</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>
@@ -168,9 +147,7 @@ export function TerminalShiftPageContent({
             <div className="space-y-2">
               <div className="flex items-center gap-2">
                 <XCircle className="h-5 w-5 text-muted-foreground" />
-                <p className="text-sm font-medium text-muted-foreground">
-                  Total Voids
-                </p>
+                <p className="text-sm font-medium text-muted-foreground">Total Voids</p>
               </div>
               <p className="text-2xl font-bold">$0.00</p>
             </div>

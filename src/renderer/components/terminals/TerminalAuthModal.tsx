@@ -1,4 +1,3 @@
-
 /**
  * Terminal Authentication Modal Component
  * Dialog form for cashier authentication when selecting a terminal
@@ -14,10 +13,10 @@
  * - Security: Only the cashier who owns an active shift can resume it
  */
 
-import { useForm } from "react-hook-form";
-import { zodResolver } from "@hookform/resolvers/zod";
-import * as z from "zod";
-import { Button } from "@/components/ui/button";
+import { useForm } from 'react-hook-form';
+import { zodResolver } from '@hookform/resolvers/zod';
+import * as z from 'zod';
+import { Button } from '@/components/ui/button';
 import {
   Form,
   FormControl,
@@ -25,16 +24,16 @@ import {
   FormItem,
   FormLabel,
   FormMessage,
-} from "@/components/ui/form";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
+} from '@/components/ui/form';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "@/components/ui/select";
+} from '@/components/ui/select';
 import {
   Dialog,
   DialogContent,
@@ -42,14 +41,14 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { Loader2, User, DollarSign } from "lucide-react";
-import { useEffect, useState } from "react";
-import { useCashiers, useAuthenticateCashier } from "@/lib/api/cashiers";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { useActiveShift, useShiftStart } from "@/lib/api/shifts";
-import { useNavigate } from "react-router-dom";
-import { useCashierSession } from "@/contexts/CashierSessionContext";
+} from '@/components/ui/dialog';
+import { Loader2, User, DollarSign } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { useCashiers, useAuthenticateCashier } from '@/lib/api/cashiers';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { useActiveShift, useShiftStart } from '@/lib/api/shifts';
+import { useNavigate } from 'react-router-dom';
+import { useCashierSession } from '@/contexts/CashierSessionContext';
 
 /**
  * Form validation schema for terminal authentication
@@ -64,13 +63,10 @@ import { useCashierSession } from "@/contexts/CashierSessionContext";
 const terminalAuthFormSchema = z.object({
   cashier_name: z.string().optional(),
   pin_number: z
-    .string({ message: "PIN number is required" })
-    .min(1, { message: "PIN number is required" })
-    .regex(/^\d{4}$/, { message: "PIN must be exactly 4 numeric digits" }),
-  starting_cash: z
-    .number()
-    .nonnegative("Starting cash must be a non-negative number")
-    .optional(),
+    .string({ message: 'PIN number is required' })
+    .min(1, { message: 'PIN number is required' })
+    .regex(/^\d{4}$/, { message: 'PIN must be exactly 4 numeric digits' }),
+  starting_cash: z.number().nonnegative('Starting cash must be a non-negative number').optional(),
 });
 
 type TerminalAuthFormValues = z.infer<typeof terminalAuthFormSchema>;
@@ -131,12 +127,12 @@ export function TerminalAuthModal({
   // Single form for both new shift and resume modes
   const form = useForm<TerminalAuthFormValues>({
     resolver: zodResolver(terminalAuthFormSchema),
-    mode: "onSubmit",
-    reValidateMode: "onChange",
+    mode: 'onSubmit',
+    reValidateMode: 'onChange',
     shouldFocusError: true,
     defaultValues: {
-      cashier_name: "",
-      pin_number: "",
+      cashier_name: '',
+      pin_number: '',
       starting_cash: undefined,
     },
   });
@@ -146,11 +142,7 @@ export function TerminalAuthModal({
     data: cashiers = [],
     isLoading: isLoadingCashiers,
     error: cashiersError,
-  } = useCashiers(
-    storeId,
-    { is_active: true },
-    { enabled: open && !isResumeMode },
-  );
+  } = useCashiers(storeId, { is_active: true }, { enabled: open && !isResumeMode });
 
   // Authenticate cashier mutation
   const authenticateMutation = useAuthenticateCashier();
@@ -164,8 +156,8 @@ export function TerminalAuthModal({
   useEffect(() => {
     if (open) {
       form.reset({
-        cashier_name: "",
-        pin_number: "",
+        cashier_name: '',
+        pin_number: '',
         starting_cash: undefined,
       });
       authenticateMutation.reset();
@@ -207,18 +199,16 @@ export function TerminalAuthModal({
 
       // Verify session was created
       if (!authResult.session?.session_token) {
-        form.setError("root", {
-          type: "manual",
-          message: "Failed to create cashier session",
+        form.setError('root', {
+          type: 'manual',
+          message: 'Failed to create cashier session',
         });
         return;
       }
 
       // SECURITY CHECK: Verify the authenticated cashier owns this shift
       if (authResult.cashier_id !== activeShift.cashier_id) {
-        setOwnershipError(
-          "Access denied. Only the cashier who started this shift can resume it.",
-        );
+        setOwnershipError('Access denied. Only the cashier who started this shift can resume it.');
         return;
       }
 
@@ -246,9 +236,9 @@ export function TerminalAuthModal({
   const handleNewShiftSubmit = async (values: TerminalAuthFormValues) => {
     // Validate cashier_name is provided for new shifts
     if (!values.cashier_name) {
-      form.setError("cashier_name", {
-        type: "manual",
-        message: "Cashier name is required",
+      form.setError('cashier_name', {
+        type: 'manual',
+        message: 'Cashier name is required',
       });
       return;
     }
@@ -273,9 +263,9 @@ export function TerminalAuthModal({
 
       // Verify session was created
       if (!authResult.session?.session_token) {
-        form.setError("root", {
-          type: "manual",
-          message: "Failed to create cashier session",
+        form.setError('root', {
+          type: 'manual',
+          message: 'Failed to create cashier session',
         });
         return;
       }
@@ -301,12 +291,9 @@ export function TerminalAuthModal({
       navigate(`/terminal/${terminalId}/shift`);
       onOpenChange(false);
     } catch (error) {
-      if (
-        error instanceof Error &&
-        error.message === "Failed to create cashier session"
-      ) {
-        form.setError("root", {
-          type: "manual",
+      if (error instanceof Error && error.message === 'Failed to create cashier session') {
+        form.setError('root', {
+          type: 'manual',
           message: error.message,
         });
       }
@@ -321,10 +308,7 @@ export function TerminalAuthModal({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent
-        className="sm:max-w-[425px]"
-        data-testid="terminal-auth-modal"
-      >
+      <DialogContent className="sm:max-w-[425px]" data-testid="terminal-auth-modal">
         <DialogHeader>
           <DialogTitle>Terminal Authentication</DialogTitle>
           <DialogDescription>
@@ -337,9 +321,7 @@ export function TerminalAuthModal({
         {/* Error Alerts */}
         {cashiersError && !isResumeMode && (
           <Alert variant="destructive">
-            <AlertDescription>
-              Failed to load cashiers. Please try again.
-            </AlertDescription>
+            <AlertDescription>Failed to load cashiers. Please try again.</AlertDescription>
           </Alert>
         )}
 
@@ -351,9 +333,7 @@ export function TerminalAuthModal({
 
         {activeShiftError && (
           <Alert variant="destructive">
-            <AlertDescription>
-              Failed to check for active shift. Please try again.
-            </AlertDescription>
+            <AlertDescription>Failed to check for active shift. Please try again.</AlertDescription>
           </Alert>
         )}
 
@@ -362,7 +342,7 @@ export function TerminalAuthModal({
             <AlertDescription>
               {startShiftMutation.error instanceof Error
                 ? startShiftMutation.error.message
-                : "Failed to start shift. Please try again."}
+                : 'Failed to start shift. Please try again.'}
             </AlertDescription>
           </Alert>
         )}
@@ -371,10 +351,10 @@ export function TerminalAuthModal({
           <Alert variant="destructive">
             <AlertDescription>
               {authenticateMutation.error instanceof Error
-                ? authenticateMutation.error.message === "Authentication failed"
-                  ? "Invalid PIN. Please try again."
+                ? authenticateMutation.error.message === 'Authentication failed'
+                  ? 'Invalid PIN. Please try again.'
                   : authenticateMutation.error.message
-                : "Authentication failed. Please check your credentials."}
+                : 'Authentication failed. Please check your credentials.'}
             </AlertDescription>
           </Alert>
         )}
@@ -387,10 +367,7 @@ export function TerminalAuthModal({
 
         {/* Single Form for both resume and new shift modes */}
         <Form {...form}>
-          <form
-            onSubmit={form.handleSubmit(handleSubmit)}
-            className="space-y-4"
-          >
+          <form onSubmit={form.handleSubmit(handleSubmit)} className="space-y-4">
             {/* Resume Mode: Display cashier name (read-only) */}
             {isResumeMode && activeShift && (
               <div className="space-y-2">
@@ -420,26 +397,21 @@ export function TerminalAuthModal({
                     <FormLabel>Cashier Name</FormLabel>
                     <Select
                       onValueChange={field.onChange}
-                      value={field.value || ""}
+                      value={field.value || ''}
                       disabled={isSubmitting || isLoadingCashiers}
                     >
                       <FormControl>
                         <SelectTrigger data-testid="cashier-name-select">
                           <SelectValue
                             placeholder={
-                              isLoadingCashiers
-                                ? "Loading cashiers..."
-                                : "Select cashier name"
+                              isLoadingCashiers ? 'Loading cashiers...' : 'Select cashier name'
                             }
                           />
                         </SelectTrigger>
                       </FormControl>
                       <SelectContent>
                         {cashiers.map((cashier) => (
-                          <SelectItem
-                            key={cashier.cashier_id}
-                            value={cashier.name}
-                          >
+                          <SelectItem key={cashier.cashier_id} value={cashier.name}>
                             {cashier.name}
                           </SelectItem>
                         ))}
@@ -470,12 +442,10 @@ export function TerminalAuthModal({
                           className="pl-9"
                           disabled={isSubmitting}
                           data-testid="starting-cash-input"
-                          value={field.value === undefined ? "" : field.value}
+                          value={field.value === undefined ? '' : field.value}
                           onChange={(e) => {
                             const value = e.target.value;
-                            field.onChange(
-                              value === "" ? undefined : parseFloat(value) || 0,
-                            );
+                            field.onChange(value === '' ? undefined : parseFloat(value) || 0);
                           }}
                         />
                       </div>
@@ -496,9 +466,7 @@ export function TerminalAuthModal({
                   <FormControl>
                     <Input
                       type="password"
-                      placeholder={
-                        isResumeMode ? "Enter your PIN" : "Enter PIN number"
-                      }
+                      placeholder={isResumeMode ? 'Enter your PIN' : 'Enter PIN number'}
                       autoComplete="off"
                       autoFocus={isResumeMode}
                       disabled={isSubmitting}
@@ -513,9 +481,7 @@ export function TerminalAuthModal({
 
             {form.formState.errors.root && (
               <Alert variant="destructive">
-                <AlertDescription>
-                  {form.formState.errors.root.message}
-                </AlertDescription>
+                <AlertDescription>{form.formState.errors.root.message}</AlertDescription>
               </Alert>
             )}
 
@@ -534,10 +500,8 @@ export function TerminalAuthModal({
                 disabled={isSubmitting || isLoadingActiveShift}
                 data-testid="terminal-auth-submit-button"
               >
-                {isSubmitting && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
-                {isResumeMode ? "Resume Shift" : "Start Shift"}
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                {isResumeMode ? 'Resume Shift' : 'Start Shift'}
               </Button>
             </DialogFooter>
           </form>

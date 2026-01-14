@@ -10,7 +10,12 @@
  * @security DB-008: Query logging with parameter redaction
  */
 
-import { StoreBasedDAL, type StoreEntity, type PaginationOptions, type PaginatedResult } from './base.dal';
+import {
+  StoreBasedDAL,
+  type StoreEntity,
+  type PaginationOptions,
+  type PaginatedResult,
+} from './base.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -242,7 +247,10 @@ export class SyncLogDAL extends StoreBasedDAL<SyncLog> {
    * @param options - Pagination options
    * @returns Paginated sync logs
    */
-  getLogsPaginated(storeId: string, options: Partial<PaginationOptions> = {}): PaginatedResult<SyncLog> {
+  getLogsPaginated(
+    storeId: string,
+    options: Partial<PaginationOptions> = {}
+  ): PaginatedResult<SyncLog> {
     const limit = Math.min(options.limit || DEFAULT_LOG_LIMIT, MAX_LOG_LIMIT);
     const offset = options.offset || 0;
 

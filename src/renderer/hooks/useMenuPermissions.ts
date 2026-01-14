@@ -19,14 +19,14 @@
  * @see src/config/menu-permissions.ts for permission configuration
  */
 
-import { useMemo, useCallback } from "react";
+import { useMemo, useCallback } from 'react';
 import {
   CLIENT_MENU_PERMISSIONS,
   hasMenuPermission,
   extractMenuKeyFromHref,
   getMenuPermissionConfig,
   type MenuPermissionConfig,
-} from "@/config/menu-permissions";
+} from '@/config/menu-permissions';
 
 /**
  * NavItem interface matching ClientSidebar navigation items
@@ -103,33 +103,25 @@ export interface UseMenuPermissionsResult {
  * }
  * ```
  */
-export function useMenuPermissions(
-  userPermissions: string[],
-): UseMenuPermissionsResult {
+export function useMenuPermissions(userPermissions: string[]): UseMenuPermissionsResult {
   // Defensive: ensure permissions is always an array (handles undefined/null)
   const safePermissions = useMemo(
     () => (Array.isArray(userPermissions) ? userPermissions : []),
-    [userPermissions],
+    [userPermissions]
   );
 
   // Memoize the permissions set for O(1) lookups
-  const permissionsSet = useMemo(
-    () => new Set(safePermissions),
-    [safePermissions],
-  );
+  const permissionsSet = useMemo(() => new Set(safePermissions), [safePermissions]);
 
   // Compute accessible menu keys once
   const accessibleMenuKeys = useMemo(() => {
     return CLIENT_MENU_PERMISSIONS.filter((config) =>
-      hasMenuPermission(safePermissions, config),
+      hasMenuPermission(safePermissions, config)
     ).map((config) => config.menuKey);
   }, [safePermissions]);
 
   // Memoize accessible keys set for O(1) lookups
-  const accessibleKeysSet = useMemo(
-    () => new Set(accessibleMenuKeys),
-    [accessibleMenuKeys],
-  );
+  const accessibleKeysSet = useMemo(() => new Set(accessibleMenuKeys), [accessibleMenuKeys]);
 
   /**
    * Check if user has a specific permission
@@ -138,7 +130,7 @@ export function useMenuPermissions(
     (permissionCode: string): boolean => {
       return permissionsSet.has(permissionCode);
     },
-    [permissionsSet],
+    [permissionsSet]
   );
 
   /**
@@ -160,7 +152,7 @@ export function useMenuPermissions(
 
       return hasMenuPermission(safePermissions, config);
     },
-    [accessibleKeysSet, safePermissions],
+    [accessibleKeysSet, safePermissions]
   );
 
   /**
@@ -171,7 +163,7 @@ export function useMenuPermissions(
       const menuKey = extractMenuKeyFromHref(href);
       return canAccessMenuByKey(menuKey);
     },
-    [canAccessMenuByKey],
+    [canAccessMenuByKey]
   );
 
   /**
@@ -181,18 +173,15 @@ export function useMenuPermissions(
     (items: NavItem[]): NavItem[] => {
       return items.filter((item) => canAccessMenu(item.href));
     },
-    [canAccessMenu],
+    [canAccessMenu]
   );
 
   /**
    * Get menu configuration by key
    */
-  const getMenuConfig = useCallback(
-    (menuKey: string): MenuPermissionConfig | undefined => {
-      return getMenuPermissionConfig(menuKey);
-    },
-    [],
-  );
+  const getMenuConfig = useCallback((menuKey: string): MenuPermissionConfig | undefined => {
+    return getMenuPermissionConfig(menuKey);
+  }, []);
 
   return {
     filterNavItems,
@@ -214,7 +203,7 @@ export function useMenuPermissions(
  */
 export function filterNavItemsByPermissions(
   userPermissions: string[],
-  navItems: NavItem[],
+  navItems: NavItem[]
 ): NavItem[] {
   return navItems.filter((item) => {
     const menuKey = extractMenuKeyFromHref(item.href);
@@ -236,10 +225,7 @@ export function filterNavItemsByPermissions(
  * @param href - Menu item href path
  * @returns true if user can access the menu
  */
-export function canUserAccessMenu(
-  userPermissions: string[],
-  href: string,
-): boolean {
+export function canUserAccessMenu(userPermissions: string[], href: string): boolean {
   const menuKey = extractMenuKeyFromHref(href);
   const config = getMenuPermissionConfig(menuKey);
 

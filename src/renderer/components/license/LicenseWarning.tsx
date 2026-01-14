@@ -104,9 +104,7 @@ export function LicenseWarning({
     >
       <div className="flex items-center gap-2">
         <AlertTriangle className={`h-4 w-4 flex-shrink-0 ${iconClasses[urgency]}`} />
-        <span className={`text-sm font-medium ${textClasses[urgency]}`}>
-          {message}
-        </span>
+        <span className={`text-sm font-medium ${textClasses[urgency]}`}>{message}</span>
         <a
           href="mailto:support@nuvana.com"
           className={`text-sm font-medium underline hover:no-underline ${textClasses[urgency]}`}

@@ -11,7 +11,7 @@
  * Tests: tests/unit/lottery/lottery-day-close.test.ts
  */
 
-import type { DayBin, CloseLotteryDayInput } from "@/lib/api/lottery";
+import type { DayBin, CloseLotteryDayInput } from '@/lib/api/lottery';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // TYPE DEFINITIONS
@@ -76,7 +76,7 @@ export function matchSerialToBin(
     serial_start: string;
   },
   bins: DayBin[],
-  gamesMap: Map<string, { game_code: string }>,
+  gamesMap: Map<string, { game_code: string }>
 ): MatchResult {
   // Filter to bins with active packs only
   const activeBins = bins.filter((bin) => bin.pack !== null);
@@ -89,8 +89,7 @@ export function matchSerialToBin(
     if (!packGameCode) return false;
 
     // Case-insensitive comparison for game codes
-    const gameCodeMatches =
-      packGameCode.toLowerCase() === parsedSerial.game_code.toLowerCase();
+    const gameCodeMatches = packGameCode.toLowerCase() === parsedSerial.game_code.toLowerCase();
     const packNumberMatches = bin.pack.pack_number === parsedSerial.pack_number;
 
     return gameCodeMatches && packNumberMatches;
@@ -135,13 +134,13 @@ export function matchSerialToBin(
 export function validateClosingSerial(
   closingSerial: string,
   startingSerial: string,
-  serialEnd: string,
+  serialEnd: string
 ): ValidationResult {
   // Must be exactly 3 digits
   if (!/^\d{3}$/.test(closingSerial)) {
     return {
       valid: false,
-      error: "Closing serial must be exactly 3 digits",
+      error: 'Closing serial must be exactly 3 digits',
     };
   }
 
@@ -149,7 +148,7 @@ export function validateClosingSerial(
   if (!/^\d+$/.test(closingSerial)) {
     return {
       valid: false,
-      error: "Closing serial must be numeric",
+      error: 'Closing serial must be numeric',
     };
   }
 
@@ -198,7 +197,7 @@ export function validateClosingSerial(
  */
 export function checkAllBinsScanned(
   bins: DayBin[],
-  scannedPackIds: Set<string>,
+  scannedPackIds: Set<string>
 ): { complete: boolean; pendingBins: DayBin[] } {
   // Get bins with active packs (pack !== null)
   const activeBins = bins.filter((bin) => bin.pack !== null);
@@ -209,9 +208,7 @@ export function checkAllBinsScanned(
   }
 
   // Find bins that haven't been scanned
-  const pendingBins = activeBins.filter(
-    (bin) => bin.pack && !scannedPackIds.has(bin.pack.pack_id),
-  );
+  const pendingBins = activeBins.filter((bin) => bin.pack && !scannedPackIds.has(bin.pack.pack_id));
 
   return {
     complete: pendingBins.length === 0,
@@ -239,7 +236,7 @@ export function checkAllBinsScanned(
  */
 export function transformToApiPayload(
   scannedBins: ScannedBin[],
-  _entryMethod: "SCAN" | "MANUAL" = "SCAN",
+  _entryMethod: 'SCAN' | 'MANUAL' = 'SCAN'
 ): CloseLotteryDayInput {
   return {
     closings: scannedBins.map((bin) => ({

@@ -1,4 +1,3 @@
-
 /**
  * Shift Info Header Component
  *
@@ -11,8 +10,8 @@
  * - FE-005: UI_SECURITY - No secrets or tokens displayed
  */
 
-import { format } from "date-fns";
-import { Card, CardContent } from "@/components/ui/card";
+import { format } from 'date-fns';
+import { Card, CardContent } from '@/components/ui/card';
 
 /**
  * Format currency for display
@@ -22,9 +21,9 @@ import { Card, CardContent } from "@/components/ui/card";
  * @security SEC-014: Input validated as number, safe for display
  */
 function formatCurrency(amount: number): string {
-  return new Intl.NumberFormat("en-US", {
-    style: "currency",
-    currency: "USD",
+  return new Intl.NumberFormat('en-US', {
+    style: 'currency',
+    currency: 'USD',
     minimumFractionDigits: 2,
     maximumFractionDigits: 2,
   }).format(amount);
@@ -68,10 +67,7 @@ export function ShiftInfoHeader({
   openingCash,
 }: ShiftInfoHeaderProps) {
   // Format shift start date and time combined
-  const shiftStartDateTime = format(
-    new Date(shiftStartTime),
-    "MMM d, yyyy 'at' h:mm a",
-  );
+  const shiftStartDateTime = format(new Date(shiftStartTime), "MMM d, yyyy 'at' h:mm a");
 
   // Format shift number for display
   const shiftNumberDisplay = shiftNumber ? `#${shiftNumber}` : null;
@@ -98,14 +94,9 @@ export function ShiftInfoHeader({
             <span className="text-muted-foreground">Started:</span>
             <span className="font-medium">{shiftStartDateTime}</span>
           </div>
-          <div
-            className="flex items-center gap-2"
-            data-testid="opening-cash-display"
-          >
+          <div className="flex items-center gap-2" data-testid="opening-cash-display">
             <span className="text-muted-foreground">Opening Cash:</span>
-            <span className="font-semibold text-green-600">
-              {formatCurrency(openingCash)}
-            </span>
+            <span className="font-semibold text-green-600">{formatCurrency(openingCash)}</span>
           </div>
         </div>
       </CardContent>

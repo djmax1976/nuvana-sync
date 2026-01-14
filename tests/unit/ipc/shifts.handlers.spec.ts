@@ -2,7 +2,7 @@
  * Shifts Handlers Unit Tests
  *
  * Tests for shift management IPC handlers.
- * 
+ *
  *
  * @module tests/unit/ipc/shifts.handlers
  */

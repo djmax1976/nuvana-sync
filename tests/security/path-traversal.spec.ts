@@ -140,9 +140,7 @@ describe('Path Traversal Protection', () => {
 
       nullBytePaths.forEach((testPath) => {
         // Null byte should be detected and rejected
-        expect(testPath.includes('\x00') || testPath.includes('%00')).toBe(
-          true
-        );
+        expect(testPath.includes('\x00') || testPath.includes('%00')).toBe(true);
       });
     });
 
@@ -225,9 +223,8 @@ describe('Path Traversal Protection', () => {
     describe('Archive/Error folder operations', () => {
       it('should construct safe archive paths', () => {
         // Use platform-appropriate paths
-        const archivePath = process.platform === 'win32'
-          ? 'C:\\naxml\\archive'
-          : '/home/user/naxml/archive';
+        const archivePath =
+          process.platform === 'win32' ? 'C:\\naxml\\archive' : '/home/user/naxml/archive';
         const fileName = 'PJR001.xml';
 
         const destPath = path.join(archivePath, fileName);
@@ -240,16 +237,11 @@ describe('Path Traversal Protection', () => {
 
       it('should detect malicious filenames that escape archive', () => {
         // Test that joining with traversal filenames is dangerous
-        const maliciousNames = [
-          '../../../etc/cron.d/evil',
-          'file\x00.xml',
-        ];
+        const maliciousNames = ['../../../etc/cron.d/evil', 'file\x00.xml'];
 
         maliciousNames.forEach((fileName) => {
           // These filenames contain dangerous patterns
-          const hasDangerousPattern =
-            fileName.includes('..') ||
-            fileName.includes('\x00');
+          const hasDangerousPattern = fileName.includes('..') || fileName.includes('\x00');
           expect(hasDangerousPattern).toBe(true);
         });
       });
@@ -286,11 +278,7 @@ describe('Path Traversal Protection', () => {
       };
 
       it('should accept valid folder paths', () => {
-        const validPaths = [
-          '/home/user/naxml/export',
-          'C:\\POSData\\NAXML',
-          '/mnt/shared/pos',
-        ];
+        const validPaths = ['/home/user/naxml/export', 'C:\\POSData\\NAXML', '/mnt/shared/pos'];
 
         validPaths.forEach((testPath) => {
           const result = validateFolder(testPath);
@@ -401,9 +389,7 @@ describe('Path Traversal Protection', () => {
 
     it('should remove path traversal from filenames', () => {
       expect(sanitizeFilename('../../../etc/passwd')).toBe('etcpasswd');
-      expect(sanitizeFilename('..\\..\\Windows\\System32')).toBe(
-        'WindowsSystem32'
-      );
+      expect(sanitizeFilename('..\\..\\Windows\\System32')).toBe('WindowsSystem32');
     });
 
     it('should remove directory separators', () => {
@@ -423,9 +409,7 @@ describe('Path Traversal Protection', () => {
 
     it('should preserve valid filenames', () => {
       expect(sanitizeFilename('PJR001.xml')).toBe('PJR001.xml');
-      expect(sanitizeFilename('FGM_20240101_120000.xml')).toBe(
-        'FGM_20240101_120000.xml'
-      );
+      expect(sanitizeFilename('FGM_20240101_120000.xml')).toBe('FGM_20240101_120000.xml');
     });
   });
 
@@ -481,11 +465,7 @@ describe('Path Traversal Protection', () => {
     });
 
     it('should handle UNC paths', () => {
-      const uncPaths = [
-        '\\\\server\\share',
-        '\\\\?\\C:\\path',
-        '\\\\.\\device',
-      ];
+      const uncPaths = ['\\\\server\\share', '\\\\?\\C:\\path', '\\\\.\\device'];
 
       uncPaths.forEach((uncPath) => {
         expect(uncPath.startsWith('\\\\')).toBe(true);

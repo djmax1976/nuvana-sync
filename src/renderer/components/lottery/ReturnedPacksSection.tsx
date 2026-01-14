@@ -1,4 +1,3 @@
-
 /**
  * Returned Packs Section Component
  *
@@ -29,9 +28,9 @@
  * - API-008: OUTPUT_FILTERING - Only whitelisted fields displayed from API response
  */
 
-import { useState, useCallback, useMemo } from "react";
-import { ChevronDown, ChevronRight, Undo2, AlertTriangle } from "lucide-react";
-import { Button } from "@/components/ui/button";
+import { useState, useCallback, useMemo } from 'react';
+import { ChevronDown, ChevronRight, Undo2, AlertTriangle } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import {
   Table,
   TableBody,
@@ -39,16 +38,12 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import {
-  Collapsible,
-  CollapsibleContent,
-  CollapsibleTrigger,
-} from "@/components/ui/collapsible";
-import { Alert, AlertDescription } from "@/components/ui/alert";
-import { Badge } from "@/components/ui/badge";
-import type { ReturnedPackDay, OpenBusinessPeriod } from "@/lib/api/lottery";
-import { useDateFormat } from "@/hooks/useDateFormat";
+} from '@/components/ui/table';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
+import { Alert, AlertDescription } from '@/components/ui/alert';
+import { Badge } from '@/components/ui/badge';
+import type { ReturnedPackDay, OpenBusinessPeriod } from '@/lib/api/lottery';
+import { useDateFormat } from '@/hooks/useDateFormat';
 
 // ============================================================================
 // TYPE DEFINITIONS
@@ -93,13 +88,13 @@ interface ParsedDateTime {
  * Ordinal suffix lookup for day numbers
  */
 const ORDINAL_SUFFIXES: Readonly<Record<number, string>> = {
-  1: "st",
-  2: "nd",
-  3: "rd",
-  21: "st",
-  22: "nd",
-  23: "rd",
-  31: "st",
+  1: 'st',
+  2: 'nd',
+  3: 'rd',
+  21: 'st',
+  22: 'nd',
+  23: 'rd',
+  31: 'st',
 } as const;
 
 /**
@@ -107,12 +102,12 @@ const ORDINAL_SUFFIXES: Readonly<Record<number, string>> = {
  * MCP: SEC-014 INPUT_VALIDATION - Constrained lookup for safe string display
  */
 const RETURN_REASON_LABELS: Readonly<Record<string, string>> = {
-  SUPPLIER_RECALL: "Supplier Recall",
-  DAMAGED: "Damaged",
-  EXPIRED: "Expired",
-  INVENTORY_ADJUSTMENT: "Inventory Adjustment",
-  STORE_CLOSURE: "Store Closure",
-  OTHER: "Other",
+  SUPPLIER_RECALL: 'Supplier Recall',
+  DAMAGED: 'Damaged',
+  EXPIRED: 'Expired',
+  INVENTORY_ADJUSTMENT: 'Inventory Adjustment',
+  STORE_CLOSURE: 'Store Closure',
+  OTHER: 'Other',
 } as const;
 
 /**
@@ -120,14 +115,14 @@ const RETURN_REASON_LABELS: Readonly<Record<string, string>> = {
  * MCP: SEC-004 XSS - Only uses safe badge variant values
  */
 const RETURN_REASON_VARIANTS: Readonly<
-  Record<string, "default" | "secondary" | "destructive" | "outline">
+  Record<string, 'default' | 'secondary' | 'destructive' | 'outline'>
 > = {
-  SUPPLIER_RECALL: "destructive",
-  DAMAGED: "destructive",
-  EXPIRED: "secondary",
-  INVENTORY_ADJUSTMENT: "outline",
-  STORE_CLOSURE: "secondary",
-  OTHER: "outline",
+  SUPPLIER_RECALL: 'destructive',
+  DAMAGED: 'destructive',
+  EXPIRED: 'secondary',
+  INVENTORY_ADJUSTMENT: 'outline',
+  STORE_CLOSURE: 'secondary',
+  OTHER: 'outline',
 } as const;
 
 // ============================================================================
@@ -144,7 +139,7 @@ const RETURN_REASON_VARIANTS: Readonly<
 function getOrdinalSuffix(day: number): string {
   // Validate input is within expected range
   if (!Number.isInteger(day) || day < 1 || day > 31) {
-    return "th";
+    return 'th';
   }
 
   // Check lookup table first for special cases
@@ -155,7 +150,7 @@ function getOrdinalSuffix(day: number): string {
   }
 
   // Default to "th" for all other cases (4th-20th, 24th-30th)
-  return "th";
+  return 'th';
 }
 
 /**
@@ -172,18 +167,18 @@ function getOrdinalSuffix(day: number): string {
  * @returns Parser function for ISO datetime strings
  */
 function createDateTimeParser(
-  formatCustom: (date: Date | string, formatStr: string) => string,
+  formatCustom: (date: Date | string, formatStr: string) => string
 ): (isoString: string | null | undefined) => ParsedDateTime {
   return (isoString: string | null | undefined): ParsedDateTime => {
     // Input validation - check for null/undefined/empty
-    if (!isoString || typeof isoString !== "string") {
-      return { date: "--", time: "--", isValid: false };
+    if (!isoString || typeof isoString !== 'string') {
+      return { date: '--', time: '--', isValid: false };
     }
 
     // Trim whitespace to prevent parsing issues
     const trimmedInput = isoString.trim();
     if (trimmedInput.length === 0) {
-      return { date: "--", time: "--", isValid: false };
+      return { date: '--', time: '--', isValid: false };
     }
 
     try {
@@ -192,25 +187,25 @@ function createDateTimeParser(
       // Validate date is valid (not NaN)
       // Using Number.isNaN for strict NaN check (SEC-014)
       if (Number.isNaN(dateObj.getTime())) {
-        return { date: "--", time: "--", isValid: false };
+        return { date: '--', time: '--', isValid: false };
       }
 
       // Validate date is within reasonable range (not year 0 or far future)
       const year = dateObj.getFullYear();
       if (year < 2000 || year > 2100) {
-        return { date: "--", time: "--", isValid: false };
+        return { date: '--', time: '--', isValid: false };
       }
 
       // Use store timezone for formatting via useDateFormat hook
       // Format: "Jan 25th, 2026" for date
-      const day = parseInt(formatCustom(trimmedInput, "d"), 10);
+      const day = parseInt(formatCustom(trimmedInput, 'd'), 10);
       const ordinalSuffix = getOrdinalSuffix(day);
-      const monthName = formatCustom(trimmedInput, "MMM");
-      const formattedYear = formatCustom(trimmedInput, "yyyy");
+      const monthName = formatCustom(trimmedInput, 'MMM');
+      const formattedYear = formatCustom(trimmedInput, 'yyyy');
       const dateString = `${monthName} ${day}${ordinalSuffix}, ${formattedYear}`;
 
       // Format time: "3:45 PM" using store timezone
-      const timeString = formatCustom(trimmedInput, "h:mm a");
+      const timeString = formatCustom(trimmedInput, 'h:mm a');
 
       return {
         date: dateString,
@@ -220,7 +215,7 @@ function createDateTimeParser(
     } catch {
       // Catch any parsing errors and return safe fallback
       // MCP: API-003 ERROR_HANDLING - Graceful degradation
-      return { date: "--", time: "--", isValid: false };
+      return { date: '--', time: '--', isValid: false };
     }
   };
 }
@@ -233,8 +228,8 @@ function createDateTimeParser(
  * @returns Human-readable label
  */
 function getReturnReasonLabel(reason: string | null | undefined): string {
-  if (!reason || typeof reason !== "string") {
-    return "Unknown";
+  if (!reason || typeof reason !== 'string') {
+    return 'Unknown';
   }
   // eslint-disable-next-line security/detect-object-injection -- Safe: reason is validated string, lookup returns undefined for invalid keys
   return RETURN_REASON_LABELS[reason] || reason;
@@ -248,13 +243,13 @@ function getReturnReasonLabel(reason: string | null | undefined): string {
  * @returns Badge variant string
  */
 function getReturnReasonVariant(
-  reason: string | null | undefined,
-): "default" | "secondary" | "destructive" | "outline" {
-  if (!reason || typeof reason !== "string") {
-    return "outline";
+  reason: string | null | undefined
+): 'default' | 'secondary' | 'destructive' | 'outline' {
+  if (!reason || typeof reason !== 'string') {
+    return 'outline';
   }
   // eslint-disable-next-line security/detect-object-injection -- Safe: reason is validated string, lookup returns undefined for invalid keys
-  return RETURN_REASON_VARIANTS[reason] || "outline";
+  return RETURN_REASON_VARIANTS[reason] || 'outline';
 }
 
 // ============================================================================
@@ -286,10 +281,7 @@ export function ReturnedPacksSection({
 
   // Create memoized datetime parser with store timezone
   // MCP: FE-001 STATE_MANAGEMENT - Memoized parser for performance
-  const parseDateTime = useMemo(
-    () => createDateTimeParser(formatCustom),
-    [formatCustom],
-  );
+  const parseDateTime = useMemo(() => createDateTimeParser(formatCustom), [formatCustom]);
 
   // ========================================================================
   // STATE MANAGEMENT
@@ -306,11 +298,7 @@ export function ReturnedPacksSection({
   // EARLY RETURN - No data
   // MCP: SEC-014 INPUT_VALIDATION - Defensive null/undefined check
   // ========================================================================
-  if (
-    !returnedPacks ||
-    !Array.isArray(returnedPacks) ||
-    returnedPacks.length === 0
-  ) {
+  if (!returnedPacks || !Array.isArray(returnedPacks) || returnedPacks.length === 0) {
     return null;
   }
 
@@ -320,7 +308,7 @@ export function ReturnedPacksSection({
 
   // Calculate total sales from returned packs
   const totalReturnSales = returnedPacks.reduce((sum, pack) => {
-    if (typeof pack.return_sales_amount === "number") {
+    if (typeof pack.return_sales_amount === 'number') {
       return sum + pack.return_sales_amount;
     }
     return sum;
@@ -331,7 +319,7 @@ export function ReturnedPacksSection({
   const isMultipleDays =
     daysSinceClose !== null &&
     daysSinceClose !== undefined &&
-    typeof daysSinceClose === "number" &&
+    typeof daysSinceClose === 'number' &&
     daysSinceClose > 1;
 
   // Build the section title based on context
@@ -359,9 +347,9 @@ export function ReturnedPacksSection({
           <AlertDescription className="text-amber-800 dark:text-amber-200">
             <strong>{daysSinceClose} days</strong> since last day close
             {openBusinessPeriod?.last_closed_date &&
-              typeof openBusinessPeriod.last_closed_date === "string" && (
+              typeof openBusinessPeriod.last_closed_date === 'string' && (
                 <span className="text-amber-600 dark:text-amber-400">
-                  {" "}
+                  {' '}
                   (last closed: {openBusinessPeriod.last_closed_date})
                 </span>
               )}
@@ -385,10 +373,7 @@ export function ReturnedPacksSection({
             aria-controls="returned-packs-content"
           >
             <div className="flex items-center gap-2">
-              <Undo2
-                className="h-4 w-4 flex-shrink-0 text-muted-foreground"
-                aria-hidden="true"
-              />
+              <Undo2 className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="font-medium text-left">{sectionTitle}</span>
               {/* Show total return sales in header */}
               {totalReturnSales > 0 && (
@@ -422,19 +407,13 @@ export function ReturnedPacksSection({
             <Table size="compact">
               <TableHeader>
                 <TableRow>
-                  <TableHead
-                    scope="col"
-                    className="w-14 text-center whitespace-nowrap"
-                  >
+                  <TableHead scope="col" className="w-14 text-center whitespace-nowrap">
                     Bin
                   </TableHead>
                   <TableHead scope="col" className="min-w-[140px]">
                     Game
                   </TableHead>
-                  <TableHead
-                    scope="col"
-                    className="w-20 text-right whitespace-nowrap"
-                  >
+                  <TableHead scope="col" className="w-20 text-right whitespace-nowrap">
                     Price
                   </TableHead>
                   <TableHead scope="col" className="w-28 whitespace-nowrap">
@@ -443,16 +422,10 @@ export function ReturnedPacksSection({
                   <TableHead scope="col" className="w-32 whitespace-nowrap">
                     Reason
                   </TableHead>
-                  <TableHead
-                    scope="col"
-                    className="w-20 text-right whitespace-nowrap"
-                  >
+                  <TableHead scope="col" className="w-20 text-right whitespace-nowrap">
                     Sold
                   </TableHead>
-                  <TableHead
-                    scope="col"
-                    className="w-24 text-right whitespace-nowrap"
-                  >
+                  <TableHead scope="col" className="w-24 text-right whitespace-nowrap">
                     Sales $
                   </TableHead>
                   <TableHead scope="col" className="w-36 whitespace-nowrap">
@@ -463,7 +436,7 @@ export function ReturnedPacksSection({
               <TableBody>
                 {returnedPacks.map((pack) => {
                   // MCP: SEC-014 INPUT_VALIDATION - Validate pack object structure
-                  if (!pack || typeof pack.pack_id !== "string") {
+                  if (!pack || typeof pack.pack_id !== 'string') {
                     return null;
                   }
 
@@ -471,36 +444,27 @@ export function ReturnedPacksSection({
                   const returnedDateTime = parseDateTime(pack.returned_at);
 
                   return (
-                    <TableRow
-                      key={pack.pack_id}
-                      data-testid={`returned-pack-row-${pack.pack_id}`}
-                    >
+                    <TableRow key={pack.pack_id} data-testid={`returned-pack-row-${pack.pack_id}`}>
                       {/* Bin Number */}
                       <TableCell className="font-mono text-primary font-semibold text-center">
-                        {typeof pack.bin_number === "number"
-                          ? pack.bin_number
-                          : "--"}
+                        {typeof pack.bin_number === 'number' ? pack.bin_number : '--'}
                       </TableCell>
 
                       {/* Game Name */}
                       <TableCell className="truncate max-w-[200px]">
-                        {typeof pack.game_name === "string"
-                          ? pack.game_name
-                          : "--"}
+                        {typeof pack.game_name === 'string' ? pack.game_name : '--'}
                       </TableCell>
 
                       {/* Price */}
                       <TableCell className="text-right tabular-nums">
-                        {typeof pack.game_price === "number"
+                        {typeof pack.game_price === 'number'
                           ? `$${pack.game_price.toFixed(2)}`
-                          : "--"}
+                          : '--'}
                       </TableCell>
 
                       {/* Pack Number */}
                       <TableCell className="font-mono text-sm">
-                        {typeof pack.pack_number === "string"
-                          ? pack.pack_number
-                          : "--"}
+                        {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
                       </TableCell>
 
                       {/* Return Reason with Badge */}
@@ -516,16 +480,16 @@ export function ReturnedPacksSection({
 
                       {/* Tickets Sold */}
                       <TableCell className="text-right tabular-nums">
-                        {typeof pack.tickets_sold_on_return === "number"
+                        {typeof pack.tickets_sold_on_return === 'number'
                           ? pack.tickets_sold_on_return
-                          : "--"}
+                          : '--'}
                       </TableCell>
 
                       {/* Sales Amount */}
                       <TableCell className="text-right tabular-nums font-medium">
-                        {typeof pack.return_sales_amount === "number"
+                        {typeof pack.return_sales_amount === 'number'
                           ? `$${pack.return_sales_amount.toFixed(2)}`
-                          : "--"}
+                          : '--'}
                       </TableCell>
 
                       {/* Returned - Stacked Date/Time */}

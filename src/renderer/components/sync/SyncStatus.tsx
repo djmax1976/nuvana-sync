@@ -13,15 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import {
-  RefreshCw,
-  Cloud,
-  CloudOff,
-  AlertCircle,
-  CheckCircle,
-  Clock,
-  Loader2,
-} from 'lucide-react';
+import { RefreshCw, Cloud, CloudOff, AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -210,9 +202,8 @@ export function SyncStatus({
    */
   const fetchStatus = useCallback(async () => {
     try {
-      const response = await window.electronAPI.invoke<IPCResponse<SyncStatusData>>(
-        'sync:getStatus'
-      );
+      const response =
+        await window.electronAPI.invoke<IPCResponse<SyncStatusData>>('sync:getStatus');
 
       if (response.error) {
         setError(response.message ?? 'Failed to get sync status');
@@ -238,9 +229,8 @@ export function SyncStatus({
     setError(null);
 
     try {
-      const response = await window.electronAPI.invoke<IPCResponse<{ triggered: boolean }>>(
-        'sync:triggerNow'
-      );
+      const response =
+        await window.electronAPI.invoke<IPCResponse<{ triggered: boolean }>>('sync:triggerNow');
 
       if (response.error) {
         setError(response.message ?? 'Sync failed');
@@ -291,11 +281,7 @@ export function SyncStatus({
   // Error state
   if (error && !status) {
     return (
-      <div
-        className={cn('flex items-center gap-2', className)}
-        role="alert"
-        aria-live="polite"
-      >
+      <div className={cn('flex items-center gap-2', className)} role="alert" aria-live="polite">
         <AlertCircle className="w-4 h-4 text-destructive" />
         <span className="text-sm text-destructive">{error}</span>
       </div>
@@ -353,10 +339,7 @@ export function SyncStatus({
   // Full variant - detailed display
   return (
     <div
-      className={cn(
-        'bg-card border border-border rounded-lg p-4 space-y-3',
-        className
-      )}
+      className={cn('bg-card border border-border rounded-lg p-4 space-y-3', className)}
       data-testid="sync-status-full"
       role="region"
       aria-label="Sync Status"
@@ -384,9 +367,7 @@ export function SyncStatus({
         </div>
         <div>
           <span className="text-muted-foreground block">Pending</span>
-          <span className="text-foreground font-medium">
-            {status.pendingCount} items
-          </span>
+          <span className="text-foreground font-medium">{status.pendingCount} items</span>
         </div>
         {showDetails && (
           <>
@@ -429,10 +410,7 @@ export function SyncStatus({
             className="flex-1"
           >
             <RefreshCw
-              className={cn(
-                'w-4 h-4 mr-2',
-                (isSyncing || status.isRunning) && 'animate-spin'
-              )}
+              className={cn('w-4 h-4 mr-2', (isSyncing || status.isRunning) && 'animate-spin')}
             />
             {isSyncing || status.isRunning ? 'Syncing...' : 'Sync Now'}
           </Button>

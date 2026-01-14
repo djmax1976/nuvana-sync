@@ -329,14 +329,7 @@ describe('Authentication Security', () => {
     });
 
     it('should not log sensitive data', () => {
-      const sensitiveFields = [
-        'pin',
-        'password',
-        'pin_hash',
-        'apiKey',
-        'token',
-        'secret',
-      ];
+      const sensitiveFields = ['pin', 'password', 'pin_hash', 'apiKey', 'token', 'secret'];
 
       const safeLogEntry = {
         event: 'user_authenticated',

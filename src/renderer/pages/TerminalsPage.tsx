@@ -13,13 +13,7 @@
 
 import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
-import {
-  Card,
-  CardHeader,
-  CardTitle,
-  CardContent,
-  CardDescription,
-} from '../components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import { Monitor, Loader2, AlertCircle, Clock, User } from 'lucide-react';
@@ -68,9 +62,7 @@ function RegisterCard({ register }: { register: RegisterWithShifts }) {
             <Badge variant="secondary">No Active Shift</Badge>
           )}
         </div>
-        <CardDescription className="text-xs">
-          Register ID: {register.register_id}
-        </CardDescription>
+        <CardDescription className="text-xs">Register ID: {register.register_id}</CardDescription>
       </CardHeader>
       <CardContent>
         {register.activeShift && (
@@ -95,19 +87,11 @@ function RegisterCard({ register }: { register: RegisterWithShifts }) {
 
         <div className="flex gap-2">
           {register.activeShift ? (
-            <Button
-              onClick={handleViewActiveShift}
-              className="flex-1"
-              variant="default"
-            >
+            <Button onClick={handleViewActiveShift} className="flex-1" variant="default">
               View Active Shift
             </Button>
           ) : (
-            <Button
-              onClick={handleViewShifts}
-              className="flex-1"
-              variant="outline"
-            >
+            <Button onClick={handleViewShifts} className="flex-1" variant="outline">
               View Shift History
             </Button>
           )}

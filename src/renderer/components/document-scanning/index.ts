@@ -6,8 +6,5 @@
  * @module document-scanning
  */
 
-export { ScanReportModal } from "./ScanReportModal";
-export type {
-  LotteryWizardFields,
-  DocumentScanResult,
-} from "./ScanReportModal";
+export { ScanReportModal } from './ScanReportModal';
+export type { LotteryWizardFields, DocumentScanResult } from './ScanReportModal';

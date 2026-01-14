@@ -1,4 +1,3 @@
-
 /**
  * Day Bins Table Component
  *
@@ -26,7 +25,7 @@
  * - FE-001: STATE_MANAGEMENT - Proper ref and memoization for focus management
  */
 
-import { useCallback, useRef, useEffect, useMemo } from "react";
+import { useCallback, useRef, useEffect, useMemo } from 'react';
 import {
   Table,
   TableBody,
@@ -34,10 +33,10 @@ import {
   TableHead,
   TableHeader,
   TableRow,
-} from "@/components/ui/table";
-import { Input } from "@/components/ui/input";
-import { Button } from "@/components/ui/button";
-import type { DayBin } from "@/lib/api/lottery";
+} from '@/components/ui/table';
+import { Input } from '@/components/ui/input';
+import { Button } from '@/components/ui/button';
+import type { DayBin } from '@/lib/api/lottery';
 
 /**
  * Validation error for a single bin
@@ -71,7 +70,7 @@ export interface DayBinsTableProps {
   onValidateEnding?: (
     binId: string,
     value: string,
-    packData: { starting_serial: string; serial_end: string },
+    packData: { starting_serial: string; serial_end: string }
   ) => void;
   /**
    * Callback when Mark Sold button is clicked for a pack
@@ -120,15 +119,14 @@ export function DayBinsTable({
   // Memoize to prevent unnecessary recalculations
   const sortedBins = useMemo(
     () => [...safeBins].sort((a, b) => a.bin_number - b.bin_number),
-    [safeBins],
+    [safeBins]
   );
 
   // Get active bins (bins with packs) for focus management
   // Memoize to maintain stable reference and prevent useEffect/useCallback re-runs
   const activeBinIds = useMemo(
-    () =>
-      sortedBins.filter((bin) => bin.pack !== null).map((bin) => bin.bin_id),
-    [sortedBins],
+    () => sortedBins.filter((bin) => bin.pack !== null).map((bin) => bin.bin_id),
+    [sortedBins]
   );
 
   /**
@@ -139,7 +137,7 @@ export function DayBinsTable({
   const handleInputChange = useCallback(
     (binId: string, value: string) => {
       // Strip non-numeric characters (SEC-014: sanitize input)
-      const sanitizedValue = value.replace(/\D/g, "");
+      const sanitizedValue = value.replace(/\D/g, '');
 
       // Enforce max length of 3 digits
       const truncatedValue = sanitizedValue.slice(0, 3);
@@ -162,7 +160,7 @@ export function DayBinsTable({
         }
       }
     },
-    [onEndingChange, onInputComplete, activeBinIds],
+    [onEndingChange, onInputComplete, activeBinIds]
   );
 
   /**
@@ -170,11 +168,7 @@ export function DayBinsTable({
    * MCP: FE-002 FORM_VALIDATION - Validate on blur for immediate feedback
    */
   const handleInputBlur = useCallback(
-    (
-      binId: string,
-      value: string,
-      pack: { starting_serial: string; serial_end: string },
-    ) => {
+    (binId: string, value: string, pack: { starting_serial: string; serial_end: string }) => {
       // Only validate if we have 3 digits (complete entry)
       if (value.length === 3 && onValidateEnding) {
         onValidateEnding(binId, value, {
@@ -183,22 +177,19 @@ export function DayBinsTable({
         });
       }
     },
-    [onValidateEnding],
+    [onValidateEnding]
   );
 
   /**
    * Store input ref for focus management
    */
-  const setInputRef = useCallback(
-    (binId: string, element: HTMLInputElement | null) => {
-      if (element) {
-        inputRefs.current.set(binId, element);
-      } else {
-        inputRefs.current.delete(binId);
-      }
-    },
-    [],
-  );
+  const setInputRef = useCallback((binId: string, element: HTMLInputElement | null) => {
+    if (element) {
+      inputRefs.current.set(binId, element);
+    } else {
+      inputRefs.current.delete(binId);
+    }
+  }, []);
 
   // Focus first active input when manual entry mode is activated (only once on activation)
   useEffect(() => {
@@ -215,11 +206,7 @@ export function DayBinsTable({
     }
 
     // Only apply initial focus once when mode is first activated
-    if (
-      wasJustActivated &&
-      !hasAppliedInitialFocus.current &&
-      activeBinIds.length > 0
-    ) {
+    if (wasJustActivated && !hasAppliedInitialFocus.current && activeBinIds.length > 0) {
       hasAppliedInitialFocus.current = true;
       const firstBinId = activeBinIds[0];
       // Small delay to ensure DOM is ready after mode change
@@ -234,20 +221,14 @@ export function DayBinsTable({
 
   if (safeBins.length === 0) {
     return (
-      <div
-        className="p-8 text-center text-muted-foreground"
-        data-testid="day-bins-table-empty"
-      >
+      <div className="p-8 text-center text-muted-foreground" data-testid="day-bins-table-empty">
         No bins configured for this store.
       </div>
     );
   }
 
   return (
-    <div
-      className="rounded-md border overflow-hidden"
-      data-testid="day-bins-table"
-    >
+    <div className="rounded-md border overflow-hidden" data-testid="day-bins-table">
       <div className="max-h-[70vh] overflow-y-auto">
         <Table size="compact">
           <TableHeader className="sticky top-0 bg-background z-10 border-b">
@@ -269,9 +250,7 @@ export function DayBinsTable({
               </TableHead>
               <TableHead scope="col" className="w-24 md:w-32">
                 Ending
-                {manualEntryMode && (
-                  <span className="ml-1 text-xs text-primary">(Edit)</span>
-                )}
+                {manualEntryMode && <span className="ml-1 text-xs text-primary">(Edit)</span>}
               </TableHead>
               {/* Actions column visible when return is available OR in manual entry mode with mark sold */}
               {(onReturnPack || (onMarkSoldOut && manualEntryMode)) && (
@@ -286,7 +265,7 @@ export function DayBinsTable({
               const isEmpty = bin.pack === null;
               // Disable row click in manual entry mode to prevent accidental navigation
               const isClickable = !isEmpty && onRowClick && !manualEntryMode;
-              const currentEndingValue = endingValues[bin.bin_id] || "";
+              const currentEndingValue = endingValues[bin.bin_id] || '';
               // Get validation error for this bin (if any)
               const validationError = validationErrors[bin.bin_id];
               const hasError = !!validationError;
@@ -296,9 +275,9 @@ export function DayBinsTable({
                   key={bin.bin_id}
                   data-testid={`day-bins-row-${bin.bin_id}`}
                   className={`
-                    ${isEmpty ? "opacity-50 bg-muted/30" : ""}
-                    ${isClickable ? "cursor-pointer hover:bg-muted/50" : ""}
-                    ${manualEntryMode && !isEmpty ? "bg-primary/5" : ""}
+                    ${isEmpty ? 'opacity-50 bg-muted/30' : ''}
+                    ${isClickable ? 'cursor-pointer hover:bg-muted/50' : ''}
+                    ${manualEntryMode && !isEmpty ? 'bg-primary/5' : ''}
                   `}
                   onClick={() => {
                     if (isClickable && bin.pack) {
@@ -313,48 +292,48 @@ export function DayBinsTable({
 
                   {/* Game Name */}
                   <TableCell
-                    className={`text-sm md:text-base ${isEmpty ? "text-muted-foreground" : ""}`}
+                    className={`text-sm md:text-base ${isEmpty ? 'text-muted-foreground' : ''}`}
                   >
-                    {isEmpty ? "(Empty)" : bin.pack!.game_name}
+                    {isEmpty ? '(Empty)' : bin.pack!.game_name}
                   </TableCell>
 
                   {/* Price (per ticket) */}
                   <TableCell
-                    className={`text-sm md:text-base ${isEmpty ? "text-muted-foreground" : ""}`}
+                    className={`text-sm md:text-base ${isEmpty ? 'text-muted-foreground' : ''}`}
                   >
-                    {isEmpty ? "--" : `$${bin.pack!.game_price.toFixed(2)}`}
+                    {isEmpty ? '--' : `$${bin.pack!.game_price.toFixed(2)}`}
                   </TableCell>
 
                   {/* Pack Number */}
                   <TableCell
                     className={`font-mono text-sm md:text-base ${
-                      isEmpty ? "text-muted-foreground" : ""
+                      isEmpty ? 'text-muted-foreground' : ''
                     }`}
                   >
-                    {isEmpty ? "--" : bin.pack!.pack_number}
+                    {isEmpty ? '--' : bin.pack!.pack_number}
                   </TableCell>
 
                   {/* Starting Serial */}
                   <TableCell
                     className={`font-mono text-sm md:text-base ${
-                      isEmpty ? "text-muted-foreground" : ""
+                      isEmpty ? 'text-muted-foreground' : ''
                     }`}
                   >
-                    {isEmpty ? "--" : bin.pack!.starting_serial}
+                    {isEmpty ? '--' : bin.pack!.starting_serial}
                   </TableCell>
 
                   {/* Ending Serial - Editable in manual entry mode */}
                   <TableCell
                     className={`font-mono text-sm md:text-base ${
                       isEmpty
-                        ? "text-muted-foreground"
+                        ? 'text-muted-foreground'
                         : manualEntryMode
-                          ? ""
-                          : "text-muted-foreground/70"
+                          ? ''
+                          : 'text-muted-foreground/70'
                     }`}
                   >
                     {isEmpty ? (
-                      "--"
+                      '--'
                     ) : manualEntryMode ? (
                       <div className="flex flex-col gap-1">
                         <Input
@@ -364,9 +343,7 @@ export function DayBinsTable({
                           pattern="[0-9]*"
                           maxLength={3}
                           value={currentEndingValue}
-                          onChange={(e) =>
-                            handleInputChange(bin.bin_id, e.target.value)
-                          }
+                          onChange={(e) => handleInputChange(bin.bin_id, e.target.value)}
                           onBlur={() =>
                             handleInputBlur(bin.bin_id, currentEndingValue, {
                               starting_serial: bin.pack!.starting_serial,
@@ -377,17 +354,15 @@ export function DayBinsTable({
                           placeholder="000"
                           className={`w-16 h-8 text-center font-mono font-bold text-sm ${
                             hasError
-                              ? "border-red-500 bg-red-50 dark:bg-red-950/20 focus:border-red-500 focus:ring-red-500"
+                              ? 'border-red-500 bg-red-50 dark:bg-red-950/20 focus:border-red-500 focus:ring-red-500'
                               : currentEndingValue.length === 3
-                                ? "border-green-500 bg-green-50 dark:bg-green-950/20"
-                                : "border-primary"
+                                ? 'border-green-500 bg-green-50 dark:bg-green-950/20'
+                                : 'border-primary'
                           }`}
                           data-testid={`ending-input-${bin.bin_id}`}
                           aria-label={`Ending serial for bin ${bin.bin_number}`}
                           aria-invalid={hasError}
-                          aria-describedby={
-                            hasError ? `ending-error-${bin.bin_id}` : undefined
-                          }
+                          aria-describedby={hasError ? `ending-error-${bin.bin_id}` : undefined}
                         />
                         {hasError && (
                           <span
@@ -402,7 +377,7 @@ export function DayBinsTable({
                       </div>
                     ) : (
                       <span data-testid={`ending-display-${bin.bin_id}`}>
-                        {bin.pack!.ending_serial || "--"}
+                        {bin.pack!.ending_serial || '--'}
                       </span>
                     )}
                   </TableCell>
@@ -411,7 +386,7 @@ export function DayBinsTable({
                   {(onReturnPack || (onMarkSoldOut && manualEntryMode)) && (
                     <TableCell className="text-center">
                       {isEmpty ? (
-                        "--"
+                        '--'
                       ) : (
                         <div className="flex items-center justify-center gap-1">
                           {/* Return Pack button - available for packs outside manual entry mode

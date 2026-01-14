@@ -13,12 +13,12 @@
  * - API-008: OUTPUT_FILTERING - Types mirror whitelisted API response fields only
  */
 
-import type { LotteryCloseResult } from "@/components/lottery/CloseDayModal";
+import type { LotteryCloseResult } from '@/components/lottery/CloseDayModal';
 
 /**
  * Closing workflow mode - determines lottery requirement
  */
-export type ClosingMode = "day" | "shift";
+export type ClosingMode = 'day' | 'shift';
 
 /**
  * Lottery status for the current business day
@@ -27,11 +27,7 @@ export type ClosingMode = "day" | "shift";
  * - closed: Lottery day fully committed/closed
  * - closed_earlier: Lottery was closed before current session started
  */
-export type LotteryStatus =
-  | "not_closed"
-  | "pending"
-  | "closed"
-  | "closed_earlier";
+export type LotteryStatus = 'not_closed' | 'pending' | 'closed' | 'closed_earlier';
 
 /**
  * Money received line item for cash reconciliation
@@ -291,8 +287,7 @@ export function calculateTotalSalesReports(state: SalesBreakdownState): number {
     (state.pos.snacks ?? 0) +
     (state.pos.other ?? 0) +
     (state.pos.salesTax ?? 0);
-  const reportsLottery =
-    (state.reports.scratchOff ?? 0) + (state.reports.onlineLottery ?? 0);
+  const reportsLottery = (state.reports.scratchOff ?? 0) + (state.reports.onlineLottery ?? 0);
   return posDepartments + reportsLottery;
 }
 

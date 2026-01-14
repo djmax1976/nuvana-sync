@@ -198,10 +198,7 @@ describe('Scanner Service', () => {
 
   describe('parseBarcodes', () => {
     it('should parse multiple valid barcodes', () => {
-      const barcodes = [
-        '100112345670001234567890',
-        '200298765430001234567890',
-      ];
+      const barcodes = ['100112345670001234567890', '200298765430001234567890'];
       const result = parseBarcodes(barcodes);
 
       expect(result.parsed.length).toBe(2);

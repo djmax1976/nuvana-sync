@@ -224,7 +224,6 @@ test.describe('Authentication', () => {
     test('should redirect to login on session expiry', async ({ window }) => {
       // This test would require mocking session expiry
       // Document expected behavior
-
       // On session expiry:
       // 1. Show session expired message
       // 2. Redirect to login screen

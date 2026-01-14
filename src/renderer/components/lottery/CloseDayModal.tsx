@@ -1,4 +1,3 @@
-
 /**
  * Close Day Modal Component
  * Modal for scanning/entering ending serial numbers for all active lottery packs at end of day
@@ -14,31 +13,25 @@
  * - Validate ending_serial >= starting_serial and <= serial_end
  */
 
-import {
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-  type ChangeEvent,
-} from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
+import { useState, useCallback, useRef, useEffect, type ChangeEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { useNotificationSound } from "@/hooks/use-notification-sound";
-import { Loader2, Volume2, VolumeX } from "lucide-react";
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { useNotificationSound } from '@/hooks/use-notification-sound';
+import { Loader2, Volume2, VolumeX } from 'lucide-react';
 import {
   closeLotteryDay,
   type DayBin,
   type CommitLotteryDayCloseResponse,
-} from "@/lib/api/lottery";
-import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
+} from '@/lib/api/lottery';
+import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 
 /**
  * Lottery close result data passed to parent on success
@@ -47,7 +40,7 @@ export interface LotteryCloseResult {
   closings_created: number;
   business_date: string;
   lottery_total: number;
-  bins_closed: CommitLotteryDayCloseResponse["bins_closed"];
+  bins_closed: CommitLotteryDayCloseResponse['bins_closed'];
 }
 
 /**
@@ -103,13 +96,10 @@ export function CloseDayModal({
   currentShiftId,
 }: CloseDayModalProps) {
   const { toast } = useToast();
-  const { playSuccess, playError, isMuted, toggleMute } =
-    useNotificationSound();
+  const { playSuccess, playError, isMuted, toggleMute } = useNotificationSound();
   const [isSubmitting, setIsSubmitting] = useState(false);
   // Use external state if provided (controlled), otherwise use internal state (uncontrolled)
-  const [internalScannedBins, setInternalScannedBins] = useState<ScannedBin[]>(
-    [],
-  );
+  const [internalScannedBins, setInternalScannedBins] = useState<ScannedBin[]>([]);
   const isControlled = externalScannedBins !== undefined;
   const scannedBins = isControlled ? externalScannedBins : internalScannedBins;
 
@@ -127,17 +117,16 @@ export function CloseDayModal({
       if (isControlled) {
         // For controlled mode, compute the new value and call the parent's callback
         const currentBins = externalScannedBinsRef.current ?? [];
-        const newValue =
-          typeof updater === "function" ? updater(currentBins) : updater;
+        const newValue = typeof updater === 'function' ? updater(currentBins) : updater;
         onScannedBinsChangeRef.current?.(newValue);
       } else {
         // For uncontrolled mode, use internal state
         setInternalScannedBins(updater);
       }
     },
-    [isControlled],
+    [isControlled]
   );
-  const [inputValue, setInputValue] = useState<string>("");
+  const [inputValue, setInputValue] = useState<string>('');
   const inputRef = useRef<HTMLInputElement>(null);
   const debounceTimer = useRef<NodeJS.Timeout | null>(null);
 
@@ -146,7 +135,7 @@ export function CloseDayModal({
 
   // Get pending bins (active bins that haven't been scanned yet)
   const pendingBins = activeBins.filter(
-    (bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id),
+    (bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id)
   );
 
   // Check if all active bins have been scanned
@@ -170,7 +159,7 @@ export function CloseDayModal({
       if (!isControlled) {
         setInternalScannedBins([]);
       }
-      setInputValue("");
+      setInputValue('');
       if (debounceTimer.current) {
         clearTimeout(debounceTimer.current);
         debounceTimer.current = null;
@@ -192,7 +181,7 @@ export function CloseDayModal({
    * Clear input and refocus for next entry
    */
   const clearInputAndFocus = useCallback(() => {
-    setInputValue("");
+    setInputValue('');
     setTimeout(() => {
       inputRef.current?.focus();
     }, 50);
@@ -226,30 +215,28 @@ export function CloseDayModal({
             // Compare game codes - we need to get game_code from the pack
             // Note: DayBinPack doesn't expose game_code, so we match by pack_number only
             // The backend will validate the full serial number
-            true,
+            true
         );
 
         if (!matchingBin || !matchingBin.pack) {
           playError();
           toast({
-            title: "Pack not found",
+            title: 'Pack not found',
             description: `No active pack found matching serial ${serial}. Pack: ${packNumber}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
         }
 
         // Check if this bin was already scanned
-        const alreadyScanned = scannedBins.find(
-          (scanned) => scanned.bin_id === matchingBin.bin_id,
-        );
+        const alreadyScanned = scannedBins.find((scanned) => scanned.bin_id === matchingBin.bin_id);
         if (alreadyScanned) {
           playError();
           toast({
-            title: "Duplicate scan",
+            title: 'Duplicate scan',
             description: `Bin ${matchingBin.bin_number} has already been scanned`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
@@ -257,18 +244,15 @@ export function CloseDayModal({
 
         // Validate closing serial is within range
         const closingSerialNum = parseInt(closingSerial, 10);
-        const startingSerialNum = parseInt(
-          matchingBin.pack.starting_serial,
-          10,
-        );
+        const startingSerialNum = parseInt(matchingBin.pack.starting_serial, 10);
         const serialEndNum = parseInt(matchingBin.pack.serial_end, 10);
 
         if (closingSerialNum < startingSerialNum) {
           playError();
           toast({
-            title: "Invalid ending serial",
+            title: 'Invalid ending serial',
             description: `Ending serial ${closingSerial} is less than starting serial ${matchingBin.pack.starting_serial}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
@@ -277,9 +261,9 @@ export function CloseDayModal({
         if (closingSerialNum > serialEndNum) {
           playError();
           toast({
-            title: "Invalid ending serial",
+            title: 'Invalid ending serial',
             description: `Ending serial ${closingSerial} exceeds pack's maximum serial ${matchingBin.pack.serial_end}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus();
           return;
@@ -296,37 +280,28 @@ export function CloseDayModal({
         };
 
         setScannedBins((prev) =>
-          [...prev, newScannedBin].sort((a, b) => a.bin_number - b.bin_number),
+          [...prev, newScannedBin].sort((a, b) => a.bin_number - b.bin_number)
         );
         clearInputAndFocus();
 
         // Success feedback
         playSuccess();
         toast({
-          title: "Bin scanned",
+          title: 'Bin scanned',
           description: `Bin ${matchingBin.bin_number} - ${matchingBin.pack.game_name} (${closingSerial})`,
         });
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Invalid serial format";
+        const errorMessage = error instanceof Error ? error.message : 'Invalid serial format';
         playError();
         toast({
-          title: "Invalid serial",
+          title: 'Invalid serial',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
         clearInputAndFocus();
       }
     },
-    [
-      activeBins,
-      scannedBins,
-      setScannedBins,
-      toast,
-      clearInputAndFocus,
-      playSuccess,
-      playError,
-    ],
+    [activeBins, scannedBins, setScannedBins, toast, clearInputAndFocus, playSuccess, playError]
   );
 
   /**
@@ -334,7 +309,7 @@ export function CloseDayModal({
    */
   const handleInputChange = useCallback(
     (e: ChangeEvent<HTMLInputElement>) => {
-      const cleanedValue = e.target.value.replace(/\D/g, ""); // Only allow digits
+      const cleanedValue = e.target.value.replace(/\D/g, ''); // Only allow digits
       setInputValue(cleanedValue);
 
       // Clear existing debounce timer
@@ -349,7 +324,7 @@ export function CloseDayModal({
         }
       }, 400);
     },
-    [handleSerialComplete],
+    [handleSerialComplete]
   );
 
   /**
@@ -359,7 +334,7 @@ export function CloseDayModal({
     (binId: string) => {
       setScannedBins((prev) => prev.filter((bin) => bin.bin_id !== binId));
     },
-    [setScannedBins],
+    [setScannedBins]
   );
 
   /**
@@ -368,9 +343,9 @@ export function CloseDayModal({
   const handleSubmit = useCallback(async () => {
     if (!allBinsScanned) {
       toast({
-        title: "Incomplete scan",
-        description: "Please scan all active bins before closing lottery",
-        variant: "destructive",
+        title: 'Incomplete scan',
+        description: 'Please scan all active bins before closing lottery',
+        variant: 'destructive',
       });
       return;
     }
@@ -392,13 +367,13 @@ export function CloseDayModal({
       if (response.success && response.data) {
         playSuccess();
         toast({
-          title: "Lottery closed successfully",
+          title: 'Lottery closed successfully',
           description: `Closed ${response.data.closings_created} pack(s) for business day ${response.data.business_date}`,
         });
 
         // Reset form
         setScannedBins([]);
-        setInputValue("");
+        setInputValue('');
         onOpenChange(false);
 
         // Call legacy callback
@@ -412,7 +387,7 @@ export function CloseDayModal({
           bins_closed: response.data.bins_closed,
         });
       } else {
-        throw new Error("Failed to close lottery");
+        throw new Error('Failed to close lottery');
       }
     } catch (error) {
       playError();
@@ -425,22 +400,21 @@ export function CloseDayModal({
         status?: number;
       };
 
-      if (apiError.code === "SHIFTS_STILL_OPEN") {
+      if (apiError.code === 'SHIFTS_STILL_OPEN') {
         // Defense-in-depth: Backend rejected because shifts are open
         toast({
-          title: "Cannot Close Lottery",
+          title: 'Cannot Close Lottery',
           description:
-            "All shifts must be closed before lottery can be closed. Please close all open shifts first.",
-          variant: "destructive",
+            'All shifts must be closed before lottery can be closed. Please close all open shifts first.',
+          variant: 'destructive',
         });
       } else {
         // Generic error handling for other cases
-        const errorMessage =
-          error instanceof Error ? error.message : "Failed to close lottery";
+        const errorMessage = error instanceof Error ? error.message : 'Failed to close lottery';
         toast({
-          title: "Error",
+          title: 'Error',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
       }
     } finally {
@@ -479,10 +453,8 @@ export function CloseDayModal({
               type="button"
               onClick={toggleMute}
               className="p-1.5 rounded-md hover:bg-muted transition-colors"
-              title={isMuted ? "Enable scan sounds" : "Disable scan sounds"}
-              aria-label={
-                isMuted ? "Enable scan sounds" : "Disable scan sounds"
-              }
+              title={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
+              aria-label={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
               data-testid="sound-toggle"
             >
               {isMuted ? (
@@ -514,7 +486,7 @@ export function CloseDayModal({
             />
             <p className="text-xs text-muted-foreground">
               {inputValue.length}/24 digits
-              {inputValue.length === 24 && " - Processing..."}
+              {inputValue.length === 24 && ' - Processing...'}
             </p>
           </div>
 
@@ -526,21 +498,14 @@ export function CloseDayModal({
                   Bins ({scannedBins.length}/{activeBins.length} scanned)
                 </label>
                 {scannedBins.length > 0 && (
-                  <span className="text-xs text-muted-foreground">
-                    Click scanned bin to undo
-                  </span>
+                  <span className="text-xs text-muted-foreground">Click scanned bin to undo</span>
                 )}
               </div>
-              <div
-                className="grid grid-cols-10 gap-1.5"
-                data-testid="bin-chips-grid"
-              >
+              <div className="grid grid-cols-10 gap-1.5" data-testid="bin-chips-grid">
                 {activeBins
                   .sort((a, b) => a.bin_number - b.bin_number)
                   .map((bin) => {
-                    const scannedBin = scannedBins.find(
-                      (s) => s.bin_id === bin.bin_id,
-                    );
+                    const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
                     const isScanned = !!scannedBin;
 
                     return (
@@ -553,8 +518,8 @@ export function CloseDayModal({
                           flex items-center h-7 rounded border transition-colors
                           ${
                             isScanned
-                              ? "bg-green-100 dark:bg-green-900/40 border-green-500 dark:border-green-600 cursor-pointer hover:bg-green-200 dark:hover:bg-green-900/60"
-                              : "bg-muted/50 border-muted-foreground/20 cursor-default justify-center"
+                              ? 'bg-green-100 dark:bg-green-900/40 border-green-500 dark:border-green-600 cursor-pointer hover:bg-green-200 dark:hover:bg-green-900/60'
+                              : 'bg-muted/50 border-muted-foreground/20 cursor-default justify-center'
                           }
                         `}
                         data-testid={`bin-chip-${bin.bin_id}`}
@@ -569,9 +534,7 @@ export function CloseDayModal({
                             <span className="w-[40%] text-center text-xs font-bold text-green-700 dark:text-green-300">
                               {bin.bin_number}
                             </span>
-                            <span className="text-gray-300 dark:text-gray-600">
-                              |
-                            </span>
+                            <span className="text-gray-300 dark:text-gray-600">|</span>
                             <span className="w-[60%] text-center text-xs font-mono font-black text-green-800 dark:text-green-200">
                               {scannedBin.closing_serial}
                             </span>
@@ -601,8 +564,7 @@ export function CloseDayModal({
           {activeBins.length === 0 && (
             <div className="p-3 bg-muted rounded-md">
               <p className="text-sm text-muted-foreground">
-                No active bins to close. All bins are either empty or already
-                closed.
+                No active bins to close. All bins are either empty or already closed.
               </p>
             </div>
           )}

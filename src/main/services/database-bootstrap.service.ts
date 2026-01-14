@@ -357,7 +357,8 @@ async function rotateBackups(correlationId: string): Promise<void> {
     return;
   }
 
-  const files = fs.readdirSync(backupDir)
+  const files = fs
+    .readdirSync(backupDir)
     .filter((f) => f.startsWith('nuvana_') && f.endsWith('.db'))
     .map((f) => ({
       name: f,
@@ -520,9 +521,7 @@ export function performHealthCheck(): HealthCheckResult {
  * @param options - Bootstrap configuration
  * @returns Bootstrap result with success/failure details
  */
-export async function bootstrapDatabase(
-  options: BootstrapOptions = {}
-): Promise<BootstrapResult> {
+export async function bootstrapDatabase(options: BootstrapOptions = {}): Promise<BootstrapResult> {
   const correlationId = randomUUID();
   sessionCorrelationId = correlationId;
   const startTime = Date.now();
@@ -555,10 +554,7 @@ export async function bootstrapDatabase(
 
   try {
     // Race against timeout
-    const result = await Promise.race([
-      executeBootstrap(correlationId, options),
-      timeoutPromise,
-    ]);
+    const result = await Promise.race([executeBootstrap(correlationId, options), timeoutPromise]);
 
     return result;
   } catch (error) {

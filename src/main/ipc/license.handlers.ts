@@ -11,15 +11,8 @@
  * @security SEC-017: Audit logging for license operations
  */
 
-import {
-  registerHandler,
-  createSuccessResponse,
-  type IPCResponse,
-} from './index';
-import {
-  licenseService,
-  type LicenseState,
-} from '../services/license.service';
+import { registerHandler, createSuccessResponse, type IPCResponse } from './index';
+import { licenseService, type LicenseState } from '../services/license.service';
 import { cloudApiService } from '../services/cloud-api.service';
 import { createLogger } from '../utils/logger';
 

@@ -1,4 +1,3 @@
-
 /**
  * Day Close Mode Scanner Component
  *
@@ -32,17 +31,10 @@
  * - All bins must be scanned before proceeding
  */
 
-import {
-  useState,
-  useCallback,
-  useRef,
-  useEffect,
-  useMemo,
-  type ChangeEvent,
-} from "react";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Progress } from "@/components/ui/progress";
+import { useState, useCallback, useRef, useEffect, useMemo, type ChangeEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Progress } from '@/components/ui/progress';
 import {
   Dialog,
   DialogContent,
@@ -50,9 +42,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { useNotificationSound } from "@/hooks/use-notification-sound";
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { useNotificationSound } from '@/hooks/use-notification-sound';
 import {
   Loader2,
   Volume2,
@@ -64,7 +56,7 @@ import {
   AlertCircle,
   AlertTriangle,
   PenLine,
-} from "lucide-react";
+} from 'lucide-react';
 import {
   prepareLotteryDayClose,
   type DayBin,
@@ -73,22 +65,22 @@ import {
   type DepletedPackDay,
   type ActivatedPackDay,
   type OpenBusinessPeriod,
-} from "@/lib/api/lottery";
-import { parseSerializedNumber } from "@/lib/utils/lottery-serial-parser";
-import { cn } from "@/lib/utils";
-import { formatDateTimeShort } from "@/utils/date-format.utils";
-import { useStoreTimezone } from "@/contexts/StoreContext";
-import { ManualEntryAuthModal } from "@/components/lottery/ManualEntryAuthModal";
+} from '@/lib/api/lottery';
+import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
+import { cn } from '@/lib/utils';
+import { formatDateTimeShort } from '@/utils/date-format.utils';
+import { useStoreTimezone } from '@/contexts/StoreContext';
+import { ManualEntryAuthModal } from '@/components/lottery/ManualEntryAuthModal';
 import {
   UnscannedBinWarningModal,
   type UnscannedBinInfo,
   type UnscannedBinModalResult,
   type BinDecision,
-} from "@/components/lottery/UnscannedBinWarningModal";
-import { validateManualEntryEnding } from "@/lib/services/lottery-closing-validation";
-import { ReturnedPacksSection } from "@/components/lottery/ReturnedPacksSection";
-import { DepletedPacksSection } from "@/components/lottery/DepletedPacksSection";
-import { ActivatedPacksSection } from "@/components/lottery/ActivatedPacksSection";
+} from '@/components/lottery/UnscannedBinWarningModal';
+import { validateManualEntryEnding } from '@/lib/services/lottery-closing-validation';
+import { ReturnedPacksSection } from '@/components/lottery/ReturnedPacksSection';
+import { DepletedPacksSection } from '@/components/lottery/DepletedPacksSection';
+import { ActivatedPacksSection } from '@/components/lottery/ActivatedPacksSection';
 
 /**
  * Scanned bin state - tracks which bins have been scanned and their ending serials
@@ -124,7 +116,7 @@ export interface LotteryCloseResult {
   /** Estimated lottery total (calculated from scanned serials) */
   lottery_total: number;
   /** Bin breakdown with sales calculations */
-  bins_closed: PrepareLotteryDayCloseResponse["bins_preview"];
+  bins_closed: PrepareLotteryDayCloseResponse['bins_preview'];
   /** Day ID for commit-close call */
   day_id?: string;
   /** Pending close expiration time */
@@ -174,7 +166,7 @@ export interface PendingClosingsData {
     pack_id: string;
     closing_serial: string;
   }>;
-  entry_method: "SCAN" | "MANUAL";
+  entry_method: 'SCAN' | 'MANUAL';
   authorized_by_user_id?: string;
 }
 
@@ -254,8 +246,7 @@ export function DayCloseModeScanner({
   openBusinessPeriod,
 }: DayCloseModeScannerProps) {
   const { toast } = useToast();
-  const { playSuccess, playError, isMuted, toggleMute } =
-    useNotificationSound();
+  const { playSuccess, playError, isMuted, toggleMute } = useNotificationSound();
 
   // ========================================================================
   // HOOKS
@@ -268,9 +259,7 @@ export function DayCloseModeScanner({
 
   // ============ STATE MANAGEMENT ============
   // Controlled vs uncontrolled pattern for scanned bins
-  const [internalScannedBins, setInternalScannedBins] = useState<ScannedBin[]>(
-    [],
-  );
+  const [internalScannedBins, setInternalScannedBins] = useState<ScannedBin[]>([]);
   const isControlled = externalScannedBins !== undefined;
   const scannedBins = isControlled ? externalScannedBins : internalScannedBins;
 
@@ -287,24 +276,22 @@ export function DayCloseModeScanner({
     (updater: ScannedBin[] | ((prev: ScannedBin[]) => ScannedBin[])) => {
       if (isControlled) {
         const currentBins = externalScannedBinsRef.current ?? [];
-        const newValue =
-          typeof updater === "function" ? updater(currentBins) : updater;
+        const newValue = typeof updater === 'function' ? updater(currentBins) : updater;
         onScannedBinsChangeRef.current?.(newValue);
       } else {
         setInternalScannedBins(updater);
       }
     },
-    [isControlled],
+    [isControlled]
   );
 
-  const [inputValue, setInputValue] = useState("");
+  const [inputValue, setInputValue] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showFloatingBar, setShowFloatingBar] = useState(false);
   const [lastScannedBinId, setLastScannedBinId] = useState<string | null>(null);
 
   // Manual entry state management
-  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] =
-    useState(false);
+  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] = useState(false);
   const [manualEntryState, setManualEntryState] = useState<ManualEntryState>({
     isActive: false,
     authorizedBy: null,
@@ -312,27 +299,21 @@ export function DayCloseModeScanner({
   });
 
   // Manual entry values - keyed by bin_id (3-digit ending serials)
-  const [manualEndingValues, setManualEndingValues] = useState<
-    Record<string, string>
-  >({});
+  const [manualEndingValues, setManualEndingValues] = useState<Record<string, string>>({});
 
   // Validation errors for manual entry - keyed by bin_id
-  const [validationErrors, setValidationErrors] = useState<
-    Record<string, BinValidationError>
-  >({});
+  const [validationErrors, setValidationErrors] = useState<Record<string, BinValidationError>>({});
 
   // Track bins with pending validation (validation in flight)
   // Prevents race condition where button enables before validation completes
-  const [pendingValidations, setPendingValidations] = useState<Set<string>>(
-    new Set(),
-  );
+  const [pendingValidations, setPendingValidations] = useState<Set<string>>(new Set());
 
   // Validation error modal state
   const [validationErrorModal, setValidationErrorModal] = useState<{
     open: boolean;
     binNumber: number | null;
     message: string;
-  }>({ open: false, binNumber: null, message: "" });
+  }>({ open: false, binNumber: null, message: '' });
 
   // Unscanned bin warning modal state
   // Shown when user tries to proceed with bins that have no ending serial
@@ -353,18 +334,12 @@ export function DayCloseModeScanner({
 
   // ============ COMPUTED VALUES ============
   // Get bins with active packs (need scanning)
-  const activeBins = useMemo(
-    () => bins.filter((bin) => bin.is_active && bin.pack),
-    [bins],
-  );
+  const activeBins = useMemo(() => bins.filter((bin) => bin.is_active && bin.pack), [bins]);
 
   // Get pending bins (not yet scanned)
   const pendingBins = useMemo(
-    () =>
-      activeBins.filter(
-        (bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id),
-      ),
-    [activeBins, scannedBins],
+    () => activeBins.filter((bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id)),
+    [activeBins, scannedBins]
   );
 
   // Progress percentage
@@ -374,16 +349,12 @@ export function DayCloseModeScanner({
   }, [scannedBins.length, activeBins.length]);
 
   // Can proceed to next step? (either all scanned OR all manual entries valid)
-  const allBinsScanned =
-    activeBins.length > 0 && scannedBins.length === activeBins.length;
+  const allBinsScanned = activeBins.length > 0 && scannedBins.length === activeBins.length;
 
   // Get sorted active bin IDs for focus management
   const sortedActiveBinIds = useMemo(
-    () =>
-      [...activeBins]
-        .sort((a, b) => a.bin_number - b.bin_number)
-        .map((bin) => bin.bin_id),
-    [activeBins],
+    () => [...activeBins].sort((a, b) => a.bin_number - b.bin_number).map((bin) => bin.bin_id),
+    [activeBins]
   );
 
   // Check if all active bins have valid 3-digit ending values in manual entry mode
@@ -462,8 +433,8 @@ export function DayCloseModeScanner({
       }
     };
 
-    window.addEventListener("scroll", handleScroll);
-    return () => window.removeEventListener("scroll", handleScroll);
+    window.addEventListener('scroll', handleScroll);
+    return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
   // ============ CLEANUP ============
@@ -496,8 +467,7 @@ export function DayCloseModeScanner({
   // ============ MANUAL ENTRY MODE FOCUS MANAGEMENT ============
   // Focus first unscanned bin input when manual entry mode is activated
   useEffect(() => {
-    const wasJustActivated =
-      manualEntryState.isActive && !prevManualEntryMode.current;
+    const wasJustActivated = manualEntryState.isActive && !prevManualEntryMode.current;
     prevManualEntryMode.current = manualEntryState.isActive;
 
     if (!manualEntryState.isActive) {
@@ -505,16 +475,12 @@ export function DayCloseModeScanner({
       return;
     }
 
-    if (
-      wasJustActivated &&
-      !hasAppliedManualFocus.current &&
-      sortedActiveBinIds.length > 0
-    ) {
+    if (wasJustActivated && !hasAppliedManualFocus.current && sortedActiveBinIds.length > 0) {
       hasAppliedManualFocus.current = true;
 
       // Find first bin that hasn't been scanned yet
       const firstUnscannedBinId = sortedActiveBinIds.find(
-        (binId) => !scannedBins.find((s) => s.bin_id === binId),
+        (binId) => !scannedBins.find((s) => s.bin_id === binId)
       );
 
       if (firstUnscannedBinId) {
@@ -532,15 +498,12 @@ export function DayCloseModeScanner({
    * Clear input and refocus for next scan
    * MCP: FE-001 STATE_MANAGEMENT - Clean state transitions
    */
-  const clearInputAndFocus = useCallback(
-    (inputRef: React.RefObject<HTMLInputElement | null>) => {
-      setInputValue("");
-      setTimeout(() => {
-        inputRef.current?.focus();
-      }, 50);
-    },
-    [],
-  );
+  const clearInputAndFocus = useCallback((inputRef: React.RefObject<HTMLInputElement | null>) => {
+    setInputValue('');
+    setTimeout(() => {
+      inputRef.current?.focus();
+    }, 50);
+  }, []);
 
   /**
    * Check if a pack number matches a returned pack
@@ -554,7 +517,7 @@ export function DayCloseModeScanner({
   const findReturnedPack = useCallback(
     (packNumber: string): ReturnedPackDay | undefined => {
       // SEC-014: Validate input type before processing
-      if (typeof packNumber !== "string" || packNumber.length === 0) {
+      if (typeof packNumber !== 'string' || packNumber.length === 0) {
         return undefined;
       }
 
@@ -565,12 +528,10 @@ export function DayCloseModeScanner({
 
       // Find matching returned pack with strict equality check
       return returnedPacks.find(
-        (pack) =>
-          typeof pack.pack_number === "string" &&
-          pack.pack_number === packNumber,
+        (pack) => typeof pack.pack_number === 'string' && pack.pack_number === packNumber
       );
     },
-    [returnedPacks],
+    [returnedPacks]
   );
 
   /**
@@ -585,8 +546,8 @@ export function DayCloseModeScanner({
   const formatReturnedDate = useCallback(
     (isoDateString: string): string => {
       // SEC-014: Validate input is a non-empty string
-      if (typeof isoDateString !== "string" || isoDateString.length === 0) {
-        return "earlier today";
+      if (typeof isoDateString !== 'string' || isoDateString.length === 0) {
+        return 'earlier today';
       }
 
       try {
@@ -594,10 +555,10 @@ export function DayCloseModeScanner({
         return formatDateTimeShort(isoDateString, storeTimezone);
       } catch {
         // SEC-014: Fail safely with fallback value
-        return "earlier today";
+        return 'earlier today';
       }
     },
-    [storeTimezone],
+    [storeTimezone]
   );
 
   /**
@@ -619,7 +580,7 @@ export function DayCloseModeScanner({
 
         // Find matching bin by pack number
         const matchingBin = activeBins.find(
-          (bin) => bin.pack && bin.pack.pack_number === packNumber,
+          (bin) => bin.pack && bin.pack.pack_number === packNumber
         );
 
         if (!matchingBin || !matchingBin.pack) {
@@ -634,9 +595,9 @@ export function DayCloseModeScanner({
             const returnedDate = formatReturnedDate(returnedPack.returned_at);
             playError();
             toast({
-              title: "Pack already returned",
+              title: 'Pack already returned',
               description: `${returnedPack.game_name} (Pack ${packNumber}) was returned on ${returnedDate}. See Returned Packs section above.`,
-              variant: "destructive",
+              variant: 'destructive',
             });
             clearInputAndFocus(inputRef);
             return;
@@ -645,24 +606,22 @@ export function DayCloseModeScanner({
           // Truly not found - pack doesn't exist in active bins or returned packs
           playError();
           toast({
-            title: "Pack not found",
+            title: 'Pack not found',
             description: `No active pack matching ${packNumber}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus(inputRef);
           return;
         }
 
         // Check if already scanned
-        const alreadyScanned = scannedBins.find(
-          (scanned) => scanned.bin_id === matchingBin.bin_id,
-        );
+        const alreadyScanned = scannedBins.find((scanned) => scanned.bin_id === matchingBin.bin_id);
         if (alreadyScanned) {
           playError();
           toast({
-            title: "Duplicate scan",
+            title: 'Duplicate scan',
             description: `Bin ${matchingBin.bin_number} has already been scanned`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus(inputRef);
           return;
@@ -670,18 +629,15 @@ export function DayCloseModeScanner({
 
         // Validate closing serial range
         const closingSerialNum = parseInt(closingSerial, 10);
-        const startingSerialNum = parseInt(
-          matchingBin.pack.starting_serial,
-          10,
-        );
+        const startingSerialNum = parseInt(matchingBin.pack.starting_serial, 10);
         const serialEndNum = parseInt(matchingBin.pack.serial_end, 10);
 
         if (closingSerialNum < startingSerialNum) {
           playError();
           toast({
-            title: "Invalid ending serial",
+            title: 'Invalid ending serial',
             description: `Ending ${closingSerial} is less than starting ${matchingBin.pack.starting_serial}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus(inputRef);
           return;
@@ -690,9 +646,9 @@ export function DayCloseModeScanner({
         if (closingSerialNum > serialEndNum) {
           playError();
           toast({
-            title: "Invalid ending serial",
+            title: 'Invalid ending serial',
             description: `Ending ${closingSerial} exceeds pack max ${matchingBin.pack.serial_end}`,
-            variant: "destructive",
+            variant: 'destructive',
           });
           clearInputAndFocus(inputRef);
           return;
@@ -709,7 +665,7 @@ export function DayCloseModeScanner({
         };
 
         setScannedBins((prev) =>
-          [...prev, newScannedBin].sort((a, b) => a.bin_number - b.bin_number),
+          [...prev, newScannedBin].sort((a, b) => a.bin_number - b.bin_number)
         );
         setLastScannedBinId(matchingBin.bin_id);
         clearInputAndFocus(inputRef);
@@ -717,23 +673,22 @@ export function DayCloseModeScanner({
         // Success feedback
         playSuccess();
         toast({
-          title: "Bin scanned",
+          title: 'Bin scanned',
           description: `Bin ${matchingBin.bin_number} - ${matchingBin.pack.game_name} (${closingSerial})`,
         });
 
         // Scroll row into view
         const row = document.getElementById(`bin-row-${matchingBin.bin_id}`);
         if (row) {
-          row.scrollIntoView({ behavior: "smooth", block: "center" });
+          row.scrollIntoView({ behavior: 'smooth', block: 'center' });
         }
       } catch (error) {
-        const errorMessage =
-          error instanceof Error ? error.message : "Invalid serial format";
+        const errorMessage = error instanceof Error ? error.message : 'Invalid serial format';
         playError();
         toast({
-          title: "Invalid serial",
+          title: 'Invalid serial',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
         clearInputAndFocus(inputRef);
       }
@@ -748,7 +703,7 @@ export function DayCloseModeScanner({
       playError,
       findReturnedPack,
       formatReturnedDate,
-    ],
+    ]
   );
 
   /**
@@ -758,13 +713,10 @@ export function DayCloseModeScanner({
    * - On error: clear input and refocus
    */
   const handleInputChange = useCallback(
-    (
-      e: ChangeEvent<HTMLInputElement>,
-      inputRef: React.RefObject<HTMLInputElement | null>,
-    ) => {
+    (e: ChangeEvent<HTMLInputElement>, inputRef: React.RefObject<HTMLInputElement | null>) => {
       const value = e.target.value;
       // Only allow digits
-      const cleanedValue = value.replace(/\D/g, "");
+      const cleanedValue = value.replace(/\D/g, '');
 
       // Clear any pending validation timer
       if (scanValidationTimerRef.current) {
@@ -778,10 +730,10 @@ export function DayCloseModeScanner({
         if (cleanedValue.length > SERIAL_LENGTH) {
           playError();
           toast({
-            title: "Invalid input. Please scan again.",
-            variant: "destructive",
+            title: 'Invalid input. Please scan again.',
+            variant: 'destructive',
           });
-          setInputValue("");
+          setInputValue('');
           setTimeout(() => inputRef.current?.focus(), 50);
           return;
         }
@@ -800,10 +752,10 @@ export function DayCloseModeScanner({
           if (capturedLength !== SERIAL_LENGTH) {
             playError();
             toast({
-              title: "Invalid input. Please scan again.",
-              variant: "destructive",
+              title: 'Invalid input. Please scan again.',
+              variant: 'destructive',
             });
-            setInputValue("");
+            setInputValue('');
             setTimeout(() => inputRef.current?.focus(), 50);
           }
         }, SCAN_VALIDATION_TIMEOUT_MS);
@@ -811,7 +763,7 @@ export function DayCloseModeScanner({
         setInputValue(cleanedValue);
       }
     },
-    [processSerial, toast, playError],
+    [processSerial, toast, playError]
   );
 
   /**
@@ -822,7 +774,7 @@ export function DayCloseModeScanner({
       setScannedBins((prev) => prev.filter((bin) => bin.bin_id !== binId));
       inlineInputRef.current?.focus();
     },
-    [setScannedBins],
+    [setScannedBins]
   );
 
   // ============ MANUAL ENTRY HANDLERS ============
@@ -858,11 +810,11 @@ export function DayCloseModeScanner({
       setPendingValidations(new Set());
 
       toast({
-        title: "Manual Entry Enabled",
+        title: 'Manual Entry Enabled',
         description: `Authorized by ${authorizedBy.name}. You can now enter ending serial numbers.`,
       });
     },
-    [scannedBins, toast],
+    [scannedBins, toast]
   );
 
   /**
@@ -879,24 +831,21 @@ export function DayCloseModeScanner({
     setPendingValidations(new Set());
 
     toast({
-      title: "Manual Entry Cancelled",
-      description: "Manual entry mode has been deactivated.",
+      title: 'Manual Entry Cancelled',
+      description: 'Manual entry mode has been deactivated.',
     });
   }, [toast]);
 
   /**
    * Store manual input ref for focus management
    */
-  const setManualInputRef = useCallback(
-    (binId: string, element: HTMLInputElement | null) => {
-      if (element) {
-        manualInputRefs.current.set(binId, element);
-      } else {
-        manualInputRefs.current.delete(binId);
-      }
-    },
-    [],
-  );
+  const setManualInputRef = useCallback((binId: string, element: HTMLInputElement | null) => {
+    if (element) {
+      manualInputRefs.current.set(binId, element);
+    } else {
+      manualInputRefs.current.delete(binId);
+    }
+  }, []);
 
   /**
    * Handle manual ending value change
@@ -907,7 +856,7 @@ export function DayCloseModeScanner({
   const handleManualEndingChange = useCallback(
     (binId: string, value: string) => {
       // Strip non-numeric characters
-      const sanitizedValue = value.replace(/\D/g, "");
+      const sanitizedValue = value.replace(/\D/g, '');
       // Enforce max length of 3 digits
       const truncatedValue = sanitizedValue.slice(0, 3);
 
@@ -944,7 +893,7 @@ export function DayCloseModeScanner({
               });
             } else {
               // Set error state and show modal
-              const errorMessage = result.error || "Invalid ending number";
+              const errorMessage = result.error || 'Invalid ending number';
               setValidationErrors((prev) => ({
                 ...prev,
                 [binId]: { message: errorMessage },
@@ -983,7 +932,7 @@ export function DayCloseModeScanner({
         });
       }
     },
-    [sortedActiveBinIds, scannedBins, activeBins],
+    [sortedActiveBinIds, scannedBins, activeBins]
   );
 
   /**
@@ -996,7 +945,7 @@ export function DayCloseModeScanner({
       binId: string,
       binNumber: number,
       value: string,
-      pack: { starting_serial: string; serial_end: string },
+      pack: { starting_serial: string; serial_end: string }
     ) => {
       // Only validate if we have 3 digits (complete entry)
       if (value.length !== 3) return;
@@ -1014,7 +963,7 @@ export function DayCloseModeScanner({
         });
       } else {
         // Set error state and show modal
-        const errorMessage = result.error || "Invalid ending number";
+        const errorMessage = result.error || 'Invalid ending number';
         setValidationErrors((prev) => ({
           ...prev,
           [binId]: { message: errorMessage },
@@ -1027,7 +976,7 @@ export function DayCloseModeScanner({
         });
       }
     },
-    [],
+    []
   );
 
   /**
@@ -1039,9 +988,9 @@ export function DayCloseModeScanner({
   const handleSubmit = useCallback(async () => {
     if (!allBinsScanned) {
       toast({
-        title: "Incomplete scan",
-        description: "Please scan all active bins before closing lottery",
-        variant: "destructive",
+        title: 'Incomplete scan',
+        description: 'Please scan all active bins before closing lottery',
+        variant: 'destructive',
       });
       return;
     }
@@ -1069,7 +1018,7 @@ export function DayCloseModeScanner({
 
         // Reset state and notify parent with prepare response data
         setScannedBins([]);
-        setInputValue("");
+        setInputValue('');
         onSuccess({
           closings_created: response.data.closings_count,
           business_date: response.data.business_date,
@@ -1079,7 +1028,7 @@ export function DayCloseModeScanner({
           pending_close_expires_at: response.data.pending_close_expires_at,
         });
       } else {
-        throw new Error("Failed to prepare lottery close");
+        throw new Error('Failed to prepare lottery close');
       }
     } catch (error) {
       playError();
@@ -1090,22 +1039,19 @@ export function DayCloseModeScanner({
         message?: string;
       };
 
-      if (apiError.code === "SHIFTS_STILL_OPEN") {
+      if (apiError.code === 'SHIFTS_STILL_OPEN') {
         toast({
-          title: "Cannot Close Lottery",
-          description:
-            "All shifts must be closed before lottery can be closed.",
-          variant: "destructive",
+          title: 'Cannot Close Lottery',
+          description: 'All shifts must be closed before lottery can be closed.',
+          variant: 'destructive',
         });
       } else {
         const errorMessage =
-          error instanceof Error
-            ? error.message
-            : "Failed to prepare lottery close";
+          error instanceof Error ? error.message : 'Failed to prepare lottery close';
         toast({
-          title: "Error",
+          title: 'Error',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
       }
     } finally {
@@ -1133,9 +1079,9 @@ export function DayCloseModeScanner({
   const handleManualSubmit = useCallback(async () => {
     if (!canCloseManualEntry) {
       toast({
-        title: "Incomplete entry",
-        description: "Please enter valid 3-digit ending serials for all bins",
-        variant: "destructive",
+        title: 'Incomplete entry',
+        description: 'Please enter valid 3-digit ending serials for all bins',
+        variant: 'destructive',
       });
       return;
     }
@@ -1174,7 +1120,7 @@ export function DayCloseModeScanner({
 
         // Reset all state and notify parent with prepare response data
         setScannedBins([]);
-        setInputValue("");
+        setInputValue('');
         setManualEntryState({
           isActive: false,
           authorizedBy: null,
@@ -1193,28 +1139,25 @@ export function DayCloseModeScanner({
           pending_close_expires_at: response.data.pending_close_expires_at,
         });
       } else {
-        throw new Error("Failed to prepare lottery close");
+        throw new Error('Failed to prepare lottery close');
       }
     } catch (error) {
       playError();
 
       const apiError = error as { code?: string; message?: string };
-      if (apiError.code === "SHIFTS_STILL_OPEN") {
+      if (apiError.code === 'SHIFTS_STILL_OPEN') {
         toast({
-          title: "Cannot Close Lottery",
-          description:
-            "All shifts must be closed before lottery can be closed.",
-          variant: "destructive",
+          title: 'Cannot Close Lottery',
+          description: 'All shifts must be closed before lottery can be closed.',
+          variant: 'destructive',
         });
       } else {
         const errorMessage =
-          error instanceof Error
-            ? error.message
-            : "Failed to prepare lottery close";
+          error instanceof Error ? error.message : 'Failed to prepare lottery close';
         toast({
-          title: "Error",
+          title: 'Error',
           description: errorMessage,
-          variant: "destructive",
+          variant: 'destructive',
         });
       }
     } finally {
@@ -1249,22 +1192,18 @@ export function DayCloseModeScanner({
       if (result.decisions && result.decisions.length > 0) {
         // Add sold out bins to scannedBins so they show green on main page
         // Mark as is_sold_out so calculateTotalSales uses depletion formula
-        const newScannedBins: ScannedBin[] = result.decisions.map(
-          (decision) => ({
-            bin_id: decision.bin_id,
-            bin_number: decision.bin_number,
-            pack_id: decision.pack_id,
-            pack_number: decision.pack_number,
-            game_name: decision.game_name,
-            closing_serial: decision.ending_serial,
-            is_sold_out: true, // Use depletion formula: (serial_end + 1) - starting
-          }),
-        );
+        const newScannedBins: ScannedBin[] = result.decisions.map((decision) => ({
+          bin_id: decision.bin_id,
+          bin_number: decision.bin_number,
+          pack_id: decision.pack_id,
+          pack_number: decision.pack_number,
+          game_name: decision.game_name,
+          closing_serial: decision.ending_serial,
+          is_sold_out: true, // Use depletion formula: (serial_end + 1) - starting
+        }));
 
         setScannedBins((prev) =>
-          [...prev, ...newScannedBins].sort(
-            (a, b) => a.bin_number - b.bin_number,
-          ),
+          [...prev, ...newScannedBins].sort((a, b) => a.bin_number - b.bin_number)
         );
         // No toast needed - green highlighting in table provides visual confirmation
       }
@@ -1278,7 +1217,7 @@ export function DayCloseModeScanner({
         }, 100);
       }
     },
-    [setScannedBins],
+    [setScannedBins]
   );
 
   /**
@@ -1327,10 +1266,7 @@ export function DayCloseModeScanner({
   const calculateTicketsSold = useCallback(
     (endingSerial: string, startingSerial: string): number => {
       // SEC-014: Validate input types before processing
-      if (
-        typeof endingSerial !== "string" ||
-        typeof startingSerial !== "string"
-      ) {
+      if (typeof endingSerial !== 'string' || typeof startingSerial !== 'string') {
         return 0;
       }
 
@@ -1346,12 +1282,7 @@ export function DayCloseModeScanner({
 
       // SEC-014: Validate serial range (reasonable bounds check)
       const MAX_SERIAL = 999;
-      if (
-        endingNum < 0 ||
-        endingNum > MAX_SERIAL ||
-        startingNum < 0 ||
-        startingNum > MAX_SERIAL
-      ) {
+      if (endingNum < 0 || endingNum > MAX_SERIAL || startingNum < 0 || startingNum > MAX_SERIAL) {
         return 0;
       }
 
@@ -1364,7 +1295,7 @@ export function DayCloseModeScanner({
       // Math.max provides defense-in-depth against data integrity issues
       return Math.max(0, ticketsSold);
     },
-    [],
+    []
   );
 
   /**
@@ -1393,7 +1324,7 @@ export function DayCloseModeScanner({
   const calculateTicketsSoldForDepletion = useCallback(
     (serialEnd: string, startingSerial: string): number => {
       // SEC-014: Validate input types before processing
-      if (typeof serialEnd !== "string" || typeof startingSerial !== "string") {
+      if (typeof serialEnd !== 'string' || typeof startingSerial !== 'string') {
         return 0;
       }
 
@@ -1425,7 +1356,7 @@ export function DayCloseModeScanner({
       // Ensure non-negative result
       return Math.max(0, ticketsSold);
     },
-    [],
+    []
   );
 
   /**
@@ -1457,10 +1388,7 @@ export function DayCloseModeScanner({
       // Sold out: (serial_end + 1) - starting (closing_serial IS serial_end)
       // Normal: ending - starting (closing_serial is next position)
       const ticketsSold = isSoldOut
-        ? calculateTicketsSoldForDepletion(
-            closingSerial,
-            bin.pack.starting_serial,
-          )
+        ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
         : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
 
       return total + ticketsSold * bin.pack.game_price;
@@ -1480,8 +1408,8 @@ export function DayCloseModeScanner({
       {/* Floating Scan Bar (Fixed at top when scrolled) */}
       <div
         className={cn(
-          "fixed top-0 left-0 right-0 z-40 bg-primary text-primary-foreground shadow-lg transition-transform duration-300",
-          showFloatingBar ? "translate-y-0" : "-translate-y-full",
+          'fixed top-0 left-0 right-0 z-40 bg-primary text-primary-foreground shadow-lg transition-transform duration-300',
+          showFloatingBar ? 'translate-y-0' : '-translate-y-full'
         )}
         data-testid="floating-scan-bar"
       >
@@ -1529,17 +1457,11 @@ export function DayCloseModeScanner({
               type="button"
               onClick={toggleMute}
               className="p-2 hover:bg-primary/80 rounded-md shrink-0"
-              title={isMuted ? "Enable scan sounds" : "Disable scan sounds"}
-              aria-label={
-                isMuted ? "Enable scan sounds" : "Disable scan sounds"
-              }
+              title={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
+              aria-label={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
               data-testid="floating-sound-toggle"
             >
-              {isMuted ? (
-                <VolumeX className="w-6 h-6" />
-              ) : (
-                <Volume2 className="w-6 h-6" />
-              )}
+              {isMuted ? <VolumeX className="w-6 h-6" /> : <Volume2 className="w-6 h-6" />}
             </button>
           </div>
         </div>
@@ -1563,12 +1485,9 @@ export function DayCloseModeScanner({
                 Cannot Close Day – Open Shifts Found
               </h3>
               {blockingShifts.map((shift) => (
-                <p
-                  key={shift.shift_id}
-                  className="text-sm text-muted-foreground"
-                >
-                  {shift.terminal_name || "Unknown Terminal"} • Shift #
-                  {shift.shift_number || "?"} • {shift.cashier_name}
+                <p key={shift.shift_id} className="text-sm text-muted-foreground">
+                  {shift.terminal_name || 'Unknown Terminal'} • Shift #{shift.shift_number || '?'} •{' '}
+                  {shift.cashier_name}
                 </p>
               ))}
             </div>
@@ -1579,8 +1498,8 @@ export function DayCloseModeScanner({
       {/* Main Content */}
       <div
         className={cn(
-          "bg-card rounded-lg border overflow-hidden flex flex-col min-h-[400px]",
-          isBlocked && "opacity-60 pointer-events-none",
+          'bg-card rounded-lg border overflow-hidden flex flex-col min-h-[400px]',
+          isBlocked && 'opacity-60 pointer-events-none'
         )}
       >
         {/* Sticky Header with scan input - stays at top when scrolling */}
@@ -1599,18 +1518,16 @@ export function DayCloseModeScanner({
                 </h2>
                 <p className="text-muted-foreground">
                   {isBlocked
-                    ? "Scanning disabled – close all shifts first"
+                    ? 'Scanning disabled – close all shifts first'
                     : manualEntryState.isActive
                       ? `Manual entry enabled by ${manualEntryState.authorizedBy?.name}. Enter 3-digit ending serials.`
-                      : "Scan the barcode on the current ticket of each active bin"}
+                      : 'Scan the barcode on the current ticket of each active bin'}
                 </p>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-sm font-medium text-muted-foreground">
-                  <span className="text-lg font-bold text-primary">
-                    {scannedBins.length}
-                  </span>
-                  /{activeBins.length} scanned
+                  <span className="text-lg font-bold text-primary">{scannedBins.length}</span>/
+                  {activeBins.length} scanned
                 </span>
 
                 {/* Manual Entry Button - only show when not in manual mode */}
@@ -1645,10 +1562,8 @@ export function DayCloseModeScanner({
                   type="button"
                   onClick={toggleMute}
                   className="p-2 hover:bg-muted rounded-md"
-                  title={isMuted ? "Enable scan sounds" : "Disable scan sounds"}
-                  aria-label={
-                    isMuted ? "Enable scan sounds" : "Disable scan sounds"
-                  }
+                  title={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
+                  aria-label={isMuted ? 'Enable scan sounds' : 'Disable scan sounds'}
                   data-testid="inline-sound-toggle"
                 >
                   {isMuted ? (
@@ -1695,9 +1610,7 @@ export function DayCloseModeScanner({
             <div className="flex items-center gap-3">
               <span className="text-sm font-medium">Progress</span>
               <Progress value={progressPercent} className="flex-1" />
-              <span className="text-sm text-muted-foreground">
-                {progressPercent}%
-              </span>
+              <span className="text-sm text-muted-foreground">{progressPercent}%</span>
             </div>
           </div>
         </div>
@@ -1736,10 +1649,7 @@ export function DayCloseModeScanner({
             <tbody className="divide-y">
               {activeBins.length === 0 && (
                 <tr>
-                  <td
-                    colSpan={8}
-                    className="px-4 py-8 text-center text-muted-foreground"
-                  >
+                  <td colSpan={8} className="px-4 py-8 text-center text-muted-foreground">
                     <div className="flex flex-col items-center gap-2">
                       <AlertCircle className="h-8 w-8 text-muted-foreground/50" />
                       <p className="font-medium">No Active Bins</p>
@@ -1753,14 +1663,12 @@ export function DayCloseModeScanner({
               {activeBins
                 .sort((a, b) => a.bin_number - b.bin_number)
                 .map((bin) => {
-                  const scannedBin = scannedBins.find(
-                    (s) => s.bin_id === bin.bin_id,
-                  );
+                  const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
                   const isScanned = !!scannedBin;
                   const isJustScanned = lastScannedBinId === bin.bin_id;
 
                   // Get manual entry value and validation error
-                  const manualValue = manualEndingValues[bin.bin_id] || "";
+                  const manualValue = manualEndingValues[bin.bin_id] || '';
                   const validationError = validationErrors[bin.bin_id];
                   const hasError = !!validationError;
 
@@ -1771,11 +1679,7 @@ export function DayCloseModeScanner({
 
                   if (isScanned && bin.pack) {
                     closingSerial = scannedBin.closing_serial;
-                  } else if (
-                    manualEntryState.isActive &&
-                    manualValue.length === 3 &&
-                    bin.pack
-                  ) {
+                  } else if (manualEntryState.isActive && manualValue.length === 3 && bin.pack) {
                     closingSerial = manualValue;
                   }
 
@@ -1783,14 +1687,8 @@ export function DayCloseModeScanner({
                     // Use correct formula based on whether bin was marked sold out
                     const isSoldOut = scannedBin?.is_sold_out === true;
                     ticketsSold = isSoldOut
-                      ? calculateTicketsSoldForDepletion(
-                          closingSerial,
-                          bin.pack.starting_serial,
-                        )
-                      : calculateTicketsSold(
-                          closingSerial,
-                          bin.pack.starting_serial,
-                        );
+                      ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
+                      : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
                     salesAmount = ticketsSold * bin.pack.game_price;
                   }
 
@@ -1801,42 +1699,30 @@ export function DayCloseModeScanner({
                       key={bin.bin_id}
                       id={`bin-row-${bin.bin_id}`}
                       className={cn(
-                        "transition-colors h-14",
+                        'transition-colors h-14',
                         isScanned && !manualEntryState.isActive
-                          ? "bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/30"
+                          ? 'bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/30'
                           : manualEntryState.isActive && hasValidEntry
-                            ? "bg-green-50 dark:bg-green-950/20"
-                            : "hover:bg-muted/50",
-                        isJustScanned && "animate-pulse",
+                            ? 'bg-green-50 dark:bg-green-950/20'
+                            : 'hover:bg-muted/50',
+                        isJustScanned && 'animate-pulse',
                         manualEntryState.isActive &&
                           !isScanned &&
-                          "bg-amber-50/30 dark:bg-amber-950/10",
+                          'bg-amber-50/30 dark:bg-amber-950/10'
                       )}
                       onClick={() =>
-                        !manualEntryState.isActive &&
-                        isScanned &&
-                        handleRemoveBin(bin.bin_id)
+                        !manualEntryState.isActive && isScanned && handleRemoveBin(bin.bin_id)
                       }
                       title={
-                        !manualEntryState.isActive && isScanned
-                          ? "Click to undo scan"
-                          : undefined
+                        !manualEntryState.isActive && isScanned ? 'Click to undo scan' : undefined
                       }
                       data-testid={`bin-row-${bin.bin_id}`}
                     >
-                      <td className="px-4 py-3 font-mono font-semibold">
-                        {bin.bin_number}
-                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold">{bin.bin_number}</td>
                       <td className="px-4 py-3">{bin.pack?.game_name}</td>
-                      <td className="px-4 py-3">
-                        ${bin.pack?.game_price.toFixed(2)}
-                      </td>
-                      <td className="px-4 py-3 font-mono">
-                        {bin.pack?.pack_number}
-                      </td>
-                      <td className="px-4 py-3 font-mono">
-                        {bin.pack?.starting_serial}
-                      </td>
+                      <td className="px-4 py-3">${bin.pack?.game_price.toFixed(2)}</td>
+                      <td className="px-4 py-3 font-mono">{bin.pack?.pack_number}</td>
+                      <td className="px-4 py-3 font-mono">{bin.pack?.starting_serial}</td>
                       <td className="px-4 py-3 font-mono min-w-[5.5rem]">
                         {/* In manual entry mode, show editable inputs for unscanned bins */}
                         {manualEntryState.isActive && !isScanned && bin.pack ? (
@@ -1848,47 +1734,33 @@ export function DayCloseModeScanner({
                               pattern="[0-9]*"
                               maxLength={3}
                               value={manualValue}
-                              onChange={(e) =>
-                                handleManualEndingChange(
-                                  bin.bin_id,
-                                  e.target.value,
-                                )
-                              }
+                              onChange={(e) => handleManualEndingChange(bin.bin_id, e.target.value)}
                               onBlur={() =>
-                                handleManualInputBlur(
-                                  bin.bin_id,
-                                  bin.bin_number,
-                                  manualValue,
-                                  {
-                                    starting_serial: bin.pack!.starting_serial,
-                                    serial_end: bin.pack!.serial_end,
-                                  },
-                                )
+                                handleManualInputBlur(bin.bin_id, bin.bin_number, manualValue, {
+                                  starting_serial: bin.pack!.starting_serial,
+                                  serial_end: bin.pack!.serial_end,
+                                })
                               }
                               onClick={(e) => e.stopPropagation()}
                               placeholder="000"
                               disabled={isSubmitting}
                               className={cn(
-                                "w-16 h-8 text-center font-mono font-bold text-sm",
+                                'w-16 h-8 text-center font-mono font-bold text-sm',
                                 hasError
-                                  ? "border-red-500 bg-red-50 dark:bg-red-950/20 focus:border-red-500 focus:ring-red-500"
+                                  ? 'border-red-500 bg-red-50 dark:bg-red-950/20 focus:border-red-500 focus:ring-red-500'
                                   : manualValue.length === 3
-                                    ? "border-green-500 bg-green-50 dark:bg-green-950/20"
-                                    : "border-amber-500 bg-amber-50/50 dark:bg-amber-950/20",
+                                    ? 'border-green-500 bg-green-50 dark:bg-green-950/20'
+                                    : 'border-amber-500 bg-amber-50/50 dark:bg-amber-950/20'
                               )}
                               data-testid={`manual-ending-input-${bin.bin_id}`}
                               aria-label={`Ending serial for bin ${bin.bin_number}`}
                               aria-invalid={hasError}
                             />
                           </div>
-                        ) : isScanned ||
-                          (manualEntryState.isActive &&
-                            manualValue.length === 3) ? (
+                        ) : isScanned || (manualEntryState.isActive && manualValue.length === 3) ? (
                           <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-bold min-w-[4rem]">
                             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
-                            {isScanned
-                              ? scannedBin.closing_serial
-                              : manualValue}
+                            {isScanned ? scannedBin.closing_serial : manualValue}
                           </span>
                         ) : (
                           <span className="inline-block min-w-[4rem] text-muted-foreground">
@@ -1898,21 +1770,21 @@ export function DayCloseModeScanner({
                       </td>
                       <td
                         className={cn(
-                          "px-4 py-3 text-right",
-                          hasValidEntry ? "" : "text-muted-foreground",
+                          'px-4 py-3 text-right',
+                          hasValidEntry ? '' : 'text-muted-foreground'
                         )}
                       >
-                        {hasValidEntry ? ticketsSold : "-"}
+                        {hasValidEntry ? ticketsSold : '-'}
                       </td>
                       <td
                         className={cn(
-                          "px-4 py-3 text-right font-semibold",
+                          'px-4 py-3 text-right font-semibold',
                           hasValidEntry
-                            ? "text-green-600 dark:text-green-400"
-                            : "text-muted-foreground",
+                            ? 'text-green-600 dark:text-green-400'
+                            : 'text-muted-foreground'
                         )}
                       >
-                        {hasValidEntry ? `$${salesAmount.toFixed(2)}` : "-"}
+                        {hasValidEntry ? `$${salesAmount.toFixed(2)}` : '-'}
                       </td>
                     </tr>
                   );
@@ -1923,7 +1795,7 @@ export function DayCloseModeScanner({
               (manualEntryState.isActive &&
                 Object.keys(manualEndingValues).some(
                   // eslint-disable-next-line security/detect-object-injection -- Object key from Object.keys is safe
-                  (id) => manualEndingValues[id]?.length === 3,
+                  (id) => manualEndingValues[id]?.length === 3
                 ))) && (
               <tfoot className="bg-muted/50 font-semibold">
                 <tr>
@@ -1934,9 +1806,7 @@ export function DayCloseModeScanner({
                     {/* Calculate total tickets sold from all sources */}
                     {activeBins.reduce((total, bin) => {
                       if (!bin.pack) return total;
-                      const scannedBin = scannedBins.find(
-                        (s) => s.bin_id === bin.bin_id,
-                      );
+                      const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
                       let closingSerial: string | undefined;
                       if (scannedBin) {
                         closingSerial = scannedBin.closing_serial;
@@ -1952,14 +1822,8 @@ export function DayCloseModeScanner({
                       // Serial difference: tickets_sold = ending - starting (normal)
                       // Depletion: tickets_sold = (serial_end + 1) - starting
                       const ticketsSold = isSoldOut
-                        ? calculateTicketsSoldForDepletion(
-                            closingSerial,
-                            bin.pack.starting_serial,
-                          )
-                        : calculateTicketsSold(
-                            closingSerial,
-                            bin.pack.starting_serial,
-                          );
+                        ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
+                        : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
                       return total + ticketsSold;
                     }, 0)}
                   </td>
@@ -2010,10 +1874,7 @@ export function DayCloseModeScanner({
         {(returnedPacks && returnedPacks.length > 0) ||
         (depletedPacks && depletedPacks.length > 0) ||
         (activatedPacks && activatedPacks.length > 0) ? (
-          <div
-            className="px-6 py-4 space-y-4 border-t"
-            data-testid="packs-sections-container"
-          >
+          <div className="px-6 py-4 space-y-4 border-t" data-testid="packs-sections-container">
             {/* Returned Packs Section - Before Depleted Packs */}
             {returnedPacks && returnedPacks.length > 0 && (
               <ReturnedPacksSection
@@ -2067,7 +1928,7 @@ export function DayCloseModeScanner({
               >
                 <AlertTriangle className="mr-2 h-4 w-4" />
                 {binsWithoutEnding.length} Bin
-                {binsWithoutEnding.length > 1 ? "s" : ""} Need Attention
+                {binsWithoutEnding.length > 1 ? 's' : ''} Need Attention
               </Button>
             )}
 
@@ -2078,14 +1939,10 @@ export function DayCloseModeScanner({
                 disabled={isSubmitting || !canCloseManualEntry}
                 data-testid="close-lottery-manual-button"
                 className={cn(
-                  canCloseManualEntry
-                    ? "bg-green-600 hover:bg-green-700 text-white"
-                    : "",
+                  canCloseManualEntry ? 'bg-green-600 hover:bg-green-700 text-white' : ''
                 )}
               >
-                {isSubmitting && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Close Lottery (Manual)
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -2094,15 +1951,9 @@ export function DayCloseModeScanner({
                 onClick={handleSubmit}
                 disabled={isSubmitting || !allBinsScanned}
                 data-testid="close-lottery-button"
-                className={cn(
-                  allBinsScanned
-                    ? "bg-green-600 hover:bg-green-700 text-white"
-                    : "",
-                )}
+                className={cn(allBinsScanned ? 'bg-green-600 hover:bg-green-700 text-white' : '')}
               >
-                {isSubmitting && (
-                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                )}
+                {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
                 Close Lottery & Continue
                 <ArrowRight className="ml-2 h-4 w-4" />
               </Button>
@@ -2122,9 +1973,7 @@ export function DayCloseModeScanner({
       {/* Validation Error Modal */}
       <Dialog
         open={validationErrorModal.open}
-        onOpenChange={(open) =>
-          setValidationErrorModal((prev) => ({ ...prev, open }))
-        }
+        onOpenChange={(open) => setValidationErrorModal((prev) => ({ ...prev, open }))}
       >
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
@@ -2147,7 +1996,7 @@ export function DayCloseModeScanner({
                 setValidationErrorModal({
                   open: false,
                   binNumber: null,
-                  message: "",
+                  message: '',
                 })
               }
               data-testid="validation-error-modal-ok-button"
@@ -2161,14 +2010,10 @@ export function DayCloseModeScanner({
       {/* Unscanned Bin Warning Modal */}
       <UnscannedBinWarningModal
         open={unscannedBinWarningModal.open}
-        onOpenChange={(open) =>
-          setUnscannedBinWarningModal((prev) => ({ ...prev, open }))
-        }
+        onOpenChange={(open) => setUnscannedBinWarningModal((prev) => ({ ...prev, open }))}
         unscannedBins={unscannedBinWarningModal.unscannedBins}
         onConfirm={handleUnscannedBinModalResult}
-        onCancel={() =>
-          setUnscannedBinWarningModal({ open: false, unscannedBins: [] })
-        }
+        onCancel={() => setUnscannedBinWarningModal({ open: false, unscannedBins: [] })}
       />
     </div>
   );

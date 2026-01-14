@@ -6,14 +6,9 @@
  * AC #1: Pack status is displayed with appropriate visual badges/indicators
  */
 
-export type PackStatus = "RECEIVED" | "ACTIVE" | "DEPLETED" | "RETURNED";
+export type PackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
-export type BadgeVariant =
-  | "secondary"
-  | "success"
-  | "destructive"
-  | "warning"
-  | "outline";
+export type BadgeVariant = 'secondary' | 'success' | 'destructive' | 'warning' | 'outline';
 
 /**
  * Get badge variant for pack status
@@ -27,16 +22,16 @@ export type BadgeVariant =
  */
 export function getPackStatusBadgeVariant(status: PackStatus): BadgeVariant {
   switch (status) {
-    case "RECEIVED":
-      return "secondary"; // Blue/Gray
-    case "ACTIVE":
-      return "success"; // Green
-    case "DEPLETED":
-      return "destructive"; // Red/Orange
-    case "RETURNED":
-      return "warning"; // Yellow/Amber
+    case 'RECEIVED':
+      return 'secondary'; // Blue/Gray
+    case 'ACTIVE':
+      return 'success'; // Green
+    case 'DEPLETED':
+      return 'destructive'; // Red/Orange
+    case 'RETURNED':
+      return 'warning'; // Yellow/Amber
     default:
-      return "outline";
+      return 'outline';
   }
 }
 

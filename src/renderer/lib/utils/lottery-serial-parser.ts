@@ -32,7 +32,7 @@ export interface ParsedSerialNumber {
 export class InvalidSerialNumberError extends Error {
   constructor(message: string) {
     super(message);
-    this.name = "InvalidSerialNumberError";
+    this.name = 'InvalidSerialNumberError';
   }
 }
 
@@ -50,9 +50,7 @@ export class InvalidSerialNumberError extends Error {
 export function parseSerializedNumber(serial: string): ParsedSerialNumber {
   // Validate: exactly 24 digits, numeric only
   if (!/^\d{24}$/.test(serial)) {
-    throw new InvalidSerialNumberError(
-      "Invalid serial number format. Must be 24 digits.",
-    );
+    throw new InvalidSerialNumberError('Invalid serial number format. Must be 24 digits.');
   }
 
   // Extract components based on positions

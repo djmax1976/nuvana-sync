@@ -1,4 +1,3 @@
-
 /**
  * Manual Entry Mode Indicator Component
  *
@@ -13,8 +12,8 @@
  * - Style with yellow/amber color (warning)
  */
 
-import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
-import { AlertTriangle } from "lucide-react";
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { AlertTriangle } from 'lucide-react';
 
 /**
  * Props for ManualEntryIndicator component
@@ -46,10 +45,10 @@ export function ManualEntryIndicator({
   }
 
   // Format timestamp for display
-  const formattedTime = new Intl.DateTimeFormat("en-US", {
-    hour: "2-digit",
-    minute: "2-digit",
-    second: "2-digit",
+  const formattedTime = new Intl.DateTimeFormat('en-US', {
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
     hour12: true,
   }).format(authorizedAt);
 
@@ -65,8 +64,7 @@ export function ManualEntryIndicator({
       <AlertDescription className="mt-2 text-amber-800 dark:text-amber-200">
         <div className="space-y-1 text-sm">
           <div>
-            Authorized by:{" "}
-            <span className="font-medium">{authorizedBy.name}</span>
+            Authorized by: <span className="font-medium">{authorizedBy.name}</span>
           </div>
           <div>
             Authorized at: <span className="font-medium">{formattedTime}</span>

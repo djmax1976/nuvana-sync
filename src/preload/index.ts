@@ -354,7 +354,10 @@ function validateSyncStatusEvent(data: unknown): SyncStatusEvent | null {
 
   const event = data as Record<string, unknown>;
 
-  if (typeof event.type !== 'string' || !VALID_SYNC_STATUS_TYPES.includes(event.type as SyncStatusEventType)) {
+  if (
+    typeof event.type !== 'string' ||
+    !VALID_SYNC_STATUS_TYPES.includes(event.type as SyncStatusEventType)
+  ) {
     console.error('[preload] Invalid sync status event type:', event.type);
     return null;
   }

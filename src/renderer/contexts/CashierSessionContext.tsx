@@ -1,4 +1,3 @@
-
 /**
  * Cashier Session Context
  *
@@ -13,14 +12,7 @@
  * Story 4.92: Terminal Shift Page
  */
 
-import {
-  createContext,
-  useContext,
-  useState,
-  useCallback,
-  useEffect,
-  type ReactNode,
-} from "react";
+import { createContext, useContext, useState, useCallback, useEffect, type ReactNode } from 'react';
 
 /**
  * Cashier session data stored in context
@@ -50,12 +42,10 @@ interface CashierSessionContextValue {
   getSessionToken: () => string | null;
 }
 
-const CashierSessionContext = createContext<CashierSessionContextValue | null>(
-  null,
-);
+const CashierSessionContext = createContext<CashierSessionContextValue | null>(null);
 
 // Storage key for persisting session across page reloads
-const SESSION_STORAGE_KEY = "cashier_session";
+const SESSION_STORAGE_KEY = 'cashier_session';
 
 /**
  * CashierSessionProvider component
@@ -66,7 +56,7 @@ export function CashierSessionProvider({ children }: { children: ReactNode }) {
 
   // Load session from sessionStorage on mount (client-side only)
   useEffect(() => {
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       const stored = sessionStorage.getItem(SESSION_STORAGE_KEY);
       if (stored) {
         try {
@@ -89,14 +79,14 @@ export function CashierSessionProvider({ children }: { children: ReactNode }) {
   const setSession = useCallback((data: CashierSessionData) => {
     setSessionState(data);
     // Persist to sessionStorage for page reloads
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       sessionStorage.setItem(SESSION_STORAGE_KEY, JSON.stringify(data));
     }
   }, []);
 
   const clearSession = useCallback(() => {
     setSessionState(null);
-    if (typeof window !== "undefined") {
+    if (typeof window !== 'undefined') {
       sessionStorage.removeItem(SESSION_STORAGE_KEY);
     }
   }, []);
@@ -137,9 +127,7 @@ export function CashierSessionProvider({ children }: { children: ReactNode }) {
 export function useCashierSession() {
   const context = useContext(CashierSessionContext);
   if (!context) {
-    throw new Error(
-      "useCashierSession must be used within CashierSessionProvider",
-    );
+    throw new Error('useCashierSession must be used within CashierSessionProvider');
   }
   return context;
 }

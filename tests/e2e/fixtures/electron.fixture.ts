@@ -7,7 +7,12 @@
  * @module tests/e2e/fixtures/electron
  */
 
-import { test as base, type Page, type ElectronApplication, _electron as electron } from '@playwright/test';
+import {
+  test as base,
+  type Page,
+  type ElectronApplication,
+  _electron as electron,
+} from '@playwright/test';
 import path from 'path';
 import fs from 'fs';
 
@@ -29,7 +34,8 @@ export type ElectronTestFixtures = {
  * Create a unique test database for isolation
  */
 function createTestDatabasePath(testName: string): string {
-  const testDataDir = process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
+  const testDataDir =
+    process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
   const sanitizedName = testName.replace(/[^a-zA-Z0-9]/g, '_');
   return path.join(testDataDir, `test_${sanitizedName}_${Date.now()}.db`);
 }
@@ -91,7 +97,8 @@ export const test = base.extend<ElectronTestFixtures>({
   },
 
   testDataDir: async ({}, use) => {
-    const testDataDir = process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
+    const testDataDir =
+      process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
     await use(testDataDir);
   },
 

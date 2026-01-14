@@ -244,7 +244,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = ReceivePackSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -297,7 +299,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = ActivatePackSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -345,7 +349,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = SettlePackSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -353,10 +359,7 @@ registerHandler(
       const { pack_id, closing_serial } = parseResult.data;
 
       // Calculate sales before settling
-      const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(
-        pack_id,
-        closing_serial
-      );
+      const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(pack_id, closing_serial);
 
       const pack = lotteryPacksDAL.settle(pack_id, {
         closing_serial,
@@ -400,7 +403,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = ReturnPackSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -458,7 +463,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = PrepareCloseSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -504,7 +511,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = CommitCloseSchema.safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
@@ -548,7 +557,9 @@ registerHandler(
     // API-001: Validate input
     const parseResult = z.object({ day_id: UUIDSchema }).safeParse(input);
     if (!parseResult.success) {
-      const errorMessage = parseResult.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 

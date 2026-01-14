@@ -61,7 +61,11 @@ if (!gotTheLock) {
   let fileWatcher: FileWatcherService | null = null;
   let syncService: SyncService | null = null;
   // Auto-updater service - dynamically imported to avoid electron-updater initialization issues
-  let autoUpdaterService: { setMainWindow: (w: BrowserWindow) => void; startPeriodicCheck: () => void; destroy: () => void } | null = null;
+  let autoUpdaterService: {
+    setMainWindow: (w: BrowserWindow) => void;
+    startPeriodicCheck: () => void;
+    destroy: () => void;
+  } | null = null;
   // User sync interval (60 seconds)
   let userSyncInterval: NodeJS.Timeout | null = null;
   const USER_SYNC_INTERVAL_MS = 60 * 1000;
@@ -213,7 +217,8 @@ if (!gotTheLock) {
 
     // Initial sync on startup
     log.info('Performing initial user sync...');
-    userSyncService.syncUsers()
+    userSyncService
+      .syncUsers()
       .then((result) => {
         log.info('Initial user sync completed', {
           synced: result.synced,
@@ -237,7 +242,8 @@ if (!gotTheLock) {
       log.info('Performing initial lottery sync (bins and games)...');
 
       // Sync bins first, then games
-      bidirectionalSyncService.syncBins()
+      bidirectionalSyncService
+        .syncBins()
         .then((binsResult) => {
           log.info('Initial bins sync completed', {
             pulled: binsResult.pulled,
@@ -269,7 +275,8 @@ if (!gotTheLock) {
 
     userSyncInterval = setInterval(() => {
       log.debug('Running periodic user sync...');
-      userSyncService.syncUsers()
+      userSyncService
+        .syncUsers()
         .then((result) => {
           if (result.created > 0 || result.updated > 0 || result.deactivated > 0) {
             log.info('Periodic user sync completed with changes', {

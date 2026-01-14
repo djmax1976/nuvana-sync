@@ -673,7 +673,9 @@ export class SettingsService {
    * @returns Decrypted offline token or null if not available
    */
   getOfflineToken(): string | null {
-    const encryptedTokenArray = this.configStore.get('encryptedOfflineToken') as number[] | undefined;
+    const encryptedTokenArray = this.configStore.get('encryptedOfflineToken') as
+      | number[]
+      | undefined;
 
     if (!encryptedTokenArray || encryptedTokenArray.length === 0) {
       return null;

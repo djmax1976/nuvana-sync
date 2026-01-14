@@ -130,7 +130,9 @@ describe('SyncTimestampsDAL', () => {
 
       dal.setLastPullAt('store-123', 'games', '2024-01-01T00:00:00.000Z');
 
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO sync_timestamps'));
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO sync_timestamps')
+      );
       expect(mockRun).toHaveBeenCalledWith(
         expect.any(String), // id
         'store-123',
@@ -235,12 +237,8 @@ describe('SyncTimestampsDAL', () => {
       const result = dal.reset('store-123', 'bins');
 
       expect(result).toBe(true);
-      expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('last_push_at = NULL')
-      );
-      expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('last_pull_at = NULL')
-      );
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('last_push_at = NULL'));
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('last_pull_at = NULL'));
     });
 
     it('should return false if no record existed', () => {
@@ -286,7 +284,9 @@ describe('SyncTimestampsDAL', () => {
       const result = dal.deleteByType('store-123', 'bins');
 
       expect(result).toBe(true);
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('DELETE FROM sync_timestamps'));
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('DELETE FROM sync_timestamps')
+      );
     });
 
     it('should return false if no record existed', () => {

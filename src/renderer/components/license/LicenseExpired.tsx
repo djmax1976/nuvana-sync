@@ -45,7 +45,10 @@ function formatExpiryDate(isoDate: string | null): string {
  * Renders a full-screen lock screen when the license has expired.
  * Provides contact information and a retry button for checking license status.
  */
-export function LicenseExpired({ expiresAt, onRetrySuccess }: LicenseExpiredProps): React.ReactElement {
+export function LicenseExpired({
+  expiresAt,
+  onRetrySuccess,
+}: LicenseExpiredProps): React.ReactElement {
   const [isChecking, setIsChecking] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -81,17 +84,13 @@ export function LicenseExpired({ expiresAt, onRetrySuccess }: LicenseExpiredProp
         </div>
 
         {/* Title */}
-        <h1 className="mb-2 text-2xl font-bold text-foreground">
-          Subscription Expired
-        </h1>
+        <h1 className="mb-2 text-2xl font-bold text-foreground">Subscription Expired</h1>
 
         {/* Message */}
         <p className="mb-6 text-muted-foreground">
           Your subscription ended on{' '}
-          <span className="font-medium text-foreground">
-            {formatExpiryDate(expiresAt)}
-          </span>
-          . Please renew to continue using Nuvana.
+          <span className="font-medium text-foreground">{formatExpiryDate(expiresAt)}</span>. Please
+          renew to continue using Nuvana.
         </p>
 
         {/* Error message */}
@@ -103,16 +102,11 @@ export function LicenseExpired({ expiresAt, onRetrySuccess }: LicenseExpiredProp
 
         {/* Contact information */}
         <div className="mb-8 rounded-lg border bg-muted/50 p-4">
-          <h2 className="mb-3 text-sm font-medium text-foreground">
-            Contact Support
-          </h2>
+          <h2 className="mb-3 text-sm font-medium text-foreground">Contact Support</h2>
           <div className="space-y-2 text-sm text-muted-foreground">
             <div className="flex items-center justify-center gap-2">
               <Mail className="h-4 w-4" />
-              <a
-                href="mailto:support@nuvana.com"
-                className="text-primary hover:underline"
-              >
+              <a href="mailto:support@nuvana.com" className="text-primary hover:underline">
                 support@nuvana.com
               </a>
             </div>
@@ -124,12 +118,7 @@ export function LicenseExpired({ expiresAt, onRetrySuccess }: LicenseExpiredProp
         </div>
 
         {/* Retry button */}
-        <Button
-          onClick={handleCheckAgain}
-          disabled={isChecking}
-          className="w-full"
-          size="lg"
-        >
+        <Button onClick={handleCheckAgain} disabled={isChecking} className="w-full" size="lg">
           {isChecking ? (
             <>
               <RefreshCw className="mr-2 h-4 w-4 animate-spin" />
@@ -145,7 +134,8 @@ export function LicenseExpired({ expiresAt, onRetrySuccess }: LicenseExpiredProp
 
         {/* Footer */}
         <p className="mt-6 text-xs text-muted-foreground">
-          If you've recently renewed your subscription, click "Check Again" to refresh your license status.
+          If you've recently renewed your subscription, click "Check Again" to refresh your license
+          status.
         </p>
       </div>
     </div>

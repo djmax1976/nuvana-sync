@@ -81,12 +81,8 @@ describe('Database Bootstrap Integration', () => {
 
       // Skip this test if native modules not available
       try {
-        const {
-          bootstrapDatabase,
-          getDatabaseState,
-          isDatabaseReady,
-          shutdownDatabase,
-        } = await import('../../src/main/services/database-bootstrap.service');
+        const { bootstrapDatabase, getDatabaseState, isDatabaseReady, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         const result = await bootstrapDatabase({
           skipBackup: true, // No existing DB to backup
@@ -114,8 +110,7 @@ describe('Database Bootstrap Integration', () => {
         // Skip if native module issues
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -126,11 +121,8 @@ describe('Database Bootstrap Integration', () => {
 
     it('should create backup before running migrations on existing database', async () => {
       try {
-        const {
-          bootstrapDatabase,
-          getAvailableBackups,
-          shutdownDatabase,
-        } = await import('../../src/main/services/database-bootstrap.service');
+        const { bootstrapDatabase, getAvailableBackups, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // First bootstrap - creates database
         await bootstrapDatabase({ skipBackup: true });
@@ -159,8 +151,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -171,11 +162,8 @@ describe('Database Bootstrap Integration', () => {
 
     it('should handle re-bootstrap without force flag', async () => {
       try {
-        const {
-          bootstrapDatabase,
-          shutdownDatabase,
-          isDatabaseReady,
-        } = await import('../../src/main/services/database-bootstrap.service');
+        const { bootstrapDatabase, shutdownDatabase, isDatabaseReady } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // First bootstrap
         const result1 = await bootstrapDatabase({ skipBackup: true });
@@ -192,8 +180,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -209,9 +196,8 @@ describe('Database Bootstrap Integration', () => {
         const stateHistory: string[] = [];
 
         // Intercept state changes by checking periodically
-        const { bootstrapDatabase, getDatabaseState, shutdownDatabase } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { bootstrapDatabase, getDatabaseState, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // Record initial state
         stateHistory.push(getDatabaseState());
@@ -229,8 +215,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -243,11 +228,8 @@ describe('Database Bootstrap Integration', () => {
   describe('Health Check Integration', () => {
     it('should perform comprehensive health check after bootstrap', async () => {
       try {
-        const {
-          bootstrapDatabase,
-          performHealthCheck,
-          shutdownDatabase,
-        } = await import('../../src/main/services/database-bootstrap.service');
+        const { bootstrapDatabase, performHealthCheck, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         await bootstrapDatabase({ skipBackup: true });
 
@@ -264,8 +246,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -276,9 +257,8 @@ describe('Database Bootstrap Integration', () => {
 
     it('should report unhealthy when database not initialized', async () => {
       try {
-        const { performHealthCheck } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { performHealthCheck } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // Don't bootstrap - check health on uninitialized state
         const health = performHealthCheck();
@@ -288,8 +268,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -302,12 +281,8 @@ describe('Database Bootstrap Integration', () => {
   describe('Backup and Recovery Integration', () => {
     it('should restore database from backup file', async () => {
       try {
-        const {
-          bootstrapDatabase,
-          getAvailableBackups,
-          restoreFromBackup,
-          shutdownDatabase,
-        } = await import('../../src/main/services/database-bootstrap.service');
+        const { bootstrapDatabase, getAvailableBackups, restoreFromBackup, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // First bootstrap
         await bootstrapDatabase({ skipBackup: true });
@@ -330,8 +305,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -342,9 +316,8 @@ describe('Database Bootstrap Integration', () => {
 
     it('should fail restore when backup file does not exist', async () => {
       try {
-        const { restoreFromBackup } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { restoreFromBackup } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         const restored = await restoreFromBackup('/nonexistent/backup.db');
 
@@ -352,8 +325,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -366,9 +338,8 @@ describe('Database Bootstrap Integration', () => {
   describe('Error Handling Integration', () => {
     it('should handle timeout gracefully', async () => {
       try {
-        const { bootstrapDatabase } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { bootstrapDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // Use extremely short timeout
         const result = await bootstrapDatabase({
@@ -383,8 +354,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;
@@ -397,9 +367,8 @@ describe('Database Bootstrap Integration', () => {
   describe('Concurrent Access', () => {
     it('should handle multiple bootstrap calls safely', async () => {
       try {
-        const { bootstrapDatabase, shutdownDatabase } = await import(
-          '../../src/main/services/database-bootstrap.service'
-        );
+        const { bootstrapDatabase, shutdownDatabase } =
+          await import('../../src/main/services/database-bootstrap.service');
 
         // Launch multiple bootstrap calls concurrently
         const results = await Promise.all([
@@ -415,8 +384,7 @@ describe('Database Bootstrap Integration', () => {
       } catch (error) {
         if (
           error instanceof Error &&
-          (error.message.includes('better-sqlite3') ||
-            error.message.includes('Cannot find module'))
+          (error.message.includes('better-sqlite3') || error.message.includes('Cannot find module'))
         ) {
           console.log('Skipping: Native module not available in test environment');
           return;

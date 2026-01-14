@@ -53,8 +53,7 @@ interface LoginScreenProps {
  */
 export function LoginScreen({ storeName, onLoginSuccess }: LoginScreenProps) {
   // Auth context
-  const { loginByPin, loginWithUser, loginError, clearLoginError, isLoading, getUsers } =
-    useAuth();
+  const { loginByPin, loginWithUser, loginError, clearLoginError, isLoading, getUsers } = useAuth();
 
   // Local state
   const [pin, setPin] = useState('');
@@ -176,12 +175,8 @@ export function LoginScreen({ storeName, onLoginSuccess }: LoginScreenProps) {
 
           {/* Store Name */}
           <div>
-            <CardTitle className="text-2xl font-bold">
-              {storeName || 'Nuvana Sync'}
-            </CardTitle>
-            <CardDescription className="mt-2">
-              Enter your PIN to continue
-            </CardDescription>
+            <CardTitle className="text-2xl font-bold">{storeName || 'Nuvana Sync'}</CardTitle>
+            <CardDescription className="mt-2">Enter your PIN to continue</CardDescription>
           </div>
         </CardHeader>
 
@@ -255,9 +250,7 @@ export function LoginScreen({ storeName, onLoginSuccess }: LoginScreenProps) {
                 className="text-center text-2xl tracking-widest"
                 data-testid="pin-input"
               />
-              <p className="text-xs text-muted-foreground text-center">
-                4-6 digit PIN
-              </p>
+              <p className="text-xs text-muted-foreground text-center">4-6 digit PIN</p>
             </div>
 
             {/* PIN Dots Indicator */}

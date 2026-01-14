@@ -326,10 +326,7 @@ registerHandler(
     // API-001: Validate input
     const parseResult = RoleCheckSchema.safeParse(input);
     if (!parseResult.success) {
-      return createErrorResponse(
-        IPCErrorCodes.VALIDATION_ERROR,
-        'Invalid role check request'
-      );
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid role check request');
     }
 
     const { requiredRole } = parseResult.data;

@@ -138,9 +138,7 @@ function App() {
   }
 
   // Determine if we should show the license warning
-  const showLicenseWarning =
-    licenseState?.showWarning &&
-    licenseState.daysRemaining !== null;
+  const showLicenseWarning = licenseState?.showWarning && licenseState.daysRemaining !== null;
 
   // Render current page with optional license warning
   const renderPage = () => {
@@ -163,9 +161,7 @@ function App() {
           daysRemaining={licenseState.daysRemaining!}
           inGracePeriod={licenseState.inGracePeriod}
         />
-        <div className="flex-1 overflow-auto">
-          {renderPage()}
-        </div>
+        <div className="flex-1 overflow-auto">{renderPage()}</div>
       </div>
     );
   }

@@ -536,11 +536,7 @@ export class LicenseService {
    * @param storeId - Optional store ID for audit
    * @param companyId - Optional company ID for audit
    */
-  updateFromApiResponse(
-    response: LicenseApiResponse,
-    storeId?: string,
-    companyId?: string
-  ): void {
+  updateFromApiResponse(response: LicenseApiResponse, storeId?: string, companyId?: string): void {
     // API-001: Validate response
     const validation = LicenseApiResponseSchema.safeParse(response);
     if (!validation.success) {

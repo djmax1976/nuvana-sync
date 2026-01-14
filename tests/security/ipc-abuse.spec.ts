@@ -186,12 +186,7 @@ describe('IPC Security', () => {
     });
 
     it('should reject subscription to non-allowlisted events', () => {
-      const disallowedEvents = [
-        'internal:secret',
-        'admin:broadcast',
-        'shell:output',
-        'fs:change',
-      ];
+      const disallowedEvents = ['internal:secret', 'admin:broadcast', 'shell:output', 'fs:change'];
 
       disallowedEvents.forEach((event) => {
         expect(ALLOWED_ON_CHANNELS).not.toContain(event);
@@ -242,18 +237,11 @@ describe('IPC Security', () => {
     describe('lottery:receivePack', () => {
       it('should validate game_id as UUID', () => {
         const validUUID = '123e4567-e89b-12d3-a456-426614174000';
-        const uuidRegex =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
         expect(validUUID).toMatch(uuidRegex);
 
-        const invalidUUIDs = [
-          "'; DROP TABLE--",
-          'not-a-uuid',
-          '123',
-          '',
-          '../../../etc/passwd',
-        ];
+        const invalidUUIDs = ["'; DROP TABLE--", 'not-a-uuid', '123', '', '../../../etc/passwd'];
 
         invalidUUIDs.forEach((invalid) => {
           expect(invalid).not.toMatch(uuidRegex);
@@ -325,9 +313,7 @@ describe('IPC Security', () => {
         traversalAttempts.forEach((testPath) => {
           // These should all be detected as invalid
           const hasTraversal =
-            testPath.includes('..') ||
-            testPath.includes('%2e') ||
-            testPath.includes('%c0');
+            testPath.includes('..') || testPath.includes('%2e') || testPath.includes('%c0');
           expect(hasTraversal).toBe(true);
         });
       });
@@ -362,26 +348,19 @@ describe('IPC Security', () => {
     });
 
     it('should define manager-only channels', () => {
-      const managerChannels = PROTECTED_CHANNELS.filter(
-        (c) => c.requiredRole === 'MANAGER'
-      );
+      const managerChannels = PROTECTED_CHANNELS.filter((c) => c.requiredRole === 'MANAGER');
       expect(managerChannels.length).toBeGreaterThan(0);
     });
 
     it('should define admin-only channels', () => {
-      const adminChannels = PROTECTED_CHANNELS.filter(
-        (c) => c.requiredRole === 'ADMIN'
-      );
+      const adminChannels = PROTECTED_CHANNELS.filter((c) => c.requiredRole === 'ADMIN');
       expect(adminChannels.length).toBeGreaterThan(0);
     });
 
     it('should enforce role hierarchy (CASHIER < MANAGER < ADMIN)', () => {
       const roleHierarchy = ['CASHIER', 'MANAGER', 'ADMIN'];
 
-      const hasRequiredRole = (
-        userRole: string,
-        requiredRole: string
-      ): boolean => {
+      const hasRequiredRole = (userRole: string, requiredRole: string): boolean => {
         const userLevel = roleHierarchy.indexOf(userRole);
         const requiredLevel = roleHierarchy.indexOf(requiredRole);
         return userLevel >= requiredLevel;
@@ -422,8 +401,7 @@ describe('IPC Security', () => {
         expect(payload).toBeDefined();
 
         // UUID validation should reject these
-        const uuidRegex =
-          /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
         expect(payload).not.toMatch(uuidRegex);
       });
     });
@@ -436,9 +414,7 @@ describe('IPC Security', () => {
 
       // Pack number: 1-20 chars
       const packNumValid = (s: string) => s.length >= 1 && s.length <= 20;
-      expect(packNumValid("'; DROP TABLE very_long_injection_string--")).toBe(
-        false
-      );
+      expect(packNumValid("'; DROP TABLE very_long_injection_string--")).toBe(false);
       expect(packNumValid('PACK-001')).toBe(true);
     });
   });
@@ -512,12 +488,7 @@ describe('IPC Security', () => {
     });
 
     it('should reject unknown paths', () => {
-      const unknownPaths = [
-        '/admin',
-        '/api/internal',
-        '/debug',
-        '/__webpack_hmr',
-      ];
+      const unknownPaths = ['/admin', '/api/internal', '/debug', '/__webpack_hmr'];
 
       unknownPaths.forEach((path) => {
         expect(ALLOWED_NAVIGATION_PATHS).not.toContain(path);
@@ -540,11 +511,7 @@ describe('IPC Security', () => {
     });
 
     it('should reject path traversal in navigation', () => {
-      const traversalPaths = [
-        '../admin',
-        '/settings/../admin',
-        '/settings/..%2fadmin',
-      ];
+      const traversalPaths = ['../admin', '/settings/../admin', '/settings/..%2fadmin'];
 
       traversalPaths.forEach((path) => {
         expect(ALLOWED_NAVIGATION_PATHS).not.toContain(path);

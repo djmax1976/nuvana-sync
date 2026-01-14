@@ -209,7 +209,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     if (pack.status !== 'RECEIVED') {
-      throw new Error(`Cannot activate pack with status ${pack.status}. Pack must be in RECEIVED status.`);
+      throw new Error(
+        `Cannot activate pack with status ${pack.status}. Pack must be in RECEIVED status.`
+      );
     }
 
     const now = this.now();
@@ -224,13 +226,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       WHERE pack_id = ? AND status = 'RECEIVED'
     `);
 
-    const result = stmt.run(
-      data.bin_id,
-      now,
-      data.opening_serial,
-      now,
-      packId
-    );
+    const result = stmt.run(data.bin_id, now, data.opening_serial, now, packId);
 
     if (result.changes === 0) {
       throw new Error('Failed to activate pack - status may have changed');
@@ -266,7 +262,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     if (pack.status !== 'ACTIVATED') {
-      throw new Error(`Cannot settle pack with status ${pack.status}. Pack must be in ACTIVATED status.`);
+      throw new Error(
+        `Cannot settle pack with status ${pack.status}. Pack must be in ACTIVATED status.`
+      );
     }
 
     const now = this.now();
@@ -326,7 +324,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     if (pack.status !== 'RECEIVED' && pack.status !== 'ACTIVATED') {
-      throw new Error(`Cannot return pack with status ${pack.status}. Pack must be in RECEIVED or ACTIVATED status.`);
+      throw new Error(
+        `Cannot return pack with status ${pack.status}. Pack must be in RECEIVED or ACTIVATED status.`
+      );
     }
 
     const now = this.now();
@@ -690,9 +690,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * @param storeId - Store identifier
    * @returns Object with counts per status
    */
-  getStatusCounts(
-    storeId: string
-  ): Record<LotteryPackStatus, number> {
+  getStatusCounts(storeId: string): Record<LotteryPackStatus, number> {
     const stmt = this.db.prepare(`
       SELECT status, COUNT(*) as count
       FROM lottery_packs

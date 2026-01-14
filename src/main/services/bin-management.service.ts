@@ -38,7 +38,10 @@ const BinNameSchema = z
   .string()
   .min(1, 'Bin name is required')
   .max(50, 'Bin name cannot exceed 50 characters')
-  .regex(/^[a-zA-Z0-9\s\-_]+$/, 'Bin name can only contain letters, numbers, spaces, hyphens, and underscores');
+  .regex(
+    /^[a-zA-Z0-9\s\-_]+$/,
+    'Bin name can only contain letters, numbers, spaces, hyphens, and underscores'
+  );
 
 /**
  * Bin location validation schema (optional)
@@ -46,7 +49,10 @@ const BinNameSchema = z
 const BinLocationSchema = z
   .string()
   .max(100, 'Location cannot exceed 100 characters')
-  .regex(/^[a-zA-Z0-9\s\-_]*$/, 'Location can only contain letters, numbers, spaces, hyphens, and underscores')
+  .regex(
+    /^[a-zA-Z0-9\s\-_]*$/,
+    'Location can only contain letters, numbers, spaces, hyphens, and underscores'
+  )
   .optional();
 
 /**
@@ -69,9 +75,7 @@ const UpdateBinSchema = z.object({
 /**
  * Bin ID validation schema
  */
-const BinIdSchema = z
-  .string()
-  .uuid('Invalid bin ID format');
+const BinIdSchema = z.string().uuid('Invalid bin ID format');
 
 /**
  * Reorder schema
@@ -244,7 +248,9 @@ export class BinManagementService {
     // SEC-014: Validate input
     const validation = CreateBinSchema.safeParse(data);
     if (!validation.success) {
-      const errorMessage = validation.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = validation.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       log.warn('Bin creation validation failed', { errors: validation.error.issues.length });
       return { success: false, error: errorMessage };
     }
@@ -321,7 +327,9 @@ export class BinManagementService {
     // SEC-014: Validate updates
     const updateValidation = UpdateBinSchema.safeParse(updates);
     if (!updateValidation.success) {
-      const errorMessage = updateValidation.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = updateValidation.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return { success: false, error: errorMessage };
     }
 
@@ -335,7 +343,8 @@ export class BinManagementService {
 
     try {
       // Build update object for DAL
-      const dalUpdates: { bin_number?: number; label?: string; status?: 'ACTIVE' | 'INACTIVE' } = {};
+      const dalUpdates: { bin_number?: number; label?: string; status?: 'ACTIVE' | 'INACTIVE' } =
+        {};
       if (validatedUpdates.name !== undefined) {
         dalUpdates.label = validatedUpdates.name;
       }
@@ -452,7 +461,9 @@ export class BinManagementService {
     // SEC-014: Validate input
     const validation = ReorderSchema.safeParse(binIds);
     if (!validation.success) {
-      const errorMessage = validation.error.issues.map((e: { message: string }) => e.message).join(', ');
+      const errorMessage = validation.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
       return { success: false, error: errorMessage };
     }
 

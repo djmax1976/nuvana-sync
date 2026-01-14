@@ -278,19 +278,9 @@ describe('Performance Benchmarks', () => {
       it('should define IPC performance targets', () => {
         const ipcTargets = {
           // Fast operations (< 50ms)
-          fast: [
-            'dashboard:getStats',
-            'stores:getInfo',
-            'auth:getCurrentUser',
-            'settings:get',
-          ],
+          fast: ['dashboard:getStats', 'stores:getInfo', 'auth:getCurrentUser', 'settings:get'],
           // Medium operations (< 200ms)
-          medium: [
-            'shifts:list',
-            'transactions:list',
-            'lottery:getPacks',
-            'reports:weekly',
-          ],
+          medium: ['shifts:list', 'transactions:list', 'lottery:getPacks', 'reports:weekly'],
           // Slow operations (< 500ms)
           slow: [
             'auth:login', // bcrypt verification
@@ -319,10 +309,16 @@ describe('Performance Benchmarks', () => {
         const EXPECTED_BCRYPT_TIME = 250; // milliseconds
         const ACCEPTABLE_VARIANCE = 100; // +/- 100ms
 
-        console.log(`Expected bcrypt verification time: ${EXPECTED_BCRYPT_TIME}ms ± ${ACCEPTABLE_VARIANCE}ms`);
+        console.log(
+          `Expected bcrypt verification time: ${EXPECTED_BCRYPT_TIME}ms ± ${ACCEPTABLE_VARIANCE}ms`
+        );
 
-        expect(THRESHOLDS.PIN_VERIFICATION).toBeGreaterThan(EXPECTED_BCRYPT_TIME - ACCEPTABLE_VARIANCE);
-        expect(THRESHOLDS.PIN_VERIFICATION).toBeLessThan(EXPECTED_BCRYPT_TIME + ACCEPTABLE_VARIANCE + 50);
+        expect(THRESHOLDS.PIN_VERIFICATION).toBeGreaterThan(
+          EXPECTED_BCRYPT_TIME - ACCEPTABLE_VARIANCE
+        );
+        expect(THRESHOLDS.PIN_VERIFICATION).toBeLessThan(
+          EXPECTED_BCRYPT_TIME + ACCEPTABLE_VARIANCE + 50
+        );
       });
 
       it('should document bcrypt cost factor trade-off', () => {

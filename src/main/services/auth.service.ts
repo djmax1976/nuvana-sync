@@ -232,10 +232,7 @@ export async function authenticateByPin(pin: string): Promise<LoginResult> {
  * @param pin - User's PIN
  * @returns Login result
  */
-export async function authenticateUser(
-  userId: string,
-  pin: string
-): Promise<LoginResult> {
+export async function authenticateUser(userId: string, pin: string): Promise<LoginResult> {
   const store = storesDAL.getConfiguredStore();
   if (!store) {
     log.warn('Authentication failed: Store not configured');
@@ -394,10 +391,7 @@ export function hasPermission(user: AuthenticatedUser, permission: string): bool
  * @param requiredRole - Minimum required role
  * @returns true if user has required role or higher
  */
-export function hasMinimumRole(
-  user: AuthenticatedUser,
-  requiredRole: UserRole
-): boolean {
+export function hasMinimumRole(user: AuthenticatedUser, requiredRole: UserRole): boolean {
   const userLevel = ROLE_HIERARCHY.indexOf(user.role);
   const requiredLevel = ROLE_HIERARCHY.indexOf(requiredRole);
 

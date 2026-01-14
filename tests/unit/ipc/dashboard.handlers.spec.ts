@@ -2,7 +2,7 @@
  * Dashboard Handlers Unit Tests
  *
  * Tests for dashboard IPC handlers.
- * 
+ *
  *
  * @module tests/unit/ipc/dashboard.handlers
  */

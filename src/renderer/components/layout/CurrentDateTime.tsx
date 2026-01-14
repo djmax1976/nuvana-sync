@@ -1,12 +1,12 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from 'react';
 
 /**
  * Formats a date to a short localized string
  */
 function formatDate(date: Date): string {
   return date.toLocaleDateString(undefined, {
-    month: "short",
-    day: "numeric",
+    month: 'short',
+    day: 'numeric',
   });
 }
 
@@ -16,8 +16,8 @@ function formatDate(date: Date): string {
  */
 function formatTime(date: Date): string {
   return date.toLocaleTimeString(undefined, {
-    hour: "numeric",
-    minute: "2-digit",
+    hour: 'numeric',
+    minute: '2-digit',
     hour12: true,
   });
 }
@@ -46,8 +46,7 @@ export function CurrentDateTime() {
 
     // Calculate milliseconds until the next minute to sync updates
     const now = new Date();
-    const msUntilNextMinute =
-      (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
+    const msUntilNextMinute = (60 - now.getSeconds()) * 1000 - now.getMilliseconds();
 
     // Set initial timeout to sync with minute boundary
     const initialTimeout = setTimeout(() => {
@@ -64,9 +63,8 @@ export function CurrentDateTime() {
 
     return () => {
       clearTimeout(initialTimeout);
-      const interval = (
-        window as Window & { __dateTimeInterval?: ReturnType<typeof setInterval> }
-      ).__dateTimeInterval;
+      const interval = (window as Window & { __dateTimeInterval?: ReturnType<typeof setInterval> })
+        .__dateTimeInterval;
       if (interval) {
         clearInterval(interval);
       }
@@ -92,10 +90,8 @@ export function CurrentDateTime() {
       data-testid="current-datetime"
       aria-live="polite"
     >
-      {formatDate(currentTime)} ·{" "}
-      <time dateTime={currentTime.toISOString()}>
-        {formatTime(currentTime)}
-      </time>
+      {formatDate(currentTime)} ·{' '}
+      <time dateTime={currentTime.toISOString()}>{formatTime(currentTime)}</time>
     </span>
   );
 }

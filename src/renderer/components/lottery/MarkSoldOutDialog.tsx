@@ -1,4 +1,3 @@
-
 /**
  * Mark Sold Out Dialog Component
  *
@@ -20,7 +19,7 @@
  * - SEC-009: TRANSACTION - Backend handles atomic updates
  */
 
-import { Button } from "@/components/ui/button";
+import { Button } from '@/components/ui/button';
 import {
   Dialog,
   DialogContent,
@@ -28,10 +27,10 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "@/components/ui/dialog";
-import { useToast } from "@/hooks/use-toast";
-import { Loader2, AlertTriangle, CheckCircle } from "lucide-react";
-import { usePackDetails, useMarkPackAsSoldOut } from "@/hooks/useLottery";
+} from '@/components/ui/dialog';
+import { useToast } from '@/hooks/use-toast';
+import { Loader2, AlertTriangle, CheckCircle } from 'lucide-react';
+import { usePackDetails, useMarkPackAsSoldOut } from '@/hooks/useLottery';
 
 interface MarkSoldOutDialogProps {
   open: boolean;
@@ -65,9 +64,9 @@ export function MarkSoldOutDialog({
   const handleMarkSoldOut = async () => {
     if (!packId) {
       toast({
-        title: "Error",
-        description: "Pack ID is required",
-        variant: "destructive",
+        title: 'Error',
+        description: 'Pack ID is required',
+        variant: 'destructive',
       });
       return;
     }
@@ -82,24 +81,22 @@ export function MarkSoldOutDialog({
 
       if (response.success) {
         toast({
-          title: "Pack marked as sold out",
+          title: 'Pack marked as sold out',
           description: `Pack ${packData?.pack_number || packId} has been marked as sold out.`,
         });
 
         onOpenChange(false);
         onSuccess?.();
       } else {
-        throw new Error(response.message || "Failed to mark pack as sold out");
+        throw new Error(response.message || 'Failed to mark pack as sold out');
       }
     } catch (error) {
       const errorMessage =
-        error instanceof Error
-          ? error.message
-          : "Failed to mark pack as sold out";
+        error instanceof Error ? error.message : 'Failed to mark pack as sold out';
       toast({
-        title: "Error",
+        title: 'Error',
         description: errorMessage,
-        variant: "destructive",
+        variant: 'destructive',
       });
     }
   };
@@ -139,14 +136,8 @@ export function MarkSoldOutDialog({
             <DialogDescription>Failed to load pack details</DialogDescription>
           </DialogHeader>
           <div className="p-4 text-center">
-            <p className="text-destructive">
-              {packError?.message || "Unknown error"}
-            </p>
-            <Button
-              variant="outline"
-              onClick={() => handleOpenChange(false)}
-              className="mt-4"
-            >
+            <p className="text-destructive">{packError?.message || 'Unknown error'}</p>
+            <Button variant="outline" onClick={() => handleOpenChange(false)} className="mt-4">
               Close
             </Button>
           </div>
@@ -156,10 +147,10 @@ export function MarkSoldOutDialog({
   }
 
   // Pack details for display (sanitized via React's automatic escaping)
-  const packNumber = packData?.pack_number || "Unknown";
-  const gameName = packData?.game?.name || "Unknown";
-  const binName = packData?.bin?.label || "N/A";
-  const serialEnd = packData?.closing_serial || "N/A";
+  const packNumber = packData?.pack_number || 'Unknown';
+  const gameName = packData?.game?.name || 'Unknown';
+  const binName = packData?.bin?.label || 'N/A';
+  const serialEnd = packData?.closing_serial || 'N/A';
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>
@@ -179,18 +170,14 @@ export function MarkSoldOutDialog({
             role="alert"
             aria-live="polite"
           >
-            <AlertTriangle
-              className="h-5 w-5 text-amber-600 mt-0.5"
-              aria-hidden="true"
-            />
+            <AlertTriangle className="h-5 w-5 text-amber-600 mt-0.5" aria-hidden="true" />
             <div className="flex-1 space-y-1">
               <p className="text-sm font-medium text-amber-700 dark:text-amber-500">
                 This action cannot be undone
               </p>
               <p className="text-sm text-muted-foreground">
-                The pack will be marked as depleted and removed from the active
-                bin. The ending serial will be set to the last ticket (
-                {serialEnd}).
+                The pack will be marked as depleted and removed from the active bin. The ending
+                serial will be set to the last ticket ({serialEnd}).
               </p>
             </div>
           </div>
@@ -215,9 +202,7 @@ export function MarkSoldOutDialog({
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Status:</span>
-                <span className="font-medium text-green-600">
-                  {packData?.status || "ACTIVE"}
-                </span>
+                <span className="font-medium text-green-600">{packData?.status || 'ACTIVE'}</span>
               </div>
             </div>
           </div>
@@ -239,16 +224,11 @@ export function MarkSoldOutDialog({
             data-testid="confirm-mark-sold-button"
             className="bg-amber-600 hover:bg-amber-700 text-white focus:outline-none focus:ring-2 focus:ring-amber-500 focus:ring-offset-2"
             aria-label={
-              isProcessing
-                ? "Marking pack as sold out..."
-                : `Mark pack ${packNumber} as sold out`
+              isProcessing ? 'Marking pack as sold out...' : `Mark pack ${packNumber} as sold out`
             }
           >
             {isProcessing ? (
-              <Loader2
-                className="mr-2 h-4 w-4 animate-spin"
-                aria-hidden="true"
-              />
+              <Loader2 className="mr-2 h-4 w-4 animate-spin" aria-hidden="true" />
             ) : (
               <CheckCircle className="mr-2 h-4 w-4" aria-hidden="true" />
             )}

@@ -1,19 +1,12 @@
-import { Card, CardHeader, CardTitle, CardContent } from "../ui/card";
-import { Button } from "../ui/button";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "../ui/table";
+import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
+import { Button } from '../ui/button';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../ui/table';
 import {
   sanitizeForDisplay,
   maskEmployeeName,
   maskSensitiveData,
   formatCurrency,
-} from "../../lib/utils/security";
+} from '../../lib/utils/security';
 
 /**
  * RecentVoids Component
@@ -31,54 +24,50 @@ import {
 // Sample voids data - will be replaced with real API data
 const voids = [
   {
-    id: "1",
-    terminal: "POS-001",
-    shiftId: "SFT-000446",
-    cashier: "Sarah Miller",
+    id: '1',
+    terminal: 'POS-001',
+    shiftId: 'SFT-000446',
+    cashier: 'Sarah Miller',
     amount: -12.99,
-    dateTime: "Dec 25, 2024 @ 3:45 PM",
+    dateTime: 'Dec 25, 2024 @ 3:45 PM',
   },
   {
-    id: "2",
-    terminal: "POS-002",
-    shiftId: "SFT-000446",
-    cashier: "Sarah Miller",
+    id: '2',
+    terminal: 'POS-002',
+    shiftId: 'SFT-000446',
+    cashier: 'Sarah Miller',
     amount: -5.49,
-    dateTime: "Dec 25, 2024 @ 2:32 PM",
+    dateTime: 'Dec 25, 2024 @ 2:32 PM',
   },
   {
-    id: "3",
-    terminal: "POS-001",
-    shiftId: "SFT-000445",
-    cashier: "John Davis",
+    id: '3',
+    terminal: 'POS-001',
+    shiftId: 'SFT-000445',
+    cashier: 'John Davis',
     amount: -23.75,
-    dateTime: "Dec 25, 2024 @ 11:15 AM",
+    dateTime: 'Dec 25, 2024 @ 11:15 AM',
   },
   {
-    id: "4",
-    terminal: "POS-001",
-    shiftId: "SFT-000445",
-    cashier: "John Davis",
+    id: '4',
+    terminal: 'POS-001',
+    shiftId: 'SFT-000445',
+    cashier: 'John Davis',
     amount: -8.99,
-    dateTime: "Dec 25, 2024 @ 9:22 AM",
+    dateTime: 'Dec 25, 2024 @ 9:22 AM',
   },
   {
-    id: "5",
-    terminal: "POS-002",
-    shiftId: "SFT-000444",
-    cashier: "Mike Johnson",
+    id: '5',
+    terminal: 'POS-002',
+    shiftId: 'SFT-000444',
+    cashier: 'Mike Johnson',
     amount: -45.0,
-    dateTime: "Dec 25, 2024 @ 2:18 AM",
+    dateTime: 'Dec 25, 2024 @ 2:18 AM',
   },
 ];
 
 export function RecentVoids() {
   return (
-    <Card
-      data-testid="recent-voids"
-      role="region"
-      aria-labelledby="recent-voids-title"
-    >
+    <Card data-testid="recent-voids" role="region" aria-labelledby="recent-voids-title">
       <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
         <CardTitle id="recent-voids-title" className="text-base font-semibold">
           Recent Voids
@@ -96,34 +85,19 @@ export function RecentVoids() {
         <Table aria-label="Recent voided transactions">
           <TableHeader>
             <TableRow>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Terminal
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Shift
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Cashier
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Void Amount
               </TableHead>
-              <TableHead
-                className="text-xs font-semibold uppercase tracking-wider"
-                scope="col"
-              >
+              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
                 Date & Time
               </TableHead>
             </TableRow>
@@ -148,10 +122,7 @@ export function RecentVoids() {
                     </span>
                   </TableCell>
                   <TableCell>
-                    <span
-                      className="font-mono text-sm text-primary"
-                      title={`Shift ${safeShiftId}`}
-                    >
+                    <span className="font-mono text-sm text-primary" title={`Shift ${safeShiftId}`}>
                       {safeShiftId}
                     </span>
                   </TableCell>
