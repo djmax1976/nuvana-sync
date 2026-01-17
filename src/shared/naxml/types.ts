@@ -1431,8 +1431,11 @@ export interface NAXMLFGMDetail {
   /** Tender-based sales summary (present in "by tender" variant) */
   fgmTenderSummary?: NAXMLFGMTenderSummary;
 
-  /** Position-based sales summary (present in "by position" variant) */
+  /** Position-based sales summary (present in "by position" variant) - DEPRECATED, use fgmPositionSummaries */
   fgmPositionSummary?: NAXMLFGMPositionSummary;
+
+  /** All position-based sales summaries (present in "by position" variant) */
+  fgmPositionSummaries?: NAXMLFGMPositionSummary[];
 }
 
 /**
@@ -2148,4 +2151,199 @@ export interface NAXMLMovementReportParseWarning {
 
   /** XPath or location of the warning */
   path?: string;
+}
+
+// ============================================================================
+// MSM Fuel Data Extraction Types
+// ============================================================================
+
+/**
+ * Fuel sales data for a single grade.
+ *
+ * @remarks
+ * Represents aggregated fuel sales for one grade, with separate tracking
+ * of volume (gallons) and amount (dollars).
+ */
+export interface MSMFuelSalesByGrade {
+  /** Fuel grade identifier (e.g., "001", "002", "003", "021") */
+  gradeId: string;
+
+  /** Total sales amount in dollars */
+  amount: number;
+
+  /** Total volume sold (gallons) */
+  volume: number;
+}
+
+/**
+ * Outside dispenser record from Period 98 MSM files.
+ *
+ * @remarks
+ * Period 98 (shift close) MSM files contain outside dispenser records
+ * after the MiscellaneousSummaryMovement closing tag. These records
+ * provide tender breakdown for outside (pay-at-pump) transactions
+ * but do not include volume by grade.
+ */
+export interface MSMOutsideDispenserRecord {
+  /** Register ID associated with the dispenser */
+  registerId: string;
+
+  /** Cashier ID (usually system ID for outside sales) */
+  cashierId: string;
+
+  /** Till ID for the dispenser */
+  tillId: string;
+
+  /** Tender type: 'outsideCredit' or 'outsideDebit' */
+  tender: 'outsideCredit' | 'outsideDebit';
+
+  /** Total amount for this tender type */
+  amount: number;
+
+  /** Transaction count (not volume) */
+  count: number;
+}
+
+/**
+ * Discount totals extracted from MSM files.
+ *
+ * @remarks
+ * MSM files contain various discount types under the 'discount' code.
+ * All amounts are in dollars.
+ */
+export interface MSMDiscountTotals {
+  /** General discount statistics amount (code: statistics/discounts) */
+  statistics: number;
+
+  /** Fixed dollar discount amount (code: discount/amountFixed) */
+  amountFixed: number;
+
+  /** Percentage-based discount amount (code: discount/amountPercentage) */
+  amountPercentage: number;
+
+  /** Promotional discount amount (code: discount/promotional) */
+  promotional: number;
+
+  /** Fuel-specific discount amount (code: discount/fuel) */
+  fuel: number;
+
+  /** Store coupon discount amount (code: discount/storeCoupons) */
+  storeCoupons: number;
+}
+
+/**
+ * Aggregated fuel totals from MSM extraction.
+ */
+export interface MSMFuelTotals {
+  /** Total inside (cash/in-store) fuel sales amount */
+  insideAmount: number;
+
+  /** Total inside fuel volume (gallons) */
+  insideVolume: number;
+
+  /** Total outside (pay-at-pump) fuel sales amount */
+  outsideAmount: number;
+
+  /** Total outside fuel volume (gallons) - only available in Period 1 files */
+  outsideVolume: number;
+
+  /** Grand total fuel sales amount */
+  grandTotalAmount: number;
+
+  /** Grand total fuel volume (gallons) */
+  grandTotalVolume: number;
+
+  /** Total fuel discount amount */
+  discountAmount: number;
+}
+
+/**
+ * Extracted fuel data from MSM file.
+ *
+ * @remarks
+ * This structure contains all fuel-related data extracted from an MSM file,
+ * organized for easy consumption by the shift/day summary handlers.
+ *
+ * Key differences between Period 1 and Period 98:
+ * - Period 1 (Daily): Contains complete inside/outside breakdown by grade
+ * - Period 98 (Shift): Contains inside fuel by grade, but outside is aggregated
+ *   (no volume breakdown by grade for outside sales)
+ *
+ * @example
+ * ```typescript
+ * const fuelData = extractFuelDataFromMSM(parsedMSMData);
+ * console.log(`Inside Total: $${fuelData.totals.insideAmount} / ${fuelData.totals.insideVolume} gal`);
+ * console.log(`Outside Total: $${fuelData.totals.outsideAmount} / ${fuelData.totals.outsideVolume} gal`);
+ * console.log(`Fuel Discount: $${fuelData.discounts.fuel}`);
+ * ```
+ */
+export interface MSMExtractedFuelData {
+  /**
+   * Period type: 1 = Daily (Store Day), 98 = Shift Close
+   */
+  period: 1 | 2 | 98;
+
+  /**
+   * Inside (in-store/cash register) fuel sales by grade.
+   * Available in both Period 1 and Period 98 files.
+   * Extracted from: fuelSalesByGrade/insideFuel/{gradeId}
+   */
+  insideFuel: MSMFuelSalesByGrade[];
+
+  /**
+   * Outside (pay-at-pump) fuel sales by grade.
+   * Only available in Period 1 (Daily) files.
+   * Extracted from: fuelSalesByGrade/outsideSales/{gradeId}
+   */
+  outsideFuel: MSMFuelSalesByGrade[];
+
+  /**
+   * Total fuel sales by grade (inside + outside combined).
+   * Extracted from: fuelSalesByGrade/fuel/{gradeId}
+   */
+  totalFuel: MSMFuelSalesByGrade[];
+
+  /**
+   * Outside dispenser records from Period 98 files.
+   * Contains tender breakdown (credit/debit) but no volume by grade.
+   */
+  outsideDispensers: MSMOutsideDispenserRecord[];
+
+  /**
+   * Discount totals extracted from MSM.
+   */
+  discounts: MSMDiscountTotals;
+
+  /**
+   * Aggregated totals for all fuel data.
+   */
+  totals: MSMFuelTotals;
+
+  /**
+   * Business date from the MSM file header.
+   */
+  businessDate: string;
+
+  /**
+   * Source file metadata for audit trail.
+   */
+  sourceInfo: {
+    /** Primary report period (1, 2, or 98) */
+    primaryReportPeriod: number;
+
+    /** Secondary report period */
+    secondaryReportPeriod: number;
+
+    /** Report begin date */
+    beginDate: string;
+
+    /** Report begin time */
+    beginTime: string;
+
+    /** Report end date */
+    endDate: string;
+
+    /** Report end time */
+    endTime: string;
+  };
 }

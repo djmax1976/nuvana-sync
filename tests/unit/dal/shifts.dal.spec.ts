@@ -44,6 +44,9 @@ describe('ShiftsDAL', () => {
     start_time: '2024-01-15T08:00:00.000Z',
     end_time: null,
     status: 'OPEN' as ShiftStatus,
+    external_cashier_id: null,
+    external_register_id: null,
+    external_till_id: null,
     created_at: '2024-01-15T08:00:00.000Z',
     updated_at: '2024-01-15T08:00:00.000Z',
   };
@@ -360,7 +363,8 @@ describe('ShiftsDAL', () => {
       const result = dal.getOpenShift('store-456');
 
       expect(result).toEqual(mockShift);
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining("status = 'OPEN'"));
+      // Uses end_time IS NULL instead of status='OPEN' (timestamps are more reliable)
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('end_time IS NULL'));
     });
 
     it('should return undefined when no open shift', () => {
@@ -380,7 +384,8 @@ describe('ShiftsDAL', () => {
 
       dal.getOpenShift('store-456');
 
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ORDER BY created_at DESC'));
+      // Uses start_time DESC as primary, created_at DESC as secondary
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ORDER BY start_time DESC'));
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('LIMIT 1'));
     });
   });
@@ -524,8 +529,9 @@ describe('ShiftsDAL', () => {
 
   describe('getOrCreateForDate', () => {
     it('should return existing open shift', () => {
+      // findOpenShiftByRegister falls back to getOpenShiftForDate which uses get()
       mockPrepare.mockReturnValue({
-        all: vi.fn().mockReturnValue([mockShift]),
+        get: vi.fn().mockReturnValue(mockShift),
       });
 
       const result = dal.getOrCreateForDate('store-456', '2024-01-15');
@@ -534,11 +540,10 @@ describe('ShiftsDAL', () => {
     });
 
     it('should create new shift when no open shift exists', () => {
-      const closedShift = { ...mockShift, status: 'CLOSED' as ShiftStatus };
       const newShift = { ...mockShift, shift_id: 'new-shift', shift_number: 2 };
 
       mockPrepare
-        .mockReturnValueOnce({ all: vi.fn().mockReturnValue([closedShift]) }) // findByDate
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(undefined) }) // findOpenShiftByRegister (no open shift)
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue({ max_num: 1 }) }) // getNextShiftNumber
         .mockReturnValueOnce({ run: vi.fn().mockReturnValue({ changes: 1 }) }) // create INSERT
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(newShift) }); // findById
@@ -552,7 +557,7 @@ describe('ShiftsDAL', () => {
       const newShift = { ...mockShift, shift_id: 'new-shift', shift_number: 1 };
 
       mockPrepare
-        .mockReturnValueOnce({ all: vi.fn().mockReturnValue([]) }) // findByDate
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(undefined) }) // findOpenShiftByRegister (no shifts)
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue({ max_num: null }) }) // getNextShiftNumber
         .mockReturnValueOnce({ run: vi.fn().mockReturnValue({ changes: 1 }) }) // create INSERT
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(newShift) }); // findById

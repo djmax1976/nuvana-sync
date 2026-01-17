@@ -120,7 +120,7 @@ function VarianceIndicator({
 
   return (
     <span
-      className={`flex items-center gap-1 text-sm ${colorClass}`}
+      className={`flex items-center gap-1 text-xs sm:text-sm ${colorClass}`}
       role="status"
       aria-label={ariaLabel}
     >
@@ -138,40 +138,74 @@ export function RecentShiftHistory() {
       role="region"
       aria-labelledby="recent-shift-history-title"
     >
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="recent-shift-history-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle id="recent-shift-history-title" className="text-sm sm:text-base font-semibold">
           Recent Shift History
         </CardTitle>
-        <Button variant="outline" size="sm" className="text-xs" aria-label="View all shift history">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs flex-shrink-0"
+          aria-label="View all shift history"
+        >
           View All Shifts
         </Button>
       </CardHeader>
-      <CardContent className="p-0">
-        <Table aria-label="Recent shift history with variance tracking">
+      <CardContent className="overflow-x-auto p-0">
+        <Table
+          aria-label="Recent shift history with variance tracking"
+          className="min-w-[700px]"
+          size="compact"
+          nested
+        >
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Shift ID
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Cashier
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden md:table-cell"
+                scope="col"
+              >
                 Time
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Total Sales
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden lg:table-cell"
+                scope="col"
+              >
                 Transactions
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
+                scope="col"
+              >
                 Cash Variance
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
+                scope="col"
+              >
                 Lottery Variance
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Status
               </TableHead>
             </TableRow>
@@ -188,27 +222,35 @@ export function RecentShiftHistory() {
               return (
                 <TableRow key={shift.id}>
                   <TableCell>
-                    <span className="font-mono text-sm text-primary" title={`Shift ${safeShiftId}`}>
+                    <span
+                      className="font-mono text-xs sm:text-sm text-primary"
+                      title={`Shift ${safeShiftId}`}
+                    >
                       {safeShiftId}
                     </span>
                   </TableCell>
-                  <TableCell>{safeCashier}</TableCell>
-                  <TableCell>
+                  <TableCell className="text-xs sm:text-sm">{safeCashier}</TableCell>
+                  <TableCell className="hidden md:table-cell text-xs sm:text-sm">
                     <time dateTime={safeTime}>{safeTime}</time>
                   </TableCell>
                   <TableCell>
-                    <span className="font-semibold" aria-label={`Total sales: ${formattedSales}`}>
+                    <span
+                      className="font-semibold text-xs sm:text-sm"
+                      aria-label={`Total sales: ${formattedSales}`}
+                    >
                       {formattedSales}
                     </span>
                   </TableCell>
-                  <TableCell>{shift.transactions}</TableCell>
-                  <TableCell>
+                  <TableCell className="hidden lg:table-cell text-xs sm:text-sm">
+                    {shift.transactions}
+                  </TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <VarianceIndicator
                       status={shift.cashVariance.status}
                       value={shift.cashVariance.amount}
                     />
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell">
                     <VarianceIndicator
                       status={shift.lotteryVariance.status}
                       value={shift.lotteryVariance.count}
@@ -218,6 +260,7 @@ export function RecentShiftHistory() {
                   <TableCell>
                     <Badge
                       variant={statusVariants[shift.status]}
+                      className="text-[10px] sm:text-xs"
                       aria-label={`Shift status: ${safeStatus}`}
                     >
                       {safeStatus}

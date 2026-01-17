@@ -24,6 +24,8 @@ export interface Store extends BaseEntity {
   name: string;
   timezone: string;
   status: 'ACTIVE' | 'INACTIVE';
+  state_id: string | null;
+  state_code: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -37,6 +39,8 @@ export interface CreateStoreData {
   name: string;
   timezone?: string;
   status?: 'ACTIVE' | 'INACTIVE';
+  state_id?: string;
+  state_code?: string;
 }
 
 /**
@@ -46,6 +50,8 @@ export interface UpdateStoreData {
   name?: string;
   timezone?: string;
   status?: 'ACTIVE' | 'INACTIVE';
+  state_id?: string;
+  state_code?: string;
 }
 
 // ============================================================================
@@ -83,8 +89,8 @@ export class StoresDAL extends BaseDAL<Store> {
     // SEC-006: Parameterized query
     const stmt = this.db.prepare(`
       INSERT INTO stores (
-        store_id, company_id, name, timezone, status, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        store_id, company_id, name, timezone, status, state_id, state_code, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -93,11 +99,17 @@ export class StoresDAL extends BaseDAL<Store> {
       data.name,
       data.timezone || 'America/New_York',
       data.status || 'ACTIVE',
+      data.state_id || null,
+      data.state_code || null,
       now,
       now
     );
 
-    log.info('Store created', { storeId: data.store_id, name: data.name });
+    log.info('Store created', {
+      storeId: data.store_id,
+      name: data.name,
+      stateCode: data.state_code,
+    });
 
     const created = this.findById(data.store_id);
     if (!created) {
@@ -132,6 +144,14 @@ export class StoresDAL extends BaseDAL<Store> {
     if (data.status !== undefined) {
       updates.push('status = ?');
       params.push(data.status);
+    }
+    if (data.state_id !== undefined) {
+      updates.push('state_id = ?');
+      params.push(data.state_id);
+    }
+    if (data.state_code !== undefined) {
+      updates.push('state_code = ?');
+      params.push(data.state_code);
     }
 
     // Add store_id to params

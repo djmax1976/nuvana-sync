@@ -72,12 +72,36 @@ const SyncIntervalSchema = z
   .max(3600, 'Sync interval cannot exceed 3600 seconds (1 hour)');
 
 /**
+ * Business day cutoff time validation schema
+ * SEC-014: Strict time format validation (HH:MM in 24-hour format)
+ *
+ * This setting determines when overnight shifts are assigned to the previous business day.
+ * Any shift that closes BEFORE this time will be assigned to yesterday's date.
+ *
+ * Example: If set to "06:00", a shift closing at 3:00 AM belongs to yesterday's business day.
+ * Default: "06:00" (6:00 AM) - standard convenience store overnight cutoff
+ *
+ * Valid range: "00:00" to "23:59"
+ */
+const BusinessDayCutoffTimeSchema = z
+  .string()
+  .regex(
+    /^([01]\d|2[0-3]):([0-5]\d)$/,
+    'Cutoff time must be in HH:MM format (24-hour, e.g., "06:00")'
+  )
+  .refine((time) => {
+    const [hours, minutes] = time.split(':').map(Number);
+    return hours >= 0 && hours <= 23 && minutes >= 0 && minutes <= 59;
+  }, 'Cutoff time must be a valid time between 00:00 and 23:59');
+
+/**
  * Local settings update schema
  */
 const LocalSettingsUpdateSchema = z
   .object({
     xmlWatchFolder: WatchFolderSchema.optional(),
     syncIntervalSeconds: SyncIntervalSchema.optional(),
+    businessDayCutoffTime: BusinessDayCutoffTimeSchema.optional(),
   })
   .strict();
 
@@ -109,6 +133,12 @@ export interface AppSettings {
   // Local (editable by MANAGER)
   xmlWatchFolder: string;
   syncIntervalSeconds: number;
+  /**
+   * Business day cutoff time in HH:MM 24-hour format.
+   * Shifts closing BEFORE this time are assigned to the previous business day.
+   * Default: "06:00" (6:00 AM)
+   */
+  businessDayCutoffTime: string;
 
   // Lottery (bi-directional)
   lottery: {
@@ -126,6 +156,11 @@ export interface AppSettings {
 export interface LocalSettingsUpdate {
   xmlWatchFolder?: string;
   syncIntervalSeconds?: number;
+  /**
+   * Business day cutoff time in HH:MM 24-hour format.
+   * Shifts closing BEFORE this time are assigned to the previous business day.
+   */
+  businessDayCutoffTime?: string;
 }
 
 /**
@@ -172,6 +207,8 @@ interface SettingsStoreSchema {
   'lottery.binCount'?: number;
   xmlWatchFolder?: string;
   syncIntervalSeconds?: number;
+  /** Business day cutoff time in HH:MM 24-hour format */
+  businessDayCutoffTime?: string;
   setupCompletedAt?: string;
   cloudEndpoint?: string;
 }
@@ -185,6 +222,19 @@ const DEFAULT_SYNC_INTERVAL = 60;
 
 /** Default cloud API endpoint */
 const DEFAULT_CLOUD_ENDPOINT = 'https://api.nuvanaapp.com';
+
+/**
+ * Default business day cutoff time (6:00 AM)
+ *
+ * Any shift that closes BEFORE this time will be assigned to yesterday's business day.
+ * This is the standard convention for convenience stores and gas stations where
+ * overnight shifts may close after midnight but belong to the previous day's business.
+ *
+ * Examples with default "06:00":
+ * - Shift closing at 3:00 AM → belongs to yesterday's business day
+ * - Shift closing at 7:00 AM → belongs to today's business day
+ */
+const DEFAULT_BUSINESS_DAY_CUTOFF_TIME = '06:00';
 
 // ============================================================================
 // Settings Service
@@ -247,6 +297,9 @@ export class SettingsService {
         xmlWatchFolder: (this.configStore.get('xmlWatchFolder') as string) || '',
         syncIntervalSeconds:
           (this.configStore.get('syncIntervalSeconds') as number) || DEFAULT_SYNC_INTERVAL,
+        businessDayCutoffTime:
+          (this.configStore.get('businessDayCutoffTime') as string) ||
+          DEFAULT_BUSINESS_DAY_CUTOFF_TIME,
         lottery: {
           enabled: (this.configStore.get('lottery.enabled') as boolean) ?? false,
           binCount: (this.configStore.get('lottery.binCount') as number) || 0,
@@ -274,6 +327,9 @@ export class SettingsService {
       xmlWatchFolder: (this.configStore.get('xmlWatchFolder') as string) || '',
       syncIntervalSeconds:
         (this.configStore.get('syncIntervalSeconds') as number) || DEFAULT_SYNC_INTERVAL,
+      businessDayCutoffTime:
+        (this.configStore.get('businessDayCutoffTime') as string) ||
+        DEFAULT_BUSINESS_DAY_CUTOFF_TIME,
 
       // Lottery settings
       lottery: {
@@ -327,12 +383,33 @@ export class SettingsService {
         // Don't log full path, just confirmation
         pathLength: validatedUpdates.xmlWatchFolder.length,
       });
+
+      // Sync to legacy nuvana-config for FileWatcher compatibility
+      // FileWatcher reads watchPath from ConfigService (nuvana-config store)
+      try {
+        const legacyConfigStore = new Store({ name: 'nuvana-config' });
+        legacyConfigStore.set('watchPath', validatedUpdates.xmlWatchFolder);
+        log.debug('Synced watchPath to legacy config');
+      } catch (syncError) {
+        log.warn('Failed to sync watchPath to legacy config', {
+          error: syncError instanceof Error ? syncError.message : String(syncError),
+        });
+      }
     }
 
     // Process syncIntervalSeconds if provided
     if (validatedUpdates.syncIntervalSeconds !== undefined) {
       this.configStore.set('syncIntervalSeconds', validatedUpdates.syncIntervalSeconds);
       log.info('Sync interval updated', { seconds: validatedUpdates.syncIntervalSeconds });
+    }
+
+    // Process businessDayCutoffTime if provided
+    // SEC-014: Already validated by Zod schema (HH:MM format, valid time range)
+    if (validatedUpdates.businessDayCutoffTime !== undefined) {
+      this.configStore.set('businessDayCutoffTime', validatedUpdates.businessDayCutoffTime);
+      log.info('Business day cutoff time updated', {
+        cutoffTime: validatedUpdates.businessDayCutoffTime,
+      });
     }
   }
 
@@ -918,6 +995,103 @@ export class SettingsService {
       setupComplete: this.isSetupComplete(),
       hasWatchFolder: !!(this.configStore.get('xmlWatchFolder') as string),
     };
+  }
+
+  // ==========================================================================
+  // Business Day Cutoff Time
+  // ==========================================================================
+
+  /**
+   * Get the configured business day cutoff time
+   *
+   * @returns Cutoff time in HH:MM format (24-hour), default "06:00"
+   */
+  getBusinessDayCutoffTime(): string {
+    return (
+      (this.configStore.get('businessDayCutoffTime') as string) || DEFAULT_BUSINESS_DAY_CUTOFF_TIME
+    );
+  }
+
+  /**
+   * Adjust business date based on file timestamp and cutoff time
+   *
+   * If the file's timestamp is BEFORE the cutoff time (e.g., 3:00 AM < 6:00 AM cutoff),
+   * the business date is adjusted to the PREVIOUS day.
+   *
+   * This implements AGKSoft-compatible overnight shift handling where shifts
+   * closing after midnight but before the cutoff belong to yesterday's business day.
+   *
+   * @param businessDate - The original business date from the NAXML file (YYYY-MM-DD)
+   * @param fileTimestamp - The file's timestamp or end time from the NAXML file
+   * @returns Adjusted business date (YYYY-MM-DD) - may be previous day if before cutoff
+   *
+   * @example
+   * // With default cutoff of "06:00":
+   * adjustBusinessDate("2024-01-02", "2024-01-02T03:00:00") // Returns "2024-01-01" (3 AM < 6 AM)
+   * adjustBusinessDate("2024-01-02", "2024-01-02T08:00:00") // Returns "2024-01-02" (8 AM >= 6 AM)
+   */
+  adjustBusinessDate(businessDate: string, fileTimestamp: string | null | undefined): string {
+    // If no timestamp provided, use the business date as-is
+    if (!fileTimestamp) {
+      return businessDate;
+    }
+
+    const cutoffTime = this.getBusinessDayCutoffTime();
+
+    try {
+      // Parse the cutoff time (HH:MM format)
+      const [cutoffHours, cutoffMinutes] = cutoffTime.split(':').map(Number);
+      const cutoffTotalMinutes = cutoffHours * 60 + cutoffMinutes;
+
+      // Parse the file timestamp to extract time
+      // eslint-disable-next-line no-restricted-syntax -- Parsing NAXML timestamps
+      const timestamp = new Date(fileTimestamp);
+      if (isNaN(timestamp.getTime())) {
+        log.warn('Invalid file timestamp, using original business date', {
+          businessDate,
+          fileTimestamp,
+        });
+        return businessDate;
+      }
+
+      const fileHours = timestamp.getHours();
+      const fileMinutes = timestamp.getMinutes();
+      const fileTotalMinutes = fileHours * 60 + fileMinutes;
+
+      // If file time is BEFORE the cutoff, adjust to previous day
+      if (fileTotalMinutes < cutoffTotalMinutes) {
+        // Parse the business date and subtract one day
+        // eslint-disable-next-line no-restricted-syntax -- Parsing NAXML business dates
+        const dateObj = new Date(businessDate + 'T12:00:00'); // Use noon to avoid timezone issues
+        if (isNaN(dateObj.getTime())) {
+          log.warn('Invalid business date, returning as-is', { businessDate });
+          return businessDate;
+        }
+
+        dateObj.setDate(dateObj.getDate() - 1);
+        const adjustedDate = dateObj.toISOString().split('T')[0];
+
+        log.debug('Business date adjusted for overnight cutoff', {
+          originalDate: businessDate,
+          adjustedDate,
+          fileTime: `${String(fileHours).padStart(2, '0')}:${String(fileMinutes).padStart(2, '0')}`,
+          cutoffTime,
+        });
+
+        return adjustedDate;
+      }
+
+      // File time is at or after cutoff - use original business date
+      return businessDate;
+    } catch (error) {
+      log.error('Error adjusting business date', {
+        error: error instanceof Error ? error.message : String(error),
+        businessDate,
+        fileTimestamp,
+      });
+      // On any error, return the original business date (safe fallback)
+      return businessDate;
+    }
   }
 
   // ==========================================================================

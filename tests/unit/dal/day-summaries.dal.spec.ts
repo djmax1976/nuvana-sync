@@ -39,13 +39,31 @@ describe('DaySummariesDAL', () => {
   let dal: DaySummariesDAL;
 
   const mockSummary: DaySummary = {
-    summary_id: 'summary-123',
+    day_summary_id: 'summary-123',
     store_id: 'store-456',
     business_date: '2024-01-15',
-    total_sales: 1500.0,
-    total_transactions: 50,
+    shift_count: 1,
+    first_shift_opened: '2024-01-15T08:00:00.000Z',
+    last_shift_closed: null,
+    gross_sales: 1500.0,
+    returns_total: 0,
+    discounts_total: 0,
+    net_sales: 1500.0,
+    tax_collected: 0,
+    tax_exempt_sales: 0,
+    taxable_sales: 1500.0,
+    transaction_count: 50,
+    void_count: 0,
+    refund_count: 0,
+    customer_count: 45,
+    items_sold_count: 100,
+    items_returned_count: 0,
+    average_basket_size: 2,
+    average_transaction_value: 30,
     status: 'OPEN' as DaySummaryStatus,
     closed_at: null,
+    closed_by_user_id: null,
+    notes: null,
     created_at: '2024-01-15T08:00:00.000Z',
     updated_at: '2024-01-15T08:00:00.000Z',
   };
@@ -69,8 +87,8 @@ describe('DaySummariesDAL', () => {
       const result = dal.create({
         store_id: 'store-456',
         business_date: '2024-01-15',
-        total_sales: 1500.0,
-        total_transactions: 50,
+        gross_sales: 1500.0,
+        transaction_count: 50,
       });
 
       expect(result).toEqual(mockSummary);
@@ -79,10 +97,10 @@ describe('DaySummariesDAL', () => {
       );
     });
 
-    it('should use generated UUID when summary_id not provided', () => {
+    it('should use generated UUID when day_summary_id not provided', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
       mockPrepare.mockReturnValueOnce({ run: mockRun }).mockReturnValueOnce({
-        get: vi.fn().mockReturnValue({ ...mockSummary, summary_id: 'mock-summary-uuid' }),
+        get: vi.fn().mockReturnValue({ ...mockSummary, day_summary_id: 'mock-summary-uuid' }),
       });
 
       dal.create({
@@ -104,7 +122,7 @@ describe('DaySummariesDAL', () => {
     it('should default to 0 for sales and transactions', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
       mockPrepare.mockReturnValueOnce({ run: mockRun }).mockReturnValueOnce({
-        get: vi.fn().mockReturnValue({ ...mockSummary, total_sales: 0, total_transactions: 0 }),
+        get: vi.fn().mockReturnValue({ ...mockSummary, gross_sales: 0, transaction_count: 0 }),
       });
 
       dal.create({
@@ -116,8 +134,8 @@ describe('DaySummariesDAL', () => {
         expect.any(String),
         'store-456',
         '2024-01-15',
-        0, // total_sales default
-        0, // total_transactions default
+        0, // gross_sales default
+        0, // transaction_count default
         expect.any(String),
         expect.any(String)
       );
@@ -159,15 +177,15 @@ describe('DaySummariesDAL', () => {
   describe('update', () => {
     it('should update sales totals', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
-      const updatedSummary = { ...mockSummary, total_sales: 2000.0 };
+      const updatedSummary = { ...mockSummary, gross_sales: 2000.0 };
 
       mockPrepare
         .mockReturnValueOnce({ run: mockRun })
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(updatedSummary) });
 
-      const result = dal.update('summary-123', { total_sales: 2000.0 });
+      const result = dal.update('summary-123', { gross_sales: 2000.0 });
 
-      expect(result?.total_sales).toBe(2000.0);
+      expect(result?.gross_sales).toBe(2000.0);
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE day_summaries SET'));
     });
 
@@ -176,7 +194,7 @@ describe('DaySummariesDAL', () => {
         run: vi.fn().mockReturnValue({ changes: 0 }),
       });
 
-      const result = dal.update('nonexistent', { total_sales: 100 });
+      const result = dal.update('nonexistent', { gross_sales: 100 });
 
       expect(result).toBeUndefined();
     });
@@ -203,8 +221,8 @@ describe('DaySummariesDAL', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
       const updatedSummary = {
         ...mockSummary,
-        total_sales: 2500.0,
-        total_transactions: 75,
+        gross_sales: 2500.0,
+        transaction_count: 75,
       };
 
       mockPrepare
@@ -212,12 +230,12 @@ describe('DaySummariesDAL', () => {
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(updatedSummary) });
 
       const result = dal.update('summary-123', {
-        total_sales: 2500.0,
-        total_transactions: 75,
+        gross_sales: 2500.0,
+        transaction_count: 75,
       });
 
-      expect(result?.total_sales).toBe(2500.0);
-      expect(result?.total_transactions).toBe(75);
+      expect(result?.gross_sales).toBe(2500.0);
+      expect(result?.transaction_count).toBe(75);
     });
   });
 
@@ -290,7 +308,7 @@ describe('DaySummariesDAL', () => {
     it('should return summaries within date range', () => {
       const summaries = [
         { ...mockSummary, business_date: '2024-01-15' },
-        { ...mockSummary, summary_id: 'summary-456', business_date: '2024-01-16' },
+        { ...mockSummary, day_summary_id: 'summary-456', business_date: '2024-01-16' },
       ];
       mockPrepare.mockReturnValue({
         all: vi.fn().mockReturnValue(summaries),
@@ -343,7 +361,7 @@ describe('DaySummariesDAL', () => {
     });
 
     it('should create new summary when none exists', () => {
-      const newSummary = { ...mockSummary, summary_id: 'new-summary' };
+      const newSummary = { ...mockSummary, day_summary_id: 'new-summary' };
 
       mockPrepare
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(undefined) }) // findByDate
@@ -358,8 +376,8 @@ describe('DaySummariesDAL', () => {
     it('should initialize new summary with zero totals', () => {
       const newSummary = {
         ...mockSummary,
-        total_sales: 0,
-        total_transactions: 0,
+        gross_sales: 0,
+        transaction_count: 0,
       };
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
 
@@ -370,8 +388,8 @@ describe('DaySummariesDAL', () => {
 
       const result = dal.getOrCreateForDate('store-456', '2024-01-15');
 
-      expect(result.total_sales).toBe(0);
-      expect(result.total_transactions).toBe(0);
+      expect(result.gross_sales).toBe(0);
+      expect(result.transaction_count).toBe(0);
     });
   });
 
@@ -384,8 +402,8 @@ describe('DaySummariesDAL', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
       const updatedSummary = {
         ...mockSummary,
-        total_sales: 1600.0,
-        total_transactions: 51,
+        gross_sales: 1600.0,
+        transaction_count: 51,
       };
 
       mockPrepare
@@ -394,8 +412,8 @@ describe('DaySummariesDAL', () => {
 
       const result = dal.incrementTotals('summary-123', 100.0, 1);
 
-      expect(result?.total_sales).toBe(1600.0);
-      expect(result?.total_transactions).toBe(51);
+      expect(result?.gross_sales).toBe(1600.0);
+      expect(result?.transaction_count).toBe(51);
     });
 
     it('should default transaction count to 1', () => {
@@ -446,10 +464,10 @@ describe('DaySummariesDAL', () => {
       dal.incrementTotals('summary-123', 100.0);
 
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('total_sales = total_sales + ?')
+        expect.stringContaining('gross_sales = gross_sales + ?')
       );
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('total_transactions = total_transactions + ?')
+        expect.stringContaining('transaction_count = transaction_count + ?')
       );
     });
   });
@@ -462,8 +480,8 @@ describe('DaySummariesDAL', () => {
     it('should return aggregated totals', () => {
       mockPrepare.mockReturnValue({
         get: vi.fn().mockReturnValue({
-          total_sales: 5000.0,
-          total_transactions: 150,
+          gross_sales: 5000.0,
+          transaction_count: 150,
           day_count: 5,
         }),
       });
@@ -480,8 +498,8 @@ describe('DaySummariesDAL', () => {
     it('should return zeros when no data', () => {
       mockPrepare.mockReturnValue({
         get: vi.fn().mockReturnValue({
-          total_sales: 0,
-          total_transactions: 0,
+          gross_sales: 0,
+          transaction_count: 0,
           day_count: 0,
         }),
       });
@@ -496,8 +514,8 @@ describe('DaySummariesDAL', () => {
     it('should use COALESCE for null safety', () => {
       mockPrepare.mockReturnValue({
         get: vi.fn().mockReturnValue({
-          total_sales: 0,
-          total_transactions: 0,
+          gross_sales: 0,
+          transaction_count: 0,
           day_count: 0,
         }),
       });

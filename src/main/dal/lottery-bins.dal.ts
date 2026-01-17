@@ -79,6 +79,41 @@ export interface BinWithPack extends LotteryBin {
   game_price: number | null;
 }
 
+/**
+ * Full pack details for day bins display
+ * SEC-014: All fields are explicitly typed
+ */
+export interface DayBinPackDetails {
+  pack_id: string;
+  pack_number: string;
+  game_name: string;
+  game_price: number;
+  /** Actual opening serial from pack record (not hardcoded) */
+  starting_serial: string;
+  /** Current ending serial if set during day close */
+  ending_serial: string | null;
+  /** Pack's last ticket serial (tickets_per_pack - 1), padded to 3 digits */
+  serial_end: string;
+  /** Whether this is first period of day (no prior closing) */
+  is_first_period: boolean;
+  /** Pack status for UI logic */
+  status: string;
+  /** When pack was activated */
+  activated_at: string | null;
+}
+
+/**
+ * Day bin with full pack details
+ * Enterprise-grade structure for day bins display
+ */
+export interface DayBinWithFullDetails {
+  bin_id: string;
+  bin_number: number;
+  name: string;
+  is_active: boolean;
+  pack: DayBinPackDetails | null;
+}
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -507,6 +542,123 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
     `);
     const result = stmt.get(storeId) as { next_number: number };
     return result.next_number;
+  }
+
+  /**
+   * Get day bins with full pack details for lottery day display
+   *
+   * Enterprise-grade query that:
+   * - SEC-006: Uses parameterized queries (no SQL injection)
+   * - DB-006: Enforces tenant isolation via store_id
+   * - Efficient single query with LEFT JOINs (no N+1)
+   * - Returns actual opening_serial from pack (not hardcoded)
+   * - Calculates serial_end from tickets_per_pack
+   *
+   * @param storeId - Store identifier (required for tenant isolation)
+   * @returns Array of bins with full pack details ordered by bin_number
+   */
+  getDayBinsWithFullPackDetails(storeId: string): DayBinWithFullDetails[] {
+    log.info('[DAYBINS DEBUG] Fetching day bins', { storeId });
+
+    // First, let's check what activated packs exist for this store
+    const debugStmt = this.db.prepare(`
+      SELECT pack_id, bin_id, status, store_id, opening_serial, game_id
+      FROM lottery_packs
+      WHERE store_id = ? AND status = 'ACTIVATED'
+    `);
+    const activatedPacks = debugStmt.all(storeId);
+    log.info('[DAYBINS DEBUG] Activated packs in store', {
+      storeId,
+      count: activatedPacks.length,
+      packs: activatedPacks,
+    });
+
+    // Also check what bins exist
+    const binsDebugStmt = this.db.prepare(`
+      SELECT bin_id, bin_number, store_id, status FROM lottery_bins WHERE store_id = ? AND deleted_at IS NULL
+    `);
+    const bins = binsDebugStmt.all(storeId);
+    log.info('[DAYBINS DEBUG] Bins in store', {
+      storeId,
+      count: bins.length,
+      bins: bins,
+    });
+
+    // SEC-006: Parameterized query prevents SQL injection
+    // DB-006: Tenant isolation enforced by store_id filter on both bins AND packs
+    // Performance: Single query with indexed JOINs, bounded result set
+    const stmt = this.db.prepare(`
+      SELECT
+        b.bin_id,
+        b.bin_number,
+        COALESCE(b.label, 'Bin ' || b.bin_number) as bin_name,
+        b.status as bin_status,
+        p.pack_id,
+        p.pack_number,
+        p.opening_serial,
+        p.closing_serial,
+        p.status as pack_status,
+        p.activated_at,
+        g.name as game_name,
+        COALESCE(g.price, 0) as game_price,
+        COALESCE(g.tickets_per_pack, 300) as tickets_per_pack
+      FROM lottery_bins b
+      LEFT JOIN lottery_packs p ON p.bin_id = b.bin_id
+        AND p.status = 'ACTIVATED'
+        AND p.store_id = ?
+      LEFT JOIN lottery_games g ON p.game_id = g.game_id
+      WHERE b.store_id = ? AND b.deleted_at IS NULL
+      ORDER BY b.bin_number ASC
+    `);
+
+    // Execute with store_id for both pack filter and bin filter (tenant isolation)
+    const rows = stmt.all(storeId, storeId) as Array<{
+      bin_id: string;
+      bin_number: number;
+      bin_name: string;
+      bin_status: string;
+      pack_id: string | null;
+      pack_number: string | null;
+      opening_serial: string | null;
+      closing_serial: string | null;
+      pack_status: string | null;
+      activated_at: string | null;
+      game_name: string | null;
+      game_price: number;
+      tickets_per_pack: number;
+    }>;
+
+    // Transform to structured response
+    return rows.map((row) => {
+      // Calculate serial_end: (tickets_per_pack - 1) padded to 3 digits
+      // e.g., 300 tickets → serial_end = "299"
+      const serialEnd = row.pack_id
+        ? String(row.tickets_per_pack - 1).padStart(3, '0')
+        : '000';
+
+      return {
+        bin_id: row.bin_id,
+        bin_number: row.bin_number,
+        name: row.bin_name,
+        is_active: row.bin_status === 'ACTIVE',
+        pack: row.pack_id
+          ? {
+              pack_id: row.pack_id,
+              pack_number: row.pack_number || '',
+              game_name: row.game_name || 'Unknown Game',
+              game_price: row.game_price,
+              // Use actual opening_serial from pack, fallback to '000' only if null
+              starting_serial: row.opening_serial || '000',
+              ending_serial: row.closing_serial,
+              serial_end: serialEnd,
+              // First period if no prior closing serial exists
+              is_first_period: row.closing_serial === null,
+              status: row.pack_status || 'ACTIVATED',
+              activated_at: row.activated_at,
+            }
+          : null,
+      };
+    });
   }
 }
 

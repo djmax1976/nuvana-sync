@@ -38,7 +38,6 @@ export interface ProcessedFile extends StoreEntity {
   status: ProcessedFileStatus;
   error_message: string | null;
   processing_duration_ms: number | null;
-  created_at: string;
 }
 
 /**
@@ -90,7 +89,6 @@ export class ProcessedFilesDAL extends StoreBasedDAL<ProcessedFile> {
   protected readonly primaryKey = 'id';
 
   protected readonly sortableColumns = new Set([
-    'created_at',
     'processed_at',
     'file_name',
     'document_type',
@@ -114,8 +112,8 @@ export class ProcessedFilesDAL extends StoreBasedDAL<ProcessedFile> {
       INSERT INTO processed_files (
         id, store_id, file_path, file_name, file_hash,
         file_size, document_type, processed_at, record_count,
-        status, error_message, processing_duration_ms, created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        status, error_message, processing_duration_ms
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -130,8 +128,7 @@ export class ProcessedFilesDAL extends StoreBasedDAL<ProcessedFile> {
       data.record_count || 0,
       data.status || 'SUCCESS',
       data.error_message || null,
-      data.processing_duration_ms || null,
-      now
+      data.processing_duration_ms || null
     );
 
     log.info('File recorded', {
@@ -380,6 +377,108 @@ export class ProcessedFilesDAL extends StoreBasedDAL<ProcessedFile> {
     });
 
     return result.changes;
+  }
+
+  /**
+   * Clear processed file records to allow reprocessing
+   * Used when parser fixes require re-importing files
+   *
+   * @param storeId - Store identifier (optional - if not provided, clears ALL stores)
+   * @param options - Optional filters (by document type, date range, or with zero records)
+   * @returns Number of records cleared
+   */
+  clearForReprocessing(
+    storeId?: string,
+    options?: {
+      documentType?: string;
+      startDate?: string;
+      endDate?: string;
+      zeroRecordsOnly?: boolean;
+    }
+  ): number {
+    let query = `DELETE FROM processed_files`;
+    const params: unknown[] = [];
+    const conditions: string[] = [];
+
+    // Only filter by store_id if provided
+    if (storeId) {
+      conditions.push(`store_id = ?`);
+      params.push(storeId);
+    }
+
+    if (options?.documentType) {
+      conditions.push(`document_type = ?`);
+      params.push(options.documentType);
+    }
+
+    if (options?.startDate && options?.endDate) {
+      conditions.push(`DATE(processed_at) >= ? AND DATE(processed_at) <= ?`);
+      params.push(options.startDate, options.endDate);
+    }
+
+    if (options?.zeroRecordsOnly) {
+      conditions.push(`record_count = 0`);
+    }
+
+    if (conditions.length > 0) {
+      query += ` WHERE ${conditions.join(' AND ')}`;
+    }
+
+    const stmt = this.db.prepare(query);
+    const result = stmt.run(...params);
+
+    log.info('Processed file records cleared for reprocessing', {
+      storeId: storeId || 'ALL',
+      options,
+      count: result.changes,
+    });
+
+    return result.changes;
+  }
+
+  /**
+   * Clear ALL processed file records regardless of store ID
+   * Use for maintenance when store IDs may have changed
+   *
+   * @param options - Optional filters
+   * @returns Number of records cleared
+   */
+  clearAllForReprocessing(options?: { zeroRecordsOnly?: boolean }): number {
+    let query = `DELETE FROM processed_files`;
+
+    if (options?.zeroRecordsOnly) {
+      query += ` WHERE record_count = 0`;
+    }
+
+    const stmt = this.db.prepare(query);
+    const result = stmt.run();
+
+    log.info('ALL processed file records cleared for reprocessing', {
+      zeroRecordsOnly: options?.zeroRecordsOnly || false,
+      count: result.changes,
+    });
+
+    return result.changes;
+  }
+
+  /**
+   * Get total count of ALL processed files regardless of store
+   * Used for debugging store ID mismatches
+   */
+  getTotalCount(): number {
+    const stmt = this.db.prepare(`SELECT COUNT(*) as count FROM processed_files`);
+    const result = stmt.get() as { count: number };
+    return result.count;
+  }
+
+  /**
+   * Get distinct store IDs in processed_files table
+   * Used for debugging store ID mismatches
+   */
+  getDistinctStoreIds(): string[] {
+    const stmt = this.db.prepare(`SELECT DISTINCT store_id FROM processed_files`);
+    const results = stmt.all() as { store_id: string }[];
+    return results.map((r) => r.store_id);
   }
 
   /**

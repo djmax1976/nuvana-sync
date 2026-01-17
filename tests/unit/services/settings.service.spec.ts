@@ -133,6 +133,8 @@ describe('SettingsService', () => {
     name: 'Test Store',
     timezone: 'America/New_York',
     status: 'ACTIVE' as const,
+    state_id: null,
+    state_code: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };
@@ -593,6 +595,381 @@ describe('SettingsService', () => {
           pin_hash: '$2b$12$immediatehash',
         })
       );
+    });
+  });
+
+  // ==========================================================================
+  // Business Day Cutoff Time Feature Tests
+  // SEC-014: Input validation for HH:MM format
+  // ==========================================================================
+
+  describe('Business Day Cutoff Time', () => {
+    describe('getBusinessDayCutoffTime', () => {
+      it('BDC-001: should return default cutoff time of 06:00 when not configured', () => {
+        const freshService = new SettingsService();
+        const cutoffTime = freshService.getBusinessDayCutoffTime();
+
+        expect(cutoffTime).toBe('06:00');
+      });
+
+      it('BDC-002: should return configured cutoff time when set', () => {
+        // Create a service and configure it
+        const service = new SettingsService();
+        service.updateLocal({ businessDayCutoffTime: '04:30' });
+
+        const cutoffTime = service.getBusinessDayCutoffTime();
+
+        expect(cutoffTime).toBe('04:30');
+      });
+
+      it('BDC-003: should persist cutoff time across getAll calls', () => {
+        vi.mocked(storesDAL.getConfiguredStore).mockReturnValue(mockStore);
+        const service = new SettingsService();
+        service.updateLocal({ businessDayCutoffTime: '05:00' });
+
+        const settings = service.getAll();
+
+        expect(settings?.businessDayCutoffTime).toBe('05:00');
+      });
+    });
+
+    describe('updateLocal - businessDayCutoffTime validation', () => {
+      it('BDC-010: should accept valid cutoff time in HH:MM format', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '06:00' });
+        }).not.toThrow();
+      });
+
+      it('BDC-011: should accept midnight (00:00)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '00:00' });
+        }).not.toThrow();
+      });
+
+      it('BDC-012: should accept end of day (23:59)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '23:59' });
+        }).not.toThrow();
+      });
+
+      it('BDC-013: should accept early morning hours (04:30)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '04:30' });
+        }).not.toThrow();
+      });
+
+      it('BDC-014: should reject invalid hour (25:00)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '25:00' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-015: should reject invalid minute (06:60)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '06:60' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-016: should reject single digit format (6:00)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '6:00' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-017: should reject 12-hour format with AM/PM', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '06:00 AM' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-018: should reject empty string', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-019: should reject malformed input (text)', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: 'six oclock' });
+        }).toThrow(/HH:MM format/);
+      });
+
+      it('BDC-020: should reject three-digit hour format', () => {
+        expect(() => {
+          settingsService.updateLocal({ businessDayCutoffTime: '006:00' });
+        }).toThrow(/HH:MM format/);
+      });
+    });
+
+    describe('adjustBusinessDate - Core Logic', () => {
+      beforeEach(() => {
+        // Reset to default cutoff of 06:00
+        settingsService.updateLocal({ businessDayCutoffTime: '06:00' });
+      });
+
+      it('BDC-030: should return original date when file time is AFTER cutoff (8 AM > 6 AM)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T08:00:00');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-031: should return previous day when file time is BEFORE cutoff (3 AM < 6 AM)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T03:00:00');
+
+        expect(result).toBe('2025-01-14');
+      });
+
+      it('BDC-032: should return original date when file time EQUALS cutoff (6 AM = 6 AM)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T06:00:00');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-033: should return previous day when 1 minute before cutoff (5:59 < 6:00)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T05:59:00');
+
+        expect(result).toBe('2025-01-14');
+      });
+
+      it('BDC-034: should return original date when 1 minute after cutoff (6:01 > 6:00)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T06:01:00');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-035: should handle midnight (00:00) correctly - always before any cutoff', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T00:00:00');
+
+        expect(result).toBe('2025-01-14');
+      });
+
+      it('BDC-036: should handle 23:59 correctly - after any reasonable cutoff', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T23:59:00');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-037: should return original date when timestamp is null', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', null);
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-038: should return original date when timestamp is undefined', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', undefined);
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-039: should return original date for invalid timestamp format', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', 'invalid-timestamp');
+
+        expect(result).toBe('2025-01-15');
+      });
+    });
+
+    describe('adjustBusinessDate - Custom Cutoff Times', () => {
+      it('BDC-040: should respect custom cutoff of 04:30', () => {
+        settingsService.updateLocal({ businessDayCutoffTime: '04:30' });
+
+        // 3:00 AM < 4:30 AM cutoff → previous day
+        const before = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T03:00:00');
+        expect(before).toBe('2025-01-14');
+
+        // 5:00 AM > 4:30 AM cutoff → same day
+        const after = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T05:00:00');
+        expect(after).toBe('2025-01-15');
+      });
+
+      it('BDC-041: should respect cutoff of 00:00 (midnight)', () => {
+        settingsService.updateLocal({ businessDayCutoffTime: '00:00' });
+
+        // Nothing can be before 00:00, so all times stay on same day
+        const midnight = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T00:00:00');
+        expect(midnight).toBe('2025-01-15');
+
+        const morning = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T03:00:00');
+        expect(morning).toBe('2025-01-15');
+      });
+
+      it('BDC-042: should respect late cutoff of 12:00 (noon)', () => {
+        settingsService.updateLocal({ businessDayCutoffTime: '12:00' });
+
+        // 8:00 AM < 12:00 PM cutoff → previous day
+        const before = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T08:00:00');
+        expect(before).toBe('2025-01-14');
+
+        // 14:00 (2 PM) > 12:00 PM cutoff → same day
+        const after = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T14:00:00');
+        expect(after).toBe('2025-01-15');
+      });
+
+      it('BDC-043: should handle AGK-compatible 23:30 cutoff', () => {
+        // AGK default is 11:30 PM (23:30)
+        settingsService.updateLocal({ businessDayCutoffTime: '23:30' });
+
+        // 20:00 (8 PM) < 23:30 → previous day
+        const before = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T20:00:00');
+        expect(before).toBe('2025-01-14');
+
+        // 23:45 > 23:30 → same day
+        const after = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T23:45:00');
+        expect(after).toBe('2025-01-15');
+      });
+    });
+
+    describe('adjustBusinessDate - Date Boundary Cases', () => {
+      beforeEach(() => {
+        settingsService.updateLocal({ businessDayCutoffTime: '06:00' });
+      });
+
+      it('BDC-050: should correctly handle month boundary (Jan 1 → Dec 31)', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-01', '2025-01-01T03:00:00');
+
+        expect(result).toBe('2024-12-31');
+      });
+
+      it('BDC-051: should correctly handle year boundary (Jan 1 → Dec 31 previous year)', () => {
+        const result = settingsService.adjustBusinessDate('2026-01-01', '2026-01-01T02:00:00');
+
+        expect(result).toBe('2025-12-31');
+      });
+
+      it('BDC-052: should handle leap year February 29 → 28', () => {
+        // 2024 is a leap year
+        const result = settingsService.adjustBusinessDate('2024-03-01', '2024-03-01T04:00:00');
+
+        expect(result).toBe('2024-02-29');
+      });
+
+      it('BDC-053: should handle non-leap year March 1 → Feb 28', () => {
+        // 2025 is not a leap year
+        const result = settingsService.adjustBusinessDate('2025-03-01', '2025-03-01T04:00:00');
+
+        expect(result).toBe('2025-02-28');
+      });
+
+      it('BDC-054: should handle end of month (Feb 1 → Jan 31)', () => {
+        const result = settingsService.adjustBusinessDate('2025-02-01', '2025-02-01T03:00:00');
+
+        expect(result).toBe('2025-01-31');
+      });
+
+      it('BDC-055: should handle April 1 → March 31 (30-day month)', () => {
+        const result = settingsService.adjustBusinessDate('2025-04-01', '2025-04-01T03:00:00');
+
+        expect(result).toBe('2025-03-31');
+      });
+    });
+
+    describe('adjustBusinessDate - ISO Timestamp Formats', () => {
+      beforeEach(() => {
+        settingsService.updateLocal({ businessDayCutoffTime: '06:00' });
+      });
+
+      it('BDC-060: should handle ISO timestamp with milliseconds', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T03:30:45.123');
+
+        expect(result).toBe('2025-01-14');
+      });
+
+      it('BDC-061: should handle ISO timestamp with timezone (Z)', () => {
+        // Note: Date parsing uses local time, so UTC timestamp behavior depends on locale
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15T03:00:00Z');
+
+        // Should still work (parses to local time)
+        expect(result).toBeDefined();
+        expect(typeof result).toBe('string');
+        expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      });
+
+      it('BDC-062: should handle ISO timestamp with timezone offset', () => {
+        const result = settingsService.adjustBusinessDate(
+          '2025-01-15',
+          '2025-01-15T03:00:00-05:00'
+        );
+
+        expect(result).toBeDefined();
+        expect(typeof result).toBe('string');
+        expect(result).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+      });
+
+      it('BDC-063: should handle date-only format gracefully', () => {
+        // No time component - should return original date
+        const result = settingsService.adjustBusinessDate('2025-01-15', '2025-01-15');
+
+        // Date-only parses as midnight UTC, which converts to local time
+        expect(result).toBeDefined();
+        expect(typeof result).toBe('string');
+      });
+    });
+
+    describe('adjustBusinessDate - Error Resilience', () => {
+      beforeEach(() => {
+        settingsService.updateLocal({ businessDayCutoffTime: '06:00' });
+      });
+
+      it('BDC-070: should return original date for empty string timestamp', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', '');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-071: should return original date for malformed date string', () => {
+        const result = settingsService.adjustBusinessDate('2025-01-15', 'not-a-date');
+
+        expect(result).toBe('2025-01-15');
+      });
+
+      it('BDC-072: should return original date for numeric timestamp', () => {
+        // Numeric timestamps should be handled gracefully
+        const result = settingsService.adjustBusinessDate('2025-01-15', String(Date.now()));
+
+        // May or may not adjust based on parsed time, but should not throw
+        expect(result).toBeDefined();
+        expect(typeof result).toBe('string');
+      });
+
+      it('BDC-073: should handle very old dates', () => {
+        const result = settingsService.adjustBusinessDate('1999-01-01', '1999-01-01T03:00:00');
+
+        expect(result).toBe('1998-12-31');
+      });
+
+      it('BDC-074: should handle far future dates', () => {
+        const result = settingsService.adjustBusinessDate('2099-06-15', '2099-06-15T03:00:00');
+
+        expect(result).toBe('2099-06-14');
+      });
+
+      it('BDC-075: should not throw for extremely malformed business date', () => {
+        // Should handle gracefully without throwing
+        expect(() => {
+          settingsService.adjustBusinessDate('invalid-date', '2025-01-15T03:00:00');
+        }).not.toThrow();
+      });
+    });
+
+    describe('Business Day Cutoff - Integration with getAll', () => {
+      it('BDC-080: should include businessDayCutoffTime in getAll response', () => {
+        vi.mocked(storesDAL.getConfiguredStore).mockReturnValue(mockStore);
+        settingsService.updateLocal({ businessDayCutoffTime: '07:00' });
+
+        const settings = settingsService.getAll();
+
+        expect(settings).not.toBeNull();
+        expect(settings?.businessDayCutoffTime).toBe('07:00');
+      });
+
+      it('BDC-081: should show default in getAll when not configured', () => {
+        vi.mocked(storesDAL.getConfiguredStore).mockReturnValue(mockStore);
+        const freshService = new SettingsService();
+
+        const settings = freshService.getAll();
+
+        expect(settings).not.toBeNull();
+        expect(settings?.businessDayCutoffTime).toBe('06:00');
+      });
     });
   });
 });

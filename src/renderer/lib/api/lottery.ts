@@ -45,6 +45,83 @@ export type LotteryPackStatus = 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED
  */
 export type LotteryGameStatus = 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
 
+// ============ Games Listing Types ============
+
+/**
+ * Pack counts for a game
+ * API-008: OUTPUT_FILTERING - Matches backend response shape
+ */
+export interface GamePackCounts {
+  total: number;
+  received: number;
+  active: number;
+  settled: number;
+  returned: number;
+}
+
+/**
+ * Game list item with pack counts
+ * API-008: OUTPUT_FILTERING - Type-safe response interface
+ */
+export interface GameListItem {
+  game_id: string;
+  game_code: string;
+  name: string;
+  price: number;
+  pack_value: number;
+  tickets_per_pack: number | null;
+  status: LotteryGameStatus;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+  pack_counts: GamePackCounts;
+}
+
+/**
+ * Filters for games listing
+ * SEC-014: Validated constraints match backend
+ */
+export interface GameListFilters {
+  /** Filter by game status */
+  status?: LotteryGameStatus;
+  /** Search by game name or code (min 2 chars) */
+  search?: string;
+}
+
+/**
+ * Pagination options for games listing
+ * SEC-014: Bounded pagination matches backend limits
+ */
+export interface GameListPagination {
+  /** Number of records per page (max 100) */
+  limit?: number;
+  /** Number of records to skip */
+  offset?: number;
+  /** Sort column */
+  sortBy?: 'name' | 'game_code' | 'price' | 'status' | 'created_at';
+  /** Sort direction */
+  sortOrder?: 'ASC' | 'DESC';
+}
+
+/**
+ * Combined input for games listing
+ */
+export interface ListGamesInput {
+  filters?: GameListFilters;
+  pagination?: GameListPagination;
+}
+
+/**
+ * Paginated games list response
+ */
+export interface GameListResponse {
+  games: GameListItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
 /**
  * Lottery pack query filters
  */
@@ -187,10 +264,13 @@ export interface DepletePackResponse {
 
 /**
  * Return pack input
+ * SEC-014: INPUT_VALIDATION - All fields validated by backend Zod schema
  */
 export interface ReturnPackInput {
   pack_id: string;
   return_reason: string;
+  /** 3-digit serial of last ticket sold before return */
+  closing_serial?: string;
   notes?: string;
 }
 
@@ -634,6 +714,28 @@ export async function getGames(): Promise<ApiResponse<LotteryGameResponse[]>> {
   }
 }
 
+/**
+ * List lottery games with pack counts and pagination
+ * IPC: lottery:listGames
+ *
+ * Enterprise-grade games listing API:
+ * - SEC-014: Type-safe filters and pagination
+ * - API-008: Returns games with aggregated pack counts
+ *
+ * @param input - Optional filters and pagination
+ * @returns Paginated games list with pack counts
+ */
+export async function listGames(
+  input?: ListGamesInput
+): Promise<ApiResponse<GameListResponse>> {
+  try {
+    const data = await ipcClient.invoke<GameListResponse>('lottery:listGames', input);
+    return wrapSuccess(data);
+  } catch (error) {
+    return handleIPCError(error);
+  }
+}
+
 // ============ Bins API Functions ============
 
 /**
@@ -652,62 +754,26 @@ export async function getBins(): Promise<ApiResponse<LotteryBinResponse[]>> {
 
 /**
  * Get lottery bins with day-based tracking
- * This is a local implementation that combines bin and pack data
- * for the day-close workflow
- * @param _storeId - Store UUID (for interface compatibility, not used in IPC)
+ * Uses the new enterprise-grade lottery:getDayBins handler that returns:
+ * - Full pack details with actual opening_serial (not hardcoded)
+ * - Calculated serial_end based on tickets_per_pack
+ * - Business day information
+ * - Recently activated, depleted, and returned packs
+ *
+ * IPC: lottery:getDayBins
+ *
+ * @param _storeId - Store UUID (for interface compatibility, handler uses session)
  * @param _date - Optional date (for interface compatibility)
+ * @returns Day bins response with full pack details
  */
 export async function getLotteryDayBins(
   _storeId?: string,
   _date?: string
 ): Promise<ApiResponse<DayBinsResponse>> {
   try {
-    // Get bins with pack info
-    const bins = await ipcClient.invoke<LotteryBinResponse[]>('lottery:getBins');
-
-    // Transform to DayBin format
-    const dayBins: DayBin[] = bins.map((bin) => ({
-      bin_id: bin.bin_id,
-      bin_number: bin.bin_number,
-      name: bin.label || `Bin ${bin.bin_number}`,
-      is_active: bin.status === 'ACTIVE',
-      pack: bin.pack_id
-        ? {
-            pack_id: bin.pack_id,
-            pack_number: bin.pack_number || '',
-            game_name: bin.game_name || '',
-            game_price: bin.game_price || 0,
-            starting_serial: '000', // Would need pack details for this
-            ending_serial: null,
-            serial_end: '000',
-            is_first_period: true,
-          }
-        : null,
-    }));
-
-    // Construct response
-    const response: DayBinsResponse = {
-      bins: dayBins,
-      business_day: {
-        date: new Date().toISOString().split('T')[0],
-        day_id: null,
-        status: 'OPEN',
-        first_shift_opened_at: null,
-        last_shift_closed_at: null,
-        shifts_count: 0,
-      },
-      open_business_period: {
-        started_at: null,
-        last_closed_date: null,
-        days_since_last_close: null,
-        is_first_period: true,
-      },
-      depleted_packs: [],
-      activated_packs: [],
-      returned_packs: [],
-      day_close_summary: null,
-    };
-
+    // Call the enterprise-grade handler that provides full pack details
+    // Handler derives store_id from session, date defaults to today
+    const response = await ipcClient.invoke<DayBinsResponse>('lottery:getDayBins');
     return wrapSuccess(response);
   } catch (error) {
     return handleIPCError(error);
@@ -947,22 +1013,34 @@ export async function deletePack(packId: string): Promise<ApiResponse<{ deleted:
 
 /**
  * Full pack activation (with bin assignment)
- * IPC: lottery:activatePackFull
- * @param storeId - Store UUID
+ * IPC: lottery:activatePack
+ * @param storeId - Store UUID (passed for interface consistency, handler uses session)
  * @param data - Full activation data
  * @returns Activated pack response
  */
 export async function activatePackFull(
-  storeId: string,
+  _storeId: string,
   data: FullActivatePackInput
 ): Promise<ApiResponse<ActivatePackResponse>> {
+  // Debug logging for activation
+  console.log('[ACTIVATE-FULL DEBUG] activatePackFull called with:', {
+    storeId: _storeId,
+    data,
+  });
+
   try {
-    const result = await ipcClient.invoke<ActivatePackResponse>('lottery:activatePackFull', {
-      store_id: storeId,
-      ...data,
+    // Note: store_id is derived from session in the handler via getStoreId()
+    // shift_id is optional and not used by current handler (for future use)
+    console.log('[ACTIVATE-FULL DEBUG] Calling ipcClient.invoke lottery:activatePack');
+    const result = await ipcClient.invoke<ActivatePackResponse>('lottery:activatePack', {
+      pack_id: data.pack_id,
+      bin_id: data.bin_id,
+      opening_serial: data.opening_serial,
     });
+    console.log('[ACTIVATE-FULL DEBUG] IPC result:', result);
     return wrapSuccess(result);
   } catch (error) {
+    console.error('[ACTIVATE-FULL DEBUG] IPC error:', error);
     return handleIPCError(error);
   }
 }
@@ -1015,6 +1093,41 @@ export async function approveVariance(
 export async function createGame(data: CreateGameInput): Promise<ApiResponse<LotteryGameResponse>> {
   try {
     const result = await ipcClient.invoke<LotteryGameResponse>('lottery:createGame', data);
+    return wrapSuccess(result);
+  } catch (error) {
+    return handleIPCError(error);
+  }
+}
+
+/**
+ * Game lookup result from cloud-first lookup
+ */
+export interface GameLookupResult {
+  found: boolean;
+  source: 'cloud' | 'local';
+  game: {
+    game_id: string;
+    game_code: string;
+    name: string;
+    price: number;
+    pack_value: number;
+    tickets_per_pack: number | null;
+  } | null;
+}
+
+/**
+ * Lookup a lottery game by game code
+ * Cloud-first: checks cloud, then local cache
+ * IPC: lottery:lookupGameByCode
+ *
+ * @param gameCode - 4-digit game code
+ * @returns Lookup result with game data if found
+ */
+export async function lookupGameByCode(gameCode: string): Promise<ApiResponse<GameLookupResult>> {
+  try {
+    const result = await ipcClient.invoke<GameLookupResult>('lottery:lookupGameByCode', {
+      game_code: gameCode,
+    });
     return wrapSuccess(result);
   } catch (error) {
     return handleIPCError(error);
@@ -1200,6 +1313,9 @@ export const lotteryAPI = {
 
   // Bins
   getBins: () => ipcClient.invoke<LotteryBinResponse[]>('lottery:getBins'),
+
+  // Day Bins (enterprise-grade handler with full pack details)
+  getDayBins: () => ipcClient.invoke<DayBinsResponse>('lottery:getDayBins'),
 
   // Packs
   getPacks: (filters?: LotteryPackQueryFilters) =>

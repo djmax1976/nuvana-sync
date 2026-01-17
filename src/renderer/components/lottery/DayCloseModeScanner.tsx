@@ -70,7 +70,7 @@ import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 import { cn } from '@/lib/utils';
 import { formatDateTimeShort } from '@/utils/date-format.utils';
 import { useStoreTimezone } from '@/contexts/StoreContext';
-import { ManualEntryAuthModal } from '@/components/lottery/ManualEntryAuthModal';
+import { PinVerificationDialog, type VerifiedUser } from '@/components/auth/PinVerificationDialog';
 import {
   UnscannedBinWarningModal,
   type UnscannedBinInfo,
@@ -290,8 +290,12 @@ export function DayCloseModeScanner({
   const [showFloatingBar, setShowFloatingBar] = useState(false);
   const [lastScannedBinId, setLastScannedBinId] = useState<string | null>(null);
 
-  // Manual entry state management
-  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] = useState(false);
+  /**
+   * Manual Entry PIN verification state
+   * SEC-010: AUTHZ - PIN verification before enabling manual entry mode
+   * SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
+   */
+  const [manualEntryPinDialogOpen, setManualEntryPinDialogOpen] = useState(false);
   const [manualEntryState, setManualEntryState] = useState<ManualEntryState>({
     isActive: false,
     authorizedBy: null,
@@ -781,18 +785,21 @@ export function DayCloseModeScanner({
 
   /**
    * Handle Manual Entry button click
-   * Opens the auth modal for PIN verification
+   * Opens the PIN verification dialog
+   * SEC-010: AUTHZ - PIN verification before enabling manual entry mode
    */
   const handleManualEntryClick = useCallback(() => {
-    setManualEntryAuthModalOpen(true);
+    setManualEntryPinDialogOpen(true);
   }, []);
 
   /**
-   * Handle Manual Entry authorization success
+   * Handle Manual Entry PIN verification success
    * Pre-populate manual entry values with already-scanned bin values
+   * SEC-010: AUTHZ - PIN verification logs user in for audit trail
+   * SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
    */
-  const handleManualEntryAuthorized = useCallback(
-    (authorizedBy: { userId: string; name: string }) => {
+  const handleManualEntryPinVerified = useCallback(
+    (user: VerifiedUser) => {
       // Pre-populate manualEndingValues with scanned bin values
       const prePopulatedValues: Record<string, string> = {};
       scannedBins.forEach((scannedBin) => {
@@ -801,17 +808,20 @@ export function DayCloseModeScanner({
 
       setManualEntryState({
         isActive: true,
-        authorizedBy,
+        authorizedBy: {
+          userId: user.userId,
+          name: user.name,
+        },
         authorizedAt: new Date(),
       });
-      setManualEntryAuthModalOpen(false);
+      setManualEntryPinDialogOpen(false);
       setManualEndingValues(prePopulatedValues);
       setValidationErrors({});
       setPendingValidations(new Set());
 
       toast({
         title: 'Manual Entry Enabled',
-        description: `Authorized by ${authorizedBy.name}. You can now enter ending serial numbers.`,
+        description: `Authorized by ${user.name}. You can now enter ending serial numbers.`,
       });
     },
     [scannedBins, toast]
@@ -1962,12 +1972,18 @@ export function DayCloseModeScanner({
         </div>
       </div>
 
-      {/* Manual Entry Auth Modal */}
-      <ManualEntryAuthModal
-        open={manualEntryAuthModalOpen}
-        onOpenChange={setManualEntryAuthModalOpen}
-        storeId={storeId}
-        onAuthorized={handleManualEntryAuthorized}
+      {/* Manual Entry PIN Verification Dialog
+          SEC-010: AUTHZ - PIN verification before enabling manual entry mode
+          SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
+          FE-001: SESSION_CACHING - Bypasses PIN if valid session exists
+      */}
+      <PinVerificationDialog
+        open={manualEntryPinDialogOpen}
+        onClose={() => setManualEntryPinDialogOpen(false)}
+        onVerified={handleManualEntryPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Manual Entry"
+        description="Enter your PIN to enable manual entry mode. This action will be recorded for audit purposes."
       />
 
       {/* Validation Error Modal */}

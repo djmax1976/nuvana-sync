@@ -14,6 +14,8 @@ import {
   type ShiftListParams,
   type ShiftListResponse,
   type ShiftSummaryResponse,
+  type ShiftFuelDataResponse,
+  type DailyFuelTotalsResponse,
 } from '../transport';
 
 // ============================================================================
@@ -29,6 +31,10 @@ export const shiftKeys = {
   summaries: () => [...shiftKeys.all, 'summary'] as const,
   summary: (shiftId: string) => [...shiftKeys.summaries(), shiftId] as const,
   openShifts: () => [...shiftKeys.all, 'open'] as const,
+  // Fuel data query keys
+  fuelData: () => [...shiftKeys.all, 'fuel'] as const,
+  shiftFuel: (shiftId: string) => [...shiftKeys.fuelData(), 'shift', shiftId] as const,
+  dailyFuel: (businessDate: string) => [...shiftKeys.fuelData(), 'daily', businessDate] as const,
 };
 
 // ============================================================================
@@ -133,5 +139,57 @@ export function useInvalidateShifts() {
     invalidateDetail: (shiftId: string) =>
       queryClient.invalidateQueries({ queryKey: shiftKeys.detail(shiftId) }),
     invalidateOpen: () => queryClient.invalidateQueries({ queryKey: shiftKeys.openShifts() }),
+    invalidateFuel: () => queryClient.invalidateQueries({ queryKey: shiftKeys.fuelData() }),
+    invalidateShiftFuel: (shiftId: string) =>
+      queryClient.invalidateQueries({ queryKey: shiftKeys.shiftFuel(shiftId) }),
+    invalidateDailyFuel: (businessDate: string) =>
+      queryClient.invalidateQueries({ queryKey: shiftKeys.dailyFuel(businessDate) }),
   };
+}
+
+// ============================================================================
+// Fuel Data Hooks
+// ============================================================================
+
+/**
+ * Hook to fetch fuel data for a specific shift with inside/outside breakdown
+ *
+ * Returns MSM-sourced data when available, which includes:
+ * - Inside fuel (cash) by grade with volume
+ * - Outside fuel (credit/debit) by grade with volume
+ * - Fuel discounts
+ *
+ * @param shiftId - Shift ID to get fuel data for
+ * @param options - Query options
+ */
+export function useShiftFuelData(shiftId: string | null, options?: { enabled?: boolean }) {
+  return useQuery<ShiftFuelDataResponse>({
+    queryKey: shiftKeys.shiftFuel(shiftId!),
+    queryFn: () => ipc.shifts.getFuelData(shiftId!),
+    enabled: options?.enabled !== false && shiftId !== null,
+    staleTime: 30000, // 30 seconds
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+  });
+}
+
+/**
+ * Hook to fetch daily fuel totals with inside/outside breakdown
+ *
+ * Returns aggregated fuel data for a business date from:
+ * - day_fuel_summaries (from MSM Period 1) - preferred
+ * - shift_fuel_summaries (aggregated) - fallback
+ *
+ * @param businessDate - Business date (YYYY-MM-DD)
+ * @param options - Query options
+ */
+export function useDailyFuelTotals(businessDate: string | null, options?: { enabled?: boolean }) {
+  return useQuery<DailyFuelTotalsResponse>({
+    queryKey: shiftKeys.dailyFuel(businessDate!),
+    queryFn: () => ipc.shifts.getDailyFuelTotals(businessDate!),
+    enabled: options?.enabled !== false && businessDate !== null,
+    staleTime: 60000, // 1 minute - daily data changes less frequently
+    refetchOnMount: true,
+    refetchOnWindowFocus: true,
+  });
 }

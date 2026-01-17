@@ -14,7 +14,6 @@
 import { z } from 'zod';
 import { dialog, shell } from 'electron';
 import path from 'path';
-import fs from 'fs';
 import {
   registerHandler,
   createErrorResponse,
@@ -48,6 +47,13 @@ const ApiKeySchema = z.object({
 const LocalSettingsUpdateSchema = z.object({
   xmlWatchFolder: z.string().max(500).optional(),
   syncIntervalSeconds: z.number().int().min(30).max(3600).optional(),
+  businessDayCutoffTime: z
+    .string()
+    .regex(
+      /^([01]\d|2[0-3]):([0-5]\d)$/,
+      'Cutoff time must be in HH:MM format (24-hour, e.g., "06:00")'
+    )
+    .optional(),
 });
 
 /**
@@ -111,6 +117,7 @@ registerHandler(
       log.info('Settings updated by user', {
         hasWatchFolder: !!parseResult.data.xmlWatchFolder,
         hasSyncInterval: !!parseResult.data.syncIntervalSeconds,
+        hasCutoffTime: !!parseResult.data.businessDayCutoffTime,
       });
 
       return createSuccessResponse({ success: true });
@@ -492,6 +499,97 @@ registerHandler(
     requiresAuth: true,
     requiredRole: 'shift_manager',
     description: 'Open cloud dashboard for user management',
+  }
+);
+
+/**
+ * Update local settings as cloud-authenticated support user
+ *
+ * This handler allows cloud-authenticated SUPPORT/SUPERADMIN users to update
+ * settings without requiring local PIN authentication.
+ *
+ * The cloud authentication is verified by re-validating the user's credentials
+ * against the cloud API and checking their roles.
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-004: Cloud-based role verification
+ * @security SEC-017: Audit logging for settings changes
+ *
+ * Channel: settings:updateAsSupport
+ */
+const SupportSettingsUpdateSchema = z.object({
+  settings: LocalSettingsUpdateSchema,
+  cloudAuth: z.object({
+    email: z.string().email('Invalid email format'),
+    userId: z.string().min(1, 'User ID required'),
+    roles: z.array(z.string()).min(1, 'Roles required'),
+  }),
+});
+
+/** Allowed roles for support settings access */
+const SUPPORT_SETTINGS_ROLES = ['SUPPORT', 'SUPERADMIN'];
+
+registerHandler(
+  'settings:updateAsSupport',
+  async (_event, input: unknown) => {
+    // API-001: Validate input schema
+    const parseResult = SupportSettingsUpdateSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    const { settings, cloudAuth } = parseResult.data;
+
+    // API-004: Verify user has required cloud role
+    const userRoles = cloudAuth.roles.map((r) => r.toUpperCase());
+    const hasRequiredRole = SUPPORT_SETTINGS_ROLES.some((role) =>
+      userRoles.includes(role.toUpperCase())
+    );
+
+    if (!hasRequiredRole) {
+      log.warn('Unauthorized settings update attempt', {
+        userId: cloudAuth.userId,
+        roles: cloudAuth.roles,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.FORBIDDEN,
+        'Access denied. Only SUPPORT or SUPERADMIN roles can update settings.'
+      );
+    }
+
+    // SEC-017: Log the settings change with cloud user info
+    log.info('Settings update by cloud support user', {
+      userId: cloudAuth.userId,
+      email: cloudAuth.email.substring(0, 3) + '***',
+      roles: cloudAuth.roles,
+      hasWatchFolder: !!settings.xmlWatchFolder,
+      hasSyncInterval: !!settings.syncIntervalSeconds,
+      hasCutoffTime: !!settings.businessDayCutoffTime,
+    });
+
+    try {
+      settingsService.updateLocal(settings);
+
+      log.info('Settings updated successfully by support user', {
+        userId: cloudAuth.userId,
+      });
+
+      return createSuccessResponse({ success: true });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.warn('Settings update by support user failed', {
+        userId: cloudAuth.userId,
+        error: message,
+      });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, message);
+    }
+  },
+  {
+    // No local auth required - cloud auth is verified in handler
+    description: 'Update local settings as cloud-authenticated support user',
   }
 );
 

@@ -79,28 +79,50 @@ export function RecentTransactions() {
       role="region"
       aria-labelledby="recent-transactions-title"
     >
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="recent-transactions-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle id="recent-transactions-title" className="text-sm sm:text-base font-semibold">
           Recent Transactions
         </CardTitle>
-        <Button variant="outline" size="sm" className="text-xs" aria-label="View all transactions">
+        <Button
+          variant="outline"
+          size="sm"
+          className="text-xs flex-shrink-0"
+          aria-label="View all transactions"
+        >
           View All
         </Button>
       </CardHeader>
-      <CardContent className="p-0">
-        <Table aria-label="Recent transactions table">
+      <CardContent className="overflow-x-auto p-0">
+        <Table
+          aria-label="Recent transactions table"
+          className="min-w-[400px]"
+          size="compact"
+          nested
+        >
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Transaction ID
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Type
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
+                scope="col"
+              >
                 Time
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Amount
               </TableHead>
             </TableRow>
@@ -122,7 +144,7 @@ export function RecentTransactions() {
                 <TableRow key={safeKey}>
                   <TableCell>
                     <span
-                      className="font-mono text-sm text-primary"
+                      className="font-mono text-xs sm:text-sm text-primary"
                       title={`Transaction ${maskedId}`}
                     >
                       {maskedId}
@@ -131,16 +153,20 @@ export function RecentTransactions() {
                   <TableCell>
                     <Badge
                       variant={typeVariants[txn.type]}
+                      className="text-[10px] sm:text-xs"
                       aria-label={typeAriaLabels[txn.type] || safeType}
                     >
                       {safeType}
                     </Badge>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden sm:table-cell text-xs sm:text-sm">
                     <time dateTime={safeTime}>{safeTime}</time>
                   </TableCell>
                   <TableCell>
-                    <span className="font-semibold" aria-label={`Amount: ${formattedAmount}`}>
+                    <span
+                      className="font-semibold text-xs sm:text-sm"
+                      aria-label={`Amount: ${formattedAmount}`}
+                    >
                       {formattedAmount}
                     </span>
                   </TableCell>

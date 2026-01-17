@@ -74,18 +74,18 @@ function maskActivityTitle(title: string, fullName: string): string {
 export function RecentActivity() {
   return (
     <Card data-testid="recent-activity" role="region" aria-labelledby="recent-activity-title">
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="recent-activity-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle id="recent-activity-title" className="text-sm sm:text-base font-semibold">
           Recent Activity
         </CardTitle>
         <span
-          className="text-xs text-muted-foreground"
+          className="text-[10px] sm:text-xs text-muted-foreground whitespace-nowrap"
           aria-label="Showing activity from the last 2 hours"
         >
           Last 2 hours
         </span>
       </CardHeader>
-      <CardContent className="p-5">
+      <CardContent className="p-3 sm:p-4 lg:p-5">
         <ul className="space-y-0" role="feed" aria-label="Store activity feed" aria-live="polite">
           {activities.map((activity, index) => {
             // Sanitize all display values (SEC-004)
@@ -99,24 +99,26 @@ export function RecentActivity() {
             return (
               <li
                 key={activity.id}
-                className={`flex gap-3 py-3.5 ${index < activities.length - 1 ? 'border-b' : ''}`}
+                className={`flex gap-2 sm:gap-3 py-2.5 sm:py-3.5 ${index < activities.length - 1 ? 'border-b' : ''}`}
                 role="article"
                 aria-label={`${safeTitle}, ${safeTime}`}
               >
                 <div
-                  className={`w-9 h-9 rounded-full flex items-center justify-center shrink-0 text-sm font-semibold ${avatarColors[activity.color]}`}
+                  className={`w-7 h-7 sm:w-9 sm:h-9 rounded-full flex items-center justify-center shrink-0 text-xs sm:text-sm font-semibold ${avatarColors[activity.color]}`}
                   aria-hidden="true"
                 >
                   {safeInitials}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <div className="font-medium text-foreground">{safeTitle}</div>
-                  <div className="text-xs text-muted-foreground">
+                  <div className="font-medium text-foreground text-sm sm:text-base truncate">
+                    {safeTitle}
+                  </div>
+                  <div className="text-[10px] sm:text-xs text-muted-foreground">
                     <time dateTime={safeTime}>{safeTime}</time>
                   </div>
                 </div>
                 <div
-                  className="font-mono text-xs text-primary whitespace-nowrap"
+                  className="font-mono text-[10px] sm:text-xs text-primary whitespace-nowrap self-center"
                   aria-label={`Value: ${safeMeta}`}
                 >
                   {safeMeta}

@@ -32,6 +32,10 @@ import { cloudApiService } from './services/cloud-api.service';
 import { settingsService } from './services/settings.service';
 import { userSyncService } from './services/user-sync.service';
 import { bidirectionalSyncService } from './services/bidirectional-sync.service';
+import { eventBus, MainEvents } from './utils/event-bus';
+import { posTerminalMappingsDAL } from './dal/pos-id-mappings.dal';
+import { storesDAL } from './dal/stores.dal';
+
 // ============================================================================
 // EPIPE Error Handling - Suppress broken pipe errors
 // ============================================================================
@@ -354,6 +358,51 @@ if (!gotTheLock) {
     fileWatcher.start();
   };
 
+  // Listen for file watcher restart requests from IPC handlers
+  // Using eventBus for reliable internal communication (ipcMain.emit can be unreliable)
+  eventBus.on(MainEvents.FILE_WATCHER_RESTART, async () => {
+    log.info('File watcher restart requested via eventBus');
+
+    fileWatcher?.stop();
+    startFileWatcher();
+
+    // After restart, explicitly process existing files to pick up cleared records
+    // Small delay to ensure watcher is ready
+    setTimeout(async () => {
+      if (fileWatcher) {
+        log.info('Processing existing files after watcher restart');
+        try {
+          await fileWatcher.processExistingFiles();
+        } catch (err) {
+          log.error('Error processing existing files after restart', {
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      } else {
+        log.error('File watcher is null after restart');
+      }
+    }, 1000);
+  });
+
+  // Also keep ipcMain listener for backwards compatibility
+  ipcMain.on('file-watcher:restart', async () => {
+    log.info('File watcher restart requested via ipcMain - forwarding to eventBus');
+    eventBus.emit(MainEvents.FILE_WATCHER_RESTART);
+  });
+
+  // Listen for shift closed events and forward to renderer
+  // SEC-014: Event payload validated via Zod schema in parser service
+  eventBus.on(MainEvents.SHIFT_CLOSED, (payload: unknown) => {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      log.debug('Forwarding shift closed event to renderer', {
+        shiftId: (payload as { shiftId?: string })?.shiftId,
+      });
+      mainWindow.webContents.send('shift:closed', payload);
+    } else {
+      log.warn('Cannot forward shift closed event - mainWindow not available');
+    }
+  });
+
   /**
    * SEC-014: Validate IPC input before processing
    */
@@ -539,6 +588,49 @@ if (!gotTheLock) {
         const managerSynced = settingsService.syncInitialManagerToDatabase();
         if (managerSynced) {
           log.info('Initial manager synced from config to database after bootstrap');
+        }
+
+        // Backfill terminal mappings from existing shifts
+        // This handles the case where shifts were processed before pos_terminal_mappings
+        // table was created (migration v007)
+        try {
+          const store = storesDAL.getConfiguredStore();
+          if (store) {
+            const backfillResult = posTerminalMappingsDAL.backfillFromShifts(store.store_id);
+            if (backfillResult.created > 0) {
+              log.info('Terminal mappings backfilled from existing shifts', {
+                storeId: store.store_id,
+                created: backfillResult.created,
+                existing: backfillResult.existing,
+                total: backfillResult.total,
+              });
+            }
+
+            // DEBUG: Check processed_files table
+            const { processedFilesDAL } = await import('./dal/processed-files.dal');
+            const processedStats = processedFilesDAL.getStats(store.store_id);
+            log.info('Processed files stats at startup', {
+              storeId: store.store_id,
+              stats: processedStats,
+            });
+
+            // Close stale open shifts from previous days
+            // This fixes data where shifts weren't properly closed by Period 98 files
+            const { shiftsDAL } = await import('./dal/shifts.dal');
+            const today = new Date().toISOString().split('T')[0];
+            const closedStaleShifts = shiftsDAL.closeStaleOpenShifts(store.store_id, today);
+            if (closedStaleShifts > 0) {
+              log.info('Closed stale open shifts at startup', {
+                storeId: store.store_id,
+                closedCount: closedStaleShifts,
+                today,
+              });
+            }
+          }
+        } catch (error) {
+          log.warn('Failed to backfill terminal mappings (non-fatal)', {
+            error: error instanceof Error ? error.message : String(error),
+          });
         }
       } else {
         log.error('Database bootstrap failed', {

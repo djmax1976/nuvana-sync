@@ -123,8 +123,15 @@ export class BidirectionalSyncService {
       try {
         const pullResponse = await cloudApiService.pullBins(lastPull || undefined);
 
+        log.debug('Bins pull response received', {
+          binsCount: pullResponse.bins?.length ?? 0,
+          totalCount: pullResponse.totalCount,
+          hasBins: Array.isArray(pullResponse.bins),
+          firstBin: pullResponse.bins?.[0] ? JSON.stringify(pullResponse.bins[0]) : 'none',
+        });
+
         // Step 4: Apply cloud changes with last-write-wins
-        for (const cloudBin of pullResponse.bins) {
+        for (const cloudBin of pullResponse.bins || []) {
           try {
             const localBin = lotteryBinsDAL.findByCloudId(cloudBin.bin_id);
 

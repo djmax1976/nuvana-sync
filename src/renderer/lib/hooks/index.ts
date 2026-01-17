@@ -18,6 +18,8 @@ export {
   useShiftSummary,
   useCloseShift,
   useInvalidateShifts,
+  useShiftFuelData,
+  useDailyFuelTotals,
 } from './useShifts';
 
 // Day summaries hooks

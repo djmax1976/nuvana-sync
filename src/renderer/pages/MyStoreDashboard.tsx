@@ -19,19 +19,19 @@ import {
  */
 export function MyStoreDashboard() {
   return (
-    <div className="space-y-6" data-testid="mystore-dashboard-page">
+    <div className="space-y-4 sm:space-y-6" data-testid="mystore-dashboard-page">
       {/* Stats Grid - 4 stat cards */}
       <StatsGrid />
 
       {/* Content Grid - 3 equal cards */}
-      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 xl:grid-cols-3 gap-3 sm:gap-4 lg:gap-5">
         <SalesByDepartment />
         <RecentlyActivatedPacks />
         <ExpectedDeliveries />
       </div>
 
       {/* Bottom Grid - 2 cards side by side */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 sm:gap-6">
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 sm:gap-4 lg:gap-5">
         <RecentTransactions />
         <RecentActivity />
       </div>

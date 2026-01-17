@@ -70,35 +70,43 @@ const statusAriaLabels: Record<string, string> = {
 export function ExpectedDeliveries() {
   return (
     <Card
-      className="min-h-[380px] flex flex-col"
+      className="min-h-[340px] sm:min-h-[380px] flex flex-col"
       data-testid="expected-deliveries"
       role="region"
       aria-labelledby="expected-deliveries-title"
     >
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="expected-deliveries-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle
+          id="expected-deliveries-title"
+          className="text-sm sm:text-base font-semibold truncate"
+        >
           Expected Deliveries
         </CardTitle>
         <button
-          className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground bg-muted/50 rounded-md border hover:border-primary transition-colors"
+          className="flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1.5 sm:py-2 text-xs sm:text-sm text-muted-foreground bg-muted/50 rounded-md border hover:border-primary transition-colors flex-shrink-0"
           aria-label="Filter deliveries by date: Today selected"
         >
-          <Calendar className="w-3.5 h-3.5" aria-hidden="true" />
+          <Calendar className="w-3 h-3 sm:w-3.5 sm:h-3.5" aria-hidden="true" />
           Today
         </button>
       </CardHeader>
-      <CardContent className="p-0 flex-1 overflow-x-auto">
-        <Table aria-label="Expected vendor deliveries for today" className="min-w-[280px]">
+      <CardContent className="flex-1 overflow-x-auto p-0">
+        <Table
+          aria-label="Expected vendor deliveries for today"
+          className="min-w-[280px]"
+          size="compact"
+          nested
+        >
           <TableHeader>
             <TableRow>
               <TableHead
-                className="text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
                 scope="col"
               >
                 Vendor
               </TableHead>
               <TableHead
-                className="text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
                 scope="col"
               >
                 Status
@@ -127,7 +135,7 @@ export function ExpectedDeliveries() {
                           {safeInitials}
                         </span>
                       </div>
-                      <span className="font-medium text-sm truncate max-w-[100px] sm:max-w-none">
+                      <span className="font-medium text-xs sm:text-sm truncate max-w-[100px] sm:max-w-none">
                         {safeVendor}
                       </span>
                     </div>
@@ -135,7 +143,7 @@ export function ExpectedDeliveries() {
                   <TableCell>
                     <Badge
                       variant={delivery.status === 'delivered' ? 'success' : 'secondary'}
-                      className={`text-xs ${
+                      className={`text-[10px] sm:text-xs ${
                         delivery.status === 'pending' ? 'bg-muted text-muted-foreground' : ''
                       }`}
                       aria-label={statusAriaLabels[delivery.status] || statusLabel}

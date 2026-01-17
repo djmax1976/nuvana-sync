@@ -12,14 +12,13 @@
  * - Newest packs appear at top of list (prepend)
  * - Sequential API calls for batch submission
  * - Partial failure handling with error highlighting
- * - Cashier authentication for non-managers
- * - Manager bypass (no auth required)
- * - Serial number editing with permission-based access
+ * - Simple PIN authentication via PinVerificationDialog in parent
+ * - Backend gets activated_by from session (enterprise-grade)
  *
  * MCP Guidance Applied:
  * - FE-002: FORM_VALIDATION - Validates pack before adding to list
  * - SEC-014: INPUT_VALIDATION - UUID validation, duplicate checks
- * - SEC-010: AUTHZ - Role-based activation flow
+ * - SEC-010: AUTHZ - Backend gets user from session, not frontend
  * - FE-001: STATE_MANAGEMENT - Proper state for pending list
  * - API-003: ERROR_HANDLING - Handles partial failures gracefully
  * - FE-005: UI_SECURITY - No secrets exposed in UI
@@ -50,7 +49,6 @@ import {
   Pencil,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
-import { useClientAuth } from '@/contexts/ClientAuthContext';
 import { useFullPackActivation, useLotteryDayBins } from '@/hooks/useLottery';
 import {
   PackSearchCombobox,
@@ -58,26 +56,18 @@ import {
   type PackSearchComboboxHandle,
 } from './PackSearchCombobox';
 import { BinSelectionModal } from './BinSelectionModal';
-import {
-  LotteryAuthModal,
-  type LotteryAuthResult,
-  type SerialOverrideApproval,
-  type MarkSoldApproval,
-} from './LotteryAuthModal';
 import type { DayBin, FullActivatePackInput } from '@/lib/api/lottery';
 
 /**
- * Manager roles that can activate without cashier authentication
- */
-const MANAGER_ROLES = ['CLIENT_OWNER', 'CLIENT_ADMIN', 'STORE_MANAGER', 'SYSTEM_ADMIN'];
-
-/**
  * Validates that a serial number falls within the pack's valid range.
- * Uses BigInt for accurate comparison of large serial numbers (24+ digits).
+ * Serial numbers are 3-digit strings representing ticket position (000-299 for 300-ticket pack).
  *
  * MCP FE-002: FORM_VALIDATION - Mirror backend validation client-side
  * MCP SEC-014: INPUT_VALIDATION - Strict validation before submission
  *
+ * @param serial - User-entered serial number (3 digits)
+ * @param packSerialStart - First valid serial for the pack (usually "000")
+ * @param packSerialEnd - Last valid serial for the pack (e.g., "299" for 300-ticket pack)
  * @returns true if valid, false if invalid
  */
 function validateSerialInRange(
@@ -85,23 +75,21 @@ function validateSerialInRange(
   packSerialStart: string,
   packSerialEnd: string
 ): boolean {
-  if (serial === '000') {
-    return true;
-  }
-
   const trimmedSerial = serial.trim();
+
+  // Must be exactly 3 digits
   if (!/^\d{3}$/.test(trimmedSerial)) {
     return false;
   }
 
-  try {
-    const userSerialBigInt = BigInt(trimmedSerial);
-    const rangeStartBigInt = BigInt(packSerialStart.trim());
-    const rangeEndBigInt = BigInt(packSerialEnd.trim());
-    return userSerialBigInt >= rangeStartBigInt && userSerialBigInt <= rangeEndBigInt;
-  } catch {
-    return false;
-  }
+  // Parse as integers (safe for 3-digit serials)
+  const serialNum = parseInt(trimmedSerial, 10);
+  const startNum = parseInt(packSerialStart.trim() || '0', 10);
+  const endNum = parseInt(packSerialEnd.trim() || '299', 10);
+
+  // Validate serial is within the pack's range
+  // Note: "000" is valid as it's the first ticket in the pack
+  return serialNum >= startNum && serialNum <= endNum;
 }
 
 /**
@@ -143,10 +131,8 @@ export interface PendingActivation {
   result?: 'success' | 'error';
   /** Error message if activation failed */
   error?: string;
-  /** Serial override approval info if applicable */
-  serial_override_approval?: SerialOverrideApproval;
-  /** Mark sold approval info if applicable */
-  mark_sold_approval?: MarkSoldApproval;
+  /** Whether this pack is marked as pre-sold */
+  mark_sold?: boolean;
 }
 
 /**
@@ -184,7 +170,6 @@ export function EnhancedPackActivationForm({
   dayBins,
 }: EnhancedPackActivationFormProps) {
   const { toast } = useToast();
-  const { user, permissions } = useClientAuth();
   const fullActivationMutation = useFullPackActivation();
 
   // Fetch day bins if not provided
@@ -199,14 +184,9 @@ export function EnhancedPackActivationForm({
   );
 
   // ============ State ============
-
-  // Authentication state
-  const [showAuthModal, setShowAuthModal] = useState(false);
-  const [authResult, setAuthResult] = useState<LotteryAuthResult | null>(null);
-
-  // Serial override modal state (for cashier needing manager approval)
-  const [showSerialOverrideModal, setShowSerialOverrideModal] = useState(false);
-  const [pendingSerialEditId, setPendingSerialEditId] = useState<string | null>(null);
+  // Note: Authentication is handled by PinVerificationDialog in parent (LotteryPage)
+  // User is already authenticated when this form opens
+  // SEC-010: Backend gets activated_by from session, not from frontend
 
   // Pending activations list (newest first)
   const [pendingActivations, setPendingActivations] = useState<PendingActivation[]>([]);
@@ -233,48 +213,6 @@ export function EnhancedPackActivationForm({
 
   // ============ Computed Values ============
 
-  // Check if user is a manager (can skip authentication)
-  const isManager = useMemo(() => {
-    return user?.roles?.some((role) => MANAGER_ROLES.includes(role)) || false;
-  }, [user?.roles]);
-
-  // Check if user is authenticated (manager or has auth result)
-  const isAuthenticated = isManager || authResult !== null;
-
-  // Check if user can modify starting serial (requires LOTTERY_SERIAL_OVERRIDE permission)
-  const canModifySerial = useMemo(() => {
-    if (isManager) {
-      return permissions.includes('LOTTERY_SERIAL_OVERRIDE');
-    }
-    if (authResult?.auth_type === 'management' && authResult.permissions) {
-      return authResult.permissions.includes('LOTTERY_SERIAL_OVERRIDE');
-    }
-    if (authResult?.auth_type === 'cashier') {
-      return permissions.includes('LOTTERY_SERIAL_OVERRIDE');
-    }
-    return false;
-  }, [isManager, permissions, authResult]);
-
-  // Check if user needs manager approval for serial change
-  const needsManagerApprovalForSerial = useMemo(() => {
-    if (isManager) return false;
-    if (authResult?.auth_type === 'management' && authResult.permissions) {
-      return !authResult.permissions.includes('LOTTERY_SERIAL_OVERRIDE');
-    }
-    if (authResult?.auth_type === 'cashier') {
-      return true;
-    }
-    return true;
-  }, [isManager, authResult]);
-
-  // Get current user info for mark sold tracking (no permission check needed)
-  const currentUserForMarkSold = useMemo(() => {
-    return {
-      id: user?.id || authResult?.cashier_id || '',
-      name: user?.name || authResult?.cashier_name || 'Unknown',
-    };
-  }, [user?.id, user?.name, authResult?.cashier_id, authResult?.cashier_name]);
-
   // Get bin IDs already in pending list (for warnings in bin modal)
   const pendingBinIds = useMemo(
     () => pendingActivations.map((p) => p.bin_id),
@@ -297,14 +235,6 @@ export function EnhancedPackActivationForm({
   const allSucceeded =
     pendingActivations.length > 0 && pendingActivations.every((p) => p.result === 'success');
 
-  // Get the user ID to use for activation
-  const activatedByUserId = useMemo(() => {
-    if (authResult?.auth_type === 'management') {
-      return authResult.cashier_id;
-    }
-    return user?.id || authResult?.cashier_id || '';
-  }, [authResult, user?.id]);
-
   // ============ Effects ============
 
   /**
@@ -320,42 +250,27 @@ export function EnhancedPackActivationForm({
         setShowBinModal(false);
         setIsSubmitting(false);
         setPackSearchQuery('');
-        setAuthResult(null);
         setEditingSerialId(null);
         setEditingSerialValue('');
         setIsSerialInvalid(false);
-        setPendingSerialEditId(null);
       });
     }
   }, [open]);
 
   /**
-   * Focus pack search input after bin modal closes or when authenticated
+   * Focus pack search input after bin modal closes
+   * User is already authenticated via PIN dialog when this form opens
    */
   useEffect(() => {
-    if (!showBinModal && open && isAuthenticated && packSearchRef.current) {
+    if (!showBinModal && open && packSearchRef.current) {
       const timer = setTimeout(() => {
         packSearchRef.current?.focus();
       }, 100);
       return () => clearTimeout(timer);
     }
-  }, [showBinModal, open, isAuthenticated]);
+  }, [showBinModal, open]);
 
   // ============ Handlers ============
-
-  /**
-   * Handle authentication success
-   */
-  const handleAuthenticated = useCallback(
-    (result: LotteryAuthResult) => {
-      setAuthResult(result);
-      toast({
-        title: 'Authenticated',
-        description: `Authenticated as ${result.cashier_name}`,
-      });
-    },
-    [toast]
-  );
 
   /**
    * Handle pack selection from combobox
@@ -468,109 +383,65 @@ export function EnhancedPackActivationForm({
 
   /**
    * Handle clicking the change serial button
+   * User is already authenticated, so allow direct editing
    */
   const handleChangeSerialClick = useCallback(
     (pendingId: string) => {
       const pending = pendingActivations.find((p) => p.id === pendingId);
       if (!pending) return;
 
-      // Check if this pack already has serial override approval
-      if (pending.serial_override_approval?.has_permission || canModifySerial) {
-        setEditingSerialId(pendingId);
-        setEditingSerialValue(pending.custom_serial_start);
-        setIsSerialInvalid(false);
-      } else if (needsManagerApprovalForSerial) {
-        setPendingSerialEditId(pendingId);
-        setShowSerialOverrideModal(true);
-      }
+      // User is already authenticated via PIN dialog - allow serial editing
+      setEditingSerialId(pendingId);
+      setEditingSerialValue(pending.custom_serial_start);
+      setIsSerialInvalid(false);
     },
-    [pendingActivations, canModifySerial, needsManagerApprovalForSerial]
-  );
-
-  /**
-   * Handle serial override approval from manager
-   */
-  const handleSerialOverrideApproved = useCallback(
-    (approval: SerialOverrideApproval) => {
-      if (!pendingSerialEditId) return;
-
-      // Store approval on the pending item
-      setPendingActivations((prev) =>
-        prev.map((p) =>
-          p.id === pendingSerialEditId ? { ...p, serial_override_approval: approval } : p
-        )
-      );
-
-      // Now enable editing
-      const pending = pendingActivations.find((p) => p.id === pendingSerialEditId);
-      if (pending) {
-        setEditingSerialId(pendingSerialEditId);
-        setEditingSerialValue(pending.custom_serial_start);
-        setIsSerialInvalid(false);
-      }
-
-      setPendingSerialEditId(null);
-
-      toast({
-        title: 'Serial Override Approved',
-        description: `Approved by ${approval.approver_name}. You can now change the starting serial.`,
-      });
-    },
-    [pendingSerialEditId, pendingActivations, toast]
+    [pendingActivations]
   );
 
   /**
    * Handle clicking the Pack Sold button
-   * Simple toggle - no permission check required
-   * Tracks who marked it sold for audit purposes
+   * Simple toggle - user is already authenticated via PIN dialog
    */
   const handleMarkSoldClick = useCallback(
     (pendingId: string) => {
       const pending = pendingActivations.find((p) => p.id === pendingId);
       if (!pending) return;
 
-      // If already marked as sold, toggle it off
-      if (pending.mark_sold_approval) {
-        setPendingActivations((prev) =>
-          prev.map((p) => (p.id === pendingId ? { ...p, mark_sold_approval: undefined } : p))
-        );
-        toast({
-          title: 'Pack Sold Removed',
-          description: 'Pack will be activated as normal.',
-        });
-        return;
-      }
-
-      // Mark as sold with current user info (no permission check)
-      const approval: MarkSoldApproval = {
-        approver_id: currentUserForMarkSold.id,
-        approver_name: currentUserForMarkSold.name,
-        approved_at: new Date(),
-        has_permission: true,
-      };
+      // Toggle mark_sold state
+      const newMarkSold = !pending.mark_sold;
       setPendingActivations((prev) =>
-        prev.map((p) => (p.id === pendingId ? { ...p, mark_sold_approval: approval } : p))
+        prev.map((p) => (p.id === pendingId ? { ...p, mark_sold: newMarkSold } : p))
       );
+
       toast({
-        title: 'Pack Marked as Sold',
-        description: 'Pack will be activated and marked as pre-sold.',
+        title: newMarkSold ? 'Pack Marked as Sold' : 'Pack Sold Removed',
+        description: newMarkSold
+          ? 'Pack will be activated and marked as pre-sold.'
+          : 'Pack will be activated as normal.',
       });
     },
-    [pendingActivations, currentUserForMarkSold, toast]
+    [pendingActivations, toast]
   );
 
   /**
    * Handle serial input change with validation
+   * SEC-014: INPUT_VALIDATION - Validate serial is within pack range
    */
   const handleSerialInputChange = useCallback(
     (value: string) => {
       setEditingSerialValue(value);
 
-      // Find the pack being edited
+      // Find the pack being edited and validate against its serial range
       const pending = pendingActivations.find((p) => p.id === editingSerialId);
-      if (pending && value !== '000') {
-        const isValid = validateSerialInRange(value, pending.serial_start, pending.serial_end);
-        setIsSerialInvalid(!isValid);
+      if (pending) {
+        // Allow partial input while typing (only validate complete 3-digit serials)
+        if (value.length === 3) {
+          const isValid = validateSerialInRange(value, pending.serial_start, pending.serial_end);
+          setIsSerialInvalid(!isValid);
+        } else {
+          // Partial input - don't show error yet
+          setIsSerialInvalid(false);
+        }
       } else {
         setIsSerialInvalid(false);
       }
@@ -613,11 +484,12 @@ export function EnhancedPackActivationForm({
   /**
    * Handle batch activation submission
    * Processes all pending packs sequentially
+   * SEC-010: Backend gets activated_by from session, not from frontend
    *
    * MCP API-003: ERROR_HANDLING - Handles partial failures
    */
   const handleActivateAll = useCallback(async () => {
-    if (pendingActivations.length === 0 || !activatedByUserId) {
+    if (pendingActivations.length === 0) {
       return;
     }
 
@@ -634,21 +506,13 @@ export function EnhancedPackActivationForm({
         continue;
       }
 
-      // If pack is marked as sold (pre-sold), don't replace existing pack in bin
-      const shouldDepletePrevious = pending.mark_sold_approval
-        ? false
-        : pending.deplete_previous || undefined;
-
+      // SEC-010: Backend gets activated_by from session
+      // Frontend only sends pack_id, bin_id, opening_serial
       const activationData: FullActivatePackInput = {
         pack_id: pending.pack_id,
         bin_id: pending.bin_id,
         opening_serial: pending.custom_serial_start,
-        shift_id: authResult?.shift_id || undefined,
       };
-
-      // Note: Additional fields like activated_by, deplete_previous, serial_override_*,
-      // mark_sold_* are not part of FullActivatePackInput. If needed, extend the type
-      // or handle these through separate API calls.
 
       try {
         await fullActivationMutation.mutateAsync({
@@ -707,16 +571,7 @@ export function EnhancedPackActivationForm({
         variant: 'destructive',
       });
     }
-  }, [
-    pendingActivations,
-    activatedByUserId,
-    authResult?.shift_id,
-    storeId,
-    fullActivationMutation,
-    onOpenChange,
-    onSuccess,
-    toast,
-  ]);
+  }, [pendingActivations, storeId, fullActivationMutation, onOpenChange, onSuccess, toast]);
 
   /**
    * Handle retry of failed packs
@@ -744,52 +599,12 @@ export function EnhancedPackActivationForm({
           <DialogHeader>
             <DialogTitle>Activate Packs</DialogTitle>
             <DialogDescription>
-              {!isManager && !authResult
-                ? 'Please authenticate to scan and activate lottery packs.'
-                : 'Scan or search for packs to add them to the activation list.'}
+              Scan or search for packs to add them to the activation list.
             </DialogDescription>
           </DialogHeader>
 
           <div className="space-y-4">
-            {/* Authentication status indicator */}
-            {!isManager && (
-              <div className="rounded-md border p-3">
-                {authResult ? (
-                  <div className="flex items-center gap-2 text-sm text-green-600">
-                    <CheckCircle2 className="h-4 w-4" />
-                    <span>
-                      Authenticated as <strong>{authResult.cashier_name}</strong>
-                    </span>
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="ml-auto h-6 text-xs"
-                      onClick={() => setShowAuthModal(true)}
-                    >
-                      Change
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                    <AlertCircle className="h-4 w-4" />
-                    <span>Authentication required to scan packs</span>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="ml-auto"
-                      onClick={() => setShowAuthModal(true)}
-                      data-testid="authenticate-button"
-                    >
-                      Authenticate
-                    </Button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Pack search input - disabled until authenticated */}
+            {/* Pack search input - user is already authenticated via PIN dialog */}
             {/* Enterprise Pattern: Fully controlled component - parent owns all state */}
             <PackSearchCombobox
               ref={packSearchRef}
@@ -798,13 +613,9 @@ export function EnhancedPackActivationForm({
               onSearchQueryChange={handleSearchQueryChange}
               onPackSelect={handlePackSelect}
               label="Scan or Search Pack"
-              placeholder={
-                isAuthenticated
-                  ? 'Scan barcode or search by game/pack number...'
-                  : 'Authenticate first to scan packs'
-              }
+              placeholder="Scan barcode or search by game/pack number..."
               statusFilter="RECEIVED"
-              disabled={isSubmitting || !isAuthenticated}
+              disabled={isSubmitting}
               testId="batch-pack-search"
             />
 
@@ -829,9 +640,7 @@ export function EnhancedPackActivationForm({
               {pendingCount === 0 ? (
                 <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">
                   <Package className="mx-auto mb-2 h-8 w-8 opacity-50" />
-                  <p>
-                    {isAuthenticated ? 'Scan a pack to get started' : 'Authenticate to scan packs'}
-                  </p>
+                  <p>Scan a pack to get started</p>
                 </div>
               ) : (
                 <ScrollArea className="h-[250px] rounded-md border">
@@ -905,43 +714,32 @@ export function EnhancedPackActivationForm({
                                     className="h-5 px-1"
                                     onClick={() => handleChangeSerialClick(pending.id)}
                                     disabled={isSubmitting}
-                                    title={
-                                      needsManagerApprovalForSerial &&
-                                      !pending.serial_override_approval?.has_permission
-                                        ? 'Request manager approval'
-                                        : 'Change serial'
-                                    }
+                                    title="Change serial"
                                     data-testid={`change-serial-${pending.pack_id}`}
                                   >
                                     <Pencil className="h-3 w-3" />
                                   </Button>
                                   <Button
                                     type="button"
-                                    variant={pending.mark_sold_approval ? 'default' : 'outline'}
+                                    variant={pending.mark_sold ? 'default' : 'outline'}
                                     size="sm"
                                     className={`ml-1 h-5 px-2 text-xs ${
-                                      pending.mark_sold_approval
+                                      pending.mark_sold
                                         ? 'bg-orange-500 hover:bg-orange-600 text-white'
                                         : ''
                                     }`}
                                     onClick={() => handleMarkSoldClick(pending.id)}
                                     disabled={isSubmitting}
                                     title={
-                                      pending.mark_sold_approval
-                                        ? `Marked sold by ${pending.mark_sold_approval.approver_name} - Click to remove`
+                                      pending.mark_sold
+                                        ? 'Click to remove sold marking'
                                         : 'Mark pack as pre-sold'
                                     }
                                     data-testid={`mark-sold-${pending.pack_id}`}
                                   >
-                                    {pending.mark_sold_approval ? 'Sold ✓' : 'Pack Sold'}
+                                    {pending.mark_sold ? 'Sold ✓' : 'Pack Sold'}
                                   </Button>
                                 </>
-                              )}
-                              {pending.serial_override_approval && (
-                                <span className="ml-1 text-green-600">
-                                  (serial approved by{' '}
-                                  {pending.serial_override_approval.approver_name})
-                                </span>
                               )}
                             </div>
                           )}
@@ -1022,7 +820,7 @@ export function EnhancedPackActivationForm({
             <Button
               type="button"
               onClick={handleActivateAll}
-              disabled={isSubmitting || pendingCount === 0 || allSucceeded || !isAuthenticated}
+              disabled={isSubmitting || pendingCount === 0 || allSucceeded}
               data-testid="activate-all-button"
             >
               {isSubmitting && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
@@ -1035,25 +833,6 @@ export function EnhancedPackActivationForm({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-
-      {/* Authentication Modal - for initial cashier/manager authentication */}
-      <LotteryAuthModal
-        open={showAuthModal}
-        onOpenChange={setShowAuthModal}
-        storeId={storeId}
-        onAuthenticated={handleAuthenticated}
-        mode="activation"
-      />
-
-      {/* Serial Override Approval Modal - for manager to approve serial change */}
-      <LotteryAuthModal
-        open={showSerialOverrideModal}
-        onOpenChange={setShowSerialOverrideModal}
-        storeId={storeId}
-        onAuthenticated={() => {}}
-        mode="serial_override"
-        onSerialOverrideApproved={handleSerialOverrideApproved}
-      />
 
       {/* Bin Selection Modal */}
       <BinSelectionModal

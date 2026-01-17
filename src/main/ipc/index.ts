@@ -79,6 +79,9 @@ export const IPCErrorCodes = {
   ALREADY_CLOSED: 'ALREADY_CLOSED',
   OPEN_SHIFTS: 'OPEN_SHIFTS',
   INTERNAL_ERROR: 'INTERNAL_ERROR',
+  CONFLICT: 'CONFLICT',
+  /** API-002: Rate limit exceeded */
+  RATE_LIMITED: 'RATE_LIMITED',
 } as const;
 
 export type IPCErrorCode = (typeof IPCErrorCodes)[keyof typeof IPCErrorCodes];
@@ -300,6 +303,8 @@ export async function initializeIPC(): Promise<void> {
   await import('./settings.handlers');
   await import('./bins.handlers');
   await import('./license.handlers');
+  await import('./employees.handlers');
+  await import('./terminals.handlers');
 
   log.info('IPC handlers initialized', {
     totalHandlers: handlerRegistry.size,

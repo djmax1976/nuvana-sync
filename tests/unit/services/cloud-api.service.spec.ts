@@ -307,6 +307,7 @@ describe('CloudApiService', () => {
 
   describe('pullUsers', () => {
     // Helper to set up mocks for the full sync flow
+    // The new implementation tries /sync/employees first, then falls back to /sync/cashiers
     const setupSyncFlowMocks = (
       cashiers: Array<{
         cashierId: string;
@@ -329,7 +330,15 @@ describe('CloudApiService', () => {
               },
             }),
         })
-        // 2. GET /api/v1/sync/cashiers
+        // 2. GET /api/v1/sync/employees - returns 404 (not available yet)
+        // 4xx errors are not retried, so we only need one mock
+        .mockResolvedValueOnce({
+          ok: false,
+          status: 404,
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: '404 not found' }),
+        })
+        // 3. GET /api/v1/sync/cashiers (fallback)
         .mockResolvedValueOnce({
           ok: true,
           json: () =>
@@ -337,6 +346,53 @@ describe('CloudApiService', () => {
               success: true,
               data: {
                 cashiers,
+                syncMetadata: {
+                  hasMore: false,
+                  lastSequence: 100,
+                  serverTimestamp: new Date().toISOString(),
+                },
+              },
+            }),
+        })
+        // 4. POST /api/v1/sync/complete
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+    };
+
+    // Helper for testing unified employees endpoint (future)
+    const setupEmployeesEndpointMocks = (
+      employees: Array<{
+        employeeId: string;
+        name: string;
+        role: string;
+        pinHash: string;
+        isActive: boolean;
+      }>
+    ) => {
+      mockFetch
+        // 1. POST /api/v1/sync/start
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'VALID',
+                pullPendingCount: employees.length,
+              },
+            }),
+        })
+        // 2. GET /api/v1/sync/employees - returns employees with proper roles
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                employees,
                 syncMetadata: {
                   hasMore: false,
                   lastSequence: 100,
@@ -399,9 +455,45 @@ describe('CloudApiService', () => {
       const result = await service.pullUsers();
 
       expect(result.users).toHaveLength(3);
-      // All users pulled via pullUsers/pullCashiers are cashiers
+      // All users pulled via pullUsers/pullCashiers are cashiers (legacy fallback)
       expect(result.users[0].role).toBe('cashier');
       expect(result.users[1].role).toBe('cashier');
+      expect(result.users[2].role).toBe('cashier');
+    });
+
+    it('should use unified employees endpoint with proper roles when available', async () => {
+      const mockEmployees = [
+        {
+          employeeId: 'user-1',
+          name: 'Store Manager',
+          role: 'STORE_MANAGER',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+        {
+          employeeId: 'user-2',
+          name: 'Shift Manager',
+          role: 'SHIFT_MANAGER',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+        {
+          employeeId: 'user-3',
+          name: 'Cashier',
+          role: 'CASHIER',
+          pinHash: '$2b$12$...',
+          isActive: true,
+        },
+      ];
+
+      setupEmployeesEndpointMocks(mockEmployees);
+
+      const result = await service.pullUsers();
+
+      expect(result.users).toHaveLength(3);
+      // Users should have proper roles from unified endpoint
+      expect(result.users[0].role).toBe('store_manager');
+      expect(result.users[1].role).toBe('shift_manager');
       expect(result.users[2].role).toBe('cashier');
     });
   });
@@ -581,42 +673,113 @@ describe('CloudApiService', () => {
   });
 
   describe('pullBins', () => {
-    it('should pull all bins when no since parameter', async () => {
-      const mockResponse = {
-        bins: [
-          {
-            bin_id: 'bin-1',
-            store_id: 'store-123',
-            bin_number: 1,
-            status: 'ACTIVE',
-            updated_at: '2024-01-01T00:00:00Z',
-          },
-        ],
+    it('should pull all bins with session_id from correct endpoint', async () => {
+      const mockSessionResponse = {
+        success: true,
+        data: {
+          sessionId: 'test-session-123',
+          revocationStatus: 'VALID',
+          pullPendingCount: 0,
+        },
       };
 
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
+      const mockBinsResponse = {
+        success: true,
+        data: {
+          bins: [
+            {
+              bin_id: 'bin-1',
+              store_id: 'store-123',
+              bin_number: 1,
+              status: 'ACTIVE',
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+          ],
+          totalCount: 1,
+        },
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockSessionResponse),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockBinsResponse),
+        });
 
       const result = await service.pullBins();
 
       expect(result.bins).toHaveLength(1);
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/api/v1/sync/bins',
+      expect(result.totalCount).toBe(1);
+      // First call is to start session
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        1,
+        'https://api.nuvanaapp.com/api/v1/sync/start',
+        expect.any(Object)
+      );
+      // Second call is to pull bins with session_id
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('/api/v1/sync/lottery/bins?session_id=test-session-123'),
         expect.any(Object)
       );
     });
 
     it('should include since parameter for delta sync', async () => {
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve({ bins: [] }),
-      });
+      const mockSessionResponse = {
+        success: true,
+        data: {
+          sessionId: 'test-session-456',
+          revocationStatus: 'VALID',
+          pullPendingCount: 0,
+        },
+      };
+
+      const mockBinsResponse = {
+        success: true,
+        data: {
+          bins: [],
+          totalCount: 0,
+        },
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockSessionResponse),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockBinsResponse),
+        });
 
       await service.pullBins('2024-01-01T00:00:00Z');
 
-      expect(mockFetch).toHaveBeenCalledWith(expect.stringContaining('since='), expect.any(Object));
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        2,
+        expect.stringContaining('since=2024-01-01T00%3A00%3A00Z'),
+        expect.any(Object)
+      );
+    });
+
+    it('should throw error if API key is revoked', async () => {
+      const mockSessionResponse = {
+        success: true,
+        data: {
+          sessionId: 'test-session-789',
+          revocationStatus: 'REVOKED',
+          pullPendingCount: 0,
+        },
+      };
+
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve(mockSessionResponse),
+      });
+
+      await expect(service.pullBins()).rejects.toThrow('API key status: REVOKED');
     });
   });
 

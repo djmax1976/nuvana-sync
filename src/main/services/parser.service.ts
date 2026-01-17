@@ -11,8 +11,8 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { createNAXMLParser } from '../../shared/naxml/parser';
-import type { NAXMLDocument } from '../../shared/naxml/types';
+import { createNAXMLParser, extractFuelDataFromMSM } from '../../shared/naxml/parser';
+import type { NAXMLDocument, MSMExtractedFuelData } from '../../shared/naxml/types';
 import type {
   NAXMLDocumentType,
   NAXMLFuelGradeMovementData,
@@ -29,23 +29,54 @@ import type {
   NAXMLISMDetail,
   NAXMLTPMDetail,
   NAXMLMCMDetail,
+  // POSJournal types
+  NAXMLPOSJournalDocument,
+  NAXMLSaleEvent,
+  NAXMLTransactionLine,
+  NAXMLJournalTransactionTax,
 } from '../../shared/naxml/types';
 import { createLogger } from '../utils/logger';
 import {
   processedFilesDAL,
   syncQueueDAL,
-  fuelGradeMovementsDAL,
-  fuelProductMovementsDAL,
-  miscellaneousSummariesDAL,
-  merchandiseMovementsDAL,
-  taxLevelMovementsDAL,
-  itemSalesMovementsDAL,
-  tenderProductMovementsDAL,
   shiftsDAL,
   daySummariesDAL,
   transactionsDAL,
+  // POS ID Mapping DALs for external ID → internal UUID translation
+  posCashierMappingsDAL,
+  posTerminalMappingsDAL,
+  posFuelPositionMappingsDAL,
+  posTillMappingsDAL,
+  posFuelGradeMappingsDAL,
+  posFuelProductMappingsDAL,
+  posDepartmentMappingsDAL,
+  posTaxLevelMappingsDAL,
+  posTenderMappingsDAL,
+  posPriceTierMappingsDAL,
+  // Schema-Aligned DALs
+  shiftSummariesDAL,
+  shiftFuelSummariesDAL,
+  shiftDepartmentSummariesDAL,
+  shiftTenderSummariesDAL,
+  shiftTaxSummariesDAL,
+  meterReadingsDAL,
+  tankReadingsDAL,
+  type FuelTenderType,
+  // MSM Fuel Data DALs (v014 - Phase 4)
+  dayFuelSummariesDAL,
+  msmDiscountSummariesDAL,
+  msmOutsideDispenserRecordsDAL,
+  type MSMDiscountType,
+  // Transaction Types for PJR processing
+  type CreateLineItemData,
+  type CreatePaymentData,
+  type CreateTaxSummaryData,
 } from '../dal';
 import { withTransaction } from './database.service';
+import { settingsService } from './settings.service';
+import { eventBus, MainEvents } from '../utils/event-bus';
+import { determineShiftCloseType } from '../ipc/shifts.handlers';
+import type { ShiftClosedEvent } from '../../shared/types/shift-events';
 
 // ============================================================================
 // Types
@@ -68,16 +99,7 @@ export interface FileProcessingResult {
 /**
  * Entity type mapping for sync queue
  */
-type EntityType =
-  | 'fuel_grade_movement'
-  | 'fuel_product_movement'
-  | 'miscellaneous_summary'
-  | 'merchandise_movement'
-  | 'tax_level_movement'
-  | 'item_sales_movement'
-  | 'tender_product_movement'
-  | 'shift'
-  | 'transaction';
+type EntityType = 'shift' | 'transaction';
 
 // ============================================================================
 // Constants
@@ -134,7 +156,9 @@ export class ParserService {
       }
 
       // Check for duplicate by hash
-      if (processedFilesDAL.isFileProcessed(this.storeId, fileHash)) {
+      const isDuplicate = processedFilesDAL.isFileProcessed(this.storeId, fileHash);
+
+      if (isDuplicate) {
         log.info('Skipping duplicate file', { fileName, fileHash: fileHash.substring(0, 16) });
         return {
           success: true,
@@ -182,11 +206,12 @@ export class ParserService {
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
 
       log.error('File processing failed', {
         fileName,
         error: errorMessage,
-        stack: error instanceof Error ? error.stack : undefined,
+        stack: errorStack,
       });
 
       // Record failed processing - wrapped in try-catch to preserve original error
@@ -296,240 +321,1422 @@ export class ParserService {
   /**
    * Process Fuel Grade Movement (FGM)
    * SEC-006: Uses parameterized DAL methods
+   * DB-006: Store-scoped operations
+   *
+   * Creates ID mappings for external POS IDs and handles shift closing
+   * for Period 98 (shift close) files.
    */
   private processFuelGradeMovement(data: NAXMLFuelGradeMovementData, fileHash: string): number {
     const { movementHeader, fgmDetails, salesMovementHeader } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
+
+    // SHIFT CLOSE DETECTION (SEC-014: Input validation)
+    // Primary check: EndDate sentinel value (2100-01-01 = open, actual date = closed)
+    // Secondary check: Period 98 (shift-level report)
+    const isShiftClosedByDate = this.isShiftClosedByEndDate(movementHeader.endDate);
+    const isShiftCloseFile = movementHeader.primaryReportPeriod === 98;
+
+    // Log detection method for debugging
+    if (isShiftClosedByDate && !isShiftCloseFile) {
+      log.info('FGM: Shift close detected via EndDate (non-Period 98 file)', {
+        businessDate,
+        endDate: movementHeader.endDate,
+        primaryReportPeriod: movementHeader.primaryReportPeriod,
+      });
+    }
+
+    // Shift should be closed if EITHER condition is true
+    const shouldCloseShift = isShiftClosedByDate || isShiftCloseFile;
     let count = 0;
 
-    // Get or create shift for shift-level reports
+    // Track external IDs from XML and their internal mappings
+    let externalCashierId: string | undefined;
+    let externalRegisterId: string | undefined;
+    let externalTillId: string | undefined;
+    let internalUserId: string | null = null;
+    let tillMappingId: string | undefined;
+
+    if (salesMovementHeader) {
+      // Store external IDs from XML
+      externalCashierId = salesMovementHeader.cashierId;
+      externalRegisterId = salesMovementHeader.registerId;
+      externalTillId = salesMovementHeader.tillId;
+
+      // Create/get cashier mapping - get internal_user_id if linked
+      if (externalCashierId) {
+        const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
+        // Use internal_user_id if the mapping has been linked to a user
+        internalUserId = cashierMapping.internal_user_id;
+      }
+
+      // Create/get terminal/register mapping (for reference tracking)
+      if (externalRegisterId) {
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+      }
+
+      // Create/get till mapping
+      if (externalTillId) {
+        const terminalMapping = externalRegisterId
+          ? posTerminalMappingsDAL.findByExternalId(this.storeId, externalRegisterId)
+          : undefined;
+        const tillMapping = posTillMappingsDAL.getOrCreate(
+          this.storeId,
+          externalTillId,
+          businessDate,
+          { relatedTerminalMappingId: terminalMapping?.id }
+        );
+        tillMappingId = tillMapping.id;
+      }
+    }
+
+    // Get or create shift using EXTERNAL IDs (stored in external_* columns)
+    // Only cashier_id is set if we have a valid internal_user_id (FK to users)
+    //
+    // IMPORTANT: Shift handling depends on whether this is a close event:
+    // - For shift close (shouldCloseShift=true): Find existing shift, don't create new
+    // - For active shift data: Get or create shift
     let shiftId: string | undefined;
-    if (salesMovementHeader && movementHeader.primaryReportPeriod === 98) {
-      const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
-      shiftId = shift.shift_id;
+    let shiftNumber: number = 1; // Track shift number for event emission
+    if (salesMovementHeader) {
+      if (shouldCloseShift) {
+        // For shift close files: find existing shift for this date
+        // First try by register, then fall back to any shift on this date
+        // (handles case where Period 2 day-level file created shift without register ID)
+        let existingClosedShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (!existingClosedShift) {
+          // Fall back to date-only match (may find shift with NULL register)
+          existingClosedShift = shiftsDAL.findShiftByDateAndRegister(
+            this.storeId,
+            businessDate,
+            undefined // No register filter
+          );
+        }
+        if (existingClosedShift) {
+          // Use existing shift - update register ID if it was NULL
+          shiftId = existingClosedShift.shift_id;
+          shiftNumber = existingClosedShift.shift_number ?? 1;
+          // Update register ID on shift if it was NULL (from day-level report)
+          if (!existingClosedShift.external_register_id && externalRegisterId) {
+            shiftsDAL.update(shiftId, { external_register_id: externalRegisterId });
+          }
+          log.debug('FGM: Using existing shift', {
+            businessDate,
+            externalRegisterId,
+            shiftId,
+            isOpen: !existingClosedShift.end_time,
+          });
+        } else {
+          // No shift exists for this date/register - try adjacent dates for overnight shifts
+          const openShiftToClose = shiftsDAL.findOpenShiftToClose(
+            this.storeId,
+            businessDate,
+            externalRegisterId
+          );
+          if (openShiftToClose) {
+            shiftId = openShiftToClose.shift_id;
+            shiftNumber = openShiftToClose.shift_number ?? 1;
+          } else {
+            // CRITICAL: FGM files do NOT create shifts - only MSM files create shifts.
+            // If no shift exists, log warning and continue without linking to shift.
+            // DB-006: Store-scoped query ensures tenant isolation
+            log.warn(
+              'FGM: No existing shift found to close - MSM file may not have been processed',
+              {
+                businessDate,
+                externalRegisterId,
+                externalCashierId,
+                detectionMethod: isShiftCloseFile ? 'Period98' : 'EndDate',
+                endDate: movementHeader.endDate,
+                hint: 'FGM data will be processed for mappings but not linked to a shift',
+              }
+            );
+            // Continue processing without a shift - data will be captured in mappings
+          }
+        }
+      } else {
+        // Non-close file - find existing shift, don't create new ones
+        // MSM files (processed first) should have already created shifts
+        const existingShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift) {
+          shiftId = existingShift.shift_id;
+          log.debug('FGM: Linking to existing shift', {
+            businessDate,
+            externalRegisterId,
+            shiftId,
+          });
+
+          // Link till mapping to shift
+          if (tillMappingId) {
+            posTillMappingsDAL.linkToShift(tillMappingId, shiftId);
+          }
+        } else {
+          // No shift exists - log warning but don't create
+          // This data will still be processed for mappings but won't be linked to a shift
+          log.warn('FGM: No existing shift found to link (MSM may not have been processed)', {
+            businessDate,
+            externalRegisterId,
+            externalCashierId,
+          });
+        }
+      }
+    } else {
+      // No salesMovementHeader (day-level reports like Period 2)
+      // Try to find an existing shift for this business date to link fuel data
+      // Do NOT create shifts - MSM files should have already created them
+      const existingShifts = shiftsDAL.findByDate(this.storeId, businessDate);
+      if (existingShifts.length > 0) {
+        // Use the first shift for this date (typically there's only one per register)
+        shiftId = existingShifts[0].shift_id;
+        log.debug('FGM: Linking to existing shift (day-level report)', {
+          businessDate,
+          shiftId,
+          shiftCount: existingShifts.length,
+        });
+      } else {
+        // No shift exists - log warning but continue processing
+        // Data will be processed but not linked to a shift
+        log.warn('FGM: No existing shift found for day-level report', {
+          businessDate,
+        });
+      }
     }
 
     // Use transaction for atomicity
     return withTransaction(() => {
-      for (const detail of fgmDetails) {
-        const recordId = fuelGradeMovementsDAL.createFromNAXML(
+      // Get or create shift summary for the new schema
+      let shiftSummaryId: string | undefined;
+      if (shiftId) {
+        const shiftSummary = shiftSummariesDAL.getOrCreateForShift(
           this.storeId,
+          shiftId,
           businessDate,
-          this.mapFGMDetail(detail),
-          fileHash,
-          shiftId
+          {
+            shift_opened_at: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+            cashier_user_id: internalUserId ?? undefined,
+          }
         );
+        shiftSummaryId = shiftSummary.shift_summary_id;
+      }
 
-        // Enqueue for sync
-        this.enqueueForSync('fuel_grade_movement', recordId);
+      for (const detail of fgmDetails) {
+        // Create fuel grade mapping
+        if (detail.fuelGradeId) {
+          posFuelGradeMappingsDAL.getOrCreate(this.storeId, detail.fuelGradeId);
+        }
+
+        // Create fuel position mappings if present
+        if (detail.fgmPositionSummary?.fuelPositionId) {
+          posFuelPositionMappingsDAL.getOrCreate(
+            this.storeId,
+            detail.fgmPositionSummary.fuelPositionId
+          );
+        }
+
+        // Create tender mapping if present
+        let tenderType: FuelTenderType = 'ALL';
+        if (detail.fgmTenderSummary?.tender) {
+          const tender = detail.fgmTenderSummary.tender;
+          posTenderMappingsDAL.getOrCreate(this.storeId, tender.tenderCode, {
+            externalTenderSubcode: tender.tenderSubCode,
+          });
+          // Map tender code to FuelTenderType
+          tenderType = this.mapTenderCodeToFuelTenderType(tender.tenderCode);
+        }
+
+        // Create price tier mapping if present
+        if (detail.fgmPositionSummary?.fgmPriceTierSummaries) {
+          for (const tierSummary of detail.fgmPositionSummary.fgmPriceTierSummaries) {
+            if (tierSummary.priceTierCode) {
+              posPriceTierMappingsDAL.getOrCreate(this.storeId, tierSummary.priceTierCode);
+            }
+          }
+        }
+
+        // NOTE: Fuel summaries are now extracted from MSM files (fuelSalesByGrade)
+        // which contain the authoritative aggregated totals per shift.
+        // FGM files are only used for pump-level mappings, not for shift totals.
+        // The MSM fuel data matches the Shift Close PDF report exactly.
+        // DISABLED: This code block is intentionally disabled.
+        // eslint-disable-next-line @typescript-eslint/no-unnecessary-condition
+        if (false as boolean) {
+          // DISABLED - using MSM fuelSalesByGrade instead
+          if (shiftSummaryId && isShiftCloseFile) {
+            const fuelData = this.extractFuelDataFromFGM(detail, 'ALL');
+            shiftFuelSummariesDAL.createFromNAXML(shiftSummaryId, fuelData, fileHash);
+
+            // Also create tender summary for this fuel tender
+            if (detail.fgmTenderSummary?.tender) {
+              const tenderData = this.extractTenderDataFromFGM(detail);
+              if (tenderData) {
+                shiftTenderSummariesDAL.upsert({
+                  shift_summary_id: shiftSummaryId,
+                  tender_code: tenderData.tenderCode,
+                  tender_display_name: tenderData.tenderDisplayName,
+                  total_amount: tenderData.totalAmount,
+                  transaction_count: tenderData.transactionCount,
+                });
+              }
+            }
+          }
+        }
+
         count++;
       }
 
-      log.debug('FGM records created', { count, businessDate });
+      // Close shift if this is a shift-close event (Period 98 OR EndDate != sentinel)
+      // SEC-014: EndDate check is authoritative per NAXML specification
+      if (shouldCloseShift && shiftId) {
+        const endTime = `${movementHeader.endDate}T${movementHeader.endTime}`;
+        shiftsDAL.closeShift(shiftId, endTime);
+
+        // Also close the shift summary
+        if (shiftSummaryId) {
+          shiftSummariesDAL.closeShiftSummary(
+            this.storeId,
+            shiftSummaryId,
+            endTime,
+            internalUserId ?? undefined
+          );
+        }
+
+        log.info('Shift closed via FGM', {
+          shiftId,
+          businessDate,
+          endTime,
+          detectionMethod: isShiftCloseFile ? 'Period98' : 'EndDate',
+          endDate: movementHeader.endDate,
+        });
+
+        // Emit shift closed event for renderer notification
+        // LM-001: Structured logging with event context
+        this.emitShiftClosedEvent({
+          shiftId,
+          businessDate,
+          endTime,
+          shiftNumber,
+          externalRegisterId,
+          externalCashierId,
+        });
+      }
+
+      log.debug('FGM records created', {
+        count,
+        businessDate,
+        shouldCloseShift,
+        isShiftCloseFile,
+        isShiftClosedByDate,
+      });
       return count;
     });
   }
 
   /**
-   * Map FGM detail to DAL input format
+   * Map tender code to FuelTenderType
    */
-  private mapFGMDetail(detail: NAXMLFGMDetail): import('../dal').NAXMLFGMInput {
+  private mapTenderCodeToFuelTenderType(tenderCode: string): FuelTenderType {
+    const code = tenderCode.toUpperCase();
+    if (code === 'CASH' || code.includes('CASH')) return 'CASH';
+    if (
+      code === 'CREDIT' ||
+      code.includes('CREDIT') ||
+      code.includes('VISA') ||
+      code.includes('MC') ||
+      code.includes('AMEX')
+    )
+      return 'CREDIT';
+    if (code === 'DEBIT' || code.includes('DEBIT')) return 'DEBIT';
+    if (code === 'FLEET' || code.includes('FLEET')) return 'FLEET';
+    return 'OTHER';
+  }
+
+  /**
+   * Extract fuel summary data from FGM detail
+   *
+   * FGM structure has sales data at:
+   * - fgmTenderSummary.fgmSellPriceSummary.fgmServiceLevelSummary.fgmSalesTotals
+   * - fgmPositionSummary.fgmPriceTierSummaries[].fgmSalesTotals
+   */
+  private extractFuelDataFromFGM(
+    detail: NAXMLFGMDetail,
+    tenderType: FuelTenderType
+  ): import('../dal').NAXMLShiftFuelInput {
+    let salesVolume = 0;
+    let salesAmount = 0;
+    let discountAmount = 0;
+    let discountCount = 0;
+    let unitPrice: number | undefined;
+
+    // Try to get data from tender summary (more commonly used)
+    if (detail.fgmTenderSummary?.fgmSellPriceSummary) {
+      const salesTotals =
+        detail.fgmTenderSummary.fgmSellPriceSummary.fgmServiceLevelSummary?.fgmSalesTotals;
+      if (salesTotals) {
+        salesVolume = salesTotals.fuelGradeSalesVolume || 0;
+        salesAmount = salesTotals.fuelGradeSalesAmount || 0;
+        discountAmount = salesTotals.discountAmount || 0;
+        discountCount = salesTotals.discountCount || 0;
+      }
+      // Get unit price from sell price summary
+      unitPrice = detail.fgmTenderSummary.fgmSellPriceSummary.actualSalesPrice;
+    }
+
+    // Also try position summaries for pump-level breakdown (Period 98 files)
+    // Sum ALL position summaries and ALL price tiers to get the total for this grade
+    if (detail.fgmPositionSummaries && detail.fgmPositionSummaries.length > 0) {
+      // Only use position data if we don't have tender data
+      if (salesVolume === 0) {
+        for (const position of detail.fgmPositionSummaries) {
+          if (position.fgmPriceTierSummaries) {
+            for (const tier of position.fgmPriceTierSummaries) {
+              const tierTotals = tier.fgmSalesTotals;
+              if (tierTotals) {
+                salesVolume += tierTotals.fuelGradeSalesVolume || 0;
+                salesAmount += tierTotals.fuelGradeSalesAmount || 0;
+                discountAmount += tierTotals.discountAmount || 0;
+              }
+            }
+          }
+        }
+      }
+    } else if (detail.fgmPositionSummary?.fgmPriceTierSummaries) {
+      // Fallback to single position summary for backwards compat
+      if (salesVolume === 0) {
+        for (const tier of detail.fgmPositionSummary.fgmPriceTierSummaries) {
+          const tierTotals = tier.fgmSalesTotals;
+          if (tierTotals) {
+            salesVolume += tierTotals.fuelGradeSalesVolume || 0;
+            salesAmount += tierTotals.fuelGradeSalesAmount || 0;
+            discountAmount += tierTotals.discountAmount || 0;
+          }
+        }
+      }
+    }
+
     return {
       fuelGradeId: detail.fuelGradeId,
-      fgmTenderSummary: detail.fgmTenderSummary,
-      fgmPositionSummary: detail.fgmPositionSummary,
+      tenderType,
+      salesVolume,
+      salesAmount,
+      discountAmount,
+      discountCount,
     };
   }
 
   /**
-   * Process Fuel Product Movement (FPM)
+   * Extract tender data from FGM detail for tender summary
+   *
+   * Uses the sales totals from the tender summary path.
+   */
+  private extractTenderDataFromFGM(detail: NAXMLFGMDetail): {
+    tenderCode: string;
+    tenderDisplayName?: string;
+    totalAmount: number;
+    transactionCount: number;
+  } | null {
+    if (!detail.fgmTenderSummary?.tender) {
+      return null;
+    }
+
+    const tender = detail.fgmTenderSummary.tender;
+    const salesTotals =
+      detail.fgmTenderSummary.fgmSellPriceSummary?.fgmServiceLevelSummary?.fgmSalesTotals;
+
+    return {
+      tenderCode: tender.tenderCode,
+      tenderDisplayName: undefined, // NAXMLFGMTender doesn't have description
+      totalAmount: salesTotals?.fuelGradeSalesAmount || 0,
+      transactionCount: 0, // Transaction count not available in FGM tender structure
+    };
+  }
+
+  /**
+   * Process Fuel Product Movement (FPM) - pump meter readings
    * SEC-006: Uses parameterized DAL methods
    */
   private processFuelProductMovement(data: NAXMLFuelProductMovementData, fileHash: string): number {
     const { movementHeader, fpmDetails } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
     let count = 0;
 
     return withTransaction(() => {
       for (const detail of fpmDetails) {
-        const recordIds = fuelProductMovementsDAL.createFromNAXML(
-          this.storeId,
-          businessDate,
-          this.mapFPMDetail(detail),
-          fileHash
-        );
-
-        for (const recordId of recordIds) {
-          this.enqueueForSync('fuel_product_movement', recordId);
+        // Extract meter readings from FPM non-resettable totals
+        const readings = this.extractMeterReadingsFromFPM(detail);
+        if (readings.length > 0) {
+          const createdIds = meterReadingsDAL.createFromNAXML(
+            this.storeId,
+            businessDate,
+            'CLOSE', // FPM non-resettable totals are typically close readings
+            readings,
+            fileHash
+          );
+          count += createdIds.length;
         }
-        count += recordIds.length;
       }
 
-      log.debug('FPM records created', { count, businessDate });
+      log.debug('FPM meter readings created', { count, businessDate });
       return count;
     });
   }
 
   /**
-   * Map FPM detail to DAL input format
+   * Extract meter reading data from FPM detail
    */
-  private mapFPMDetail(detail: NAXMLFPMDetail): import('../dal').NAXMLFPMInput {
-    return {
-      fuelProductId: detail.fuelProductId,
-      fpmNonResettableTotals: detail.fpmNonResettableTotals || [],
-    };
+  private extractMeterReadingsFromFPM(
+    detail: NAXMLFPMDetail
+  ): Array<import('../dal').NAXMLMeterReadingInput> {
+    const readings: Array<import('../dal').NAXMLMeterReadingInput> = [];
+
+    for (const total of detail.fpmNonResettableTotals || []) {
+      readings.push({
+        fuelPositionId: total.fuelPositionId,
+        fuelProductId: detail.fuelProductId,
+        volumeReading: total.fuelProductNonResettableVolumeNumber || 0,
+        amountReading: total.fuelProductNonResettableAmountNumber,
+      });
+    }
+
+    return readings;
+  }
+
+  /**
+   * NAXML sentinel value indicating an open shift.
+   * According to NAXML spec: EndDate = 2100-01-01 means shift is still open.
+   * When a shift closes, EndDate is set to the actual closing date.
+   * SEC-014: Defined as constant for validation against NAXML standard
+   */
+  private static readonly NAXML_OPEN_SHIFT_SENTINEL_DATE = '2100-01-01';
+
+  /**
+   * Determine if a shift should be closed based on NAXML EndDate.
+   * SEC-014: Validates against NAXML specification.
+   *
+   * NAXML uses EndDate = 2100-01-01 as a sentinel value for OPEN shifts.
+   * Any other valid date indicates the shift is CLOSED.
+   *
+   * @param endDate - The EndDate from MovementHeader
+   * @returns true if shift should be closed, false if still open
+   */
+  private isShiftClosedByEndDate(endDate: string): boolean {
+    // SEC-014: Validate input format (YYYY-MM-DD)
+    if (!endDate || endDate.trim().length === 0) {
+      return false;
+    }
+
+    // Sentinel value check: 2100-01-01 = OPEN shift
+    if (endDate === ParserService.NAXML_OPEN_SHIFT_SENTINEL_DATE) {
+      return false;
+    }
+
+    // Any other valid date format means CLOSED
+    // SEC-014: Validate date format before accepting
+    const datePattern = /^\d{4}-\d{2}-\d{2}$/;
+    if (!datePattern.test(endDate)) {
+      log.warn('Invalid EndDate format in NAXML', { endDate });
+      return false;
+    }
+
+    // Additional validation: ensure date is reasonable (not in distant future)
+    const year = parseInt(endDate.substring(0, 4), 10);
+    if (year >= 2100) {
+      // Any year >= 2100 is treated as sentinel (open)
+      return false;
+    }
+
+    return true;
+  }
+
+  /**
+   * Determine the ACTUAL business date for overnight shifts.
+   *
+   * CRITICAL: For gas stations with 24-hour shifts starting near midnight:
+   * - XML BusinessDate = the date when the shift OPENED (e.g., Jan 8 at 11:59 PM)
+   * - XML EndDate = the date when the shift CLOSED (e.g., Jan 9 at 11:59 PM)
+   * - The ACTUAL business day covered is EndDate (Jan 9), NOT BusinessDate (Jan 8)
+   *
+   * Example from PDF "Shift Close" report:
+   * - "PERIOD FROM: Jan 08, 2026 11:59 PM TO: Jan 09, 2026 11:59 PM"
+   * - This shift covers January 9th's business operations
+   * - XML would have BusinessDate=2026-01-08, but actual business day is 2026-01-09
+   *
+   * @param businessDate - The BusinessDate from NAXML MovementHeader
+   * @param beginTime - The BeginTime from NAXML MovementHeader (HH:MM:SS format)
+   * @param endDate - The EndDate from NAXML MovementHeader (YYYY-MM-DD format)
+   * @returns The actual business date (may be adjusted to EndDate for overnight shifts)
+   */
+  private getActualBusinessDate(
+    businessDate: string,
+    beginTime: string | undefined,
+    endDate: string | undefined
+  ): string {
+    // If missing required fields, return original business date
+    if (!beginTime || !endDate || !businessDate) {
+      return businessDate;
+    }
+
+    // Skip if EndDate is the sentinel value (shift still open)
+    if (endDate === ParserService.NAXML_OPEN_SHIFT_SENTINEL_DATE || endDate >= '2100') {
+      return businessDate;
+    }
+
+    const beginHour = parseInt(beginTime.split(':')[0], 10);
+
+    // If shift begins at 23:xx (11 PM+) and EndDate > BusinessDate,
+    // this is an overnight shift pattern - use EndDate as the actual business day
+    if (beginHour >= 23 && endDate > businessDate) {
+      log.debug('Overnight shift: Using EndDate as business date', {
+        originalBusinessDate: businessDate,
+        adjustedBusinessDate: endDate,
+        beginTime,
+        endDate,
+      });
+      return endDate;
+    }
+
+    return businessDate;
   }
 
   /**
    * Process Miscellaneous Summary Movement (MSM)
    * SEC-006: Uses parameterized DAL methods
+   * DB-006: Store-scoped operations
+   *
+   * Creates ID mappings for external POS IDs and handles shift closing.
+   *
+   * SHIFT CLOSE DETECTION:
+   * Per NAXML specification, shifts are closed based on TWO conditions:
+   * 1. Period 98 (shift-level report) - traditional detection
+   * 2. EndDate != 2100-01-01 (sentinel value) - authoritative source
+   *
+   * The EndDate check is the PRIMARY and AUTHORITATIVE method because:
+   * - It works even if Period 98 files are missing or corrupted
+   * - It reflects the actual POS system state
+   * - 2100-01-01 is the NAXML standard sentinel for "still open"
    */
   private processMiscellaneousSummary(
     data: NAXMLMiscellaneousSummaryMovementData,
     fileHash: string
   ): number {
     const { movementHeader, msmDetails, salesMovementHeader } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
+
+    // SHIFT CLOSE DETECTION (SEC-014: Input validation)
+    // Primary check: EndDate sentinel value (2100-01-01 = open, actual date = closed)
+    // Secondary check: Period 98 (shift-level report)
+    const isShiftClosedByDate = this.isShiftClosedByEndDate(movementHeader.endDate);
+    const isShiftCloseFile = movementHeader.primaryReportPeriod === 98;
+
+    // Log detection method for debugging
+    if (isShiftClosedByDate && !isShiftCloseFile) {
+      log.info('Shift close detected via EndDate (non-Period 98 file)', {
+        businessDate,
+        endDate: movementHeader.endDate,
+        primaryReportPeriod: movementHeader.primaryReportPeriod,
+      });
+    }
+
+    // Shift should be closed if EITHER condition is true
+    const shouldCloseShift = isShiftClosedByDate || isShiftCloseFile;
     let count = 0;
 
-    // Get shift for shift-level reports
+    // Track external IDs from XML and their internal mappings
+    let externalCashierId: string | undefined;
+    let externalRegisterId: string | undefined;
+    let externalTillId: string | undefined;
+    let internalUserId: string | null = null;
+    let tillMappingId: string | undefined;
+
+    if (salesMovementHeader) {
+      // Store external IDs from XML
+      externalCashierId = salesMovementHeader.cashierId;
+      externalRegisterId = salesMovementHeader.registerId;
+      externalTillId = salesMovementHeader.tillId;
+
+      // Create/get cashier mapping - get internal_user_id if linked
+      if (externalCashierId) {
+        const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
+        // Use internal_user_id if the mapping has been linked to a user
+        internalUserId = cashierMapping.internal_user_id;
+      }
+
+      // Create/get terminal/register mapping (for reference tracking)
+      if (externalRegisterId) {
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+      }
+
+      // Create/get till mapping
+      if (externalTillId) {
+        const terminalMapping = externalRegisterId
+          ? posTerminalMappingsDAL.findByExternalId(this.storeId, externalRegisterId)
+          : undefined;
+        const tillMapping = posTillMappingsDAL.getOrCreate(
+          this.storeId,
+          externalTillId,
+          businessDate,
+          { relatedTerminalMappingId: terminalMapping?.id }
+        );
+        tillMappingId = tillMapping.id;
+      }
+    }
+
+    // Get or create shift using EXTERNAL IDs (stored in external_* columns)
+    // Only cashier_id is set if we have a valid internal_user_id (FK to users)
+    //
+    // IMPORTANT: Shift handling depends on whether this is a close event:
+    // - For shift close (shouldCloseShift=true): Find existing shift, don't create new
+    // - For active shift data: Get or create shift
     let shiftId: string | undefined;
-    if (salesMovementHeader && movementHeader.primaryReportPeriod === 98) {
-      const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
-      shiftId = shift.shift_id;
+    let shiftNumber: number = 1; // Track shift number for event emission
+    if (salesMovementHeader) {
+      if (shouldCloseShift) {
+        // For shift close files, first check for ANY shift (open or closed)
+        const existingClosedShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingClosedShift) {
+          shiftId = existingClosedShift.shift_id;
+          shiftNumber = existingClosedShift.shift_number ?? 1;
+          log.debug('MSM: Using existing shift', { businessDate, shiftId });
+        } else {
+          // Check adjacent dates for overnight shifts
+          const openShiftToClose = shiftsDAL.findOpenShiftToClose(
+            this.storeId,
+            businessDate,
+            externalRegisterId
+          );
+          if (openShiftToClose) {
+            shiftId = openShiftToClose.shift_id;
+            shiftNumber = openShiftToClose.shift_number ?? 1;
+          } else {
+            log.info('Creating closed shift from MSM (no prior shift found)', {
+              businessDate,
+              externalRegisterId,
+              externalCashierId,
+              detectionMethod: isShiftCloseFile ? 'Period98' : 'EndDate',
+              endDate: movementHeader.endDate,
+            });
+            const shift = shiftsDAL.createClosedShift(this.storeId, businessDate, {
+              externalCashierId,
+              externalRegisterId,
+              externalTillId,
+              internalUserId: internalUserId ?? undefined,
+              startTime: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+              endTime: `${movementHeader.endDate}T${movementHeader.endTime}`,
+            });
+            shiftId = shift.shift_id;
+          }
+        }
+      } else {
+        // Normal file (still open) - get or create shift
+        const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate, {
+          // External IDs from POS XML (for reference/debugging)
+          externalCashierId,
+          externalRegisterId,
+          externalTillId,
+          // Internal user ID from mapping (FK-safe for users table)
+          internalUserId: internalUserId ?? undefined,
+          startTime: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+        });
+        shiftId = shift.shift_id;
+
+        // Link till mapping to shift
+        if (tillMappingId) {
+          posTillMappingsDAL.linkToShift(tillMappingId, shiftId);
+        }
+      }
     }
 
     return withTransaction(() => {
-      for (const detail of msmDetails) {
-        const recordId = miscellaneousSummariesDAL.createFromNAXML(
+      // Get or create shift summary for the new schema
+      let shiftSummaryId: string | undefined;
+      if (shiftId) {
+        const shiftSummary = shiftSummariesDAL.getOrCreateForShift(
           this.storeId,
+          shiftId,
           businessDate,
-          this.mapMSMDetail(detail),
-          fileHash,
-          shiftId
+          {
+            shift_opened_at: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+            cashier_user_id: internalUserId ?? undefined,
+          }
         );
+        shiftSummaryId = shiftSummary.shift_summary_id;
+      }
 
-        this.enqueueForSync('miscellaneous_summary', recordId);
+      for (const detail of msmDetails) {
+        // Create mappings for IDs in the detail
+        if (detail.registerId) {
+          posTerminalMappingsDAL.getOrCreate(this.storeId, detail.registerId);
+        }
+        if (detail.cashierId) {
+          posCashierMappingsDAL.getOrCreate(this.storeId, detail.cashierId);
+        }
+        if (detail.tillId) {
+          posTillMappingsDAL.getOrCreate(this.storeId, detail.tillId, businessDate);
+        }
+
+        // Create mappings for fuel grades in detail records
+        const codes = detail.miscellaneousSummaryCodes;
+        if (
+          codes.miscellaneousSummaryCode === 'fuelSalesByGrade' &&
+          codes.miscellaneousSummarySubCodeModifier
+        ) {
+          posFuelGradeMappingsDAL.getOrCreate(
+            this.storeId,
+            codes.miscellaneousSummarySubCodeModifier
+          );
+        }
+
         count++;
       }
 
-      log.debug('MSM records created', { count, businessDate });
+      // ========================================================================
+      // Phase 4: MSM Fuel Data Extraction using extractFuelDataFromMSM
+      // SEC-006: All database operations use parameterized queries via DAL
+      // DB-006: All operations are store-scoped
+      // ========================================================================
+
+      // Extract structured fuel data from MSM using the parser function
+      const extractedFuelData = extractFuelDataFromMSM(data);
+
+      // Determine if this is Period 2 (Day/Store Close - Daily) or Period 98 (Shift)
+      // Note: Per NAXML spec, Period 2 = Day/Store Close (aggregated daily data)
+      // Period 98 = Shift Close (individual shift data)
+      const isPeriod2Daily = movementHeader.primaryReportPeriod === 2;
+      const isPeriod98Shift = movementHeader.primaryReportPeriod === 98;
+
+      // ---------------------------------------------------------------------
+      // Period 2 (Day/Store Close): Save to day_fuel_summaries
+      // Contains complete daily fuel data with inside/outside breakdown
+      // ---------------------------------------------------------------------
+      if (isPeriod2Daily) {
+        // Get or create day summary for the business date
+        const daySummary = daySummariesDAL.getOrCreateForDate(this.storeId, businessDate);
+
+        // Process total fuel by grade (totalFuel array)
+        for (const gradeData of extractedFuelData.totalFuel) {
+          // Find matching inside fuel data for this grade
+          const insideGrade = extractedFuelData.insideFuel.find(
+            (g) => g.gradeId === gradeData.gradeId
+          );
+          // Find matching outside fuel data for this grade
+          const outsideGrade = extractedFuelData.outsideFuel.find(
+            (g) => g.gradeId === gradeData.gradeId
+          );
+
+          // Create day fuel summary with inside/outside breakdown
+          dayFuelSummariesDAL.createFromMSM(
+            daySummary.day_summary_id,
+            {
+              gradeId: gradeData.gradeId,
+              totalVolume: gradeData.volume,
+              totalAmount: gradeData.amount,
+              insideVolume: insideGrade?.volume ?? 0,
+              insideAmount: insideGrade?.amount ?? 0,
+              outsideVolume: outsideGrade?.volume ?? 0,
+              outsideAmount: outsideGrade?.amount ?? 0,
+              // Discount is at daily level, not per-grade
+              discountAmount: 0,
+            },
+            fileHash
+          );
+
+          log.debug('MSM Period 2: Created day fuel summary', {
+            gradeId: gradeData.gradeId,
+            totalVolume: gradeData.volume,
+            totalAmount: gradeData.amount,
+            insideVolume: insideGrade?.volume ?? 0,
+            outsideVolume: outsideGrade?.volume ?? 0,
+          });
+        }
+
+        // Save discount summaries for Period 2 (daily discounts)
+        this.saveMSMDiscountSummaries(
+          businessDate,
+          movementHeader.primaryReportPeriod,
+          null, // No shift for daily
+          extractedFuelData.discounts,
+          fileHash
+        );
+
+        log.info('MSM Period 2: Daily fuel data processed', {
+          businessDate,
+          totalFuelGrades: extractedFuelData.totalFuel.length,
+          insideAmount: extractedFuelData.totals.insideAmount,
+          outsideAmount: extractedFuelData.totals.outsideAmount,
+          grandTotalAmount: extractedFuelData.totals.grandTotalAmount,
+          fuelDiscount: extractedFuelData.discounts.fuel,
+        });
+      }
+
+      // ---------------------------------------------------------------------
+      // Period 98 (Shift): Save to shift_fuel_summaries with inside/outside
+      // Contains shift-level fuel data with inside breakdown
+      // Outside dispenser records are saved separately (no grade breakdown)
+      // ---------------------------------------------------------------------
+      if (isPeriod98Shift && shiftSummaryId) {
+        // Process inside fuel by grade (the primary data in Period 98)
+        for (const insideGrade of extractedFuelData.insideFuel) {
+          // Create shift fuel summary using MSM method with inside/outside breakdown
+          shiftFuelSummariesDAL.createFromMSM(
+            shiftSummaryId,
+            {
+              gradeId: insideGrade.gradeId,
+              tenderType: 'ALL',
+              // Total = inside for Period 98 (outside is in dispenser records)
+              totalVolume: insideGrade.volume,
+              totalAmount: insideGrade.amount,
+              // Inside breakdown
+              insideVolume: insideGrade.volume,
+              insideAmount: insideGrade.amount,
+              // Outside is not available by grade in Period 98
+              outsideVolume: 0,
+              outsideAmount: 0,
+              // MSM metadata
+              msmPeriod: movementHeader.primaryReportPeriod,
+              msmSecondaryPeriod: movementHeader.secondaryReportPeriod,
+              tillId: externalTillId,
+              registerId: externalRegisterId,
+            },
+            fileHash
+          );
+
+          log.debug('MSM Period 98: Created shift fuel summary', {
+            gradeId: insideGrade.gradeId,
+            insideVolume: insideGrade.volume,
+            insideAmount: insideGrade.amount,
+            shiftSummaryId,
+          });
+        }
+
+        // Save outside dispenser records (Period 98 specific)
+        // These have amount and count but NOT volume by grade
+        for (const dispenser of extractedFuelData.outsideDispensers) {
+          msmOutsideDispenserRecordsDAL.upsert({
+            store_id: this.storeId,
+            business_date: businessDate,
+            shift_id: shiftId,
+            register_id: dispenser.registerId,
+            till_id: dispenser.tillId || undefined,
+            cashier_id: dispenser.cashierId || undefined,
+            tender_type: dispenser.tender,
+            amount: dispenser.amount,
+            transaction_count: dispenser.count,
+            source_file_hash: fileHash,
+          });
+
+          log.debug('MSM Period 98: Created outside dispenser record', {
+            registerId: dispenser.registerId,
+            tenderType: dispenser.tender,
+            amount: dispenser.amount,
+            count: dispenser.count,
+          });
+        }
+
+        // Save discount summaries for Period 98 (shift-level discounts)
+        // Note: Fuel discounts typically appear only in Period 1 (daily)
+        this.saveMSMDiscountSummaries(
+          businessDate,
+          movementHeader.primaryReportPeriod,
+          shiftId ?? null,
+          extractedFuelData.discounts,
+          fileHash
+        );
+
+        log.info('MSM Period 98: Shift fuel data processed', {
+          businessDate,
+          shiftId,
+          insideFuelGrades: extractedFuelData.insideFuel.length,
+          insideAmount: extractedFuelData.totals.insideAmount,
+          outsideDispenserRecords: extractedFuelData.outsideDispensers.length,
+        });
+      }
+
+      // Close shift if this is a shift-close event (Period 98 OR EndDate != sentinel)
+      // SEC-014: EndDate check is authoritative per NAXML specification
+      if (shouldCloseShift && shiftId) {
+        const endTime = `${movementHeader.endDate}T${movementHeader.endTime}`;
+        shiftsDAL.closeShift(shiftId, endTime);
+
+        // Also close the shift summary
+        if (shiftSummaryId) {
+          shiftSummariesDAL.closeShiftSummary(
+            this.storeId,
+            shiftSummaryId,
+            endTime,
+            internalUserId ?? undefined
+          );
+        }
+
+        log.info('Shift closed via MSM', {
+          shiftId,
+          businessDate,
+          endTime,
+          detectionMethod: isShiftCloseFile ? 'Period98' : 'EndDate',
+          endDate: movementHeader.endDate,
+        });
+
+        // Emit shift closed event for renderer notification
+        this.emitShiftClosedEvent({
+          shiftId,
+          businessDate,
+          endTime,
+          shiftNumber,
+          externalRegisterId,
+          externalCashierId,
+        });
+      }
+
+      log.debug('MSM records created', {
+        count,
+        businessDate,
+        shouldCloseShift,
+        isShiftCloseFile,
+        isShiftClosedByDate,
+      });
       return count;
     });
   }
 
   /**
-   * Map MSM detail to DAL input format
-   */
-  private mapMSMDetail(detail: NAXMLMSMDetail): import('../dal').NAXMLMSMInput {
-    return {
-      miscellaneousSummaryCodes: detail.miscellaneousSummaryCodes,
-      registerId: detail.registerId,
-      cashierId: detail.cashierId,
-      tillId: detail.tillId,
-      msmSalesTotals: detail.msmSalesTotals,
-    };
-  }
-
-  /**
    * Process Merchandise Code Movement (MCM)
    * SEC-006: Uses parameterized DAL methods
+   * DB-006: Store-scoped operations
+   *
+   * Creates ID mappings for external POS IDs and handles shift closing.
+   * All MCM data is linked to shifts (not just Period 98) following
+   * the AGKsoft pattern of Date+Shift linking.
    */
   private processMerchandiseMovement(
     data: NAXMLMerchandiseCodeMovementData,
     fileHash: string
   ): number {
     const { movementHeader, mcmDetails, salesMovementHeader } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
+
+    // SHIFT CLOSE DETECTION (SEC-014: Input validation)
+    // Primary check: EndDate sentinel value (2100-01-01 = open, actual date = closed)
+    // Secondary check: Period 98 (shift-level report)
+    const isShiftClosedByDate = this.isShiftClosedByEndDate(movementHeader.endDate);
+    const isShiftCloseFile = movementHeader.primaryReportPeriod === 98;
+    const shouldCloseShift = isShiftClosedByDate || isShiftCloseFile;
     let count = 0;
 
+    // Track external IDs from XML and their internal mappings
+    let externalCashierId: string | undefined;
+    let externalRegisterId: string | undefined;
+    let internalUserId: string | null = null;
+
+    if (salesMovementHeader) {
+      externalCashierId = salesMovementHeader.cashierId;
+      externalRegisterId = salesMovementHeader.registerId;
+
+      // Create/get cashier mapping - get internal_user_id if linked
+      if (externalCashierId) {
+        const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
+        internalUserId = cashierMapping.internal_user_id;
+      }
+
+      // Create/get terminal/register mapping (for reference tracking)
+      if (externalRegisterId) {
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+      }
+    }
+
+    // Get or create shift - ALWAYS link MCM data to shifts (not just Period 98)
     let shiftId: string | undefined;
-    if (salesMovementHeader && movementHeader.primaryReportPeriod === 98) {
-      const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
-      shiftId = shift.shift_id;
+    let existingShift: ReturnType<typeof shiftsDAL.findShiftByDateAndRegister> | undefined;
+    if (salesMovementHeader) {
+      if (shouldCloseShift) {
+        // For shift close files, first check for ANY shift (open or closed)
+        existingShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift) {
+          shiftId = existingShift.shift_id;
+          log.debug('MCM: Using existing shift', { businessDate, shiftId });
+        } else {
+          // Check adjacent dates for overnight shifts
+          const openShiftToClose = shiftsDAL.findOpenShiftToClose(
+            this.storeId,
+            businessDate,
+            externalRegisterId
+          );
+          if (openShiftToClose) {
+            shiftId = openShiftToClose.shift_id;
+            existingShift = openShiftToClose;
+          } else {
+            // CRITICAL: MCM files do NOT create shifts - only MSM files create shifts.
+            // If no shift exists, log warning and continue without linking to shift.
+            // DB-006: Store-scoped query ensures tenant isolation
+            log.warn(
+              'MCM: No existing shift found to close - MSM file may not have been processed',
+              {
+                businessDate,
+                externalRegisterId,
+                externalCashierId,
+                hint: 'MCM data will be processed for mappings but not linked to a shift',
+              }
+            );
+            // Continue processing without a shift - data will be captured in mappings
+          }
+        }
+      } else {
+        // Non-close file - find existing shift, don't create new ones
+        // MSM files (processed first) should have already created shifts
+        const existingShift2 = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift2) {
+          shiftId = existingShift2.shift_id;
+          log.debug('MCM: Linking to existing shift', {
+            businessDate,
+            externalRegisterId,
+            shiftId,
+          });
+        } else {
+          log.warn('MCM: No existing shift found to link (MSM may not have been processed)', {
+            businessDate,
+            externalRegisterId,
+            externalCashierId,
+          });
+        }
+      }
+    } else {
+      // No salesMovementHeader (day-level reports) - link to existing shift only
+      const existingShifts = shiftsDAL.findByDate(this.storeId, businessDate);
+      if (existingShifts.length > 0) {
+        shiftId = existingShifts[0].shift_id;
+        log.debug('MCM: Linking to existing shift (day-level report)', {
+          businessDate,
+          shiftId,
+        });
+      } else {
+        log.warn('MCM: No existing shift found for day-level report', {
+          businessDate,
+        });
+      }
     }
 
     return withTransaction(() => {
-      for (const detail of mcmDetails) {
-        const mcmInput = this.mapMCMDetail(detail);
-        const recordId = merchandiseMovementsDAL.createFromNAXML(
+      // Get or create shift summary for the new schema
+      let shiftSummaryId: string | undefined;
+      if (shiftId) {
+        const shiftSummary = shiftSummariesDAL.getOrCreateForShift(
           this.storeId,
+          shiftId,
           businessDate,
-          mcmInput,
-          fileHash,
-          shiftId
+          {
+            shift_opened_at: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+            cashier_user_id: internalUserId ?? undefined,
+          }
         );
+        shiftSummaryId = shiftSummary.shift_summary_id;
+      }
 
-        this.enqueueForSync('merchandise_movement', recordId);
+      for (const detail of mcmDetails) {
+        // Create department mapping for the merchandise code
+        if (detail.merchandiseCode) {
+          posDepartmentMappingsDAL.getOrCreate(this.storeId, detail.merchandiseCode, {
+            externalDescription: detail.merchandiseCodeDescription,
+          });
+        }
+
+        // Create shift department summary record (aggregated by department)
+        if (shiftSummaryId) {
+          const departmentData = this.extractDepartmentDataFromMCM(detail);
+          shiftDepartmentSummariesDAL.createFromNAXML(shiftSummaryId, departmentData);
+        }
+
         count++;
       }
 
-      log.debug('MCM records created', { count, businessDate });
+      // Close shift if this is a shift-close event
+      if (shouldCloseShift && shiftId) {
+        const endTime = `${movementHeader.endDate}T${movementHeader.endTime}`;
+        shiftsDAL.closeShift(shiftId, endTime);
+
+        if (shiftSummaryId) {
+          shiftSummariesDAL.closeShiftSummary(
+            this.storeId,
+            shiftSummaryId,
+            endTime,
+            internalUserId ?? undefined
+          );
+        }
+
+        log.info('Shift closed via MCM', { shiftId, businessDate, endTime });
+
+        // Emit shift closed event for renderer notification
+        this.emitShiftClosedEvent({
+          shiftId,
+          businessDate,
+          endTime,
+          shiftNumber: existingShift?.shift_number ?? 1,
+          externalRegisterId,
+          externalCashierId,
+        });
+      }
+
+      log.debug('MCM records created', { count, businessDate, shiftId });
       return count;
     });
   }
 
   /**
-   * Map MCM detail to DAL input format
-   * Maps from types.ts NAXMLMCMDetail structure
+   * Extract department summary data from MCM detail
    */
-  private mapMCMDetail(detail: NAXMLMCMDetail): import('../dal').NAXMLMCMInput {
+  private extractDepartmentDataFromMCM(
+    detail: NAXMLMCMDetail
+  ): import('../dal').NAXMLDepartmentInput {
     const salesTotals = detail.mcmSalesTotals;
     return {
-      departmentId: detail.merchandiseCode,
-      categoryId: detail.merchandiseCodeDescription,
-      quantitySold: salesTotals?.salesQuantity,
-      amountSold: salesTotals?.salesAmount,
-      discountAmount: salesTotals?.discountAmount,
-      refundAmount: salesTotals?.refundAmount,
+      departmentCode: detail.merchandiseCode,
+      departmentName: detail.merchandiseCodeDescription,
+      grossSales: salesTotals?.salesAmount,
+      returnsTotal: salesTotals?.refundAmount,
+      discountsTotal: salesTotals?.discountAmount,
       transactionCount: salesTotals?.transactionCount,
+      itemsSoldCount: salesTotals?.salesQuantity,
     };
   }
 
   /**
    * Process Tax Level Movement (TLM)
    * SEC-006: Uses parameterized DAL methods
+   * DB-006: Store-scoped operations
+   *
+   * Creates ID mappings for external POS IDs and handles shift closing.
+   * All TLM data is linked to shifts (not just Period 98) following
+   * the AGKsoft pattern of Date+Shift linking.
    */
   private processTaxLevelMovement(data: NAXMLTaxLevelMovementData, fileHash: string): number {
     const { movementHeader, tlmDetails, salesMovementHeader } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
+
+    // SHIFT CLOSE DETECTION (SEC-014: Input validation)
+    // Primary check: EndDate sentinel value (2100-01-01 = open, actual date = closed)
+    // Secondary check: Period 98 (shift-level report)
+    const isShiftClosedByDate = this.isShiftClosedByEndDate(movementHeader.endDate);
+    const isShiftCloseFile = movementHeader.primaryReportPeriod === 98;
+    const shouldCloseShift = isShiftClosedByDate || isShiftCloseFile;
     let count = 0;
 
+    // Track external IDs from XML and their internal mappings
+    let externalCashierId: string | undefined;
+    let externalRegisterId: string | undefined;
+    let internalUserId: string | null = null;
+
+    if (salesMovementHeader) {
+      externalCashierId = salesMovementHeader.cashierId;
+      externalRegisterId = salesMovementHeader.registerId;
+
+      // Create/get cashier mapping - get internal_user_id if linked
+      if (externalCashierId) {
+        const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
+        internalUserId = cashierMapping.internal_user_id;
+      }
+
+      // Create/get terminal/register mapping (for reference tracking)
+      if (externalRegisterId) {
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+      }
+    }
+
+    // Get or create shift - ALWAYS link TLM data to shifts (not just Period 98)
     let shiftId: string | undefined;
-    if (salesMovementHeader && movementHeader.primaryReportPeriod === 98) {
-      const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
-      shiftId = shift.shift_id;
+    let existingShift: ReturnType<typeof shiftsDAL.findShiftByDateAndRegister> | undefined;
+    if (salesMovementHeader) {
+      if (shouldCloseShift) {
+        // For shift close files, first check for ANY shift (open or closed)
+        existingShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift) {
+          shiftId = existingShift.shift_id;
+          log.debug('TLM: Using existing shift', { businessDate, shiftId });
+        } else {
+          // Check adjacent dates for overnight shifts
+          const openShiftToClose = shiftsDAL.findOpenShiftToClose(
+            this.storeId,
+            businessDate,
+            externalRegisterId
+          );
+          if (openShiftToClose) {
+            shiftId = openShiftToClose.shift_id;
+            existingShift = openShiftToClose;
+          } else {
+            // CRITICAL: TLM files do NOT create shifts - only MSM files create shifts.
+            // If no shift exists, log warning and continue without linking to shift.
+            // DB-006: Store-scoped query ensures tenant isolation
+            log.warn(
+              'TLM: No existing shift found to close - MSM file may not have been processed',
+              {
+                businessDate,
+                externalRegisterId,
+                externalCashierId,
+                hint: 'TLM data will be processed for mappings but not linked to a shift',
+              }
+            );
+            // Continue processing without a shift - data will be captured in mappings
+          }
+        }
+      } else {
+        // Non-close file - find existing shift, don't create new ones
+        // MSM files (processed first) should have already created shifts
+        const existingShift2 = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift2) {
+          shiftId = existingShift2.shift_id;
+          log.debug('TLM: Linking to existing shift', {
+            businessDate,
+            externalRegisterId,
+            shiftId,
+          });
+        } else {
+          log.warn('TLM: No existing shift found to link (MSM may not have been processed)', {
+            businessDate,
+            externalRegisterId,
+            externalCashierId,
+          });
+        }
+      }
+    } else {
+      // No salesMovementHeader (day-level reports) - link to existing shift only
+      // DB-006: Store-scoped query ensures tenant isolation
+      const existingShifts = shiftsDAL.findByDate(this.storeId, businessDate);
+      if (existingShifts.length > 0) {
+        shiftId = existingShifts[0].shift_id;
+        log.debug('TLM: Linking to existing shift (day-level report)', {
+          businessDate,
+          shiftId,
+        });
+      } else {
+        log.warn('TLM: No existing shift found for day-level report', {
+          businessDate,
+        });
+      }
     }
 
     return withTransaction(() => {
-      for (const detail of tlmDetails) {
-        const tlmInput = this.mapTLMDetail(detail);
-        const recordId = taxLevelMovementsDAL.createFromNAXML(
+      // Get or create shift summary for the new schema
+      let shiftSummaryId: string | undefined;
+      if (shiftId) {
+        const shiftSummary = shiftSummariesDAL.getOrCreateForShift(
           this.storeId,
+          shiftId,
           businessDate,
-          tlmInput,
-          fileHash,
-          shiftId
+          {
+            shift_opened_at: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
+            cashier_user_id: internalUserId ?? undefined,
+          }
         );
+        shiftSummaryId = shiftSummary.shift_summary_id;
+      }
 
-        this.enqueueForSync('tax_level_movement', recordId);
+      for (const detail of tlmDetails) {
+        // Create tax level mapping
+        if (detail.taxLevelId) {
+          posTaxLevelMappingsDAL.getOrCreate(this.storeId, detail.taxLevelId);
+        }
+
+        // Create shift tax summary record (aggregated by tax code)
+        if (shiftSummaryId) {
+          const taxData = this.extractTaxDataFromTLM(detail);
+          shiftTaxSummariesDAL.createFromNAXML(shiftSummaryId, taxData);
+        }
+
         count++;
       }
 
-      log.debug('TLM records created', { count, businessDate });
+      // Close shift if this is a shift-close event
+      if (shouldCloseShift && shiftId) {
+        const endTime = `${movementHeader.endDate}T${movementHeader.endTime}`;
+        shiftsDAL.closeShift(shiftId, endTime);
+
+        if (shiftSummaryId) {
+          shiftSummariesDAL.closeShiftSummary(
+            this.storeId,
+            shiftSummaryId,
+            endTime,
+            internalUserId ?? undefined
+          );
+        }
+
+        log.info('Shift closed via TLM', { shiftId, businessDate, endTime });
+
+        // Emit shift closed event for renderer notification
+        this.emitShiftClosedEvent({
+          shiftId,
+          businessDate,
+          endTime,
+          shiftNumber: existingShift?.shift_number ?? 1,
+          externalRegisterId,
+          externalCashierId,
+        });
+      }
+
+      log.debug('TLM records created', { count, businessDate, shiftId });
       return count;
     });
   }
 
   /**
-   * Map TLM detail to DAL input format
-   * Maps from types.ts NAXMLTLMDetail structure
+   * Extract tax summary data from TLM detail
    */
-  private mapTLMDetail(detail: NAXMLTLMDetail): import('../dal').NAXMLTLMInput {
+  private extractTaxDataFromTLM(detail: NAXMLTLMDetail): import('../dal').NAXMLTaxInput {
     return {
-      taxLevel: detail.taxLevelId,
+      taxCode: detail.taxLevelId,
       taxableAmount: detail.taxableSalesAmount,
-      taxAmount: detail.taxCollectedAmount,
+      taxCollected: detail.taxCollectedAmount,
       exemptAmount: detail.taxExemptSalesAmount,
     };
   }
@@ -537,188 +1744,379 @@ export class ParserService {
   /**
    * Process Item Sales Movement (ISM)
    * SEC-006: Uses parameterized bulk insert for performance
+   * DB-006: Store-scoped operations
+   *
+   * All ISM data is linked to shifts (not just Period 98) following
+   * the AGKsoft pattern of Date+Shift linking.
    */
   private processItemSalesMovement(data: NAXMLItemSalesMovementData, fileHash: string): number {
     const { movementHeader, ismDetails, salesMovementHeader } = data;
-    const businessDate = movementHeader.businessDate;
 
-    let shiftId: string | undefined;
-    if (salesMovementHeader && movementHeader.primaryReportPeriod === 98) {
-      const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
-      shiftId = shift.shift_id;
-    }
-
-    // Map to bulk input format
-    const items = ismDetails.map((detail) => this.mapISMDetail(detail));
-
-    // Use bulk insert for performance (ISM can have many items)
-    const count = itemSalesMovementsDAL.bulkCreateFromNAXML(
-      this.storeId,
-      businessDate,
-      items,
-      fileHash,
-      shiftId
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
     );
 
-    // Note: For ISM, we enqueue the file as a batch rather than individual items
-    // This prevents sync queue explosion for large ISM files
-    if (count > 0) {
-      // Enqueue a summary record for sync
-      syncQueueDAL.enqueue({
-        store_id: this.storeId,
-        entity_type: 'item_sales_movement_batch',
-        entity_id: fileHash,
-        operation: 'CREATE',
-        payload: { businessDate, count, fileHash },
+    // SHIFT CLOSE DETECTION (SEC-014: Input validation)
+    // Primary check: EndDate sentinel value (2100-01-01 = open, actual date = closed)
+    // Secondary check: Period 98 (shift-level report)
+    const isShiftClosedByDate = this.isShiftClosedByEndDate(movementHeader.endDate);
+    const isShiftCloseFile = movementHeader.primaryReportPeriod === 98;
+    const shouldCloseShift = isShiftClosedByDate || isShiftCloseFile;
+
+    // Track external IDs from XML and their internal mappings
+    let externalCashierId: string | undefined;
+    let externalRegisterId: string | undefined;
+    let internalUserId: string | null = null;
+
+    if (salesMovementHeader) {
+      externalCashierId = salesMovementHeader.cashierId;
+      externalRegisterId = salesMovementHeader.registerId;
+
+      // Create/get cashier mapping - get internal_user_id if linked
+      if (externalCashierId) {
+        const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
+        internalUserId = cashierMapping.internal_user_id;
+      }
+
+      // Create/get terminal/register mapping (for reference tracking)
+      if (externalRegisterId) {
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+      }
+    }
+
+    // Get or create shift - ALWAYS link ISM data to shifts (not just Period 98)
+    let shiftId: string | undefined;
+    let existingShift: ReturnType<typeof shiftsDAL.findShiftByDateAndRegister> | undefined;
+    if (salesMovementHeader) {
+      if (shouldCloseShift) {
+        // For shift close files, first check for ANY shift (open or closed)
+        existingShift = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift) {
+          shiftId = existingShift.shift_id;
+          log.debug('ISM: Using existing shift', { businessDate, shiftId });
+        } else {
+          // Check adjacent dates for overnight shifts
+          const openShiftToClose = shiftsDAL.findOpenShiftToClose(
+            this.storeId,
+            businessDate,
+            externalRegisterId
+          );
+          if (openShiftToClose) {
+            shiftId = openShiftToClose.shift_id;
+            existingShift = openShiftToClose;
+          } else {
+            // CRITICAL: ISM files do NOT create shifts - only MSM files create shifts.
+            // If no shift exists, log warning and continue without linking to shift.
+            // DB-006: Store-scoped query ensures tenant isolation
+            log.warn(
+              'ISM: No existing shift found to close - MSM file may not have been processed',
+              {
+                businessDate,
+                externalRegisterId,
+                externalCashierId,
+                hint: 'ISM data will be processed for mappings but not linked to a shift',
+              }
+            );
+            // Continue processing without a shift - data will be captured in mappings
+          }
+        }
+      } else {
+        // Non-close file - find existing shift, don't create new ones
+        // MSM files (processed first) should have already created shifts
+        const existingShift2 = shiftsDAL.findShiftByDateAndRegister(
+          this.storeId,
+          businessDate,
+          externalRegisterId
+        );
+        if (existingShift2) {
+          shiftId = existingShift2.shift_id;
+          log.debug('ISM: Linking to existing shift', {
+            businessDate,
+            externalRegisterId,
+            shiftId,
+          });
+        } else {
+          log.warn('ISM: No existing shift found to link (MSM may not have been processed)', {
+            businessDate,
+            externalRegisterId,
+            externalCashierId,
+          });
+        }
+      }
+    } else {
+      // No salesMovementHeader (day-level reports) - link to existing shift only
+      // DB-006: Store-scoped query ensures tenant isolation
+      const existingShifts = shiftsDAL.findByDate(this.storeId, businessDate);
+      if (existingShifts.length > 0) {
+        shiftId = existingShifts[0].shift_id;
+        log.debug('ISM: Linking to existing shift (day-level report)', {
+          businessDate,
+          shiftId,
+        });
+      } else {
+        log.warn('ISM: No existing shift found for day-level report', {
+          businessDate,
+        });
+      }
+    }
+
+    // TODO: Create new schema table for item sales data if needed
+    // For now, just count processed records (item-level sales detail is often
+    // aggregated into shift_department_summaries via MCM)
+    const count = ismDetails.length;
+
+    // Close shift if this is a shift-close event
+    if (shouldCloseShift && shiftId) {
+      const endTime = `${movementHeader.endDate}T${movementHeader.endTime}`;
+      shiftsDAL.closeShift(shiftId, endTime);
+      log.info('Shift closed via ISM', { shiftId, businessDate, endTime });
+
+      // Emit shift closed event for renderer notification
+      this.emitShiftClosedEvent({
+        shiftId,
+        businessDate,
+        endTime,
+        shiftNumber: existingShift?.shift_number ?? 1,
+        externalRegisterId,
+        externalCashierId,
       });
     }
 
-    log.debug('ISM records created', { count, businessDate });
+    log.debug('ISM records processed', { count, businessDate, shiftId });
     return count;
   }
 
   /**
-   * Map ISM detail to DAL input format
-   * Maps from types.ts NAXMLISMDetail structure
-   */
-  private mapISMDetail(detail: NAXMLISMDetail): import('../dal').NAXMLISMInput {
-    return {
-      itemCode: detail.itemCode,
-      itemDescription: detail.itemDescription,
-      departmentId: detail.merchandiseCode,
-      upc: undefined, // Not in NAXMLISMDetail
-      quantitySold: detail.salesQuantity,
-      amountSold: detail.salesAmount,
-      discountAmount: undefined, // Not in NAXMLISMDetail
-      transactionCount: undefined, // Not in NAXMLISMDetail
-    };
-  }
-
-  /**
-   * Process Tank Product Movement (TPM) - maps to tank inventory data
+   * Process Tank Product Movement (TPM) - ATG tank inventory data
    * SEC-006: Uses parameterized DAL methods
-   * Note: TPM is tank inventory, not tender data. Maps to tender_product_movements
-   * table for now (to be refactored if separate tank table needed)
    */
   private processTenderProductMovement(
     data: NAXMLTankProductMovementData,
     fileHash: string
   ): number {
     const { movementHeader, tpmDetails } = data;
-    const businessDate = movementHeader.businessDate;
+
+    // Get the ACTUAL business date (adjusted for overnight shifts)
+    const businessDate = this.getActualBusinessDate(
+      movementHeader.businessDate,
+      movementHeader.beginTime,
+      movementHeader.endDate
+    );
     let count = 0;
 
     // TPM doesn't have salesMovementHeader - it's tank inventory data
     return withTransaction(() => {
       for (const detail of tpmDetails) {
-        const tpmInput = this.mapTPMDetail(detail);
-        const recordId = tenderProductMovementsDAL.createFromNAXML(
-          this.storeId,
-          businessDate,
-          tpmInput,
-          fileHash,
-          undefined // No shift for tank data
-        );
-
-        this.enqueueForSync('tender_product_movement', recordId);
+        // Create tank reading from TPM data
+        const tankReading = this.extractTankReadingFromTPM(detail);
+        tankReadingsDAL.createFromNAXML(this.storeId, businessDate, tankReading, fileHash);
         count++;
       }
 
-      log.debug('TPM records created', { count, businessDate });
+      log.debug('TPM tank readings created', { count, businessDate });
       return count;
     });
   }
 
   /**
-   * Map TPM detail to DAL input format
-   * Maps from types.ts NAXMLTPMDetail structure (tank inventory)
+   * Extract tank reading data from TPM detail
    */
-  private mapTPMDetail(detail: NAXMLTPMDetail): import('../dal').NAXMLTPMInput {
+  private extractTankReadingFromTPM(
+    detail: NAXMLTPMDetail
+  ): import('../dal').NAXMLTankReadingInput {
     return {
-      tenderId: detail.tankId,
-      tenderType: detail.fuelProductId,
-      amount: detail.tankVolume,
-      transactionCount: undefined, // Tank data doesn't have transaction count
+      tankId: parseInt(detail.tankId, 10) || 0,
+      fuelProductId: detail.fuelProductId,
+      tankVolume: detail.tankVolume,
     };
   }
 
   /**
    * Process POS Journal (PJR)
-   * Creates shifts, transactions, line items, and payments
+   * Creates shifts, transactions, line items, payments, and tax summaries
    * SEC-006: Uses parameterized DAL methods within transaction
+   *
+   * Complete PJR processing extracts:
+   * - Transaction headers (register, cashier, timestamps, totals)
+   * - Line items (fuel and merchandise)
+   * - Payments/tenders with change amounts
+   * - Tax summaries by tax level
    */
   private processPOSJournal(data: unknown, _fileHash: string): number {
-    // POS Journal structure is more complex - parse and handle
-    const pjrData = data as {
-      journalHeader?: { businessDate?: string };
-      transactions?: unknown[];
-    };
+    // Cast to properly typed POSJournal structure
+    const pjrData = data as NAXMLPOSJournalDocument;
 
-    if (!pjrData.journalHeader?.businessDate || !pjrData.transactions) {
-      log.warn('Invalid POS Journal structure');
+    const journalReport = pjrData.journalReport;
+    if (!journalReport?.saleEvents || journalReport.saleEvents.length === 0) {
+      log.warn('Invalid POS Journal structure or no sale events');
       return 0;
     }
 
-    const businessDate = pjrData.journalHeader.businessDate;
     let count = 0;
 
     return withTransaction(() => {
-      // Ensure day summary exists
-      daySummariesDAL.getOrCreateForDate(this.storeId, businessDate);
+      for (const saleEvent of journalReport.saleEvents) {
+        // Get businessDate from the saleEvent itself
+        const rawBusinessDate = saleEvent.businessDate;
+        if (!rawBusinessDate) {
+          log.warn('Sale event missing businessDate, skipping');
+          continue;
+        }
 
-      for (const txn of pjrData.transactions || []) {
-        const transaction = txn as {
-          transactionNumber?: number;
-          transactionTime?: string;
-          shiftNumber?: number;
-          registerId?: string;
-          cashierId?: string;
-          totalAmount?: number;
-          paymentType?: string;
-          lineItems?: Array<{
-            lineNumber: number;
-            itemCode?: string;
-            description?: string;
-            quantity?: number;
-            unitPrice?: number;
-            totalPrice?: number;
-            departmentId?: string;
-          }>;
-          payments?: Array<{
-            paymentType: string;
-            amount: number;
-            referenceNumber?: string;
-          }>;
-        };
+        // Determine the ACTUAL business date for overnight transactions.
+        // For PJR transactions, use eventEndDate as the business date when:
+        // - eventStartTime is at 23:xx (transaction started near midnight)
+        // - eventEndDate > rawBusinessDate
+        // This matches the MSM overnight shift logic where the actual business day
+        // is the day the shift/transaction covers, not when it technically started.
+        let businessDate = rawBusinessDate;
+        if (saleEvent.eventStartTime && saleEvent.eventEndDate) {
+          const startHour = parseInt(saleEvent.eventStartTime.split(':')[0], 10);
+          if (startHour >= 23 && saleEvent.eventEndDate > rawBusinessDate) {
+            businessDate = saleEvent.eventEndDate;
+          }
+        }
 
-        // Get or create shift
-        const shift = shiftsDAL.getOrCreateForDate(this.storeId, businessDate);
+        // Ensure day summary exists
+        daySummariesDAL.getOrCreateForDate(this.storeId, businessDate);
 
-        // Create transaction with details
+        // Create POS ID mappings for external IDs
+        let internalUserId: string | null = null;
+        if (saleEvent.cashierId) {
+          const cashierMapping = posCashierMappingsDAL.getOrCreate(
+            this.storeId,
+            saleEvent.cashierId
+          );
+          internalUserId = cashierMapping.internal_user_id;
+        }
+
+        if (saleEvent.registerId) {
+          posTerminalMappingsDAL.getOrCreate(this.storeId, saleEvent.registerId);
+        }
+
+        if (saleEvent.tillId) {
+          posTillMappingsDAL.getOrCreate(this.storeId, saleEvent.tillId, businessDate);
+        }
+
+        // CRITICAL: PJR files are TRANSACTION files - they NEVER create shifts.
+        // Shifts are ONLY created by MSM files (Period 98 with SalesMovementHeader).
+        // PJR transactions must link to an EXISTING shift created by MSM.
+        //
+        // DB-006: Store-scoped query ensures tenant isolation
+        // SEC-006: Uses parameterized DAL methods
+        //
+        // Find existing shift for this business date to attach the transaction to.
+        // If no shift exists, log warning - the MSM file hasn't been processed yet.
+        const existingShifts = shiftsDAL.findByDate(this.storeId, businessDate);
+
+        let shift;
+        if (existingShifts.length > 0) {
+          // Link to the most recent shift for this business date
+          // For multi-shift days, transactions are linked to the latest shift
+          // (MSM files define shift boundaries via their timestamps)
+          shift = existingShifts[existingShifts.length - 1];
+          log.debug('PJR: Linking transaction to existing shift', {
+            businessDate,
+            shiftId: shift.shift_id,
+            shiftNumber: shift.shift_number,
+            registerId: saleEvent.registerId,
+            transactionId: saleEvent.transactionId,
+          });
+        } else {
+          // NO SHIFT EXISTS - cannot create transaction without a shift
+          // This should not happen in normal operation as MSM files are processed first
+          log.warn('PJR: No existing shift found for business date - skipping transaction', {
+            businessDate,
+            registerId: saleEvent.registerId,
+            cashierId: saleEvent.cashierId,
+            transactionId: saleEvent.transactionId,
+            eventEndDate: saleEvent.eventEndDate,
+            eventEndTime: saleEvent.eventEndTime,
+            hint: 'MSM file for this date may not have been processed yet',
+          });
+          continue; // Skip this transaction - no shift to attach to
+        }
+
+        // Extract line items from transactionDetailGroup
+        const lineItems = this.extractPJRLineItems(saleEvent);
+
+        // Extract payments from transactionDetailGroup
+        const payments = this.extractPJRPayments(saleEvent);
+
+        // Extract tax summaries from transactionDetailGroup
+        const taxSummaries = this.extractPJRTaxSummaries(saleEvent);
+
+        // Determine primary payment type from first payment
+        const primaryPaymentType = payments.length > 0 ? payments[0].payment_type : undefined;
+
+        // Get transaction totals from summary
+        const summary = saleEvent.transactionSummary;
+        const totalAmount = summary?.transactionTotalGrandAmount ?? 0;
+
+        // Build linked transaction ID if present
+        let linkedTransactionId: string | undefined;
+        let linkReason: string | undefined;
+        if (saleEvent.linkedTransactionInfo) {
+          const linked = saleEvent.linkedTransactionInfo;
+          linkedTransactionId = `${linked.originalStoreLocationId}-${linked.originalRegisterId}-${linked.originalTransactionId}`;
+          linkReason = linked.transactionLinkReason;
+        }
+
+        // Construct event end timestamp from date and time components
+        const eventEndTimestamp =
+          saleEvent.eventEndDate && saleEvent.eventEndTime
+            ? `${saleEvent.eventEndDate}T${saleEvent.eventEndTime}`
+            : undefined;
+
+        // Create transaction with all details
         const created = transactionsDAL.createWithDetails({
           store_id: this.storeId,
           shift_id: shift.shift_id,
           business_date: businessDate,
-          transaction_number: transaction.transactionNumber,
-          transaction_time: transaction.transactionTime,
-          register_id: transaction.registerId,
-          cashier_id: transaction.cashierId,
-          total_amount: transaction.totalAmount,
-          payment_type: transaction.paymentType,
-          lineItems: transaction.lineItems?.map((item, idx) => ({
-            line_number: item.lineNumber || idx + 1,
-            item_code: item.itemCode,
-            description: item.description,
-            quantity: item.quantity,
-            unit_price: item.unitPrice,
-            total_price: item.totalPrice,
-            department_id: item.departmentId,
-          })),
-          payments: transaction.payments?.map((payment) => ({
-            payment_type: payment.paymentType,
-            amount: payment.amount,
-            reference_number: payment.referenceNumber,
-          })),
+          transaction_number: saleEvent.transactionId
+            ? parseInt(saleEvent.transactionId, 10)
+            : undefined,
+          transaction_time: eventEndTimestamp,
+          register_id: saleEvent.registerId,
+          cashier_id: saleEvent.cashierId,
+          total_amount: totalAmount,
+          payment_type: primaryPaymentType,
+          // PJR-specific fields
+          event_sequence_id: saleEvent.eventSequenceId,
+          training_mode: saleEvent.trainingModeFlag,
+          outside_sale: saleEvent.outsideSalesFlag,
+          offline: saleEvent.offlineFlag,
+          suspended: saleEvent.suspendFlag,
+          till_id: saleEvent.tillId,
+          receipt_time:
+            saleEvent.receiptDate && saleEvent.receiptTime
+              ? `${saleEvent.receiptDate}T${saleEvent.receiptTime}`
+              : undefined,
+          event_start_time:
+            saleEvent.eventStartDate && saleEvent.eventStartTime
+              ? `${saleEvent.eventStartDate}T${saleEvent.eventStartTime}`
+              : undefined,
+          event_end_time: eventEndTimestamp,
+          // Transaction totals from summary
+          gross_amount: summary?.transactionTotalGrossAmount,
+          net_amount: summary?.transactionTotalNetAmount,
+          tax_amount: summary?.transactionTotalTaxSalesAmount,
+          tax_exempt_amount: summary?.transactionTotalTaxExemptAmount,
+          direction: summary?.transactionTotalGrandAmountDirection,
+          // Linked transaction info
+          linked_transaction_id: linkedTransactionId,
+          link_reason: linkReason,
+          // Line items, payments, and tax summaries
+          lineItems,
+          payments,
+          taxSummaries,
         });
 
         // Enqueue transaction for sync
@@ -726,9 +2124,206 @@ export class ParserService {
         count++;
       }
 
-      log.debug('PJR transactions created', { count, businessDate });
+      const firstEvent = journalReport.saleEvents?.[0];
+      log.debug('PJR transactions created', {
+        count,
+        businessDate: firstEvent?.businessDate,
+        totalLineItems: journalReport.saleEvents.reduce(
+          (sum, e) => sum + (e.transactionDetailGroup?.transactionLines?.length || 0),
+          0
+        ),
+      });
       return count;
     });
+  }
+
+  /**
+   * Extract line items (fuel + merchandise) from PJR sale event
+   * Creates POS ID mappings for fuel grades, positions, and departments
+   */
+  private extractPJRLineItems(saleEvent: NAXMLSaleEvent): CreateLineItemData[] {
+    const lineItems: CreateLineItemData[] = [];
+    const transactionLines = saleEvent.transactionDetailGroup?.transactionLines || [];
+    let lineNumber = 1;
+
+    for (const line of transactionLines) {
+      // Process fuel lines
+      if (line.fuelLine) {
+        const fuel = line.fuelLine;
+
+        // Create fuel grade mapping
+        if (fuel.fuelGradeId) {
+          posFuelGradeMappingsDAL.getOrCreate(this.storeId, fuel.fuelGradeId);
+        }
+
+        // Create fuel position mapping
+        if (fuel.fuelPositionId) {
+          posFuelPositionMappingsDAL.getOrCreate(this.storeId, fuel.fuelPositionId);
+        }
+
+        // Create department mapping for fuel merchandise code
+        if (fuel.merchandiseCode) {
+          posDepartmentMappingsDAL.getOrCreate(this.storeId, fuel.merchandiseCode);
+        }
+
+        lineItems.push({
+          line_number: lineNumber++,
+          item_code: fuel.merchandiseCode || fuel.fuelGradeId,
+          description: fuel.description,
+          quantity: fuel.salesQuantity,
+          unit_price: fuel.actualSalesPrice || fuel.regularSellPrice,
+          total_price: fuel.salesAmount,
+          department_id: fuel.merchandiseCode,
+          // Fuel-specific fields
+          line_type: 'fuel',
+          line_status: this.mapLineStatus(line.status),
+          fuel_grade_id: fuel.fuelGradeId,
+          fuel_position_id: fuel.fuelPositionId,
+          service_level: fuel.serviceLevelCode as 'self' | 'full' | 'mini' | undefined,
+          actual_price: fuel.actualSalesPrice,
+          entry_method: fuel.entryMethod,
+          tax_level_id: fuel.itemTax?.taxLevelId,
+        });
+      }
+
+      // Process fuel prepay lines
+      if (line.fuelPrepayLine) {
+        const prepay = line.fuelPrepayLine;
+
+        // Create fuel position mapping
+        if (prepay.fuelPositionId) {
+          posFuelPositionMappingsDAL.getOrCreate(this.storeId, prepay.fuelPositionId);
+        }
+
+        lineItems.push({
+          line_number: lineNumber++,
+          item_code: `PREPAY-${prepay.fuelPositionId}`,
+          description: `Fuel Prepay - Position ${prepay.fuelPositionId}`,
+          quantity: 1,
+          unit_price: prepay.salesAmount,
+          total_price: prepay.salesAmount,
+          // Fuel prepay fields
+          line_type: 'prepay',
+          line_status: this.mapLineStatus(line.status),
+          fuel_position_id: prepay.fuelPositionId,
+        });
+      }
+
+      // Process merchandise lines
+      if (line.merchandiseLine) {
+        const merch = line.merchandiseLine;
+
+        // Create department mapping
+        if (merch.departmentCode) {
+          posDepartmentMappingsDAL.getOrCreate(this.storeId, merch.departmentCode, {
+            externalDescription: merch.description,
+          });
+        }
+
+        lineItems.push({
+          line_number: lineNumber++,
+          item_code: merch.itemCode,
+          description: merch.description,
+          quantity: merch.salesQuantity,
+          unit_price: merch.unitPrice,
+          total_price: merch.salesAmount,
+          department_id: merch.departmentCode,
+          // Merchandise-specific fields
+          line_type: 'merchandise',
+          line_status: this.mapLineStatus(line.status),
+          entry_method: merch.entryMethod,
+          tax_level_id: merch.itemTax?.taxLevelId,
+        });
+      }
+    }
+
+    return lineItems;
+  }
+
+  /**
+   * Extract payments from PJR sale event
+   * Creates POS ID mappings for tender codes
+   */
+  private extractPJRPayments(saleEvent: NAXMLSaleEvent): CreatePaymentData[] {
+    const payments: CreatePaymentData[] = [];
+    const transactionLines = saleEvent.transactionDetailGroup?.transactionLines || [];
+
+    for (const line of transactionLines) {
+      if (line.tenderInfo) {
+        const tenderInfo = line.tenderInfo;
+        const tender = tenderInfo.tender;
+
+        // Create tender mapping
+        if (tender.tenderCode) {
+          posTenderMappingsDAL.getOrCreate(this.storeId, tender.tenderCode, {
+            externalTenderSubcode: tender.tenderSubCode,
+          });
+        }
+
+        payments.push({
+          payment_type: tender.tenderCode,
+          amount: tenderInfo.tenderAmount,
+          tender_sub_code: tender.tenderSubCode,
+          change_amount: tenderInfo.changeFlag ? tenderInfo.changeAmount || 0 : 0,
+        });
+      }
+    }
+
+    return payments;
+  }
+
+  /**
+   * Extract tax summaries from PJR sale event
+   * Creates POS ID mappings for tax level IDs
+   */
+  private extractPJRTaxSummaries(saleEvent: NAXMLSaleEvent): CreateTaxSummaryData[] {
+    const taxSummaries: CreateTaxSummaryData[] = [];
+    const transactionLines = saleEvent.transactionDetailGroup?.transactionLines || [];
+
+    for (const line of transactionLines) {
+      if (line.transactionTax) {
+        const tax = line.transactionTax;
+
+        // Create tax level mapping
+        if (tax.taxLevelId) {
+          posTaxLevelMappingsDAL.getOrCreate(this.storeId, tax.taxLevelId);
+        }
+
+        taxSummaries.push(this.mapPJRTaxToSummary(tax));
+      }
+    }
+
+    return taxSummaries;
+  }
+
+  /**
+   * Map PJR transaction tax to CreateTaxSummaryData
+   */
+  private mapPJRTaxToSummary(tax: NAXMLJournalTransactionTax): CreateTaxSummaryData {
+    return {
+      tax_level_id: tax.taxLevelId,
+      taxable_sales_amount: tax.taxableSalesAmount || 0,
+      tax_collected_amount: tax.taxCollectedAmount || 0,
+      taxable_sales_refunded_amount: tax.taxableSalesRefundedAmount || 0,
+      tax_refunded_amount: tax.taxRefundedAmount || 0,
+      tax_exempt_sales_amount: tax.taxExemptSalesAmount || 0,
+      tax_exempt_sales_refunded_amount: tax.taxExemptSalesRefundedAmount || 0,
+      tax_forgiven_sales_amount: tax.taxForgivenSalesAmount || 0,
+      tax_forgiven_sales_refunded_amount: tax.taxForgivenSalesRefundedAmount || 0,
+      tax_forgiven_amount: tax.taxForgivenAmount || 0,
+    };
+  }
+
+  /**
+   * Map PJR line status to internal line status type
+   */
+  private mapLineStatus(status: string | undefined): 'normal' | 'void' | 'cancel' | 'refund' {
+    if (!status) return 'normal';
+    const normalized = status.toLowerCase();
+    if (normalized === 'void') return 'void';
+    if (normalized === 'cancel') return 'cancel';
+    if (normalized === 'refund') return 'refund';
+    return 'normal';
   }
 
   // ==========================================================================
@@ -750,6 +2345,134 @@ export class ParserService {
       operation: 'CREATE',
       payload: { entityType, entityId },
     });
+  }
+
+  // ==========================================================================
+  // Event Emission Helper
+  // ==========================================================================
+
+  /**
+   * Emit shift closed event for renderer notification
+   *
+   * Determines the close type (SHIFT_CLOSE vs DAY_CLOSE) and emits
+   * an event that can be forwarded to the renderer process.
+   *
+   * SEC-014: Event payload validated via Zod schema in shared types
+   * LM-001: Structured logging with event context
+   *
+   * @param params - Shift close parameters
+   */
+  private emitShiftClosedEvent(params: {
+    shiftId: string;
+    businessDate: string;
+    endTime: string;
+    shiftNumber: number;
+    externalRegisterId?: string;
+    externalCashierId?: string;
+  }): void {
+    const { shiftId, businessDate, endTime, shiftNumber, externalRegisterId, externalCashierId } =
+      params;
+
+    // Determine if this is a shift close or day close
+    const { closeType, remainingOpenShifts } = determineShiftCloseType(
+      this.storeId,
+      shiftId,
+      businessDate
+    );
+
+    // Build event payload (SEC-014: matches ShiftClosedEventSchema)
+    const eventPayload: ShiftClosedEvent = {
+      closeType,
+      shiftId,
+      businessDate,
+      externalRegisterId,
+      externalCashierId,
+      shiftNumber,
+      closedAt: endTime,
+      isLastShiftOfDay: remainingOpenShifts === 0,
+      remainingOpenShifts,
+    };
+
+    // Emit event for main process listener to forward to renderer
+    eventBus.emit(MainEvents.SHIFT_CLOSED, eventPayload);
+
+    // LM-001: Structured logging with event context
+    log.info('Shift closed event emitted', {
+      shiftId,
+      closeType,
+      businessDate,
+      isLastShiftOfDay: remainingOpenShifts === 0,
+      remainingOpenShifts,
+    });
+  }
+
+  /**
+   * Save MSM discount summaries to the database
+   * SEC-006: Uses parameterized queries via DAL
+   * DB-006: Store-scoped operations
+   *
+   * Persists discount data extracted from MSM files. Supports both
+   * Period 1 (daily) and Period 98 (shift) discount data.
+   *
+   * @param businessDate - Business date for the discounts
+   * @param msmPeriod - MSM period (1=Daily, 98=Shift)
+   * @param shiftId - Shift ID (null for Period 1 daily)
+   * @param discounts - Extracted discount data from MSM parser
+   * @param sourceFileHash - Source file hash for deduplication
+   */
+  private saveMSMDiscountSummaries(
+    businessDate: string,
+    msmPeriod: number,
+    shiftId: string | null,
+    discounts: MSMExtractedFuelData['discounts'],
+    sourceFileHash: string
+  ): void {
+    // Map of discount property to database type
+    // SEC-014: Type validation via allowlist
+    // Note: Property names match MSMDiscountTotals interface from types.ts
+    const discountTypeMap: Array<{
+      property: keyof typeof discounts;
+      dbType: MSMDiscountType;
+    }> = [
+      { property: 'statistics', dbType: 'statistics_discounts' },
+      { property: 'amountFixed', dbType: 'discount_amount_fixed' },
+      { property: 'amountPercentage', dbType: 'discount_amount_percentage' },
+      { property: 'promotional', dbType: 'discount_promotional' },
+      { property: 'fuel', dbType: 'discount_fuel' },
+      { property: 'storeCoupons', dbType: 'discount_store_coupons' },
+    ];
+
+    let savedCount = 0;
+
+    for (const mapping of discountTypeMap) {
+      const amount = discounts[mapping.property];
+
+      // Only save non-zero discounts
+      if (amount !== 0) {
+        msmDiscountSummariesDAL.upsert({
+          store_id: this.storeId,
+          business_date: businessDate,
+          msm_period: msmPeriod,
+          shift_id: shiftId ?? undefined,
+          discount_type: mapping.dbType,
+          discount_amount: amount,
+          discount_count: 0, // Count not available from extracted data
+          source_file_hash: sourceFileHash,
+        });
+        savedCount++;
+      }
+    }
+
+    if (savedCount > 0) {
+      log.debug('MSM discount summaries saved', {
+        businessDate,
+        msmPeriod,
+        shiftId,
+        savedCount,
+        fuelDiscount: discounts.fuel,
+        totalDiscounts: discounts.statistics,
+      });
+    }
   }
 }
 

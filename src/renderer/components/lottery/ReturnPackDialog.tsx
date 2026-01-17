@@ -300,8 +300,11 @@ export function ReturnPackDialog({
     }
 
     try {
+      // SEC-014: INPUT_VALIDATION - Build input with all validated fields
       const input: Omit<ReturnPackInput, 'pack_id'> = {
         return_reason: returnReason,
+        // Include closing_serial if valid (3 digits within range)
+        ...(isSerialValid && salesCalculation && { closing_serial: lastSoldSerial }),
         ...(returnNotes.trim() && { notes: returnNotes.trim() }),
       };
 

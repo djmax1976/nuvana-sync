@@ -36,6 +36,7 @@ export interface LotteryPack extends StoreEntity {
   bin_id: string | null;
   status: LotteryPackStatus;
   received_at: string | null;
+  received_by: string | null;
   activated_at: string | null;
   settled_at: string | null;
   returned_at: string | null;
@@ -58,12 +59,16 @@ export interface ReceivePackData {
   game_id: string;
   pack_number: string;
   cloud_pack_id?: string;
+  /** User ID of who received the pack (for audit trail) */
+  received_by?: string;
 }
 
 /**
  * Pack activation data
+ * DB-006: Requires store_id for tenant isolation validation
  */
 export interface ActivatePackData {
+  store_id: string;
   bin_id: string;
   opening_serial: string;
   activated_by?: string;
@@ -71,8 +76,10 @@ export interface ActivatePackData {
 
 /**
  * Pack settle data (day close)
+ * DB-006: Requires store_id for tenant isolation validation
  */
 export interface SettlePackData {
+  store_id: string;
   closing_serial: string;
   tickets_sold: number;
   sales_amount: number;
@@ -80,8 +87,10 @@ export interface SettlePackData {
 
 /**
  * Pack return data
+ * DB-006: Requires store_id for tenant isolation validation
  */
 export interface ReturnPackData {
+  store_id: string;
   closing_serial?: string;
   tickets_sold?: number;
   sales_amount?: number;
@@ -95,6 +104,8 @@ export interface PackWithDetails extends LotteryPack {
   game_code: string | null;
   game_name: string | null;
   game_price: number | null;
+  game_tickets_per_pack: number | null;
+  game_status: string | null;
   bin_number: number | null;
   bin_label: string | null;
 }
@@ -106,6 +117,8 @@ export interface PackFilterOptions {
   status?: LotteryPackStatus;
   game_id?: string;
   bin_id?: string;
+  /** Search by pack_number or game name (case-insensitive) */
+  search?: string;
 }
 
 // ============================================================================
@@ -160,11 +173,12 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     // SEC-006: Parameterized query
+    // SEC-010: AUTHZ - Track received_by for audit trail
     const stmt = this.db.prepare(`
       INSERT INTO lottery_packs (
         pack_id, store_id, game_id, pack_number, status,
-        received_at, cloud_pack_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'RECEIVED', ?, ?, ?, ?)
+        received_at, received_by, cloud_pack_id, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'RECEIVED', ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -173,6 +187,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.game_id,
       data.pack_number,
       now,
+      data.received_by || null,
       data.cloud_pack_id || null,
       now,
       now
@@ -183,6 +198,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       storeId: data.store_id,
       gameId: data.game_id,
       packNumber: data.pack_number,
+      receivedBy: data.received_by,
     });
 
     const created = this.findById(packId);
@@ -194,15 +210,37 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Activate a pack (move to bin and start selling)
-   * Validates pack is in RECEIVED status
-   * SEC-006: Parameterized UPDATE
+   * Validates pack is in RECEIVED status and belongs to the specified store
+   * SEC-006: Parameterized UPDATE with store_id in WHERE clause
+   * DB-006: Tenant isolation - pack must belong to store_id
+   * SEC-010: AUTHZ - Record activated_by for audit trail
    *
    * @param packId - Pack ID to activate
-   * @param data - Activation data
+   * @param data - Activation data including store_id for tenant isolation
    * @returns Updated pack or throws error
    */
   activate(packId: string, data: ActivatePackData): LotteryPack {
-    const pack = this.findById(packId);
+    console.log('[DAL ACTIVATE] ====== ENTRY ======');
+    console.log('[DAL ACTIVATE] packId:', packId);
+    console.log('[DAL ACTIVATE] data:', JSON.stringify(data));
+    log.info('[ACTIVATE DEBUG] Starting activation', {
+      packId,
+      storeId: data.store_id,
+      binId: data.bin_id,
+      openingSerial: data.opening_serial,
+    });
+
+    // DB-006: First verify pack exists AND belongs to the specified store
+    console.log('[DAL ACTIVATE] Calling findByIdForStore...');
+    const pack = this.findByIdForStore(data.store_id, packId);
+    console.log('[DAL ACTIVATE] findByIdForStore returned:', pack ? 'found' : 'NOT FOUND');
+
+    log.info('[ACTIVATE DEBUG] findByIdForStore result', {
+      found: !!pack,
+      packStatus: pack?.status,
+      packStoreId: pack?.store_id,
+      packBinId: pack?.bin_id,
+    });
 
     if (!pack) {
       throw new Error(`Pack not found: ${packId}`);
@@ -216,29 +254,49 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const now = this.now();
 
+    // SEC-006: Parameterized UPDATE with store_id constraint
+    // DB-006: Include store_id in WHERE clause for tenant isolation
+    // SEC-010: AUTHZ - Store activated_by for audit trail
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
         bin_id = ?,
         status = 'ACTIVATED',
         activated_at = ?,
         opening_serial = ?,
+        activated_by = ?,
         updated_at = ?
-      WHERE pack_id = ? AND status = 'RECEIVED'
+      WHERE pack_id = ? AND store_id = ? AND status = 'RECEIVED'
     `);
 
-    const result = stmt.run(data.bin_id, now, data.opening_serial, now, packId);
-
-    if (result.changes === 0) {
-      throw new Error('Failed to activate pack - status may have changed');
-    }
-
-    log.info('Lottery pack activated', {
+    const result = stmt.run(
+      data.bin_id,
+      now,
+      data.opening_serial,
+      data.activated_by || null,
+      now,
       packId,
-      binId: data.bin_id,
-      openingSerial: data.opening_serial,
+      data.store_id
+    );
+
+    log.info('[ACTIVATE DEBUG] UPDATE result', {
+      changes: result.changes,
+      lastInsertRowid: result.lastInsertRowid,
     });
 
-    const updated = this.findById(packId);
+    if (result.changes === 0) {
+      throw new Error('Failed to activate pack - status may have changed or pack does not belong to this store');
+    }
+
+    const updated = this.findByIdForStore(data.store_id, packId);
+
+    log.info('[ACTIVATE DEBUG] After activation - pack state', {
+      packId: updated?.pack_id,
+      status: updated?.status,
+      binId: updated?.bin_id,
+      storeId: updated?.store_id,
+      openingSerial: updated?.opening_serial,
+    });
+
     if (!updated) {
       throw new Error(`Failed to retrieve activated pack: ${packId}`);
     }
@@ -247,15 +305,17 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Settle a pack (close during day close)
-   * Validates pack is in ACTIVATED status
-   * SEC-006: Parameterized UPDATE
+   * Validates pack is in ACTIVATED status and belongs to specified store
+   * SEC-006: Parameterized UPDATE with store_id in WHERE clause
+   * DB-006: Tenant isolation - pack must belong to store_id
    *
    * @param packId - Pack ID to settle
-   * @param data - Settlement data
+   * @param data - Settlement data including store_id for tenant isolation
    * @returns Updated pack or throws error
    */
   settle(packId: string, data: SettlePackData): LotteryPack {
-    const pack = this.findById(packId);
+    // DB-006: First verify pack exists AND belongs to the specified store
+    const pack = this.findByIdForStore(data.store_id, packId);
 
     if (!pack) {
       throw new Error(`Pack not found: ${packId}`);
@@ -269,6 +329,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const now = this.now();
 
+    // SEC-006: Parameterized UPDATE with store_id constraint
+    // DB-006: Include store_id in WHERE clause for tenant isolation
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
         status = 'SETTLED',
@@ -277,7 +339,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         tickets_sold = ?,
         sales_amount = ?,
         updated_at = ?
-      WHERE pack_id = ? AND status = 'ACTIVATED'
+      WHERE pack_id = ? AND store_id = ? AND status = 'ACTIVATED'
     `);
 
     const result = stmt.run(
@@ -286,21 +348,23 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.tickets_sold,
       data.sales_amount,
       now,
-      packId
+      packId,
+      data.store_id
     );
 
     if (result.changes === 0) {
-      throw new Error('Failed to settle pack - status may have changed');
+      throw new Error('Failed to settle pack - status may have changed or pack does not belong to this store');
     }
 
     log.info('Lottery pack settled', {
       packId,
+      storeId: data.store_id,
       closingSerial: data.closing_serial,
       ticketsSold: data.tickets_sold,
       salesAmount: data.sales_amount,
     });
 
-    const updated = this.findById(packId);
+    const updated = this.findByIdForStore(data.store_id, packId);
     if (!updated) {
       throw new Error(`Failed to retrieve settled pack: ${packId}`);
     }
@@ -310,14 +374,16 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   /**
    * Return a pack to distributor
    * Can return from RECEIVED or ACTIVATED status
-   * SEC-006: Parameterized UPDATE
+   * SEC-006: Parameterized UPDATE with store_id in WHERE clause
+   * DB-006: Tenant isolation - pack must belong to store_id
    *
    * @param packId - Pack ID to return
-   * @param data - Return data
+   * @param data - Return data including store_id for tenant isolation
    * @returns Updated pack or throws error
    */
-  returnPack(packId: string, data: ReturnPackData = {}): LotteryPack {
-    const pack = this.findById(packId);
+  returnPack(packId: string, data: ReturnPackData): LotteryPack {
+    // DB-006: First verify pack exists AND belongs to the specified store
+    const pack = this.findByIdForStore(data.store_id, packId);
 
     if (!pack) {
       throw new Error(`Pack not found: ${packId}`);
@@ -331,6 +397,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const now = this.now();
 
+    // SEC-006: Parameterized UPDATE with store_id constraint
+    // DB-006: Include store_id in WHERE clause for tenant isolation
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
         status = 'RETURNED',
@@ -339,7 +407,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         tickets_sold = COALESCE(?, tickets_sold),
         sales_amount = COALESCE(?, sales_amount),
         updated_at = ?
-      WHERE pack_id = ? AND status IN ('RECEIVED', 'ACTIVATED')
+      WHERE pack_id = ? AND store_id = ? AND status IN ('RECEIVED', 'ACTIVATED')
     `);
 
     const result = stmt.run(
@@ -348,20 +416,22 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.tickets_sold ?? null,
       data.sales_amount ?? null,
       now,
-      packId
+      packId,
+      data.store_id
     );
 
     if (result.changes === 0) {
-      throw new Error('Failed to return pack - status may have changed');
+      throw new Error('Failed to return pack - status may have changed or pack does not belong to this store');
     }
 
     log.info('Lottery pack returned', {
       packId,
+      storeId: data.store_id,
       previousStatus: pack.status,
       closingSerial: data.closing_serial,
     });
 
-    const updated = this.findById(packId);
+    const updated = this.findByIdForStore(data.store_id, packId);
     if (!updated) {
       throw new Error(`Failed to retrieve returned pack: ${packId}`);
     }
@@ -519,6 +589,15 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       conditions.push('p.bin_id = ?');
       params.push(filters.bin_id);
     }
+    // SEC-006: Search uses parameterized LIKE query to prevent SQL injection
+    // Searches pack_number (exact prefix match) or game name (case-insensitive contains)
+    if (filters.search && filters.search.trim().length >= 2) {
+      const searchTerm = filters.search.trim();
+      // Use LIKE with parameterized values - % wildcards added to param, not SQL string
+      conditions.push('(p.pack_number LIKE ? OR g.name LIKE ? COLLATE NOCASE)');
+      params.push(`${searchTerm}%`); // pack_number prefix match
+      params.push(`%${searchTerm}%`); // game name contains match
+    }
 
     const whereClause = conditions.join(' AND ');
 
@@ -528,6 +607,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         g.game_code,
         g.name as game_name,
         g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
         b.bin_number,
         b.label as bin_label
       FROM lottery_packs p
@@ -548,6 +629,144 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    */
   getActivatedPacksForDayClose(storeId: string): PackWithDetails[] {
     return this.findPacksWithDetails(storeId, { status: 'ACTIVATED' });
+  }
+
+  /**
+   * Find packs activated since a specific date (enterprise close-to-close model)
+   *
+   * This method returns ALL packs that were activated on or after the specified date,
+   * regardless of their current status. This supports the enterprise close-to-close
+   * business day model where:
+   * - A pack activated yesterday that was returned today should still appear
+   * - A pack activated yesterday that was settled (sold out) today should still appear
+   * - The UI shows the full history of the open business period
+   *
+   * Performance: Uses indexed activated_at column with parameterized date filter.
+   * Query is bounded by date range and store_id (both indexed).
+   *
+   * @security SEC-006: Parameterized query prevents SQL injection
+   * @security DB-006: store_id in WHERE clause enforces tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @returns Array of packs with game and bin details, ordered by activated_at DESC
+   */
+  findPacksActivatedSince(storeId: string, sinceDate: string): PackWithDetails[] {
+    // Validate sinceDate format to prevent malformed queries
+    // Format: YYYY-MM-DD (ISO 8601 date)
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
+      throw new Error('Invalid date format. Expected YYYY-MM-DD');
+    }
+
+    const sinceDatetime = `${sinceDate}T00:00:00`;
+
+    // SEC-006: Fully parameterized query
+    // DB-006: store_id enforces tenant isolation
+    // Performance: Uses indexed columns (store_id, activated_at) with bounded result set
+    const stmt = this.db.prepare(`
+      SELECT
+        p.*,
+        g.game_code,
+        g.name as game_name,
+        g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
+        b.bin_number,
+        b.label as bin_label
+      FROM lottery_packs p
+      LEFT JOIN lottery_games g ON p.game_id = g.game_id
+      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      WHERE p.store_id = ?
+        AND p.activated_at IS NOT NULL
+        AND p.activated_at >= ?
+      ORDER BY p.activated_at DESC
+    `);
+
+    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
+  }
+
+  /**
+   * Find packs settled since a specific date (enterprise close-to-close model)
+   *
+   * Returns packs that were settled (sold out / depleted) on or after the specified date.
+   *
+   * @security SEC-006: Parameterized query prevents SQL injection
+   * @security DB-006: store_id in WHERE clause enforces tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @returns Array of packs with game and bin details
+   */
+  findPacksSettledSince(storeId: string, sinceDate: string): PackWithDetails[] {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
+      throw new Error('Invalid date format. Expected YYYY-MM-DD');
+    }
+
+    const sinceDatetime = `${sinceDate}T00:00:00`;
+
+    const stmt = this.db.prepare(`
+      SELECT
+        p.*,
+        g.game_code,
+        g.name as game_name,
+        g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
+        b.bin_number,
+        b.label as bin_label
+      FROM lottery_packs p
+      LEFT JOIN lottery_games g ON p.game_id = g.game_id
+      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      WHERE p.store_id = ?
+        AND p.status = 'SETTLED'
+        AND p.settled_at IS NOT NULL
+        AND p.settled_at >= ?
+      ORDER BY p.settled_at DESC
+    `);
+
+    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
+  }
+
+  /**
+   * Find packs returned since a specific date (enterprise close-to-close model)
+   *
+   * Returns packs that were returned on or after the specified date.
+   *
+   * @security SEC-006: Parameterized query prevents SQL injection
+   * @security DB-006: store_id in WHERE clause enforces tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @returns Array of packs with game and bin details
+   */
+  findPacksReturnedSince(storeId: string, sinceDate: string): PackWithDetails[] {
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
+      throw new Error('Invalid date format. Expected YYYY-MM-DD');
+    }
+
+    const sinceDatetime = `${sinceDate}T00:00:00`;
+
+    const stmt = this.db.prepare(`
+      SELECT
+        p.*,
+        g.game_code,
+        g.name as game_name,
+        g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
+        b.bin_number,
+        b.label as bin_label
+      FROM lottery_packs p
+      LEFT JOIN lottery_games g ON p.game_id = g.game_id
+      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      WHERE p.store_id = ?
+        AND p.status = 'RETURNED'
+        AND p.returned_at IS NOT NULL
+        AND p.returned_at >= ?
+      ORDER BY p.returned_at DESC
+    `);
+
+    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
   }
 
   // ==========================================================================
@@ -681,6 +900,31 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Failed to retrieve updated pack: ${packId}`);
     }
     return updated;
+  }
+
+  /**
+   * Find pack by pack number only (across all games in store)
+   * Used for checking if a pack exists before reception
+   * DB-006: Store-scoped query
+   *
+   * @param storeId - Store identifier
+   * @param packNumber - Pack number
+   * @returns Pack with game details or undefined
+   */
+  findByPackNumberOnly(
+    storeId: string,
+    packNumber: string
+  ): (LotteryPack & { game_code: string | null; game_name: string | null }) | undefined {
+    const stmt = this.db.prepare(`
+      SELECT lp.*, lg.game_code, lg.name as game_name
+      FROM lottery_packs lp
+      LEFT JOIN lottery_games lg ON lp.game_id = lg.game_id
+      WHERE lp.store_id = ? AND lp.pack_number = ?
+      LIMIT 1
+    `);
+    return stmt.get(storeId, packNumber) as
+      | (LotteryPack & { game_code: string | null; game_name: string | null })
+      | undefined;
   }
 
   /**

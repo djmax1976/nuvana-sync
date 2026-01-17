@@ -78,10 +78,27 @@ export interface TransactionWithDetails extends Transaction {
 }
 
 /**
- * Line item creation data
+ * Line type discriminator for fuel vs merchandise
+ */
+export type LineType = 'fuel' | 'merchandise' | 'prepay';
+
+/**
+ * Line status for voided/cancelled items
+ */
+export type LineStatus = 'normal' | 'void' | 'cancel' | 'refund';
+
+/**
+ * Service level codes for fuel transactions
+ */
+export type ServiceLevel = 'self' | 'full' | 'mini';
+
+/**
+ * Line item creation data (enhanced for PJR parsing)
  */
 export interface CreateLineItemData {
   line_number: number;
+  line_type?: LineType;
+  line_status?: LineStatus;
   item_code?: string;
   description?: string;
   quantity?: number;
@@ -90,20 +107,45 @@ export interface CreateLineItemData {
   department_id?: string;
   tax_amount?: number;
   discount_amount?: number;
+  // Fuel-specific fields
+  fuel_grade_id?: string;
+  fuel_position_id?: string;
+  service_level?: ServiceLevel;
+  actual_price?: number;
+  entry_method?: string;
+  tax_level_id?: string;
 }
 
 /**
- * Payment creation data
+ * Payment creation data (enhanced for PJR parsing)
  */
 export interface CreatePaymentData {
   payment_type: string;
   amount: number;
   tender_id?: string;
+  tender_sub_code?: string;
   reference_number?: string;
+  change_amount?: number;
 }
 
 /**
- * Transaction creation data
+ * Tax summary creation data (from PJR TransactionTax elements)
+ */
+export interface CreateTaxSummaryData {
+  tax_level_id: string;
+  taxable_sales_amount?: number;
+  tax_collected_amount?: number;
+  taxable_sales_refunded_amount?: number;
+  tax_refunded_amount?: number;
+  tax_exempt_sales_amount?: number;
+  tax_exempt_sales_refunded_amount?: number;
+  tax_forgiven_sales_amount?: number;
+  tax_forgiven_sales_refunded_amount?: number;
+  tax_forgiven_amount?: number;
+}
+
+/**
+ * Transaction creation data (enhanced for PJR parsing)
  */
 export interface CreateTransactionData {
   transaction_id?: string;
@@ -116,8 +158,27 @@ export interface CreateTransactionData {
   cashier_id?: string;
   total_amount?: number;
   payment_type?: string;
+  // PJR-specific fields
+  event_sequence_id?: number;
+  training_mode?: boolean;
+  outside_sale?: boolean;
+  offline?: boolean;
+  suspended?: boolean;
+  till_id?: string;
+  receipt_time?: string;
+  event_start_time?: string;
+  event_end_time?: string;
+  gross_amount?: number;
+  net_amount?: number;
+  tax_amount?: number;
+  tax_exempt_amount?: number;
+  direction?: 'Collected' | 'Refunded';
+  linked_transaction_id?: string;
+  link_reason?: string;
+  // Nested data
   lineItems?: CreateLineItemData[];
   payments?: CreatePaymentData[];
+  taxSummaries?: CreateTaxSummaryData[];
 }
 
 // ============================================================================
@@ -146,9 +207,10 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
   ]);
 
   /**
-   * Create a transaction with optional line items and payments
+   * Create a transaction with optional line items, payments, and tax summaries
    * Uses database transaction for atomicity
    * SEC-006: All queries use parameterized statements
+   * Enhanced for complete PJR (POSJournal) parsing
    *
    * @param data - Transaction creation data
    * @returns Created transaction with details
@@ -158,13 +220,18 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
     const now = this.now();
 
     return this.withTransaction(() => {
-      // Create transaction
+      // Create transaction with all PJR fields
       const txnStmt = this.db.prepare(`
         INSERT INTO transactions (
           transaction_id, store_id, shift_id, business_date,
           transaction_number, transaction_time, register_id, cashier_id,
-          total_amount, payment_type, voided, created_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+          total_amount, payment_type, voided,
+          event_sequence_id, training_mode, outside_sale, offline, suspended,
+          till_id, receipt_time, event_start_time, event_end_time,
+          gross_amount, net_amount, tax_amount, tax_exempt_amount, direction,
+          linked_transaction_id, link_reason,
+          created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       txnStmt.run(
@@ -178,18 +245,38 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
         data.cashier_id || null,
         data.total_amount || 0,
         data.payment_type || null,
+        data.event_sequence_id || null,
+        data.training_mode ? 1 : 0,
+        data.outside_sale ? 1 : 0,
+        data.offline ? 1 : 0,
+        data.suspended ? 1 : 0,
+        data.till_id || null,
+        data.receipt_time || null,
+        data.event_start_time || null,
+        data.event_end_time || null,
+        data.gross_amount || 0,
+        data.net_amount || 0,
+        data.tax_amount || 0,
+        data.tax_exempt_amount || 0,
+        data.direction || 'Collected',
+        data.linked_transaction_id || null,
+        data.link_reason || null,
         now
       );
 
-      // Create line items
+      // Create line items with enhanced fields for fuel/merchandise
       const lineItems: TransactionLineItem[] = [];
       if (data.lineItems && data.lineItems.length > 0) {
         const lineStmt = this.db.prepare(`
           INSERT INTO transaction_line_items (
             line_item_id, store_id, transaction_id, line_number,
+            line_type, line_status,
             item_code, description, quantity, unit_price, total_price,
-            department_id, tax_amount, discount_amount, voided, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?)
+            department_id, tax_amount, discount_amount, voided,
+            fuel_grade_id, fuel_position_id, service_level, actual_price,
+            entry_method, tax_level_id,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const line of data.lineItems) {
@@ -199,6 +286,8 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
             data.store_id,
             transactionId,
             line.line_number,
+            line.line_type || 'merchandise',
+            line.line_status || 'normal',
             line.item_code || null,
             line.description || null,
             line.quantity ?? 1,
@@ -207,6 +296,12 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
             line.department_id || null,
             line.tax_amount ?? 0,
             line.discount_amount ?? 0,
+            line.fuel_grade_id || null,
+            line.fuel_position_id || null,
+            line.service_level || null,
+            line.actual_price ?? null,
+            line.entry_method || null,
+            line.tax_level_id || null,
             now
           );
 
@@ -229,14 +324,15 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
         }
       }
 
-      // Create payments
+      // Create payments with enhanced fields
       const payments: TransactionPayment[] = [];
       if (data.payments && data.payments.length > 0) {
         const payStmt = this.db.prepare(`
           INSERT INTO transaction_payments (
             payment_id, store_id, transaction_id, payment_type,
-            amount, tender_id, reference_number, created_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            amount, tender_id, tender_sub_code, reference_number, change_amount,
+            created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         `);
 
         for (const payment of data.payments) {
@@ -248,7 +344,9 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
             payment.payment_type,
             payment.amount,
             payment.tender_id || null,
+            payment.tender_sub_code || null,
             payment.reference_number || null,
+            payment.change_amount || 0,
             now
           );
 
@@ -265,6 +363,40 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
         }
       }
 
+      // Create tax summaries (from PJR TransactionTax elements)
+      if (data.taxSummaries && data.taxSummaries.length > 0) {
+        const taxStmt = this.db.prepare(`
+          INSERT INTO transaction_tax_summaries (
+            tax_summary_id, store_id, transaction_id, tax_level_id,
+            taxable_sales_amount, tax_collected_amount,
+            taxable_sales_refunded_amount, tax_refunded_amount,
+            tax_exempt_sales_amount, tax_exempt_sales_refunded_amount,
+            tax_forgiven_sales_amount, tax_forgiven_sales_refunded_amount,
+            tax_forgiven_amount, created_at
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `);
+
+        for (const tax of data.taxSummaries) {
+          const taxId = this.generateId();
+          taxStmt.run(
+            taxId,
+            data.store_id,
+            transactionId,
+            tax.tax_level_id,
+            tax.taxable_sales_amount ?? 0,
+            tax.tax_collected_amount ?? 0,
+            tax.taxable_sales_refunded_amount ?? 0,
+            tax.tax_refunded_amount ?? 0,
+            tax.tax_exempt_sales_amount ?? 0,
+            tax.tax_exempt_sales_refunded_amount ?? 0,
+            tax.tax_forgiven_sales_amount ?? 0,
+            tax.tax_forgiven_sales_refunded_amount ?? 0,
+            tax.tax_forgiven_amount ?? 0,
+            now
+          );
+        }
+      }
+
       const transaction = this.findById(transactionId);
       if (!transaction) {
         throw new Error(`Failed to retrieve created transaction: ${transactionId}`);
@@ -274,6 +406,7 @@ export class TransactionsDAL extends StoreBasedDAL<Transaction> {
         transactionId,
         lineItemCount: lineItems.length,
         paymentCount: payments.length,
+        taxSummaryCount: data.taxSummaries?.length || 0,
       });
 
       return {

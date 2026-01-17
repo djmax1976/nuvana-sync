@@ -11,6 +11,7 @@ import React, { Suspense, lazy } from 'react';
 import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoadingSpinner } from './components/ui/LoadingSpinner';
+import { ProtectedPage } from './components/auth/ProtectedPage';
 
 // ============================================================================
 // Lazy-loaded Pages
@@ -29,8 +30,10 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 // Placeholder pages for new routes
 const ClockInOutPage = lazy(() => import('./pages/ClockInOutPage'));
 const LotteryPage = lazy(() => import('./pages/LotteryPage'));
+const LotteryGamesPage = lazy(() => import('./pages/LotteryGamesPage'));
 const POSIntegrationPage = lazy(() => import('./pages/POSIntegrationPage'));
 const TerminalsPage = lazy(() => import('./pages/TerminalsPage'));
+const EmployeesPage = lazy(() => import('./pages/EmployeesPage'));
 
 // Wizard pages
 const ShiftEndPage = lazy(() => import('./pages/ShiftEndPage'));
@@ -102,6 +105,14 @@ const router = createHashRouter([
         ),
       },
       {
+        path: 'lottery/games',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <LotteryGamesPage />
+          </Suspense>
+        ),
+      },
+      {
         path: 'pos-integration',
         element: (
           <Suspense fallback={<PageLoader />}>
@@ -114,6 +125,20 @@ const router = createHashRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <TerminalsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'employees',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <ProtectedPage
+              requiredRole="store_manager"
+              title="Employee Management"
+              description="Enter your Store Manager PIN to access employee management."
+            >
+              <EmployeesPage />
+            </ProtectedPage>
           </Suspense>
         ),
       },

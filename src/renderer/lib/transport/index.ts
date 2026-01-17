@@ -243,6 +243,21 @@ export const ipc = {
     getWeeklySales: () => ipcClient.invoke<WeeklySalesResponse>('dashboard:getWeeklySales'),
   },
 
+  // Employees
+  employees: {
+    list: () => ipcClient.invoke<EmployeeListResponse>('employees:list'),
+    create: (data: CreateEmployeeRequest) =>
+      ipcClient.invoke<CreateEmployeeResponse>('employees:create', data),
+    update: (data: UpdateEmployeeRequest) =>
+      ipcClient.invoke<UpdateEmployeeResponse>('employees:update', data),
+    updatePin: (data: UpdatePinRequest) =>
+      ipcClient.invoke<UpdatePinResponse>('employees:updatePin', data),
+    deactivate: (userId: string) =>
+      ipcClient.invoke<ToggleStatusResponse>('employees:deactivate', { userId }),
+    reactivate: (userId: string) =>
+      ipcClient.invoke<ToggleStatusResponse>('employees:reactivate', { userId }),
+  },
+
   // Shifts
   shifts: {
     list: (params?: ShiftListParams) => ipcClient.invoke<ShiftListResponse>('shifts:list', params),
@@ -251,6 +266,18 @@ export const ipc = {
       ipcClient.invoke<ShiftSummaryResponse>('shifts:getSummary', shiftId),
     findOpenShifts: () => ipcClient.invoke<ShiftResponse[]>('shifts:findOpenShifts'),
     close: (shiftId: string) => ipcClient.invoke<ShiftResponse>('shifts:close', shiftId),
+    /**
+     * Get fuel data for a specific shift with inside/outside breakdown
+     * Returns MSM-sourced data when available
+     */
+    getFuelData: (shiftId: string) =>
+      ipcClient.invoke<ShiftFuelDataResponse>('shifts:getFuelData', shiftId),
+    /**
+     * Get daily fuel totals for a business date with inside/outside breakdown
+     * Returns aggregated data from day_fuel_summaries or shift_fuel_summaries
+     */
+    getDailyFuelTotals: (businessDate: string) =>
+      ipcClient.invoke<DailyFuelTotalsResponse>('shifts:getDailyFuelTotals', businessDate),
   },
 
   // Day Summaries
@@ -347,11 +374,106 @@ export interface ShiftListResponse {
   offset: number;
 }
 
+export interface DepartmentBreakdown {
+  departmentCode: string;
+  departmentName: string | null;
+  netSales: number;
+  transactionCount: number;
+}
+
+export interface TenderBreakdown {
+  tenderCode: string;
+  tenderDisplayName: string | null;
+  netAmount: number;
+  transactionCount: number;
+}
+
+export interface FuelByGrade {
+  gradeId: string;
+  gradeName: string | null;
+  volumeSold: number;
+  amountSold: number;
+}
+
+/**
+ * MSM fuel totals with inside/outside breakdown
+ * Matches data from MSM (MiscellaneousSummaryMovement) files
+ */
+export interface MSMFuelTotals {
+  totalVolume: number;
+  totalAmount: number;
+  totalDiscount: number;
+  transactionCount: number;
+  insideVolume: number;
+  insideAmount: number;
+  outsideVolume: number;
+  outsideAmount: number;
+  averagePrice: number;
+}
+
+/**
+ * MSM fuel breakdown by grade with inside/outside split
+ */
+export interface MSMFuelByGrade {
+  gradeId: string | null;
+  gradeName: string | null;
+  totalVolume: number;
+  totalAmount: number;
+  insideVolume: number;
+  insideAmount: number;
+  outsideVolume: number;
+  outsideAmount: number;
+  discountAmount: number;
+  averagePrice: number;
+}
+
+/**
+ * Shift fuel data response with inside/outside breakdown
+ */
+export interface ShiftFuelDataResponse {
+  shiftId: string;
+  shiftSummaryId: string | null;
+  businessDate: string;
+  totals: MSMFuelTotals;
+  byGrade: MSMFuelByGrade[];
+  hasMSMData: boolean;
+}
+
+/**
+ * Daily fuel totals response with inside/outside breakdown
+ */
+export interface DailyFuelTotalsResponse {
+  storeId: string;
+  businessDate: string;
+  totals: {
+    totalVolume: number;
+    totalAmount: number;
+    totalDiscount: number;
+    insideVolume: number;
+    insideAmount: number;
+    outsideVolume: number;
+    outsideAmount: number;
+    averagePrice: number;
+  };
+  byGrade: MSMFuelByGrade[];
+  fuelSource: 'FGM' | 'MSM' | 'CALCULATED' | 'MANUAL';
+}
+
 export interface ShiftSummaryResponse {
   shift: ShiftResponse;
   transactionCount: number;
   totalSales: number;
   totalVoided: number;
+  // Enhanced summary data from shift_summaries table
+  grossSales?: number;
+  netSales?: number;
+  taxCollected?: number;
+  fuelGallons?: number;
+  fuelSales?: number;
+  lotteryNet?: number;
+  departmentBreakdown?: DepartmentBreakdown[];
+  tenderBreakdown?: TenderBreakdown[];
+  fuelByGrade?: FuelByGrade[];
 }
 
 export interface DaySummaryResponse {
@@ -488,4 +610,63 @@ export interface DateRangeReportResponse {
     transactions: number;
     dayCount: number;
   };
+}
+
+// Employee Types
+export type EmployeeRole = 'store_manager' | 'shift_manager' | 'cashier';
+
+export interface Employee {
+  user_id: string;
+  store_id: string;
+  role: EmployeeRole;
+  name: string;
+  active: number;
+  last_login_at: string | null;
+  cloud_user_id: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeListResponse {
+  employees: Employee[];
+  total: number;
+}
+
+export interface CreateEmployeeRequest {
+  name: string;
+  role: 'cashier' | 'shift_manager';
+  pin: string;
+  confirmPin: string;
+}
+
+export interface CreateEmployeeResponse {
+  employee: Employee;
+}
+
+export interface UpdateEmployeeRequest {
+  userId: string;
+  name?: string;
+  role?: 'cashier' | 'shift_manager';
+}
+
+export interface UpdateEmployeeResponse {
+  employee: Employee;
+}
+
+export interface UpdatePinRequest {
+  userId: string;
+  currentPin: string;
+  newPin: string;
+  confirmPin: string;
+}
+
+export interface UpdatePinResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ToggleStatusResponse {
+  success: boolean;
+  message: string;
 }

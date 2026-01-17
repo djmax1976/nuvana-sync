@@ -454,7 +454,9 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         );
 
         // Settle the pack
+        // DB-006: Pass store_id for tenant isolation validation
         lotteryPacksDAL.settle(closing.pack_id, {
+          store_id: day.store_id,
           closing_serial: closing.closing_serial,
           tickets_sold: ticketsSold,
           sales_amount: salesAmount,

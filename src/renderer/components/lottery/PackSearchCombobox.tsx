@@ -41,7 +41,8 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { Check, ChevronsUpDown, Loader2, Package } from 'lucide-react';
 import { useLotteryPacks, usePackSearch } from '@/hooks/useLottery';
-import type { LotteryPackResponse } from '@/lib/api/lottery';
+import type { LotteryPackResponse, LotteryPackStatus } from '@/lib/api/lottery';
+import { checkPackExists } from '@/lib/api/lottery';
 import { isValidSerialNumber, parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 
 /**
@@ -126,6 +127,50 @@ function mapPackToOption(pack: LotteryPackResponse): PackSearchOption {
     serial_start: pack.opening_serial || '',
     serial_end: pack.closing_serial || '',
   };
+}
+
+/**
+ * Get user-friendly error message based on pack status
+ * Explains why the pack cannot be activated
+ */
+function getPackStatusErrorMessage(
+  status: LotteryPackStatus,
+  packNumber: string,
+  gameName?: string,
+  binLabel?: string | null
+): { title: string; description: string } {
+  const gameInfo = gameName ? ` (${gameName})` : '';
+
+  switch (status) {
+    case 'ACTIVATED':
+      return {
+        title: 'Pack is already active',
+        description: binLabel
+          ? `Pack #${packNumber}${gameInfo} is currently active in ${binLabel}. A pack can only be activated once.`
+          : `Pack #${packNumber}${gameInfo} is already activated. A pack can only be activated once.`,
+      };
+    case 'SETTLED':
+      return {
+        title: 'Pack has been sold/depleted',
+        description: `Pack #${packNumber}${gameInfo} was previously activated and has been depleted. It cannot be activated again.`,
+      };
+    case 'RETURNED':
+      return {
+        title: 'Pack was returned',
+        description: `Pack #${packNumber}${gameInfo} was returned to the distributor and cannot be activated.`,
+      };
+    case 'RECEIVED':
+      // This shouldn't happen in this context, but handle it gracefully
+      return {
+        title: 'Pack not found in search',
+        description: `Pack #${packNumber}${gameInfo} exists but was not found. Please try again.`,
+      };
+    default:
+      return {
+        title: 'Pack unavailable',
+        description: `Pack #${packNumber}${gameInfo} has status "${status}" and cannot be activated.`,
+      };
+  }
 }
 
 /**
@@ -289,6 +334,62 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
     }, [onSearchQueryChange]);
 
     /**
+     * Check pack status and show appropriate error when pack not found in RECEIVED status
+     * This provides clear feedback when a user scans a pack that exists but cannot be activated
+     * (already active, depleted, or returned)
+     *
+     * @param packNumber - The pack number extracted from barcode
+     */
+    const checkPackStatusAndShowError = useCallback(
+      async (packNumber: string) => {
+        if (!storeId) {
+          toast({
+            title: 'Pack not found. Please scan again.',
+            variant: 'destructive',
+          });
+          clearAndRefocus();
+          return;
+        }
+
+        try {
+          const response = await checkPackExists(storeId, packNumber);
+
+          if (response.success && response.data?.exists && response.data.pack) {
+            const pack = response.data.pack;
+            // Pack exists but not in RECEIVED status - show status-specific message
+            const errorMsg = getPackStatusErrorMessage(
+              pack.status,
+              pack.pack_number,
+              pack.game?.name,
+              pack.bin?.label
+            );
+            toast({
+              title: errorMsg.title,
+              description: errorMsg.description,
+              variant: 'destructive',
+            });
+          } else {
+            // Pack truly doesn't exist in inventory
+            toast({
+              title: 'Pack not found',
+              description: 'This pack has not been received into inventory. Please receive the pack first before activating.',
+              variant: 'destructive',
+            });
+          }
+        } catch {
+          // Fallback to generic message on API error
+          toast({
+            title: 'Pack not found. Please scan again.',
+            variant: 'destructive',
+          });
+        }
+
+        clearAndRefocus();
+      },
+      [storeId, toast, clearAndRefocus]
+    );
+
+    /**
      * Handle input change with simple 400ms validation
      *
      * Logic:
@@ -440,13 +541,93 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
           setPendingEnterSelect(false);
         });
       } else if (pendingEnterSelect && isSearchMode && !isLoading && packs.length === 0) {
-        // Search completed but no results - clear pending state
+        // Search completed but no results - check if pack exists with different status
+        // This provides clear feedback for already-activated, depleted, or returned packs
         queueMicrotask(() => {
           setPendingEnterSelect(false);
+          // Extract pack number from the search query (could be barcode or direct pack number)
+          const trimmedQuery = searchQuery.trim();
+          let packNumber = trimmedQuery;
+          if (isValidSerialNumber(trimmedQuery)) {
+            const parsed = parseSerializedNumber(trimmedQuery);
+            packNumber = parsed.pack_number;
+          }
+          // Check pack status and show appropriate error message
+          checkPackStatusAndShowError(packNumber);
         });
       }
       // Note: If pendingEnterSelect && !isSearchMode, we wait for debounce to complete
-    }, [pendingEnterSelect, isSearchMode, isLoading, packs, handleSelectPack]);
+    }, [
+      pendingEnterSelect,
+      isSearchMode,
+      isLoading,
+      packs,
+      handleSelectPack,
+      searchQuery,
+      checkPackStatusAndShowError,
+    ]);
+
+    // ============================================================================
+    // BARCODE AUTO-SELECT: Auto-select when valid barcode scan finds exact match
+    // ============================================================================
+    // When a 24-digit barcode is scanned (without Enter key), auto-select if:
+    // 1. The debounced search matches the barcode (debounce completed)
+    // 2. Search is not loading (API call completed)
+    // 3. Exactly one pack matches OR the first pack's pack_number matches the barcode
+    //
+    // This handles scanners that don't send Enter key after barcode.
+    useEffect(() => {
+      // Only trigger for valid 24-digit barcodes
+      const trimmedQuery = searchQuery.trim();
+      if (!isValidSerialNumber(trimmedQuery)) {
+        return;
+      }
+
+      // Wait for debounce to complete
+      if (debouncedSearch.trim() !== trimmedQuery) {
+        return;
+      }
+
+      // Wait for API call to complete
+      if (isLoading || !isSearchMode) {
+        return;
+      }
+
+      // Extract pack number from barcode for matching
+      const parsed = parseSerializedNumber(trimmedQuery);
+      const barcodePackNumber = parsed.pack_number;
+
+      // Auto-select if exactly one result, or first result matches barcode pack number
+      if (packs.length === 1) {
+        // Exactly one match - auto-select it
+        queueMicrotask(() => {
+          handleSelectPack(packs[0]);
+        });
+      } else if (packs.length > 1) {
+        // Multiple results - check if first one matches the barcode pack number
+        const firstPack = packs[0];
+        if (firstPack.pack_number === barcodePackNumber) {
+          queueMicrotask(() => {
+            handleSelectPack(firstPack);
+          });
+        }
+        // If no exact match, leave dropdown open for manual selection
+      } else {
+        // No results for valid barcode - check if pack exists with different status
+        // This provides clear feedback for already-activated, depleted, or returned packs
+        queueMicrotask(() => {
+          checkPackStatusAndShowError(barcodePackNumber);
+        });
+      }
+    }, [
+      searchQuery,
+      debouncedSearch,
+      isLoading,
+      isSearchMode,
+      packs,
+      handleSelectPack,
+      checkPackStatusAndShowError,
+    ]);
 
     return (
       <div ref={dropdownRef} className="relative space-y-2">

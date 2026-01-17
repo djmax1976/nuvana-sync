@@ -69,6 +69,10 @@ export {
   type CreateTransactionData,
   type CreateLineItemData,
   type CreatePaymentData,
+  type CreateTaxSummaryData,
+  type LineType,
+  type LineStatus,
+  type ServiceLevel,
 } from './transactions.dal';
 
 // Sync Queue DAL
@@ -91,65 +95,162 @@ export {
   type FileProcessingStats,
 } from './processed-files.dal';
 
-// Movement DALs (NAXML data)
+// POS ID Mappings DAL (External POS IDs → Internal UUIDs)
 export {
-  FuelGradeMovementsDAL,
-  fuelGradeMovementsDAL,
-  type FuelGradeMovement,
-  type CreateFuelGradeMovementData,
-  type NAXMLFGMInput,
-  type FuelGradeAggregation,
-} from './fuel-grade-movements.dal';
+  // DAL Classes
+  POSCashierMappingsDAL,
+  POSTerminalMappingsDAL,
+  POSFuelPositionMappingsDAL,
+  POSTillMappingsDAL,
+  POSFuelGradeMappingsDAL,
+  POSFuelProductMappingsDAL,
+  POSDepartmentMappingsDAL,
+  POSTaxLevelMappingsDAL,
+  POSTenderMappingsDAL,
+  POSPriceTierMappingsDAL,
+  // Singleton Instances
+  posCashierMappingsDAL,
+  posTerminalMappingsDAL,
+  posFuelPositionMappingsDAL,
+  posTillMappingsDAL,
+  posFuelGradeMappingsDAL,
+  posFuelProductMappingsDAL,
+  posDepartmentMappingsDAL,
+  posTaxLevelMappingsDAL,
+  posTenderMappingsDAL,
+  posPriceTierMappingsDAL,
+  // Types
+  type POSSystemType,
+  type TerminalType,
+  type FuelType,
+  type TenderType,
+  type PriceTierType,
+  type POSCashierMapping,
+  type POSTerminalMapping,
+  type POSFuelPositionMapping,
+  type POSTillMapping,
+  type POSFuelGradeMapping,
+  type POSFuelProductMapping,
+  type POSDepartmentMapping,
+  type POSTaxLevelMapping,
+  type POSTenderMapping,
+  type POSPriceTierMapping,
+} from './pos-id-mappings.dal';
 
-export {
-  FuelProductMovementsDAL,
-  fuelProductMovementsDAL,
-  type FuelProductMovement,
-  type CreateFuelProductMovementData,
-  type NAXMLFPMInput,
-} from './fuel-product-movements.dal';
+// ============================================================================
+// New Schema-Aligned DALs (v010 migration)
+// ============================================================================
 
+// Shift Summaries DAL (Parent for shift-level data)
 export {
-  MiscellaneousSummariesDAL,
-  miscellaneousSummariesDAL,
-  type MiscellaneousSummary,
-  type CreateMiscellaneousSummaryData,
-  type NAXMLMSMInput,
-  type SummaryTypeAggregation,
-} from './miscellaneous-summaries.dal';
+  ShiftSummariesDAL,
+  shiftSummariesDAL,
+  type ShiftSummary,
+  type CreateShiftSummaryData,
+  type UpdateShiftSummaryData,
+} from './shift-summaries.dal';
 
+// Shift Fuel Summaries DAL (Replaces fuel_grade_movements)
 export {
-  MerchandiseMovementsDAL,
-  merchandiseMovementsDAL,
-  type MerchandiseMovement,
-  type CreateMerchandiseMovementData,
-  type NAXMLMCMInput,
-  type DepartmentAggregation,
-} from './merchandise-movements.dal';
+  ShiftFuelSummariesDAL,
+  shiftFuelSummariesDAL,
+  type ShiftFuelSummary,
+  type CreateShiftFuelSummaryData,
+  type NAXMLShiftFuelInput,
+  type FuelTenderType,
+  type FuelGradeAggregation as ShiftFuelGradeAggregation,
+} from './shift-fuel-summaries.dal';
 
+// Shift Department Summaries DAL (Replaces merchandise_movements)
 export {
-  TaxLevelMovementsDAL,
-  taxLevelMovementsDAL,
-  type TaxLevelMovement,
-  type CreateTaxLevelMovementData,
-  type NAXMLTLMInput,
-  type TaxLevelAggregation,
-} from './tax-level-movements.dal';
+  ShiftDepartmentSummariesDAL,
+  shiftDepartmentSummariesDAL,
+  type ShiftDepartmentSummary,
+  type CreateShiftDepartmentSummaryData,
+  type NAXMLDepartmentInput,
+  type DepartmentAggregation as ShiftDepartmentAggregation,
+} from './shift-department-summaries.dal';
 
+// Shift Tender Summaries DAL (Payment totals by tender type)
 export {
-  ItemSalesMovementsDAL,
-  itemSalesMovementsDAL,
-  type ItemSalesMovement,
-  type CreateItemSalesMovementData,
-  type NAXMLISMInput,
-  type TopSellingItem,
-} from './item-sales-movements.dal';
+  ShiftTenderSummariesDAL,
+  shiftTenderSummariesDAL,
+  type ShiftTenderSummary,
+  type CreateShiftTenderSummaryData,
+  type TenderAggregation as ShiftTenderAggregation,
+} from './shift-tender-summaries.dal';
 
+// Shift Tax Summaries DAL (Replaces tax_level_movements)
 export {
-  TenderProductMovementsDAL,
-  tenderProductMovementsDAL,
-  type TenderProductMovement,
-  type CreateTenderProductMovementData,
-  type NAXMLTPMInput,
-  type TenderAggregation,
-} from './tender-product-movements.dal';
+  ShiftTaxSummariesDAL,
+  shiftTaxSummariesDAL,
+  type ShiftTaxSummary,
+  type CreateShiftTaxSummaryData,
+  type NAXMLTaxInput,
+  type TaxAggregation as ShiftTaxAggregation,
+} from './shift-tax-summaries.dal';
+
+// Meter Readings DAL (Replaces fuel_product_movements - pump totalizers)
+export {
+  MeterReadingsDAL,
+  meterReadingsDAL,
+  type MeterReading,
+  type CreateMeterReadingData,
+  type NAXMLMeterReadingInput,
+  type MeterReadingType,
+  type MeterVariance,
+} from './meter-readings.dal';
+
+// Tank Readings DAL (Replaces tender_product_movements - ATG tank data)
+export {
+  TankReadingsDAL,
+  tankReadingsDAL,
+  type TankReading,
+  type CreateTankReadingData,
+  type NAXMLTankReadingInput,
+  type TankInventorySummary,
+} from './tank-readings.dal';
+
+// ============================================================================
+// MSM Fuel Data DALs (v014 migration)
+// ============================================================================
+
+// Day Fuel Summaries DAL (Daily fuel data by grade)
+export {
+  DayFuelSummariesDAL,
+  dayFuelSummariesDAL,
+  type DayFuelSummary,
+  type CreateDayFuelSummaryData,
+  type MSMDayFuelInput,
+  type DayFuelTotals,
+  type DayFuelByGrade,
+  type DayFuelSource,
+} from './day-fuel-summaries.dal';
+
+// Additional MSM exports from shift-fuel-summaries.dal.ts (v014)
+export {
+  type FuelSource,
+  type MSMShiftFuelInput,
+  type MSMFuelTotals,
+  type MSMFuelByGrade,
+} from './shift-fuel-summaries.dal';
+
+// MSM Discount Summaries DAL (Discount data from MSM files)
+export {
+  MSMDiscountSummariesDAL,
+  msmDiscountSummariesDAL,
+  type MSMDiscountSummary,
+  type CreateMSMDiscountData,
+  type MSMDiscountType,
+  type DiscountTotals,
+} from './msm-discount-summaries.dal';
+
+// MSM Outside Dispenser Records DAL (Period 98 outside fuel)
+export {
+  MSMOutsideDispenserRecordsDAL,
+  msmOutsideDispenserRecordsDAL,
+  type MSMOutsideDispenserRecord,
+  type CreateOutsideDispenserData,
+  type OutsideTenderType,
+  type OutsideFuelTotals,
+} from './msm-outside-dispenser-records.dal';

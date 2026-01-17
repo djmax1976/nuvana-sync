@@ -24,6 +24,7 @@ import {
   markPackAsSoldOut,
   getCashierActiveShift,
   getGames,
+  listGames,
   updateGame,
   depletePack,
   returnPack,
@@ -37,6 +38,7 @@ import {
   type MarkPackAsSoldOutInput,
   type FullActivatePackInput,
   type ReturnPackInput,
+  type ListGamesInput,
 } from '../lib/api/lottery';
 
 // ============ TanStack Query Keys ============
@@ -60,6 +62,9 @@ export const lotteryKeys = {
     [...lotteryKeys.dayBins(), storeId, date] as const,
   games: () => [...lotteryKeys.all, 'games'] as const,
   gameList: () => [...lotteryKeys.games(), 'list'] as const,
+  /** Query key for paginated games listing with filters */
+  gamesListPaginated: (input?: ListGamesInput) =>
+    [...lotteryKeys.games(), 'listPaginated', input || {}] as const,
 };
 
 // ============ Query Hooks ============
@@ -138,14 +143,18 @@ export function useInvalidateLottery() {
   const queryClient = useQueryClient();
 
   return {
-    invalidatePacks: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() }),
+    invalidatePacks: () =>
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.packs(), refetchType: 'active' }),
     invalidatePackDetail: (packId: string) => {
       return queryClient.invalidateQueries({
         queryKey: lotteryKeys.packDetail(packId),
+        refetchType: 'active',
       });
     },
-    invalidateVariances: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.variances() }),
-    invalidateAll: () => queryClient.invalidateQueries({ queryKey: lotteryKeys.all }),
+    invalidateVariances: () =>
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.variances(), refetchType: 'active' }),
+    invalidateAll: () =>
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.all, refetchType: 'active' }),
   };
 }
 
@@ -398,10 +407,19 @@ export function useFullPackActivation() {
   return useMutation({
     mutationFn: ({ storeId, data }: FullPackActivationMutationInput) =>
       activatePackFull(storeId, data),
-    onSuccess: () => {
+    onSuccess: async () => {
       // Invalidate pack list and day bins to refresh after activation
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() });
-      queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
+      // Use refetchType: 'active' to ensure immediate refetch for mounted components
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: lotteryKeys.packs(),
+          refetchType: 'active',
+        }),
+        queryClient.invalidateQueries({
+          queryKey: lotteryKeys.dayBins(),
+          refetchType: 'active',
+        }),
+      ]);
     },
   });
 }
@@ -454,6 +472,34 @@ export function useLotteryGames(options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: lotteryKeys.gameList(),
     queryFn: () => getGames(),
+    enabled: options?.enabled !== false,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 30000, // Consider data fresh for 30 seconds
+    select: (response) => response.data,
+  });
+}
+
+/**
+ * Hook to list lottery games with pack counts and pagination
+ * IPC: lottery:listGames
+ *
+ * Enterprise-grade games listing hook with:
+ * - SEC-014: Type-safe filters and pagination
+ * - FE-001: STATE_MANAGEMENT - Proper caching with query keys
+ * - DB-006: TENANT_ISOLATION - Server enforces store-level isolation
+ *
+ * @param input - Optional filters and pagination
+ * @param options - Query options (enabled, etc.)
+ * @returns TanStack Query result with paginated games list
+ */
+export function useGamesListPaginated(
+  input?: ListGamesInput,
+  options?: { enabled?: boolean }
+) {
+  return useQuery({
+    queryKey: lotteryKeys.gamesListPaginated(input),
+    queryFn: () => listGames(input),
     enabled: options?.enabled !== false,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,

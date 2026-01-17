@@ -33,6 +33,7 @@ import {
   receivePackBatch,
   getGames,
   checkPackExists,
+  lookupGameByCode,
   type LotteryGameResponse,
 } from '@/lib/api/lottery';
 import { parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
@@ -330,13 +331,43 @@ export function PackReceptionForm({
           setIsCheckingPack(false);
         }
 
-        // Check if game exists in cache
-        const game = gamesCache.get(parsed.game_code);
+        // Check if game exists in cache first
+        let game = gamesCache.get(parsed.game_code);
+
+        if (!game) {
+          // Game not in cache - do cloud-first lookup
+          try {
+            const lookupResponse = await lookupGameByCode(parsed.game_code);
+            if (lookupResponse.success && lookupResponse.data?.found && lookupResponse.data.game) {
+              // Found in cloud or local - add to cache and use it
+              const cloudGame = lookupResponse.data.game;
+              const cachedGame: LotteryGameResponse = {
+                game_id: cloudGame.game_id,
+                game_code: cloudGame.game_code,
+                name: cloudGame.name,
+                price: cloudGame.price,
+                pack_value: cloudGame.pack_value,
+                tickets_per_pack: cloudGame.tickets_per_pack ?? 0,
+                status: 'ACTIVE',
+                store_id: storeId,
+                created_at: new Date().toISOString(),
+                updated_at: new Date().toISOString(),
+              };
+              // Update the games cache with the newly found game
+              gamesCache.set(parsed.game_code, cachedGame);
+              game = cachedGame;
+            }
+          } catch (lookupError) {
+            // Log error but continue - if lookup fails, show create modal
+            console.error('Failed to lookup game in cloud:', lookupError);
+          }
+        }
+
         if (game) {
-          // Game exists - add pack to list immediately
+          // Game exists (from cache or cloud lookup) - add pack to list immediately
           addPackToList(serial, parsed, game, scanMetrics);
         } else {
-          // Game not found - show modal to create it
+          // Game not found anywhere - show modal to create it
           setPendingGameToCreate({
             serial,
             game_code: parsed.game_code,
@@ -450,6 +481,7 @@ export function PackReceptionForm({
     setIsSubmitting(true);
     try {
       // Submit all packs via batch API
+      // SEC-010: AUTHZ - Backend gets received_by from authenticated session
       const response = await receivePackBatch({
         serialized_numbers: serials,
         store_id: storeId,

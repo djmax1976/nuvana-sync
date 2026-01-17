@@ -1,7 +1,8 @@
 import { Badge } from '../ui/badge';
 import { cn } from '../../lib/utils';
 import { Receipt, Users, Ticket, Scale, TrendingUp, Clock, CheckCircle } from 'lucide-react';
-import { AreaChart, Area, ResponsiveContainer, XAxis, YAxis, Tooltip } from 'recharts';
+import { AreaChart, Area, XAxis, YAxis, Tooltip } from 'recharts';
+import { DeferredResponsiveContainer } from '../ui/deferred-responsive-container';
 import { maskEmployeeName } from '../../lib/utils/security';
 
 /**
@@ -176,8 +177,12 @@ function StatCard({
   return (
     <article
       className={cn(
-        'bg-card border border-border rounded-xl p-4 shadow-sm transition-shadow duration-200 hover:shadow-md',
-        'flex flex-col h-[140px] min-w-0 overflow-hidden',
+        'bg-card border border-border rounded-xl shadow-sm transition-shadow duration-200 hover:shadow-md',
+        'flex flex-col min-w-0 overflow-hidden',
+        // Responsive padding and height
+        'p-3 h-[130px]',
+        'sm:p-4 sm:h-[140px]',
+        'xl:h-[150px]',
         className
       )}
       data-card-id={id}
@@ -190,19 +195,22 @@ function StatCard({
       <div className="flex justify-between items-start mb-0">
         <div className="min-w-0 flex-1">
           <span
-            className="text-[11px] font-medium text-muted-foreground uppercase tracking-wide block"
+            className="text-[10px] sm:text-[11px] font-medium text-muted-foreground uppercase tracking-wide block"
             id={`label-${id}`}
           >
             {label}
           </span>
-          <div className="flex items-baseline gap-1.5 mt-0.5">
-            <span className="text-xl font-bold text-foreground" aria-describedby={`label-${id}`}>
+          <div className="flex items-baseline gap-1 sm:gap-1.5 mt-0.5">
+            <span
+              className="text-lg sm:text-xl font-bold text-foreground"
+              aria-describedby={`label-${id}`}
+            >
               {value}
             </span>
             {trend && (
               <span
                 className={cn(
-                  'flex items-center gap-0.5 text-[11px]',
+                  'flex items-center gap-0.5 text-[10px] sm:text-[11px]',
                   trend.isPositive ? 'text-green-600' : 'text-red-500'
                 )}
                 aria-label={`Trend: ${trend.isPositive ? 'up' : 'down'} ${trend.value}`}
@@ -215,7 +223,7 @@ function StatCard({
         </div>
         <div
           className={cn(
-            'w-7 h-7 rounded-lg flex items-center justify-center flex-shrink-0',
+            'w-6 h-6 sm:w-7 sm:h-7 rounded-lg flex items-center justify-center flex-shrink-0',
             // eslint-disable-next-line security/detect-object-injection -- Safe: iconVariant is typed IconVariant enum
             ICON_VARIANT_STYLES[iconVariant]
           )}
@@ -227,15 +235,15 @@ function StatCard({
 
       {/* Chart or custom children */}
       {chartData ? (
-        <div className="flex-1 mt-1" style={{ minHeight: 60 }} aria-hidden="true">
-          <ResponsiveContainer width="100%" height={60}>
-            <AreaChart data={chartData} margin={{ top: 18, right: 12, bottom: 0, left: 12 }}>
+        <div className="flex-1 mt-1 h-[50px] min-h-[50px] min-w-[50px]" aria-hidden="true">
+          <DeferredResponsiveContainer width="100%" height="100%">
+            <AreaChart data={chartData} margin={{ top: 16, right: 8, bottom: 0, left: 8 }}>
               <XAxis
                 dataKey="label"
                 axisLine={{ stroke: 'hsl(var(--border))', strokeWidth: 1 }}
                 tickLine={false}
                 tick={{
-                  fontSize: 9,
+                  fontSize: 8,
                   fill: 'hsl(var(--muted-foreground))',
                 }}
                 interval={0}
@@ -309,29 +317,32 @@ function StatCard({
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={4}
+                          r={3}
                           fill={dotColor}
                           stroke="white"
-                          strokeWidth={2}
+                          strokeWidth={1.5}
                         />
                       )}
-                      <text
-                        x={cx}
-                        y={cy - 8}
-                        textAnchor="middle"
-                        fill={textColor}
-                        fontSize={9}
-                        fontWeight="bold"
-                      >
-                        {formatValue(dataValue)}
-                      </text>
+                      {/* Only show labels for max/min values to avoid overlap */}
+                      {(isMax || isMin) && (
+                        <text
+                          x={cx}
+                          y={cy - 6}
+                          textAnchor="middle"
+                          fill={textColor}
+                          fontSize={8}
+                          fontWeight="bold"
+                        >
+                          {formatValue(dataValue)}
+                        </text>
+                      )}
                     </g>
                   );
                 }}
                 activeDot={{ r: 4, strokeWidth: 0 }}
               />
             </AreaChart>
-          </ResponsiveContainer>
+          </DeferredResponsiveContainer>
         </div>
       ) : (
         <div className="flex-1 mt-1">{children}</div>
@@ -343,7 +354,7 @@ function StatCard({
 export function StatsGrid() {
   return (
     <section
-      className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4"
+      className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4"
       data-testid="stats-grid"
       aria-label="Store Performance Metrics"
       role="list"

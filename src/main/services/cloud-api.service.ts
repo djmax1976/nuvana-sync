@@ -146,6 +146,41 @@ export interface CloudCashiersResponse {
 }
 
 /**
+ * Employee from unified cloud sync (includes all roles)
+ * API: GET /api/v1/sync/employees
+ *
+ * Enterprise-grade unified employee sync that includes:
+ * - Store managers
+ * - Shift managers
+ * - Cashiers
+ *
+ * @security SEC-001: PIN hash from cloud, already bcrypt hashed
+ */
+export interface CloudEmployee {
+  employeeId: string;
+  name: string;
+  role: string; // Cloud role code: STORE_MANAGER, SHIFT_MANAGER, CASHIER
+  pinHash: string;
+  isActive: boolean;
+  syncSequence: number;
+  updatedAt: string;
+}
+
+/**
+ * Employees sync response from cloud
+ * API: GET /api/v1/sync/employees
+ */
+export interface CloudEmployeesResponse {
+  employees: CloudEmployee[];
+  syncMetadata: {
+    totalCount: number;
+    hasMore: boolean;
+    lastSequence: number;
+    serverTime: string;
+  };
+}
+
+/**
  * Sync statistics for completing a sync session
  */
 export interface SyncStats {
@@ -279,7 +314,7 @@ export interface CloudGame {
   price: number;
   pack_value: number;
   tickets_per_pack?: number;
-  status: 'ACTIVE' | 'INACTIVE';
+  status: 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
   updated_at: string;
 }
 
@@ -288,6 +323,7 @@ export interface CloudGame {
  */
 export interface CloudBinsResponse {
   bins: CloudBin[];
+  totalCount: number;
 }
 
 /**
@@ -295,6 +331,41 @@ export interface CloudBinsResponse {
  */
 export interface CloudGamesResponse {
   games: CloudGame[];
+}
+
+/**
+ * Lottery config value from cloud
+ */
+export interface CloudLotteryConfigValue {
+  config_value_id: string;
+  amount: number;
+  display_order: number;
+}
+
+/**
+ * Lottery configuration response from cloud
+ * API: GET /api/lottery/config-values
+ */
+export interface CloudLotteryConfigResponse {
+  ticket_prices: CloudLotteryConfigValue[];
+  pack_values: CloudLotteryConfigValue[];
+}
+
+/**
+ * Game lookup result from cloud
+ * API: GET /api/v1/sync/lottery/games
+ */
+export interface CloudGameLookupResult {
+  game_id: string;
+  game_code: string;
+  name: string;
+  price: number;
+  pack_value: number;
+  tickets_per_pack: number | null;
+  status: 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
+  state_id: string | null;
+  store_id: string | null;
+  scope_type?: 'STATE' | 'STORE' | 'GLOBAL';
 }
 
 // ============================================================================
@@ -703,18 +774,26 @@ export class CloudApiService {
       } catch (error: unknown) {
         lastError = error instanceof Error ? error : new Error('Unknown error');
 
-        // Don't retry for certain errors
-        if (
+        // Don't retry for certain errors:
+        // - AbortError: Request was cancelled
+        // - API key errors: Authentication issues
+        // - HTTPS errors: Security configuration
+        // - License status errors: Account issues
+        // - 4xx client errors: Not transient (404, 400, etc.)
+        const shouldNotRetry =
           lastError.name === 'AbortError' ||
           lastError.message.includes('API key') ||
           lastError.message.includes('HTTPS') ||
           lastError.message.includes('suspended') ||
-          lastError.message.includes('cancelled')
-        ) {
+          lastError.message.includes('cancelled') ||
+          lastError.message.includes('not found') ||
+          lastError.message.includes('HTTP 4'); // Catches HTTP 400, 404, etc.
+
+        if (shouldNotRetry) {
           throw lastError;
         }
 
-        // Retry on network errors
+        // Retry on transient errors (network issues, 5xx server errors)
         if (attempt < retries) {
           const delay = RETRY_DELAY_BASE_MS * Math.pow(2, attempt);
           log.warn('Request failed, retrying', { error: lastError.message, attempt, delay });
@@ -1176,6 +1255,7 @@ export class CloudApiService {
 
   /**
    * Push bins to cloud
+   * API: POST /api/v1/sync/lottery/bins (with session_id parameter)
    *
    * @param bins - Bin records to push
    * @returns Push result
@@ -1189,7 +1269,19 @@ export class CloudApiService {
 
     log.debug('Pushing bins to cloud', { count: bins.length });
 
-    return this.request('POST', '/api/v1/sync/bins', { bins });
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    const params = new URLSearchParams();
+    params.set('session_id', session.sessionId);
+
+    const path = `/api/v1/sync/lottery/bins?${params.toString()}`;
+
+    return this.request('POST', path, { bins });
   }
 
   /**
@@ -1376,19 +1468,97 @@ export class CloudApiService {
   }
 
   /**
-   * Pull users/cashiers from cloud with full sync session management
+   * Pull employees from cloud with sync session
    * SEC-001: PIN hashes are pulled, never plaintext PINs
-   * API: Follows documented sync flow (start -> cashiers -> complete)
    *
-   * This method handles the complete sync flow per API documentation:
+   * Enterprise-grade unified employee sync:
+   * - Pulls ALL employee types (store_manager, shift_manager, cashier)
+   * - Maps cloud role codes to local roles
+   * - Supports pagination for large datasets
+   *
+   * @param sessionId - Sync session ID from startSyncSession
+   * @param options - Optional parameters for delta sync
+   * @returns Cloud employees with roles
+   */
+  async pullEmployees(
+    sessionId: string,
+    options?: {
+      sinceTimestamp?: string;
+      sinceSequence?: number;
+      includeInactive?: boolean;
+      limit?: number;
+    }
+  ): Promise<CloudEmployeesResponse> {
+    log.debug('Pulling employees from cloud', { sessionId, options });
+
+    const params = new URLSearchParams();
+    params.set('session_id', sessionId);
+
+    if (options?.sinceTimestamp) {
+      params.set('since_timestamp', options.sinceTimestamp);
+    }
+    if (options?.sinceSequence !== undefined) {
+      params.set('since_sequence', String(options.sinceSequence));
+    }
+    if (options?.includeInactive) {
+      params.set('include_inactive', 'true');
+    }
+    if (options?.limit) {
+      params.set('limit', String(options.limit));
+    }
+
+    const path = `/api/v1/sync/employees?${params.toString()}`;
+
+    // API returns { success: true, data: { employees: [...], syncMetadata: {...} } }
+    const rawResponse = await this.request<{ success: boolean; data: CloudEmployeesResponse }>(
+      'GET',
+      path
+    );
+
+    log.debug('Employees raw response', {
+      hasData: Boolean(rawResponse.data),
+      dataKeys: rawResponse.data ? Object.keys(rawResponse.data) : [],
+    });
+
+    const response = rawResponse.data;
+
+    // Handle case where syncMetadata might not be present
+    const syncMetadata = response?.syncMetadata || {
+      totalCount: response?.employees?.length || 0,
+      hasMore: false,
+      lastSequence: 0,
+      serverTime: new Date().toISOString(),
+    };
+
+    const employees = response?.employees || [];
+
+    log.info('Employees pulled successfully', {
+      count: employees.length,
+      hasMore: syncMetadata.hasMore,
+      lastSequence: syncMetadata.lastSequence,
+    });
+
+    return {
+      employees,
+      syncMetadata,
+    };
+  }
+
+  /**
+   * Pull users/employees from cloud with full sync session management
+   * SEC-001: PIN hashes are pulled, never plaintext PINs
+   * API: Follows documented sync flow (start -> employees -> complete)
+   *
+   * Enterprise-grade implementation:
    * 1. Start sync session (POST /api/v1/sync/start)
-   * 2. Pull all cashiers with pagination (GET /api/v1/sync/cashiers)
-   * 3. Complete sync session with stats (POST /api/v1/sync/complete)
+   * 2. Try unified employees endpoint first (GET /api/v1/sync/employees)
+   * 3. Fall back to cashiers endpoint if employees not available
+   * 4. Complete sync session with stats (POST /api/v1/sync/complete)
    *
-   * @returns Cloud users in legacy format for local storage
+   * @returns Cloud users with proper roles for local storage
    */
   async pullUsers(): Promise<CloudUsersResponse> {
-    log.debug('Pulling cashiers from cloud');
+    log.debug('Pulling employees from cloud');
 
     // Start sync session (required per API documentation)
     const session = await this.startSyncSession();
@@ -1406,45 +1576,38 @@ export class CloudApiService {
     let lastSequence = 0;
 
     try {
-      // Pull all cashiers with pagination
-      const allCashiers: CloudCashier[] = [];
-      let hasMore = true;
-      let sinceSequence: number | undefined;
+      // Try unified employees endpoint first (enterprise-grade)
+      const users = await this.pullUsersFromEmployeesEndpoint(session.sessionId);
 
-      while (hasMore) {
-        const response = await this.pullCashiers(session.sessionId, {
-          sinceSequence,
-          limit: 500, // API max is 500
+      if (users !== null) {
+        totalPulled = users.length;
+
+        // Complete sync session with stats
+        await this.completeSyncSession(session.sessionId, lastSequence, {
+          pulled: totalPulled,
+          pushed: 0,
+          conflictsResolved: 0,
         });
 
-        allCashiers.push(...response.cashiers);
-        hasMore = response.syncMetadata.hasMore;
-        lastSequence = response.syncMetadata.lastSequence;
-        // Use lastSequence for next page
-        sinceSequence = lastSequence;
+        log.info('Employees pulled successfully via unified endpoint', { count: users.length });
+        return { users };
       }
 
-      totalPulled = allCashiers.length;
+      // Fall back to cashiers endpoint (legacy compatibility)
+      log.info('Falling back to cashiers endpoint');
+      const cashierUsers = await this.pullUsersFromCashiersEndpoint(session.sessionId);
+      totalPulled = cashierUsers.length;
+      lastSequence = 0; // Reset for cashiers endpoint
 
-      // Complete sync session with stats (required per API documentation)
+      // Complete sync session
       await this.completeSyncSession(session.sessionId, lastSequence, {
         pulled: totalPulled,
         pushed: 0,
         conflictsResolved: 0,
       });
 
-      // Convert to legacy format
-      const users: CloudUser[] = allCashiers.map((cashier) => ({
-        userId: cashier.cashierId,
-        name: cashier.name,
-        role: 'cashier' as StoreRole,
-        pinHash: cashier.pinHash,
-        active: cashier.isActive,
-      }));
-
-      log.info('Cashiers pulled successfully', { count: users.length });
-
-      return { users };
+      log.info('Cashiers pulled successfully via legacy endpoint', { count: cashierUsers.length });
+      return { users: cashierUsers };
     } catch (error) {
       // Try to complete session even on error (best effort)
       try {
@@ -1461,23 +1624,180 @@ export class CloudApiService {
   }
 
   /**
+   * Pull users from unified employees endpoint
+   * Returns null if endpoint not available (404)
+   *
+   * @param sessionId - Sync session ID
+   * @returns CloudUser array or null if endpoint unavailable
+   */
+  private async pullUsersFromEmployeesEndpoint(sessionId: string): Promise<CloudUser[] | null> {
+    try {
+      const allEmployees: CloudEmployee[] = [];
+      let hasMore = true;
+      let sinceSequence: number | undefined;
+
+      while (hasMore) {
+        const response = await this.pullEmployees(sessionId, {
+          sinceSequence,
+          limit: 500,
+        });
+
+        allEmployees.push(...response.employees);
+        hasMore = response.syncMetadata.hasMore;
+        sinceSequence = response.syncMetadata.lastSequence;
+      }
+
+      // Map employees to CloudUser with proper role mapping
+      return allEmployees.map((employee) => ({
+        userId: employee.employeeId,
+        name: employee.name,
+        role: mapCloudRole(employee.role),
+        pinHash: employee.pinHash,
+        active: employee.isActive,
+      }));
+    } catch (error) {
+      // Check if endpoint doesn't exist (404)
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('404') || errorMessage.includes('not found')) {
+        log.info('Unified employees endpoint not available, will use fallback');
+        return null;
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pull users from legacy cashiers endpoint
+   * All users mapped as 'cashier' role (legacy behavior)
+   *
+   * @param sessionId - Sync session ID
+   * @returns CloudUser array with cashier role
+   */
+  private async pullUsersFromCashiersEndpoint(sessionId: string): Promise<CloudUser[]> {
+    const allCashiers: CloudCashier[] = [];
+    let hasMore = true;
+    let sinceSequence: number | undefined;
+
+    while (hasMore) {
+      const response = await this.pullCashiers(sessionId, {
+        sinceSequence,
+        limit: 500,
+      });
+
+      allCashiers.push(...response.cashiers);
+      hasMore = response.syncMetadata.hasMore;
+      sinceSequence = response.syncMetadata.lastSequence;
+    }
+
+    // Legacy mapping - all as cashier role
+    // NOTE: This is intentionally kept for backwards compatibility
+    // When backend provides unified endpoint, pullUsersFromEmployeesEndpoint
+    // will be used instead with proper role mapping
+    return allCashiers.map((cashier) => ({
+      userId: cashier.cashierId,
+      name: cashier.name,
+      role: 'cashier' as StoreRole,
+      pinHash: cashier.pinHash,
+      active: cashier.isActive,
+    }));
+  }
+
+  /**
    * Pull bins from cloud
+   * API: GET /api/v1/sync/lottery/bins (with session_id parameter)
    *
    * @param since - Optional timestamp for delta sync
-   * @returns Cloud bins
+   * @returns Cloud bins with totalCount
    */
   async pullBins(since?: string): Promise<CloudBinsResponse> {
-    const path = since
-      ? `/api/v1/sync/bins?since=${encodeURIComponent(since)}`
-      : '/api/v1/sync/bins';
-
     log.debug('Pulling bins from cloud', { since: since || 'full' });
 
-    const response = await this.request<CloudBinsResponse>('GET', path);
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
 
-    log.info('Bins pulled successfully', { count: response.bins.length });
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
 
-    return response;
+    try {
+      // Build query parameters with session_id
+      const params = new URLSearchParams();
+      params.set('session_id', session.sessionId);
+      if (since) {
+        params.set('since', since);
+      }
+
+      const path = `/api/v1/sync/lottery/bins?${params.toString()}`;
+
+      const rawResponse = await this.request<Record<string, unknown>>('GET', path);
+
+      // Log full response structure for debugging
+      log.debug('Bins API raw response', {
+        responseKeys: Object.keys(rawResponse),
+        hasSuccess: 'success' in rawResponse,
+        hasData: 'data' in rawResponse,
+        hasBins: 'bins' in rawResponse,
+        dataType: rawResponse.data ? typeof rawResponse.data : 'undefined',
+        dataKeys:
+          rawResponse.data && typeof rawResponse.data === 'object'
+            ? Object.keys(rawResponse.data as Record<string, unknown>)
+            : [],
+      });
+
+      // Handle the API response format: { success, data: { records, totalCount, ... } }
+      // The cloud API returns 'records' with different field names than our CloudBin interface:
+      // Cloud: { binId, name, location, displayOrder, isActive, updatedAt, syncSequence }
+      // Local: { bin_id, store_id, bin_number, label, status, updated_at, deleted_at }
+      let response: CloudBinsResponse;
+
+      // Helper to map cloud bin format to local format
+      const mapCloudBin = (cloudRecord: Record<string, unknown>): CloudBin => ({
+        bin_id: (cloudRecord.binId || cloudRecord.bin_id) as string,
+        store_id: (cloudRecord.storeId || cloudRecord.store_id || '') as string,
+        bin_number: ((cloudRecord.displayOrder as number) ?? 0) + 1, // displayOrder is 0-indexed, bin_number is 1-indexed
+        label: (cloudRecord.name || cloudRecord.label) as string | undefined,
+        status: (cloudRecord.isActive === true || cloudRecord.status === 'ACTIVE') ? 'ACTIVE' : 'INACTIVE',
+        updated_at: (cloudRecord.updatedAt || cloudRecord.updated_at) as string,
+        deleted_at: (cloudRecord.deletedAt || cloudRecord.deleted_at) as string | undefined,
+      });
+
+      if ('data' in rawResponse && rawResponse.data && typeof rawResponse.data === 'object') {
+        const data = rawResponse.data as Record<string, unknown>;
+        // Cloud API returns 'records' array, not 'bins'
+        const rawRecords = (data.records || data.bins || []) as Record<string, unknown>[];
+        const records = rawRecords.map(mapCloudBin);
+        response = {
+          bins: records,
+          totalCount: (data.totalCount as number) || records.length,
+        };
+      } else if ('records' in rawResponse) {
+        // Direct format with records
+        const rawRecords = (rawResponse.records || []) as Record<string, unknown>[];
+        const records = rawRecords.map(mapCloudBin);
+        response = {
+          bins: records,
+          totalCount: (rawResponse.totalCount as number) || records.length,
+        };
+      } else if ('bins' in rawResponse) {
+        // Direct format with bins (already in correct format)
+        response = rawResponse as unknown as CloudBinsResponse;
+      } else {
+        log.error('Unexpected bins API response structure', { rawResponse });
+        throw new Error('Invalid bins API response structure');
+      }
+
+      log.info('Bins pulled successfully', {
+        count: response.bins?.length ?? 0,
+        totalCount: response.totalCount,
+      });
+
+      return response;
+    } catch (error) {
+      log.error('Failed to pull bins from cloud', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      throw error;
+    }
   }
 
   /**
@@ -1498,6 +1818,586 @@ export class CloudApiService {
     log.info('Games pulled successfully', { count: response.games.length });
 
     return response;
+  }
+
+  // ==========================================================================
+  // Lottery Configuration API
+  // ==========================================================================
+
+  /**
+   * Fetch lottery configuration values from cloud
+   * Returns ticket prices and pack values for dropdown population
+   * API: GET /api/v1/sync/lottery/config
+   *
+   * Requires a sync session (like all sync endpoints).
+   * Games are state-scoped, so state_id is the primary filter.
+   *
+   * @param stateId - State ID for scoping (games are state-level)
+   * @returns Config values grouped by type
+   */
+  async fetchLotteryConfigValues(stateId: string | null): Promise<CloudLotteryConfigResponse> {
+    log.debug('Fetching lottery config values from cloud', { stateId });
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      // Build query parameters with session_id and state_id
+      const params = new URLSearchParams();
+      params.set('session_id', session.sessionId);
+      if (stateId) {
+        params.set('state_id', stateId);
+      }
+
+      const path = `/api/v1/sync/lottery/config?${params.toString()}`;
+
+      // SEC-014: Type the raw response loosely to inspect actual structure
+      const rawResponse = await this.request<{
+        success: boolean;
+        data: Record<string, unknown>;
+      }>('GET', path);
+
+      // API-003: Log response structure for debugging (no sensitive data)
+      log.debug('Config API raw response structure', {
+        success: rawResponse.success,
+        hasData: !!rawResponse.data,
+        dataKeys: rawResponse.data ? Object.keys(rawResponse.data) : [],
+      });
+
+      if (!rawResponse.success || !rawResponse.data) {
+        throw new Error('Failed to fetch lottery config values');
+      }
+
+      // Transform response to expected format
+      // API may return: { config_values: [...] }, { records: [...] }, or { ticket_prices: [...], pack_values: [...] }
+      const data = rawResponse.data;
+      let configResponse: CloudLotteryConfigResponse;
+
+      if ('ticket_prices' in data && 'pack_values' in data) {
+        // Direct format - already correct
+        configResponse = data as unknown as CloudLotteryConfigResponse;
+      } else if ('config_values' in data && Array.isArray(data.config_values)) {
+        // Flat array format - need to transform
+        const values = data.config_values as Array<{
+          config_value_id: string;
+          config_type: string;
+          amount: number;
+          display_order: number;
+        }>;
+        configResponse = {
+          ticket_prices: values
+            .filter((v) => v.config_type === 'TICKET_PRICE')
+            .map((v) => ({
+              config_value_id: v.config_value_id,
+              amount: v.amount,
+              display_order: v.display_order,
+            })),
+          pack_values: values
+            .filter((v) => v.config_type === 'PACK_VALUE')
+            .map((v) => ({
+              config_value_id: v.config_value_id,
+              amount: v.amount,
+              display_order: v.display_order,
+            })),
+        };
+      } else if ('records' in data && Array.isArray(data.records)) {
+        // Sync endpoint format - records array with camelCase fields
+        const rawRecords = data.records as Array<Record<string, unknown>>;
+        log.debug('Processing config records', {
+          totalRecords: rawRecords.length,
+          sampleRecord: rawRecords[0] ? JSON.stringify(rawRecords[0]).slice(0, 200) : 'none',
+        });
+        // Transform camelCase to snake_case and normalize field names
+        const values = rawRecords.map((r) => ({
+          config_value_id: (r.configValueId || r.config_value_id || r.id || '') as string,
+          config_type: ((r.configType || r.config_type || '') as string).toUpperCase(),
+          amount: Number(r.amount || 0),
+          display_order: Number(r.displayOrder || r.display_order || 0),
+        }));
+        configResponse = {
+          ticket_prices: values
+            .filter((v) => v.config_type === 'TICKET_PRICE')
+            .map((v) => ({
+              config_value_id: v.config_value_id,
+              amount: v.amount,
+              display_order: v.display_order,
+            })),
+          pack_values: values
+            .filter((v) => v.config_type === 'PACK_VALUE')
+            .map((v) => ({
+              config_value_id: v.config_value_id,
+              amount: v.amount,
+              display_order: v.display_order,
+            })),
+        };
+        log.debug('Config values transformed', {
+          ticketPrices: configResponse.ticket_prices.length,
+          packValues: configResponse.pack_values.length,
+        });
+      } else if ('ticketPrices' in data && 'packValues' in data) {
+        // CamelCase format - transform to snake_case
+        configResponse = {
+          ticket_prices: data.ticketPrices as CloudLotteryConfigValue[],
+          pack_values: data.packValues as CloudLotteryConfigValue[],
+        };
+      } else {
+        // Unknown format - return empty arrays with warning
+        log.warn('Unknown config response format', { keys: Object.keys(data) });
+        configResponse = { ticket_prices: [], pack_values: [] };
+      }
+
+      log.info('Lottery config values fetched', {
+        ticketPrices: configResponse.ticket_prices?.length || 0,
+        packValues: configResponse.pack_values?.length || 0,
+      });
+
+      // Complete sync session
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled:
+          (configResponse.ticket_prices?.length || 0) + (configResponse.pack_values?.length || 0),
+        pushed: 0,
+        conflictsResolved: 0,
+      });
+
+      return configResponse;
+    } catch (error) {
+      // Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after config fetch error');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Pull lottery games from the lottery-specific endpoint
+   * API: GET /api/v1/sync/lottery/games
+   *
+   * Requires a sync session (like all sync endpoints).
+   * Games are state-scoped, so state_id is the primary filter.
+   *
+   * @param stateId - State ID for scoping (games are state-level)
+   * @param since - Optional timestamp for delta sync
+   * @returns Cloud games response
+   */
+  async pullLotteryGames(stateId: string | null, since?: string): Promise<CloudGamesResponse> {
+    log.debug('Pulling lottery games from cloud', { stateId, since: since || 'full' });
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      // Build query parameters with session_id and state_id
+      const params = new URLSearchParams();
+      params.set('session_id', session.sessionId);
+      if (stateId) {
+        params.set('state_id', stateId);
+      }
+      if (since) {
+        params.set('since', since);
+      }
+
+      const path = `/api/v1/sync/lottery/games?${params.toString()}`;
+
+      const response = await this.request<{
+        success: boolean;
+        data: { games: CloudGame[] };
+      }>('GET', path);
+
+      const games = response.success && response.data?.games ? response.data.games : [];
+
+      log.info('Lottery games pulled successfully', { count: games.length });
+
+      // Complete sync session
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled: games.length,
+        pushed: 0,
+        conflictsResolved: 0,
+      });
+
+      return { games };
+    } catch (error) {
+      // Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after games pull error');
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Lookup a lottery game by game code from cloud
+   * Used when receiving packs with unknown game codes
+   * API: GET /api/v1/sync/lottery/games (with session_id parameter)
+   *
+   * Games are state-scoped, so state_id is used for filtering.
+   *
+   * SEC-006: Game code validated before lookup
+   * API-001: Input validation before processing
+   *
+   * @param gameCode - 4-digit game code
+   * @param stateId - State ID for scoping (games are state-level)
+   * @returns Game if found, null if not found in cloud
+   */
+  async lookupGameByCode(
+    gameCode: string,
+    stateId?: string | null
+  ): Promise<CloudGameLookupResult | null> {
+    // SEC-006 & API-001: Validate game code format before processing
+    if (!/^\d{4}$/.test(gameCode)) {
+      log.warn('Invalid game code format', { gameCode });
+      return null;
+    }
+
+    log.debug('Looking up game by code in cloud', { gameCode, stateId });
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      // Build query parameters - fetch all games for state (API may not support game_code filter)
+      // API-001: Only use supported parameters
+      const params = new URLSearchParams();
+      params.set('session_id', session.sessionId);
+      if (stateId) {
+        params.set('state_id', stateId);
+      }
+      // Note: game_code filter removed - API may not support it, fetch all and filter locally
+
+      const path = `/api/v1/sync/lottery/games?${params.toString()}`;
+
+      // SEC-014: Type loosely to inspect actual response structure - use unknown to see raw shape
+      const rawResponse = await this.request<Record<string, unknown>>('GET', path);
+
+      // API-003: Log FULL response structure for debugging (no sensitive data)
+      log.debug('Games API FULL raw response', {
+        responseKeys: Object.keys(rawResponse),
+        hasSuccess: 'success' in rawResponse,
+        successValue: rawResponse.success,
+        hasData: 'data' in rawResponse,
+        hasGames: 'games' in rawResponse,
+        dataType: rawResponse.data ? typeof rawResponse.data : 'undefined',
+        dataKeys:
+          rawResponse.data && typeof rawResponse.data === 'object'
+            ? Object.keys(rawResponse.data as Record<string, unknown>)
+            : [],
+        gameCode,
+      });
+
+      // Extract games from various possible response structures
+      let games: CloudGameLookupResult[] = [];
+
+      // Structure 1: { success: true, data: { games: [...] } }
+      if (rawResponse.success && rawResponse.data && typeof rawResponse.data === 'object') {
+        const data = rawResponse.data as Record<string, unknown>;
+        if ('games' in data && Array.isArray(data.games)) {
+          games = data.games as CloudGameLookupResult[];
+          log.debug('Games found in response.data.games', { count: games.length });
+        }
+      }
+
+      // Structure 2: { success: true, games: [...] } - games at top level
+      if (games.length === 0 && 'games' in rawResponse && Array.isArray(rawResponse.games)) {
+        games = rawResponse.games as CloudGameLookupResult[];
+        log.debug('Games found in response.games (top level)', { count: games.length });
+      }
+
+      // Structure 3: { data: [...] } - data is the games array directly
+      if (games.length === 0 && rawResponse.data && Array.isArray(rawResponse.data)) {
+        games = rawResponse.data as unknown as CloudGameLookupResult[];
+        log.debug('Games found as response.data array', { count: games.length });
+      }
+
+      // Structure 4: Response is array directly (unlikely but possible)
+      if (games.length === 0 && Array.isArray(rawResponse)) {
+        games = rawResponse as unknown as CloudGameLookupResult[];
+        log.debug('Response is direct games array', { count: games.length });
+      }
+
+      // Structure 5: { data: { items: [...] } } or { items: [...] }
+      if (games.length === 0) {
+        const data = (rawResponse.data as Record<string, unknown>) || rawResponse;
+        if (data && 'items' in data && Array.isArray(data.items)) {
+          games = data.items as CloudGameLookupResult[];
+          log.debug('Games found in items array', { count: games.length });
+        }
+      }
+
+      // Structure 6: { data: { records: [...] } } - sync endpoint format with camelCase
+      if (games.length === 0) {
+        const data = (rawResponse.data as Record<string, unknown>) || rawResponse;
+        if (data && 'records' in data && Array.isArray(data.records)) {
+          // Transform camelCase records to snake_case format
+          const rawRecords = data.records as Array<Record<string, unknown>>;
+          games = rawRecords.map((r) => ({
+            game_id: (r.gameId || r.game_id || r.id) as string,
+            game_code: (r.gameCode || r.game_code) as string,
+            name: (r.name || r.gameName) as string,
+            price: Number(r.price || r.ticketPrice || 0),
+            pack_value: Number(r.packValue || r.pack_value || 0),
+            tickets_per_pack:
+              r.ticketsPerPack !== undefined
+                ? Number(r.ticketsPerPack)
+                : r.tickets_per_pack !== undefined
+                  ? Number(r.tickets_per_pack)
+                  : null,
+            status: ((r.status || 'ACTIVE') as string).toUpperCase() as
+              | 'ACTIVE'
+              | 'INACTIVE'
+              | 'DISCONTINUED',
+            state_id: (r.stateId || r.state_id || null) as string | null,
+            store_id: (r.storeId || r.store_id || null) as string | null,
+            scope_type: (r.scopeType || r.scope_type) as 'STATE' | 'STORE' | 'GLOBAL' | undefined,
+          }));
+          log.debug('Games found in records array (sync format)', {
+            count: games.length,
+            sampleGame: games[0] ? { game_code: games[0].game_code, name: games[0].name } : null,
+          });
+        }
+      }
+
+      // Structure 7: Single game object returned
+      if (games.length === 0) {
+        const data = (rawResponse.data as Record<string, unknown>) || rawResponse;
+        if (data && 'game_id' in data && 'game_code' in data) {
+          games = [data as unknown as CloudGameLookupResult];
+          log.debug('Single game object returned', { gameCode: data.game_code });
+        }
+      }
+
+      // If still no games, log detailed structure for debugging
+      if (games.length === 0) {
+        log.warn('Could not extract games from response', {
+          gameCode,
+          responseKeys: Object.keys(rawResponse),
+          dataKeys:
+            rawResponse.data && typeof rawResponse.data === 'object'
+              ? Object.keys(rawResponse.data as Record<string, unknown>)
+              : [],
+          sampleData: JSON.stringify(rawResponse).slice(0, 500),
+        });
+      }
+
+      log.debug('Games extracted from response', {
+        gameCode,
+        gamesCount: games.length,
+        gameCodes: games.slice(0, 10).map((g) => g.game_code),
+      });
+
+      if (games.length === 0) {
+        log.debug('No games found in cloud', { gameCode });
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+        return null;
+      }
+
+      // Find the exact game by code (case-sensitive match)
+      const game = games.find((g) => g.game_code === gameCode);
+
+      // Complete sync session
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled: games.length,
+        pushed: 0,
+        conflictsResolved: 0,
+      });
+
+      if (!game) {
+        log.debug('Game not found in cloud response', {
+          searchedFor: gameCode,
+          totalGames: games.length,
+          availableCodes: games.map((g) => g.game_code),
+        });
+        return null;
+      }
+
+      log.info('Game found in cloud', {
+        gameCode,
+        gameId: game.game_id,
+        name: game.name,
+      });
+
+      return game;
+    } catch (error) {
+      // Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after game lookup error');
+      }
+      // Log and re-throw - let caller handle the error
+      const errorMsg = error instanceof Error ? error.message : String(error);
+      log.error('Failed to lookup game by code from cloud', { gameCode, error: errorMsg });
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // Cloud Authentication (Support/Admin Access)
+  // ==========================================================================
+
+  /**
+   * Authenticate a support/admin user with email and password against the cloud API
+   * SEC-001: Cloud-based authentication for support personnel
+   *
+   * This is separate from the store-level PIN authentication.
+   * Used for support staff accessing settings and administrative functions.
+   *
+   * @param email - User's email address
+   * @param password - User's password
+   * @returns Authentication result with user info and roles
+   */
+  async authenticateCloudUser(
+    email: string,
+    password: string
+  ): Promise<{
+    success: boolean;
+    user?: {
+      id: string;
+      email: string;
+      name: string;
+      roles: string[];
+    };
+    error?: string;
+  }> {
+    log.info('Attempting cloud authentication', { email: email.substring(0, 3) + '***' });
+
+    try {
+      const baseUrl = this.getBaseUrl();
+      const url = `${baseUrl}/api/auth/login`;
+
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), REQUEST_TIMEOUT_MS);
+
+      const response = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'X-Client-Version': CLIENT_VERSION,
+        },
+        body: JSON.stringify({ email, password }),
+        signal: controller.signal,
+        credentials: 'include', // Include cookies for session
+      });
+
+      clearTimeout(timeoutId);
+
+      // Parse response
+      const responseData = (await response.json()) as {
+        success?: boolean;
+        data?: {
+          user?: {
+            id: string;
+            email: string;
+            name: string;
+            roles?: string[];
+          };
+        };
+        error?: {
+          code?: string;
+          message?: string;
+        };
+        message?: string;
+      };
+
+      // Handle authentication failure
+      if (!response.ok || responseData.success === false) {
+        const errorMessage =
+          responseData.error?.message || responseData.message || 'Invalid email or password';
+
+        log.warn('Cloud authentication failed', {
+          status: response.status,
+          error: errorMessage,
+        });
+
+        return {
+          success: false,
+          error: errorMessage,
+        };
+      }
+
+      // Extract user from response
+      const user = responseData.data?.user;
+      if (!user) {
+        log.error('Cloud auth response missing user data');
+        return {
+          success: false,
+          error: 'Invalid response from authentication server',
+        };
+      }
+
+      log.info('Cloud authentication successful', {
+        userId: user.id,
+        email: user.email,
+        roles: user.roles,
+      });
+
+      return {
+        success: true,
+        user: {
+          id: user.id,
+          email: user.email,
+          name: user.name,
+          roles: user.roles || [],
+        },
+      };
+    } catch (error) {
+      const errorMsg = error instanceof Error ? error.message : String(error);
+
+      // Handle specific error types
+      if (errorMsg.includes('abort') || errorMsg.includes('timeout')) {
+        log.error('Cloud authentication timed out');
+        return {
+          success: false,
+          error: 'Authentication request timed out. Please try again.',
+        };
+      }
+
+      if (errorMsg.includes('fetch') || errorMsg.includes('network')) {
+        log.error('Cloud authentication network error', { error: errorMsg });
+        return {
+          success: false,
+          error:
+            'Unable to connect to authentication server. Please check your internet connection.',
+        };
+      }
+
+      log.error('Cloud authentication error', { error: errorMsg });
+      return {
+        success: false,
+        error: 'Authentication failed. Please try again.',
+      };
+    }
   }
 }
 

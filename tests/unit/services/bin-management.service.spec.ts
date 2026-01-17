@@ -73,6 +73,8 @@ describe('BinManagementService', () => {
     name: 'Test Store',
     timezone: 'America/New_York',
     status: 'ACTIVE' as const,
+    state_id: null,
+    state_code: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
   };

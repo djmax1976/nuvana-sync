@@ -59,42 +59,50 @@ const recentPacks = [
 export function RecentlyActivatedPacks() {
   return (
     <Card
-      className="min-h-[380px] flex flex-col"
+      className="min-h-[340px] sm:min-h-[380px] flex flex-col"
       data-testid="recently-activated-packs"
       role="region"
       aria-labelledby="recently-activated-packs-title"
     >
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="recently-activated-packs-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle
+          id="recently-activated-packs-title"
+          className="text-sm sm:text-base font-semibold truncate"
+        >
           Recently Activated Packs
         </CardTitle>
         <Button
           variant="outline"
           size="sm"
-          className="text-xs"
+          className="text-xs flex-shrink-0"
           aria-label="View all activated lottery packs"
         >
           View All
         </Button>
       </CardHeader>
-      <CardContent className="p-0 flex-1 overflow-x-auto">
-        <Table aria-label="Recently activated lottery packs" className="min-w-[320px]">
+      <CardContent className="flex-1 overflow-x-auto p-0">
+        <Table
+          aria-label="Recently activated lottery packs"
+          className="min-w-[320px]"
+          size="compact"
+          nested
+        >
           <TableHeader>
             <TableRow>
               <TableHead
-                className="text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
                 scope="col"
               >
                 Game
               </TableHead>
               <TableHead
-                className="text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
                 scope="col"
               >
                 Pack
               </TableHead>
               <TableHead
-                className="text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
                 scope="col"
               >
                 Activated By
@@ -113,7 +121,7 @@ export function RecentlyActivatedPacks() {
 
               return (
                 <TableRow key={safeKey}>
-                  <TableCell className="font-medium text-sm max-w-[120px] truncate">
+                  <TableCell className="font-medium text-xs sm:text-sm max-w-[120px] truncate">
                     {safeGame}
                   </TableCell>
                   <TableCell>
@@ -124,7 +132,9 @@ export function RecentlyActivatedPacks() {
                       {maskedPackId}
                     </span>
                   </TableCell>
-                  <TableCell className="hidden sm:table-cell text-sm">{maskedActivator}</TableCell>
+                  <TableCell className="hidden sm:table-cell text-xs sm:text-sm">
+                    {maskedActivator}
+                  </TableCell>
                 </TableRow>
               );
             })}

@@ -292,6 +292,220 @@ export class UsersDAL extends StoreBasedDAL<User> {
   }
 
   /**
+   * Find multiple users by cloud user IDs (batch operation)
+   * Enterprise-grade: Eliminates N+1 queries during sync
+   * SEC-006: Parameterized IN clause with placeholders
+   * Performance: Single query for all cloud IDs
+   *
+   * @param cloudUserIds - Array of cloud user identifiers
+   * @returns Map of cloud_user_id -> User for efficient lookup
+   */
+  findByCloudIds(cloudUserIds: string[]): Map<string, User> {
+    const result = new Map<string, User>();
+
+    if (cloudUserIds.length === 0) {
+      return result;
+    }
+
+    // SEC-006: Batch in chunks to avoid SQLite parameter limits (max ~999)
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < cloudUserIds.length; i += CHUNK_SIZE) {
+      const chunk = cloudUserIds.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(', ');
+
+      const stmt = this.db.prepare(`
+        SELECT * FROM users WHERE cloud_user_id IN (${placeholders})
+      `);
+
+      const users = stmt.all(...chunk) as User[];
+
+      for (const user of users) {
+        if (user.cloud_user_id) {
+          result.set(user.cloud_user_id, user);
+        }
+      }
+    }
+
+    log.debug('Batch lookup by cloud IDs', {
+      requested: cloudUserIds.length,
+      found: result.size,
+    });
+
+    return result;
+  }
+
+  /**
+   * Batch upsert users from cloud sync
+   * Enterprise-grade: Single transaction for all users
+   * SEC-006: Parameterized queries
+   * DB-006: Validates store_id for tenant isolation
+   * Performance: Uses transaction for atomicity and speed
+   *
+   * @param users - Array of cloud user data
+   * @param expectedStoreId - Expected store ID for tenant isolation validation
+   * @returns Upsert result with counts
+   */
+  batchUpsertFromCloud(
+    users: CloudUserData[],
+    expectedStoreId: string
+  ): { created: number; updated: number; errors: string[] } {
+    const result = { created: 0, updated: 0, errors: [] as string[] };
+
+    if (users.length === 0) {
+      return result;
+    }
+
+    // DB-006: Validate all users belong to expected store
+    for (const user of users) {
+      if (user.store_id !== expectedStoreId) {
+        const errorMsg = `Store ID mismatch for user ${user.cloud_user_id}: expected ${expectedStoreId}, got ${user.store_id}`;
+        log.error('Tenant isolation violation in batch upsert', {
+          cloudUserId: user.cloud_user_id,
+          expectedStoreId,
+          actualStoreId: user.store_id,
+        });
+        result.errors.push(errorMsg);
+      }
+    }
+
+    // Abort if any store_id violations
+    if (result.errors.length > 0) {
+      throw new Error(
+        `Tenant isolation violation: ${result.errors.length} users have wrong store_id`
+      );
+    }
+
+    // Get existing users in single batch query (eliminates N+1)
+    const cloudUserIds = users.map((u) => u.cloud_user_id);
+    const existingUsers = this.findByCloudIds(cloudUserIds);
+
+    // Execute all upserts in single transaction for atomicity
+    this.withTransaction(() => {
+      const now = this.now();
+
+      const insertStmt = this.db.prepare(`
+        INSERT INTO users (
+          user_id, store_id, role, name, pin_hash, active,
+          cloud_user_id, synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+      `);
+
+      const updateStmt = this.db.prepare(`
+        UPDATE users SET
+          role = ?,
+          name = ?,
+          pin_hash = ?,
+          synced_at = ?,
+          updated_at = ?
+        WHERE cloud_user_id = ?
+      `);
+
+      for (const userData of users) {
+        try {
+          const existing = existingUsers.get(userData.cloud_user_id);
+
+          if (existing) {
+            // Update existing user
+            updateStmt.run(
+              userData.role,
+              userData.name,
+              userData.pin_hash,
+              now,
+              now,
+              userData.cloud_user_id
+            );
+            result.updated++;
+          } else {
+            // Create new user
+            const userId = this.generateId();
+            insertStmt.run(
+              userId,
+              userData.store_id,
+              userData.role,
+              userData.name,
+              userData.pin_hash,
+              userData.cloud_user_id,
+              now,
+              now,
+              now
+            );
+            result.created++;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push(`User ${userData.cloud_user_id}: ${message}`);
+          log.error('Failed to upsert user in batch', {
+            cloudUserId: userData.cloud_user_id,
+            error: message,
+          });
+        }
+      }
+    });
+
+    log.info('Batch upsert completed', {
+      total: users.length,
+      created: result.created,
+      updated: result.updated,
+      errors: result.errors.length,
+    });
+
+    return result;
+  }
+
+  /**
+   * Batch deactivate users not in provided cloud IDs
+   * Enterprise-grade: Single query for deactivation
+   * SEC-006: Parameterized query
+   * DB-006: Store-scoped for tenant isolation
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param activeCloudIds - Set of cloud IDs that should remain active
+   * @returns Number of users deactivated
+   */
+  batchDeactivateNotInCloudIds(storeId: string, activeCloudIds: Set<string>): number {
+    // Get all active users with cloud_user_id for this store
+    const stmt = this.db.prepare(`
+      SELECT user_id, cloud_user_id FROM users
+      WHERE store_id = ? AND active = 1 AND cloud_user_id IS NOT NULL
+    `);
+
+    const activeUsers = stmt.all(storeId) as Array<{ user_id: string; cloud_user_id: string }>;
+
+    // Find users to deactivate (have cloud_user_id but not in active set)
+    const toDeactivate = activeUsers.filter(
+      (u) => u.cloud_user_id && !activeCloudIds.has(u.cloud_user_id)
+    );
+
+    if (toDeactivate.length === 0) {
+      return 0;
+    }
+
+    // Deactivate in single transaction
+    const now = this.now();
+    const deactivateStmt = this.db.prepare(`
+      UPDATE users SET active = 0, updated_at = ? WHERE user_id = ?
+    `);
+
+    this.withTransaction(() => {
+      for (const user of toDeactivate) {
+        deactivateStmt.run(now, user.user_id);
+        log.info('User deactivated (removed from cloud)', {
+          userId: user.user_id,
+          cloudUserId: user.cloud_user_id,
+        });
+      }
+    });
+
+    log.info('Batch deactivation completed', {
+      storeId,
+      checked: activeUsers.length,
+      deactivated: toDeactivate.length,
+    });
+
+    return toDeactivate.length;
+  }
+
+  /**
    * Upsert user from cloud sync
    * Creates if not exists, updates if exists (by cloud_user_id)
    * SEC-006: Parameterized queries

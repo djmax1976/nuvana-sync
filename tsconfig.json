@@ -18,7 +18,7 @@
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"]
     },
-    "types": ["vitest/globals", "node"]
+    "types": ["vitest/globals", "node", "vite/client"]
   },
   "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist", "release"]

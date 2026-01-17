@@ -654,7 +654,7 @@ describe('FileWatcherService', () => {
         expect.objectContaining({
           usePolling: true,
           persistent: true,
-          depth: 0,
+          depth: 2,
         })
       );
     });
@@ -711,11 +711,15 @@ describe('FileWatcherService', () => {
 
   describe('processExistingFiles', () => {
     it('should process XML files in watch directory', async () => {
-      vi.mocked(fs.readdir).mockResolvedValue([
-        'FGM001.xml',
-        'FGM002.xml',
-        'readme.txt',
-      ] as unknown as Awaited<ReturnType<typeof fs.readdir>>);
+      // Mock readdir to return Dirent objects for the recursive search
+      const mockDirents = [
+        { name: 'FGM001.xml', isFile: () => true, isDirectory: () => false },
+        { name: 'FGM002.xml', isFile: () => true, isDirectory: () => false },
+        { name: 'readme.txt', isFile: () => true, isDirectory: () => false },
+      ];
+      vi.mocked(fs.readdir).mockResolvedValue(
+        mockDirents as unknown as Awaited<ReturnType<typeof fs.readdir>>
+      );
       vi.mocked(fs.readFile).mockResolvedValue(SAMPLE_FGM_XML);
       vi.mocked(fs.mkdir).mockResolvedValue(undefined);
       vi.mocked(fs.rename).mockResolvedValue(undefined);

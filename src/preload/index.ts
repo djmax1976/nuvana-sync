@@ -47,6 +47,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:syncUsersDuringSetup',
   'sync:syncBins',
   'sync:syncBinsDuringSetup',
+  'sync:debugSyncBins',
   'sync:syncGames',
   'sync:syncGamesDuringSetup',
   'sync:forceFullSync',
@@ -58,6 +59,12 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:startEngine',
   'sync:stopEngine',
   'sync:cleanupQueue',
+  'sync:clearProcessedFiles',
+  'sync:reprocessXmlFiles',
+  'sync:getProcessedFilesStats',
+  'sync:debugDump',
+  'sync:closeStaleShifts',
+  'sync:resetFuelData',
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',
@@ -68,6 +75,8 @@ const ALLOWED_INVOKE_CHANNELS = [
   'shifts:getSummary',
   'shifts:close',
   'shifts:findOpenShifts',
+  'shifts:getFuelData',
+  'shifts:getDailyFuelTotals',
   // Day Summaries
   'daySummaries:list',
   'daySummaries:getByDate',
@@ -81,9 +90,13 @@ const ALLOWED_INVOKE_CHANNELS = [
   'reports:dateRange',
   // Lottery
   'lottery:getGames',
+  'lottery:listGames',
   'lottery:getPacks',
   'lottery:getBins',
+  'lottery:getDayBins', // Enterprise-grade day bins with full pack details
   'lottery:receivePack',
+  'lottery:receivePackBatch',
+  'lottery:checkPackExists',
   'lottery:activatePack',
   'lottery:depletePack',
   'lottery:returnPack',
@@ -91,10 +104,14 @@ const ALLOWED_INVOKE_CHANNELS = [
   'lottery:commitDayClose',
   'lottery:cancelDayClose',
   'lottery:parseBarcode',
+  'lottery:getConfigValues',
+  'lottery:lookupGameByCode',
+  'lottery:createGame',
   // Settings
   'settings:get',
   'settings:update',
   'settings:updateDuringSetup',
+  'settings:updateAsSupport', // Cloud-authenticated support user settings update
   'settings:testConnection',
   'settings:validateApiKey',
   'settings:completeSetup',
@@ -110,13 +127,27 @@ const ALLOWED_INVOKE_CHANNELS = [
   'auth:getCurrentUser',
   'auth:updateActivity',
   'auth:getUsers',
+  'auth:hasStoreManager',
   'auth:hasPermission',
   'auth:hasMinimumRole',
+  'auth:checkSessionForRole', // FE-001: Session bypass check for 15-minute auth caching
+  'auth:cloudLogin', // Cloud authentication for support/admin access
   // License
   'license:getStatus',
   'license:checkNow',
   'license:getDaysRemaining',
   'license:shouldShowWarning',
+  // Employees
+  'employees:list',
+  'employees:create',
+  'employees:update',
+  'employees:updatePin',
+  'employees:deactivate',
+  'employees:reactivate',
+  // Terminals/Registers
+  'terminals:list',
+  'terminals:getById',
+  'terminals:update',
 ] as const;
 
 /**
@@ -137,6 +168,8 @@ const ALLOWED_ON_CHANNELS = [
   'updater:status',
   // License
   'license:statusChanged',
+  // Shift close notification
+  'shift:closed',
 ] as const;
 
 type InvokeChannel = (typeof ALLOWED_INVOKE_CHANNELS)[number];
@@ -400,6 +433,106 @@ function validateNavigationPath(path: unknown): string | null {
 }
 
 /**
+ * Shift closed event payload (mirrors ShiftClosedEvent from shared types)
+ * SEC-014: Type definition without zod for preload sandbox
+ */
+interface ShiftClosedEventPayload {
+  closeType: 'SHIFT_CLOSE' | 'DAY_CLOSE';
+  shiftId: string;
+  businessDate: string;
+  externalRegisterId?: string;
+  externalCashierId?: string;
+  shiftNumber: number;
+  closedAt: string;
+  isLastShiftOfDay: boolean;
+  remainingOpenShifts: number;
+}
+
+/**
+ * SEC-014: Validate shift closed event payload
+ * Defense in depth - validates before exposing to renderer
+ */
+const VALID_SHIFT_CLOSE_TYPES = ['SHIFT_CLOSE', 'DAY_CLOSE'] as const;
+const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/;
+
+function validateShiftClosedEvent(data: unknown): ShiftClosedEventPayload | null {
+  if (typeof data !== 'object' || data === null) {
+    console.error('[preload] Invalid shift closed event: not an object');
+    return null;
+  }
+
+  const event = data as Record<string, unknown>;
+
+  // Validate closeType against allowlist
+  if (
+    typeof event.closeType !== 'string' ||
+    !VALID_SHIFT_CLOSE_TYPES.includes(event.closeType as (typeof VALID_SHIFT_CLOSE_TYPES)[number])
+  ) {
+    console.error('[preload] Invalid shift close type:', event.closeType);
+    return null;
+  }
+
+  // Validate shiftId (UUID format)
+  if (typeof event.shiftId !== 'string' || !UUID_REGEX.test(event.shiftId)) {
+    console.error('[preload] Invalid shift ID format');
+    return null;
+  }
+
+  // Validate businessDate (YYYY-MM-DD format)
+  if (typeof event.businessDate !== 'string' || !DATE_REGEX.test(event.businessDate)) {
+    console.error('[preload] Invalid business date format');
+    return null;
+  }
+
+  // Validate shiftNumber (positive integer)
+  if (
+    typeof event.shiftNumber !== 'number' ||
+    !Number.isInteger(event.shiftNumber) ||
+    event.shiftNumber < 1
+  ) {
+    console.error('[preload] Invalid shift number');
+    return null;
+  }
+
+  // Validate closedAt (ISO datetime string)
+  if (typeof event.closedAt !== 'string') {
+    console.error('[preload] Invalid closedAt timestamp');
+    return null;
+  }
+
+  // Validate boolean fields
+  if (typeof event.isLastShiftOfDay !== 'boolean') {
+    console.error('[preload] Invalid isLastShiftOfDay');
+    return null;
+  }
+
+  // Validate remainingOpenShifts (non-negative integer)
+  if (
+    typeof event.remainingOpenShifts !== 'number' ||
+    !Number.isInteger(event.remainingOpenShifts) ||
+    event.remainingOpenShifts < 0
+  ) {
+    console.error('[preload] Invalid remainingOpenShifts');
+    return null;
+  }
+
+  return {
+    closeType: event.closeType as 'SHIFT_CLOSE' | 'DAY_CLOSE',
+    shiftId: event.shiftId,
+    businessDate: event.businessDate,
+    externalRegisterId:
+      typeof event.externalRegisterId === 'string' ? event.externalRegisterId : undefined,
+    externalCashierId:
+      typeof event.externalCashierId === 'string' ? event.externalCashierId : undefined,
+    shiftNumber: event.shiftNumber,
+    closedAt: event.closedAt,
+    isLastShiftOfDay: event.isLastShiftOfDay,
+    remainingOpenShifts: event.remainingOpenShifts,
+  };
+}
+
+/**
  * SEC-014: Validate channel is in allowlist
  */
 function isAllowedInvokeChannel(channel: string): channel is InvokeChannel {
@@ -430,6 +563,7 @@ export interface NuvanaAPI {
   // Events - type-safe callbacks
   onSyncStatus: (callback: (data: SyncStatusEvent) => void) => () => void;
   onNavigate: (callback: (path: string) => void) => () => void;
+  onShiftClosed: (callback: (data: ShiftClosedEventPayload) => void) => () => void;
 }
 
 /**
@@ -492,6 +626,17 @@ contextBridge.exposeInMainWorld('nuvanaAPI', {
     };
     ipcRenderer.on('navigate', handler);
     return () => ipcRenderer.removeListener('navigate', handler);
+  },
+
+  onShiftClosed: (callback: (data: ShiftClosedEventPayload) => void): (() => void) => {
+    const handler = (_event: IpcRendererEvent, data: unknown): void => {
+      const validated = validateShiftClosedEvent(data);
+      if (validated) {
+        callback(validated);
+      }
+    };
+    ipcRenderer.on('shift:closed', handler);
+    return () => ipcRenderer.removeListener('shift:closed', handler);
   },
 } satisfies NuvanaAPI);
 
@@ -569,4 +714,5 @@ export type {
   Transaction,
   TransactionListParams,
   IPCErrorResponse,
+  ShiftClosedEventPayload,
 };

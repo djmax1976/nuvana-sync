@@ -19,7 +19,61 @@ import { createLogger } from '../utils/logger';
 /**
  * Lottery game status
  */
-export type LotteryGameStatus = 'ACTIVE' | 'INACTIVE';
+export type LotteryGameStatus = 'ACTIVE' | 'INACTIVE' | 'DISCONTINUED';
+
+/**
+ * Filter options for games listing
+ * SEC-014: Validated enum constraints for status filter
+ */
+export interface GameListFilters {
+  /** Filter by game status */
+  status?: LotteryGameStatus;
+  /** Search by game name or code (min 2 chars) */
+  search?: string;
+}
+
+/**
+ * Pagination options for games listing
+ * SEC-014: Enforces max page size to prevent unbounded reads
+ */
+export interface GameListPagination {
+  /** Number of records per page (max 100) */
+  limit?: number;
+  /** Number of records to skip */
+  offset?: number;
+  /** Sort column (must be in allowlist) */
+  sortBy?: 'name' | 'game_code' | 'price' | 'status' | 'created_at';
+  /** Sort direction */
+  sortOrder?: 'ASC' | 'DESC';
+}
+
+/**
+ * Game with aggregated pack counts
+ * API-008: OUTPUT_FILTERING - Controlled response shape
+ */
+export interface GameWithPackCounts extends LotteryGame {
+  /** Total packs ever received for this game */
+  total_packs: number;
+  /** Currently received but not activated */
+  received_packs: number;
+  /** Currently active in bins */
+  active_packs: number;
+  /** Settled/sold packs */
+  settled_packs: number;
+  /** Returned packs */
+  returned_packs: number;
+}
+
+/**
+ * Paginated games list response
+ */
+export interface GameListResult {
+  games: GameWithPackCounts[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
 
 /**
  * Lottery game entity
@@ -35,6 +89,7 @@ export interface LotteryGame extends StoreEntity {
   status: LotteryGameStatus;
   deleted_at: string | null;
   cloud_game_id: string | null;
+  state_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -440,6 +495,180 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
   static calculateTicketsPerPack(packValue: number, price: number): number {
     if (price <= 0) return 0;
     return Math.floor(packValue / price);
+  }
+
+  // ==========================================================================
+  // Games Listing with Pack Counts
+  // ==========================================================================
+
+  /** Maximum allowed page size for games listing */
+  private static readonly MAX_GAMES_PAGE_SIZE = 100;
+
+  /** Default page size for games listing */
+  private static readonly DEFAULT_GAMES_PAGE_SIZE = 50;
+
+  /** Allowed sort columns for games listing (SEC-006: SQL injection prevention) */
+  private static readonly GAMES_SORT_COLUMNS = new Set([
+    'name',
+    'game_code',
+    'price',
+    'status',
+    'created_at',
+  ]);
+
+  /**
+   * List games with aggregated pack counts
+   *
+   * Enterprise-grade query with:
+   * - DB-006: Tenant isolation via store_id
+   * - SEC-006: Parameterized queries prevent SQL injection
+   * - Performance: Single query with LEFT JOIN and GROUP BY for efficient aggregation
+   * - Bounded reads: Enforced max page size
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param filters - Optional filter criteria
+   * @param pagination - Optional pagination and sorting
+   * @returns Paginated games with pack counts
+   */
+  listGamesWithPackCounts(
+    storeId: string,
+    filters: GameListFilters = {},
+    pagination: GameListPagination = {}
+  ): GameListResult {
+    // Enforce pagination limits to prevent unbounded reads
+    const limit = Math.min(
+      pagination.limit || LotteryGamesDAL.DEFAULT_GAMES_PAGE_SIZE,
+      LotteryGamesDAL.MAX_GAMES_PAGE_SIZE
+    );
+    const offset = Math.max(pagination.offset || 0, 0);
+
+    // Validate sort column against allowlist (SEC-006)
+    const sortBy =
+      pagination.sortBy && LotteryGamesDAL.GAMES_SORT_COLUMNS.has(pagination.sortBy)
+        ? pagination.sortBy
+        : 'name';
+
+    // Validate sort direction (SEC-006)
+    const sortOrder = pagination.sortOrder === 'DESC' ? 'DESC' : 'ASC';
+
+    // Build WHERE conditions (SEC-006: parameterized)
+    const conditions: string[] = ['g.store_id = ?', 'g.deleted_at IS NULL'];
+    const params: unknown[] = [storeId];
+
+    // Status filter (SEC-014: validated enum)
+    if (filters.status) {
+      conditions.push('g.status = ?');
+      params.push(filters.status);
+    }
+
+    // Search filter (SEC-006: parameterized LIKE with escaped input)
+    if (filters.search && filters.search.length >= 2) {
+      // Escape special LIKE characters to prevent pattern injection
+      const escapedSearch = filters.search.replace(/[%_\\]/g, '\\$&');
+      conditions.push('(g.name LIKE ? ESCAPE \'\\\' OR g.game_code LIKE ? ESCAPE \'\\\')');
+      params.push(`%${escapedSearch}%`, `%${escapedSearch}%`);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // Count query for pagination (SEC-006: parameterized)
+    const countStmt = this.db.prepare(`
+      SELECT COUNT(*) as count
+      FROM lottery_games g
+      WHERE ${whereClause}
+    `);
+    const countResult = countStmt.get(...params) as { count: number };
+    const total = countResult.count;
+
+    // Main query with pack counts aggregation
+    // Performance: Single indexed JOIN with conditional aggregation
+    // SEC-006: All user input is parameterized, sort column validated against allowlist
+    const dataStmt = this.db.prepare(`
+      SELECT
+        g.game_id,
+        g.store_id,
+        g.game_code,
+        g.name,
+        g.price,
+        g.pack_value,
+        g.tickets_per_pack,
+        g.status,
+        g.deleted_at,
+        g.cloud_game_id,
+        g.state_id,
+        g.synced_at,
+        g.created_at,
+        g.updated_at,
+        COALESCE(COUNT(p.pack_id), 0) as total_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'RECEIVED' THEN 1 ELSE 0 END), 0) as received_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'ACTIVATED' THEN 1 ELSE 0 END), 0) as active_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'SETTLED' THEN 1 ELSE 0 END), 0) as settled_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'RETURNED' THEN 1 ELSE 0 END), 0) as returned_packs
+      FROM lottery_games g
+      LEFT JOIN lottery_packs p ON g.game_id = p.game_id AND p.store_id = g.store_id
+      WHERE ${whereClause}
+      GROUP BY g.game_id
+      ORDER BY g.${sortBy} ${sortOrder}
+      LIMIT ? OFFSET ?
+    `);
+
+    // Add pagination params
+    const games = dataStmt.all(...params, limit, offset) as GameWithPackCounts[];
+
+    log.debug('Games listed with pack counts', {
+      storeId,
+      filters,
+      total,
+      returned: games.length,
+    });
+
+    return {
+      games,
+      total,
+      limit,
+      offset,
+      hasMore: offset + games.length < total,
+    };
+  }
+
+  /**
+   * Get a single game by ID with pack counts
+   * DB-006: Store-scoped query for tenant isolation
+   * SEC-006: Parameterized query
+   *
+   * @param storeId - Store identifier
+   * @param gameId - Game UUID
+   * @returns Game with pack counts or undefined
+   */
+  findByIdWithPackCounts(storeId: string, gameId: string): GameWithPackCounts | undefined {
+    const stmt = this.db.prepare(`
+      SELECT
+        g.game_id,
+        g.store_id,
+        g.game_code,
+        g.name,
+        g.price,
+        g.pack_value,
+        g.tickets_per_pack,
+        g.status,
+        g.deleted_at,
+        g.cloud_game_id,
+        g.state_id,
+        g.synced_at,
+        g.created_at,
+        g.updated_at,
+        COALESCE(COUNT(p.pack_id), 0) as total_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'RECEIVED' THEN 1 ELSE 0 END), 0) as received_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'ACTIVATED' THEN 1 ELSE 0 END), 0) as active_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'SETTLED' THEN 1 ELSE 0 END), 0) as settled_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'RETURNED' THEN 1 ELSE 0 END), 0) as returned_packs
+      FROM lottery_games g
+      LEFT JOIN lottery_packs p ON g.game_id = p.game_id AND p.store_id = g.store_id
+      WHERE g.game_id = ? AND g.store_id = ? AND g.deleted_at IS NULL
+      GROUP BY g.game_id
+    `);
+
+    return stmt.get(gameId, storeId) as GameWithPackCounts | undefined;
   }
 }
 

@@ -18,16 +18,15 @@ import { ActivatedPacksSection } from '@/components/lottery/ActivatedPacksSectio
 import { PackReceptionForm } from '@/components/lottery/PackReceptionForm';
 import { EnhancedPackActivationForm } from '@/components/lottery/EnhancedPackActivationForm';
 import { PackDetailsModal, type PackDetailsData } from '@/components/lottery/PackDetailsModal';
-import { ManualEntryAuthModal } from '@/components/lottery/ManualEntryAuthModal';
 import { MarkSoldOutDialog } from '@/components/lottery/MarkSoldOutDialog';
 import { ManualEntryIndicator } from '@/components/lottery/ManualEntryIndicator';
 import { ReturnPackDialog } from '@/components/lottery/ReturnPackDialog';
+import { PinVerificationDialog, type VerifiedUser } from '@/components/auth/PinVerificationDialog';
+import { useAuthGuard } from '@/hooks/useAuthGuard';
 import { receivePack, closeLotteryDay, type LotteryPackResponse } from '@/lib/api/lottery';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { CheckCircle2 } from 'lucide-react';
-import { formatBusinessDateFull, formatDateTimeShort } from '@/utils/date-format.utils';
-import { useStoreTimezone } from '@/contexts/StoreContext';
 
 /**
  * Manual entry state interface
@@ -81,11 +80,10 @@ export default function LotteryManagementPage() {
   } = useClientDashboard();
   const { toast } = useToast();
 
-  // ========================================================================
-  // HOOKS
-  // MCP: FE-001 STATE_MANAGEMENT - Access store timezone for date formatting
-  // ========================================================================
-  const storeTimezone = useStoreTimezone();
+  // FE-001: Auth guard for session-first validation (check before showing dialog)
+  const { executeWithAuth } = useAuthGuard('cashier');
+  // SEC-010: Auth guard for shift_manager role (required for pack returns)
+  const { executeWithAuth: executeWithShiftManagerAuth } = useAuthGuard('shift_manager');
 
   // Dialog state management
   const [receptionDialogOpen, setReceptionDialogOpen] = useState(false);
@@ -98,16 +96,39 @@ export default function LotteryManagementPage() {
   const [packIdToMarkSoldOut, setPackIdToMarkSoldOut] = useState<string | null>(null);
 
   /**
+   * Pack Reception PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   */
+  const [receptionPinDialogOpen, setReceptionPinDialogOpen] = useState(false);
+
+  /**
+   * Pack Activation PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   */
+  const [activationPinDialogOpen, setActivationPinDialogOpen] = useState(false);
+
+  /**
    * Return Pack dialog state
    * MCP: FE-001 STATE_MANAGEMENT - Controlled dialog state with pack ID and data tracking
-   * MCP: SEC-010 AUTHZ - ACTIVE and RECEIVED packs can be returned (enforced in dialog)
+   * MCP: SEC-010 AUTHZ - Requires shift_manager role, enforced server-side
    */
   const [returnPackDialogOpen, setReturnPackDialogOpen] = useState(false);
   const [packIdToReturn, setPackIdToReturn] = useState<string | null>(null);
   const [packDataToReturn, setPackDataToReturn] = useState<LotteryPackResponse | null>(null);
 
-  // Manual entry state management
-  const [manualEntryAuthModalOpen, setManualEntryAuthModalOpen] = useState(false);
+  /**
+   * Return Pack PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   * SEC-017: AUDIT_TRAILS - Shift manager required for pack returns
+   */
+  const [returnPackPinDialogOpen, setReturnPackPinDialogOpen] = useState(false);
+
+  /**
+   * Manual Entry PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   * SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
+   */
+  const [manualEntryPinDialogOpen, setManualEntryPinDialogOpen] = useState(false);
   const [manualEntryState, setManualEntryState] = useState<ManualEntryState>({
     isActive: false,
     authorizedBy: null,
@@ -179,16 +200,13 @@ export default function LotteryManagementPage() {
   }, [invalidateAll]);
 
   /**
-   * Handle Return Pack button click
-   * Opens the ReturnPackDialog for the selected pack
-   * Finds pack data from day bins to provide immediate display without extra API call
+   * Prepare pack data for return dialog
+   * Internal helper to extract pack data from day bins
    *
    * MCP Guidance Applied:
    * - FE-001: STATE_MANAGEMENT - Controlled dialog state with pack data
-   * - SEC-014: INPUT_VALIDATION - Pack ID validated by dialog before API call
-   * - SEC-010: AUTHZ - ACTIVE and RECEIVED packs can be returned (enforced server-side)
    */
-  const handleReturnPackClick = useCallback(
+  const prepareReturnPackData = useCallback(
     (packId: string) => {
       // Find the pack data from day bins to avoid extra API call
       const bin = dayBinsData?.bins.find((b) => b.pack?.pack_id === packId);
@@ -221,10 +239,50 @@ export default function LotteryManagementPage() {
         setPackDataToReturn(null);
       }
       setPackIdToReturn(packId);
-      setReturnPackDialogOpen(true);
     },
     [dayBinsData?.bins, storeId]
   );
+
+  /**
+   * Handle Return Pack button click
+   * SEC-010: AUTHZ - Requires shift_manager role, checks session first
+   * If session valid with sufficient role, opens dialog directly
+   * If session invalid, shows PIN verification dialog
+   *
+   * MCP Guidance Applied:
+   * - FE-001: STATE_MANAGEMENT - Controlled dialog state with pack data
+   * - SEC-014: INPUT_VALIDATION - Pack ID validated by dialog before API call
+   * - SEC-010: AUTHZ - shift_manager role required, enforced server-side
+   */
+  const handleReturnPackClick = useCallback(
+    (packId: string) => {
+      // Store pack ID for use after auth
+      prepareReturnPackData(packId);
+
+      // SEC-010: Check session first, only prompt PIN if needed
+      executeWithShiftManagerAuth(
+        () => {
+          // Valid session - open return dialog directly
+          setReturnPackDialogOpen(true);
+        },
+        () => {
+          // No valid session - show PIN dialog
+          setReturnPackPinDialogOpen(true);
+        }
+      );
+    },
+    [prepareReturnPackData, executeWithShiftManagerAuth]
+  );
+
+  /**
+   * Handle successful PIN verification for pack return
+   * SEC-010: AUTHZ - User verified with shift_manager role
+   * SEC-017: AUDIT_TRAILS - Session created, backend tracks user for audit
+   */
+  const handleReturnPackPinVerified = useCallback((_user: VerifiedUser) => {
+    setReturnPackPinDialogOpen(false);
+    setReturnPackDialogOpen(true);
+  }, []);
 
   /**
    * Handle successful pack return
@@ -261,25 +319,107 @@ export default function LotteryManagementPage() {
   }, [invalidateAll]);
 
   /**
-   * Handle Manual Entry button click
-   * Opens the auth modal for PIN verification
+   * Handle Receive Pack button click
+   * FE-001: Check session first, only show PIN dialog if session invalid
    */
-  const handleManualEntryClick = useCallback(() => {
-    setManualEntryAuthModalOpen(true);
+  const handleReceivePackClick = useCallback(() => {
+    executeWithAuth(
+      () => {
+        // Session valid - open reception dialog directly
+        setReceptionDialogOpen(true);
+      },
+      () => {
+        // Session invalid - show PIN dialog
+        setReceptionPinDialogOpen(true);
+      }
+    );
+  }, [executeWithAuth]);
+
+  /**
+   * Handle Pack Reception PIN verification success
+   * SEC-010: AUTHZ - PIN verification logs user in, backend tracks received_by from session
+   */
+  const handleReceptionPinVerified = useCallback((_user: VerifiedUser) => {
+    // User is now logged in (PIN dialog called auth:login)
+    // Backend will get received_by from the authenticated session
+    setReceptionPinDialogOpen(false);
+    setReceptionDialogOpen(true);
   }, []);
 
   /**
-   * Handle Manual Entry authorization success
-   * Called when user successfully verifies with LOTTERY_MANUAL_ENTRY permission
+   * Handle Activate Pack button click
+   * FE-001: Check session first, only show PIN dialog if session invalid
    */
-  const handleManualEntryAuthorized = useCallback(
-    (authorizedBy: { userId: string; name: string }) => {
+  const handleActivatePackClick = useCallback(() => {
+    executeWithAuth(
+      () => {
+        // Session valid - open activation dialog directly
+        setActivationDialogOpen(true);
+      },
+      () => {
+        // Session invalid - show PIN dialog
+        setActivationPinDialogOpen(true);
+      }
+    );
+  }, [executeWithAuth]);
+
+  /**
+   * Handle Pack Activation PIN verification success
+   * SEC-010: AUTHZ - PIN verification logs user in, backend tracks activated_by from session
+   */
+  const handleActivationPinVerified = useCallback((_user: VerifiedUser) => {
+    // User is now logged in (PIN dialog called auth:login)
+    // Backend will get activated_by from the authenticated session
+    setActivationPinDialogOpen(false);
+    setActivationDialogOpen(true);
+  }, []);
+
+  /**
+   * Handle Manual Entry button click
+   * FE-001: Check session first, only show PIN dialog if session invalid
+   */
+  const handleManualEntryClick = useCallback(() => {
+    executeWithAuth(
+      (user) => {
+        // Session valid - enable manual entry directly
+        setManualEntryState({
+          isActive: true,
+          authorizedBy: {
+            userId: user.userId,
+            name: user.name,
+          },
+          authorizedAt: new Date(),
+        });
+        setManualEndingValues({});
+        setValidationErrors({});
+        toast({
+          title: 'Manual Entry Enabled',
+          description: `Authorized by ${user.name}. You can now enter ending serial numbers.`,
+        });
+      },
+      () => {
+        // Session invalid - show PIN dialog
+        setManualEntryPinDialogOpen(true);
+      }
+    );
+  }, [executeWithAuth, toast]);
+
+  /**
+   * Handle Manual Entry PIN verification success
+   * SEC-010: AUTHZ - PIN verification logs user in for audit trail
+   * SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
+   */
+  const handleManualEntryPinVerified = useCallback(
+    (user: VerifiedUser) => {
       setManualEntryState({
         isActive: true,
-        authorizedBy,
+        authorizedBy: {
+          userId: user.userId,
+          name: user.name,
+        },
         authorizedAt: new Date(),
       });
-      setManualEntryAuthModalOpen(false);
+      setManualEntryPinDialogOpen(false);
 
       // Clear any previous manual entry values and validation errors
       setManualEndingValues({});
@@ -287,7 +427,7 @@ export default function LotteryManagementPage() {
 
       toast({
         title: 'Manual Entry Enabled',
-        description: `Authorized by ${authorizedBy.name}. You can now enter ending serial numbers.`,
+        description: `Authorized by ${user.name}. You can now enter ending serial numbers.`,
       });
     },
     [toast]
@@ -498,18 +638,6 @@ export default function LotteryManagementPage() {
     );
   }
 
-  // Get store name and current date for subtitle
-  // Use centralized timezone-aware utilities to avoid timezone drift issues
-  const storeName = dashboardData?.stores.find((s) => s.store_id === storeId)?.name || 'your store';
-  const currentDate = dayBinsData?.business_day?.date
-    ? formatBusinessDateFull(dayBinsData.business_day.date)
-    : formatBusinessDateFull(new Date().toISOString().split('T')[0]);
-
-  // Format day start time if available using centralized utility
-  const dayStartTime = dayBinsData?.business_day?.first_shift_opened_at
-    ? formatDateTimeShort(dayBinsData.business_day.first_shift_opened_at, storeTimezone)
-    : null;
-
   // Convert pack details to modal format
   // Note: Map from API response types to modal types
   // LotteryPackDetailResponse uses opening_serial/closing_serial, settled_at
@@ -546,19 +674,10 @@ export default function LotteryManagementPage() {
   return (
     <div className="space-y-6" data-testid="lottery-management-page">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div className="space-y-1">
-          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
-          <p className="text-muted-foreground">
-            {storeName} &bull; {currentDate}
-          </p>
-          {dayStartTime && (
-            <p className="text-sm text-muted-foreground">Day started: {dayStartTime}</p>
-          )}
-        </div>
+      <div className="flex items-center justify-end">
         <div className="flex flex-wrap gap-2">
           <Button
-            onClick={() => setReceptionDialogOpen(true)}
+            onClick={handleReceivePackClick}
             data-testid="receive-pack-button"
             disabled={manualEntryState.isActive}
           >
@@ -606,7 +725,7 @@ export default function LotteryManagementPage() {
           )}
 
           <Button
-            onClick={() => setActivationDialogOpen(true)}
+            onClick={handleActivatePackClick}
             variant="outline"
             data-testid="activate-pack-button"
             disabled={!hasReceivedPacks || manualEntryState.isActive}
@@ -708,6 +827,31 @@ export default function LotteryManagementPage() {
         </div>
       )}
 
+      {/* Pack Reception PIN Verification Dialog
+          MCP: SEC-010 AUTHZ - Verify user before allowing pack reception
+      */}
+      <PinVerificationDialog
+        open={receptionPinDialogOpen}
+        onClose={() => setReceptionPinDialogOpen(false)}
+        onVerified={handleReceptionPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Pack Reception"
+        description="Enter your PIN to receive lottery packs into inventory."
+      />
+
+      {/* Pack Activation PIN Verification Dialog
+          MCP: SEC-010 AUTHZ - Verify user before allowing pack activation
+          Enterprise: Backend gets activated_by from session, not frontend
+      */}
+      <PinVerificationDialog
+        open={activationPinDialogOpen}
+        onClose={() => setActivationPinDialogOpen(false)}
+        onVerified={handleActivationPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Pack Activation"
+        description="Enter your PIN to activate lottery packs."
+      />
+
       {/* Pack Reception Dialog */}
       <PackReceptionForm
         storeId={storeId}
@@ -735,15 +879,19 @@ export default function LotteryManagementPage() {
         isLoading={packDetailsLoading}
       />
 
-      {/* Manual Entry Auth Modal */}
-      {storeId && (
-        <ManualEntryAuthModal
-          open={manualEntryAuthModalOpen}
-          onOpenChange={setManualEntryAuthModalOpen}
-          storeId={storeId}
-          onAuthorized={handleManualEntryAuthorized}
-        />
-      )}
+      {/* Manual Entry PIN Verification Dialog
+          SEC-010: AUTHZ - PIN verification before enabling manual entry mode
+          SEC-017: AUDIT_TRAILS - Records user who authorized manual entry
+          FE-001: SESSION_CACHING - Bypasses PIN if valid session exists
+      */}
+      <PinVerificationDialog
+        open={manualEntryPinDialogOpen}
+        onClose={() => setManualEntryPinDialogOpen(false)}
+        onVerified={handleManualEntryPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Manual Entry"
+        description="Enter your PIN to enable manual entry mode. This action will be recorded for audit purposes."
+      />
 
       {/* Mark Sold Out Dialog */}
       <MarkSoldOutDialog
@@ -753,12 +901,26 @@ export default function LotteryManagementPage() {
         onSuccess={handleMarkSoldOutSuccess}
       />
 
+      {/* Return Pack PIN Verification Dialog
+          SEC-010: AUTHZ - PIN verification before allowing pack return
+          SEC-017: AUDIT_TRAILS - Records user who authorized return
+          FE-001: SESSION_CACHING - Bypasses PIN if valid session exists
+      */}
+      <PinVerificationDialog
+        open={returnPackPinDialogOpen}
+        onClose={() => setReturnPackPinDialogOpen(false)}
+        onVerified={handleReturnPackPinVerified}
+        requiredRole="shift_manager"
+        title="Verify PIN for Pack Return"
+        description="Enter your PIN to return this pack. Shift Manager access required."
+      />
+
       {/* Return Pack Dialog
           MCP Guidance Applied:
           - FE-001: STATE_MANAGEMENT - Controlled dialog with pack ID and data
           - FE-002: FORM_VALIDATION - Dialog validates all inputs before API call
           - SEC-014: INPUT_VALIDATION - Serial format and range validated
-          - SEC-010: AUTHZ - ACTIVE and RECEIVED packs can be returned (enforced in dialog + server)
+          - SEC-010: AUTHZ - shift_manager role enforced via PIN dialog + server
           - API-003: ERROR_HANDLING - Dialog shows user-friendly error messages
       */}
       <ReturnPackDialog

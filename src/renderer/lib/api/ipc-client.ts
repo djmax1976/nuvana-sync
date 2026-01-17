@@ -22,6 +22,14 @@ import * as mockData from './mock-data';
  */
 export const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
+// Debug logging for isElectron detection
+console.log('[IPC-CLIENT] isElectron detection:', {
+  isElectron,
+  windowDefined: typeof window !== 'undefined',
+  electronAPIDefined: typeof window !== 'undefined' && window.electronAPI !== undefined,
+  electronAPIKeys: typeof window !== 'undefined' && window.electronAPI ? Object.keys(window.electronAPI) : 'N/A',
+});
+
 // ============================================================================
 // Types
 // ============================================================================
@@ -67,18 +75,37 @@ class IPCClient {
    * @throws IPCError if the handler returns an error response
    */
   async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
+    // Debug logging for IPC calls
+    console.log('[IPC-CLIENT] invoke called:', { channel, args, isElectron });
+
     // In dev mode without Electron, return mock data
     if (!isElectron) {
+      console.log('[IPC-CLIENT] Using MOCK data for channel:', channel);
       return this.getMockData<T>(channel, args);
     }
 
+    console.log('[IPC-CLIENT] Using REAL IPC for channel:', channel);
+
     try {
-      const response = await window.electronAPI.invoke<T | IPCErrorResponse>(channel, ...args);
+      const response = await window.electronAPI.invoke<
+        T | IPCErrorResponse | { success: boolean; data?: T; error?: string; message?: string }
+      >(channel, ...args);
 
       // Check for error response format
       if (response && typeof response === 'object' && 'error' in response) {
         const errorResponse = response as IPCErrorResponse;
         throw new IPCError(errorResponse.error, errorResponse.message || 'Unknown error');
+      }
+
+      // Unwrap success response format: {success: true, data: T}
+      if (
+        response &&
+        typeof response === 'object' &&
+        'success' in response &&
+        (response as { success: boolean }).success === true &&
+        'data' in response
+      ) {
+        return (response as { success: boolean; data: T }).data;
       }
 
       return response as T;
@@ -397,6 +424,68 @@ class IPCClient {
           status: 'OPEN',
         } as T;
 
+      // Terminals/Registers
+      case 'terminals:list':
+        return mockData.getMockRegisters() as T;
+      case 'terminals:getById': {
+        const regId = params as unknown as string;
+        const allRegs = mockData.getMockRegisters();
+        const found = allRegs.registers.find((r) => r.id === regId);
+        return (found || {}) as T;
+      }
+      case 'terminals:update': {
+        const updateParams = params as { registerId: string; description?: string };
+        return {
+          id: updateParams.registerId,
+          external_register_id: '1',
+          terminal_type: 'REGISTER',
+          description: updateParams.description || null,
+          active: true,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as T;
+      }
+
+      // Employees
+      case 'employees:list':
+        return mockData.getMockEmployees() as T;
+      case 'employees:create':
+        return {
+          employee: {
+            user_id: `user-${Date.now()}`,
+            store_id: 'store-1',
+            role: (params as { role: string }).role,
+            name: (params as { name: string }).name,
+            active: 1,
+            last_login_at: null,
+            cloud_user_id: null,
+            synced_at: null,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString(),
+          },
+        } as T;
+      case 'employees:update':
+        return {
+          employee: {
+            user_id: (params as { userId: string }).userId,
+            store_id: 'store-1',
+            role: (params as { role?: string }).role || 'cashier',
+            name: (params as { name?: string }).name || 'Updated Employee',
+            active: 1,
+            last_login_at: null,
+            cloud_user_id: null,
+            synced_at: null,
+            created_at: '2024-01-01T00:00:00.000Z',
+            updated_at: new Date().toISOString(),
+          },
+        } as T;
+      case 'employees:updatePin':
+        return { success: true, message: 'PIN updated successfully' } as T;
+      case 'employees:deactivate':
+        return { success: true, message: 'Employee deactivated successfully' } as T;
+      case 'employees:reactivate':
+        return { success: true, message: 'Employee reactivated successfully' } as T;
+
       default:
         console.warn(`[MockIPC] Unknown channel: ${channel}`);
         return {} as T;
@@ -568,6 +657,80 @@ export const reportsAPI = {
     ipcClient.invoke<DateRangeReportResponse>('reports:dateRange', params),
 };
 
+// Employees API
+export const employeesAPI = {
+  list: () => ipcClient.invoke<EmployeeListResponse>('employees:list'),
+  create: (data: CreateEmployeeRequest) =>
+    ipcClient.invoke<CreateEmployeeResponse>('employees:create', data),
+  update: (data: UpdateEmployeeRequest) =>
+    ipcClient.invoke<UpdateEmployeeResponse>('employees:update', data),
+  updatePin: (data: UpdatePinRequest) =>
+    ipcClient.invoke<UpdatePinResponse>('employees:updatePin', data),
+  deactivate: (userId: string) =>
+    ipcClient.invoke<ToggleStatusResponse>('employees:deactivate', { userId }),
+  reactivate: (userId: string) =>
+    ipcClient.invoke<ToggleStatusResponse>('employees:reactivate', { userId }),
+};
+
+// Terminals/Registers API
+export const terminalsAPI = {
+  /** List all registers for the configured store with their active shift status */
+  list: () => ipcClient.invoke<RegisterListResponse>('terminals:list'),
+  /** Get a single register by ID with its active shift status */
+  getById: (registerId: string) =>
+    ipcClient.invoke<RegisterWithShiftStatus>('terminals:getById', registerId),
+  /** Update a register's description */
+  update: (params: UpdateRegisterParams) =>
+    ipcClient.invoke<RegisterResponse>('terminals:update', params),
+  /**
+   * Subscribe to shift closed events
+   * Emitted when POS closes a shift (detected via XML file polling)
+   *
+   * @param callback - Function to call when a shift is closed
+   * @returns Unsubscribe function
+   *
+   * @example
+   * ```typescript
+   * useEffect(() => {
+   *   const unsubscribe = terminalsAPI.onShiftClosed((event) => {
+   *     console.log(`Shift ${event.shiftId} closed: ${event.closeType}`);
+   *     if (event.closeType === 'DAY_CLOSE') {
+   *       navigate('/day-close');
+   *     }
+   *   });
+   *   return unsubscribe;
+   * }, []);
+   * ```
+   */
+  onShiftClosed: (callback: (event: ShiftClosedEvent) => void): (() => void) => {
+    // In non-Electron environment, return no-op
+    if (!isElectron) {
+      return () => {};
+    }
+    // Use the nuvanaAPI's validated event handler (SEC-014 compliant)
+    // The preload validates the payload before calling the callback
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const nuvanaAPI = (window as any).nuvanaAPI;
+    if (nuvanaAPI?.onShiftClosed) {
+      return nuvanaAPI.onShiftClosed(callback);
+    }
+    // Fallback to generic electronAPI if nuvanaAPI not available
+    return ipcClient.on('shift:closed', (data) => callback(data as ShiftClosedEvent));
+  },
+};
+
+// Sync API
+export const syncAPI = {
+  getStatus: () => ipcClient.invoke<SyncStatusResponse>('sync:getStatus'),
+  triggerNow: () => ipcClient.invoke<{ triggered: boolean }>('sync:triggerNow'),
+  getProcessedFilesStats: () =>
+    ipcClient.invoke<ProcessedFilesStatsResponse>('sync:getProcessedFilesStats'),
+  clearProcessedFiles: (params?: ClearProcessedFilesParams) =>
+    ipcClient.invoke<{ clearedCount: number }>('sync:clearProcessedFiles', params),
+  reprocessXmlFiles: (params?: ReprocessXmlFilesParams) =>
+    ipcClient.invoke<ReprocessXmlFilesResponse>('sync:reprocessXmlFiles', params),
+};
+
 // ============================================================================
 // Response Type Definitions (for API usage)
 // ============================================================================
@@ -649,11 +812,34 @@ export interface ShiftListResponse {
   offset: number;
 }
 
+export interface DepartmentBreakdown {
+  departmentCode: string;
+  departmentName: string | null;
+  netSales: number;
+  transactionCount: number;
+}
+
+export interface TenderBreakdown {
+  tenderCode: string;
+  tenderDisplayName: string | null;
+  netAmount: number;
+  transactionCount: number;
+}
+
 export interface ShiftSummary {
   shift: Shift;
   transactionCount: number;
   totalSales: number;
   totalVoided: number;
+  // Enhanced summary data from shift_summaries table
+  grossSales?: number;
+  netSales?: number;
+  taxCollected?: number;
+  fuelGallons?: number;
+  fuelSales?: number;
+  lotteryNet?: number;
+  departmentBreakdown?: DepartmentBreakdown[];
+  tenderBreakdown?: TenderBreakdown[];
 }
 
 export interface DaySummary {
@@ -790,4 +976,178 @@ export interface DateRangeReportResponse {
     transactions: number;
     dayCount: number;
   };
+}
+
+// Employee Types
+export type EmployeeRole = 'store_manager' | 'shift_manager' | 'cashier';
+
+export interface Employee {
+  user_id: string;
+  store_id: string;
+  role: EmployeeRole;
+  name: string;
+  active: number;
+  last_login_at: string | null;
+  cloud_user_id: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface EmployeeListResponse {
+  employees: Employee[];
+  total: number;
+}
+
+export interface CreateEmployeeRequest {
+  name: string;
+  role: 'cashier' | 'shift_manager';
+  pin: string;
+  confirmPin: string;
+}
+
+export interface CreateEmployeeResponse {
+  employee: Employee;
+}
+
+export interface UpdateEmployeeRequest {
+  userId: string;
+  name?: string;
+  role?: 'cashier' | 'shift_manager';
+}
+
+export interface UpdateEmployeeResponse {
+  employee: Employee;
+}
+
+export interface UpdatePinRequest {
+  userId: string;
+  currentPin: string;
+  newPin: string;
+  confirmPin: string;
+}
+
+export interface UpdatePinResponse {
+  success: boolean;
+  message: string;
+}
+
+export interface ToggleStatusResponse {
+  success: boolean;
+  message: string;
+}
+
+// Sync Types
+export interface SyncStatusResponse {
+  isRunning: boolean;
+  lastSync: string | null;
+  pendingCount: number;
+  failedCount: number;
+}
+
+export interface ProcessedFilesStatsResponse {
+  totalFiles: number;
+  successCount: number;
+  failedCount: number;
+  partialCount: number;
+  totalRecords: number;
+  totalSizeBytes: number;
+  averageDurationMs: number;
+  zeroRecordCount: number;
+  countsByType: Record<string, number>;
+}
+
+export interface ClearProcessedFilesParams {
+  zeroRecordsOnly?: boolean;
+  documentType?: string;
+  startDate?: string;
+  endDate?: string;
+}
+
+export interface ReprocessXmlFilesParams {
+  clearZeroRecordsOnly?: boolean;
+  restartWatcher?: boolean;
+}
+
+export interface ReprocessXmlFilesResponse {
+  clearedCount: number;
+  message: string;
+}
+
+// Terminal/Register Types
+export interface RegisterWithShiftStatus {
+  /** Internal terminal mapping ID */
+  id: string;
+  /** External register ID from POS system */
+  external_register_id: string;
+  /** Terminal type (always REGISTER for this endpoint) */
+  terminal_type: string;
+  /** User-friendly description/name */
+  description: string | null;
+  /** Whether the register is active */
+  active: boolean;
+  /** Currently open shift on this register, if any */
+  activeShift: Shift | null;
+  /** Count of open shifts for this register */
+  openShiftCount: number;
+  /** When this register was first identified */
+  created_at: string;
+  /** When this register was last updated */
+  updated_at: string;
+}
+
+export interface RegisterListResponse {
+  registers: RegisterWithShiftStatus[];
+  total: number;
+}
+
+export interface UpdateRegisterParams {
+  registerId: string;
+  description?: string;
+}
+
+export interface RegisterResponse {
+  id: string;
+  external_register_id: string;
+  terminal_type: string;
+  description: string | null;
+  active: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+// ============================================================================
+// Shift Close Event Types (SEC-014 compliant)
+// ============================================================================
+
+/**
+ * Type of shift close operation
+ * - SHIFT_CLOSE: Other registers still have open shifts
+ * - DAY_CLOSE: This is the last shift of the business day
+ */
+export type ShiftCloseType = 'SHIFT_CLOSE' | 'DAY_CLOSE';
+
+/**
+ * Payload emitted when a shift is closed via POS XML detection
+ * Used for real-time notifications on the Terminals page
+ */
+export interface ShiftClosedEvent {
+  /** Type of close - determines which wizard to route to */
+  closeType: ShiftCloseType;
+  /** The shift that was just closed */
+  shiftId: string;
+  /** Business date of the closed shift (YYYY-MM-DD) */
+  businessDate: string;
+  /** External register ID from POS system */
+  externalRegisterId?: string;
+  /** External cashier ID from POS system */
+  externalCashierId?: string;
+  /** Shift number within the day */
+  shiftNumber: number;
+  /** ISO timestamp when the shift was closed */
+  closedAt: string;
+  /** True if this was the last open shift for the business day */
+  isLastShiftOfDay: boolean;
+  /** Count of shifts still open after this close (0 for day close) */
+  remainingOpenShifts: number;
 }

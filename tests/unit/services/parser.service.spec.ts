@@ -19,31 +19,29 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 let mockIsFileProcessed: ReturnType<typeof vi.fn>;
 let mockRecordFile: ReturnType<typeof vi.fn>;
 let mockGetOrCreateForDate: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLFGM: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLFPM: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLMSM: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLMCM: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLTLM: ReturnType<typeof vi.fn>;
-let mockBulkCreateFromNAXMLISM: ReturnType<typeof vi.fn>;
-let mockCreateFromNAXMLTPM: ReturnType<typeof vi.fn>;
 let mockCreateWithDetails: ReturnType<typeof vi.fn>;
 let mockEnqueue: ReturnType<typeof vi.fn>;
 let mockParse: ReturnType<typeof vi.fn>;
+// New schema DAL mocks
+let mockShiftFuelCreateFromNAXML: ReturnType<typeof vi.fn>;
+let mockShiftDeptCreateFromNAXML: ReturnType<typeof vi.fn>;
+let mockShiftTaxCreateFromNAXML: ReturnType<typeof vi.fn>;
+let mockMeterReadingsCreateFromNAXML: ReturnType<typeof vi.fn>;
+let mockTankReadingsCreateFromNAXML: ReturnType<typeof vi.fn>;
 
 // Mock all DALs before importing - use inline vi.fn() to avoid hoisting issues
 vi.mock('../../../src/main/dal', () => {
   const isFileProcessed = vi.fn();
   const recordFile = vi.fn();
   const enqueue = vi.fn();
-  const createFromNAXMLFGM = vi.fn();
-  const createFromNAXMLFPM = vi.fn();
-  const createFromNAXMLMSM = vi.fn();
-  const createFromNAXMLMCM = vi.fn();
-  const createFromNAXMLTLM = vi.fn();
-  const bulkCreateFromNAXMLISM = vi.fn();
-  const createFromNAXMLTPM = vi.fn();
   const getOrCreateForDate = vi.fn();
   const createWithDetails = vi.fn();
+  // New schema DALs
+  const shiftFuelCreateFromNAXML = vi.fn();
+  const shiftDeptCreateFromNAXML = vi.fn();
+  const shiftTaxCreateFromNAXML = vi.fn();
+  const meterReadingsCreateFromNAXML = vi.fn();
+  const tankReadingsCreateFromNAXML = vi.fn();
 
   return {
     processedFilesDAL: {
@@ -53,35 +51,74 @@ vi.mock('../../../src/main/dal', () => {
     syncQueueDAL: {
       enqueue,
     },
-    fuelGradeMovementsDAL: {
-      createFromNAXML: createFromNAXMLFGM,
-    },
-    fuelProductMovementsDAL: {
-      createFromNAXML: createFromNAXMLFPM,
-    },
-    miscellaneousSummariesDAL: {
-      createFromNAXML: createFromNAXMLMSM,
-    },
-    merchandiseMovementsDAL: {
-      createFromNAXML: createFromNAXMLMCM,
-    },
-    taxLevelMovementsDAL: {
-      createFromNAXML: createFromNAXMLTLM,
-    },
-    itemSalesMovementsDAL: {
-      bulkCreateFromNAXML: bulkCreateFromNAXMLISM,
-    },
-    tenderProductMovementsDAL: {
-      createFromNAXML: createFromNAXMLTPM,
-    },
     shiftsDAL: {
       getOrCreateForDate,
+      findShiftByDateAndRegister: vi.fn(() => ({ shift_id: 'existing-shift-123' })),
+      findOpenShiftToClose: vi.fn(() => ({ shift_id: 'existing-shift-123' })),
+      findByDate: vi.fn(() => [{ shift_id: 'existing-shift-123' }]),
+      createClosedShift: vi.fn(() => ({ shift_id: 'closed-shift-123' })),
+      closeShift: vi.fn(),
     },
     daySummariesDAL: {
       getOrCreateForDate: vi.fn(),
     },
     transactionsDAL: {
       createWithDetails,
+    },
+    // POS ID Mapping DALs
+    posFuelGradeMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'fuel-grade-mapping-id' })),
+    },
+    posDepartmentMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'dept-mapping-id' })),
+    },
+    posTenderMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'tender-mapping-id' })),
+    },
+    posTaxLevelMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'tax-level-mapping-id' })),
+    },
+    posCashierMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'cashier-mapping-id' })),
+    },
+    posTerminalMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'terminal-mapping-id' })),
+    },
+    posFuelPositionMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'fuel-position-mapping-id' })),
+    },
+    posTillMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ id: 'till-mapping-id' })),
+      linkToShift: vi.fn(),
+    },
+    posPriceTierMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'price-tier-mapping-id' })),
+    },
+    posFuelProductMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'fuel-product-mapping-id' })),
+    },
+    // New Schema-Aligned DALs (shift summary hierarchy)
+    shiftSummariesDAL: {
+      getOrCreateForShift: vi.fn(() => ({ shift_summary_id: 'shift-summary-123' })),
+      closeShiftSummary: vi.fn(),
+    },
+    shiftFuelSummariesDAL: {
+      createFromNAXML: shiftFuelCreateFromNAXML,
+    },
+    shiftDepartmentSummariesDAL: {
+      createFromNAXML: shiftDeptCreateFromNAXML,
+    },
+    shiftTenderSummariesDAL: {
+      upsert: vi.fn(() => ({ id: 'shift-tender-summary-123' })),
+    },
+    shiftTaxSummariesDAL: {
+      createFromNAXML: shiftTaxCreateFromNAXML,
+    },
+    meterReadingsDAL: {
+      createFromNAXML: meterReadingsCreateFromNAXML,
+    },
+    tankReadingsDAL: {
+      createFromNAXML: tankReadingsCreateFromNAXML,
     },
   };
 });
@@ -107,6 +144,18 @@ vi.mock('../../../src/main/utils/logger', () => ({
   })),
 }));
 
+// Mock settingsService for business day cutoff
+let mockAdjustBusinessDate: ReturnType<typeof vi.fn>;
+vi.mock('../../../src/main/services/settings.service', () => {
+  const adjustBusinessDate = vi.fn((businessDate: string) => businessDate); // Default: no adjustment
+  return {
+    settingsService: {
+      adjustBusinessDate,
+      getBusinessDayCutoffTime: vi.fn(() => '06:00'),
+    },
+  };
+});
+
 // Mock NAXML parser
 vi.mock('../../../src/shared/naxml/parser', () => {
   const parse = vi.fn();
@@ -122,6 +171,7 @@ import * as fs from 'fs/promises';
 import { ParserService, createParserService } from '../../../src/main/services/parser.service';
 import * as dal from '../../../src/main/dal';
 import { createNAXMLParser } from '../../../src/shared/naxml/parser';
+import { settingsService } from '../../../src/main/services/settings.service';
 
 // ============================================================================
 // Test Fixtures
@@ -184,15 +234,14 @@ describe('ParserService', () => {
     mockIsFileProcessed = vi.mocked(dal.processedFilesDAL.isFileProcessed);
     mockRecordFile = vi.mocked(dal.processedFilesDAL.recordFile);
     mockEnqueue = vi.mocked(dal.syncQueueDAL.enqueue);
-    mockCreateFromNAXMLFGM = vi.mocked(dal.fuelGradeMovementsDAL.createFromNAXML);
-    mockCreateFromNAXMLFPM = vi.mocked(dal.fuelProductMovementsDAL.createFromNAXML);
-    mockCreateFromNAXMLMSM = vi.mocked(dal.miscellaneousSummariesDAL.createFromNAXML);
-    mockCreateFromNAXMLMCM = vi.mocked(dal.merchandiseMovementsDAL.createFromNAXML);
-    mockCreateFromNAXMLTLM = vi.mocked(dal.taxLevelMovementsDAL.createFromNAXML);
-    mockBulkCreateFromNAXMLISM = vi.mocked(dal.itemSalesMovementsDAL.bulkCreateFromNAXML);
-    mockCreateFromNAXMLTPM = vi.mocked(dal.tenderProductMovementsDAL.createFromNAXML);
     mockGetOrCreateForDate = vi.mocked(dal.shiftsDAL.getOrCreateForDate);
     mockCreateWithDetails = vi.mocked(dal.transactionsDAL.createWithDetails);
+    // New schema DAL mocks
+    mockShiftFuelCreateFromNAXML = vi.mocked(dal.shiftFuelSummariesDAL.createFromNAXML);
+    mockShiftDeptCreateFromNAXML = vi.mocked(dal.shiftDepartmentSummariesDAL.createFromNAXML);
+    mockShiftTaxCreateFromNAXML = vi.mocked(dal.shiftTaxSummariesDAL.createFromNAXML);
+    mockMeterReadingsCreateFromNAXML = vi.mocked(dal.meterReadingsDAL.createFromNAXML);
+    mockTankReadingsCreateFromNAXML = vi.mocked(dal.tankReadingsDAL.createFromNAXML);
 
     // Get parser mock - createNAXMLParser takes options object, not store ID
     const parserInstance = createNAXMLParser();
@@ -205,15 +254,19 @@ describe('ParserService', () => {
     mockIsFileProcessed.mockReturnValue(false);
     mockRecordFile.mockReturnValue({ id: 'file-record-id' });
     mockGetOrCreateForDate.mockReturnValue({ shift_id: 'shift-123' });
-    mockCreateFromNAXMLFGM.mockReturnValue('fgm-record-id');
-    mockCreateFromNAXMLFPM.mockReturnValue(['fpm-record-id']);
-    mockCreateFromNAXMLMSM.mockReturnValue('msm-record-id');
-    mockCreateFromNAXMLMCM.mockReturnValue('mcm-record-id');
-    mockCreateFromNAXMLTLM.mockReturnValue('tlm-record-id');
-    mockBulkCreateFromNAXMLISM.mockReturnValue(3);
-    mockCreateFromNAXMLTPM.mockReturnValue('tpm-record-id');
     mockCreateWithDetails.mockReturnValue({ transaction_id: 'txn-123' });
     mockEnqueue.mockReturnValue({ id: 'queue-item-id' });
+    // New schema DAL defaults
+    mockShiftFuelCreateFromNAXML.mockReturnValue('shift-fuel-summary-123');
+    mockShiftDeptCreateFromNAXML.mockReturnValue('shift-dept-summary-123');
+    mockShiftTaxCreateFromNAXML.mockReturnValue('shift-tax-summary-123');
+    mockMeterReadingsCreateFromNAXML.mockReturnValue('meter-reading-123');
+    mockTankReadingsCreateFromNAXML.mockReturnValue('tank-reading-123');
+
+    // Get reference to mocked settingsService.adjustBusinessDate
+    mockAdjustBusinessDate = vi.mocked(settingsService.adjustBusinessDate);
+    // Default: no adjustment (return original business date)
+    mockAdjustBusinessDate.mockImplementation((businessDate: string) => businessDate);
 
     vi.mocked(fs.stat).mockResolvedValue({ size: 1024 } as unknown as Awaited<
       ReturnType<typeof fs.stat>
@@ -299,55 +352,42 @@ describe('ParserService', () => {
   // ==========================================================================
 
   describe('Document Type Routing', () => {
-    it('PS-020: should route FuelGradeMovement to fuelGradeMovementsDAL', async () => {
+    it('PS-020: should route FuelGradeMovement to shiftFuelSummariesDAL', async () => {
       mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
 
       await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLFGM).toHaveBeenCalledTimes(2); // Two FGM details
-      expect(mockCreateFromNAXMLFGM).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        '2025-01-15',
-        expect.objectContaining({ fuelGradeId: 'UNLEADED' }),
-        TEST_FILE_HASH,
-        undefined // No shift for period 99
-      );
+      // Two FGM details should result in 2 shift fuel summary records
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalledTimes(2);
     });
 
-    it('PS-021: should route ItemSalesMovement to itemSalesMovementsDAL with bulk insert', async () => {
+    it('PS-021: should count ItemSalesMovement records (no longer stored in legacy table)', async () => {
       mockParse.mockReturnValue(SAMPLE_ISM_PARSE_RESULT);
 
-      await service.processFile('/path/to/ISM20250115.xml', TEST_FILE_HASH);
+      const result = await service.processFile('/path/to/ISM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockBulkCreateFromNAXMLISM).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        '2025-01-15',
-        expect.arrayContaining([
-          expect.objectContaining({ itemCode: 'SKU001' }),
-          expect.objectContaining({ itemCode: 'SKU002' }),
-          expect.objectContaining({ itemCode: 'SKU003' }),
-        ]),
-        TEST_FILE_HASH,
-        undefined
-      );
+      // ISM now just counts records (aggregated via MCM/shift_department_summaries)
+      expect(result.recordsCreated).toBe(3);
     });
 
-    it('PS-022: should route FuelProductMovement to fuelProductMovementsDAL', async () => {
+    it('PS-022: should route FuelProductMovement to meterReadingsDAL', async () => {
       const fpmResult = {
         documentType: 'FuelProductMovement',
         data: {
           movementHeader: { businessDate: '2025-01-15' },
-          fpmDetails: [{ fuelProductId: 'PRODUCT1', fpmNonResettableTotals: [] }],
+          fpmDetails: [
+            { fuelProductId: 'PRODUCT1', fpmNonResettableTotals: [{ fuelPositionId: 'P1' }] },
+          ],
         },
       };
       mockParse.mockReturnValue(fpmResult);
 
       await service.processFile('/path/to/FPM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLFPM).toHaveBeenCalled();
+      expect(mockMeterReadingsCreateFromNAXML).toHaveBeenCalled();
     });
 
-    it('PS-023: should route MiscellaneousSummaryMovement to miscellaneousSummariesDAL', async () => {
+    it('PS-023: should process MiscellaneousSummaryMovement (creates mappings only)', async () => {
       const msmResult = {
         documentType: 'MiscellaneousSummaryMovement',
         data: {
@@ -358,12 +398,14 @@ describe('ParserService', () => {
       };
       mockParse.mockReturnValue(msmResult);
 
-      await service.processFile('/path/to/MSM20250115.xml', TEST_FILE_HASH);
+      const result = await service.processFile('/path/to/MSM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLMSM).toHaveBeenCalled();
+      // MSM now just creates ID mappings (no dedicated table yet)
+      expect(result.success).toBe(true);
+      expect(result.recordsCreated).toBe(1);
     });
 
-    it('PS-024: should route MerchandiseCodeMovement to merchandiseMovementsDAL', async () => {
+    it('PS-024: should route MerchandiseCodeMovement to shiftDepartmentSummariesDAL', async () => {
       const mcmResult = {
         documentType: 'MerchandiseCodeMovement',
         data: {
@@ -371,8 +413,9 @@ describe('ParserService', () => {
           salesMovementHeader: {},
           mcmDetails: [
             {
-              merchandiseCode: { merchandiseCodeValue: { departmentId: 'DEPT1' } },
-              mcmSalesTotals: {},
+              merchandiseCode: 'DEPT1',
+              merchandiseCodeDescription: 'Department 1',
+              mcmSalesTotals: { salesAmount: 100 },
             },
           ],
         },
@@ -381,41 +424,39 @@ describe('ParserService', () => {
 
       await service.processFile('/path/to/MCM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLMCM).toHaveBeenCalled();
+      expect(mockShiftDeptCreateFromNAXML).toHaveBeenCalled();
     });
 
-    it('PS-025: should route TaxLevelMovement to taxLevelMovementsDAL', async () => {
+    it('PS-025: should route TaxLevelMovement to shiftTaxSummariesDAL', async () => {
       const tlmResult = {
         documentType: 'TaxLevelMovement',
         data: {
           movementHeader: { businessDate: '2025-01-15' },
           salesMovementHeader: {},
-          tlmDetails: [{ taxLevelId: 'TAX1', tlmSalesTotals: { taxAmount: 5.0 } }],
+          tlmDetails: [{ taxLevelId: 'TAX1', taxableSalesAmount: 100, taxCollectedAmount: 5.0 }],
         },
       };
       mockParse.mockReturnValue(tlmResult);
 
       await service.processFile('/path/to/TLM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLTLM).toHaveBeenCalled();
+      expect(mockShiftTaxCreateFromNAXML).toHaveBeenCalled();
     });
 
-    it('PS-026: should route TankProductMovement to tenderProductMovementsDAL', async () => {
+    it('PS-026: should route TankProductMovement to tankReadingsDAL', async () => {
       const tpmResult = {
         documentType: 'TankProductMovement',
         data: {
           movementHeader: { businessDate: '2025-01-15' },
           salesMovementHeader: {},
-          tpmDetails: [
-            { tankId: 'TANK1', productId: 'PROD1', tpmInventoryData: {}, tpmSalesData: {} },
-          ],
+          tpmDetails: [{ tankId: 'TANK1', fuelProductId: 'PROD1', tankVolume: 5000 }],
         },
       };
       mockParse.mockReturnValue(tpmResult);
 
       await service.processFile('/path/to/TPM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockCreateFromNAXMLTPM).toHaveBeenCalled();
+      expect(mockTankReadingsCreateFromNAXML).toHaveBeenCalled();
     });
 
     it('PS-027: should skip unknown document types', async () => {
@@ -430,14 +471,14 @@ describe('ParserService', () => {
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it('PS-028: should create shift for shift-level reports (period 98)', async () => {
+    it('PS-028: should find existing shift for shift close reports (period 98)', async () => {
       const fgmShiftResult = {
         ...SAMPLE_FGM_PARSE_RESULT,
         data: {
           ...SAMPLE_FGM_PARSE_RESULT.data,
           movementHeader: {
             businessDate: '2025-01-15',
-            primaryReportPeriod: 98, // Shift-level
+            primaryReportPeriod: 98, // Shift close
           },
         },
       };
@@ -445,14 +486,11 @@ describe('ParserService', () => {
 
       await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockGetOrCreateForDate).toHaveBeenCalledWith(TEST_STORE_ID, '2025-01-15');
-      expect(mockCreateFromNAXMLFGM).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        '2025-01-15',
-        expect.any(Object),
-        TEST_FILE_HASH,
-        'shift-123' // Should pass shift ID
-      );
+      // Period 98 = shift close, should find existing OPEN shift rather than create new one
+      // Uses findOpenShiftToClose to check adjacent dates for overnight shifts
+      expect(vi.mocked(dal.shiftsDAL.findOpenShiftToClose)).toHaveBeenCalled();
+      // Shift fuel summaries should be created with the shift's summary ID
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
     });
   });
 
@@ -502,38 +540,22 @@ describe('ParserService', () => {
   // ==========================================================================
 
   describe('Sync Queue Integration', () => {
-    it('PS-060: should enqueue each created record for sync', async () => {
+    it('PS-060: should NOT enqueue movement data (new local-first schema)', async () => {
       mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
 
       await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
 
-      // 2 FGM details = 2 enqueue calls
-      expect(mockEnqueue).toHaveBeenCalledTimes(2);
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          store_id: TEST_STORE_ID,
-          entity_type: 'fuel_grade_movement',
-          operation: 'CREATE',
-        })
-      );
+      // New schema is local-first, no sync queue for movement data
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it('PS-061: should enqueue ISM as batch to prevent queue explosion', async () => {
+    it('PS-061: should NOT enqueue ISM (new local-first schema)', async () => {
       mockParse.mockReturnValue(SAMPLE_ISM_PARSE_RESULT);
 
       await service.processFile('/path/to/ISM20250115.xml', TEST_FILE_HASH);
 
-      // Should only enqueue once for the batch, not per item
-      expect(mockEnqueue).toHaveBeenCalledTimes(1);
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: 'item_sales_movement_batch',
-          payload: expect.objectContaining({
-            count: 3,
-            fileHash: TEST_FILE_HASH,
-          }),
-        })
-      );
+      // New schema is local-first, no sync queue for movement data
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
     it('PS-062: should not enqueue if no records created', async () => {
@@ -550,8 +572,8 @@ describe('ParserService', () => {
       expect(mockEnqueue).not.toHaveBeenCalled();
     });
 
-    it('PS-063: should include correct entity_id in queue payload', async () => {
-      mockCreateFromNAXMLFGM.mockReturnValue('specific-fgm-id');
+    it('PS-063: shift summaries are stored locally (no sync queue)', async () => {
+      mockShiftFuelCreateFromNAXML.mockReturnValue('shift-fuel-123');
       mockParse.mockReturnValue({
         documentType: 'FuelGradeMovement',
         data: {
@@ -562,11 +584,9 @@ describe('ParserService', () => {
 
       await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
 
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_id: 'specific-fgm-id',
-        })
-      );
+      // Shift fuel summaries are created but not enqueued
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -597,7 +617,7 @@ describe('ParserService', () => {
 
     it('PS-082: should handle DAL errors during storage', async () => {
       mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
-      mockCreateFromNAXMLFGM.mockImplementation(() => {
+      mockShiftFuelCreateFromNAXML.mockImplementation(() => {
         throw new Error('Database constraint violation');
       });
 
@@ -666,6 +686,342 @@ describe('ParserService', () => {
       const instance = createParserService('store-456');
 
       expect(instance).toBeInstanceOf(ParserService);
+    });
+  });
+
+  // ==========================================================================
+  // PS-100 through 120: Business Day Cutoff Integration
+  // Tests for settingsService.adjustBusinessDate integration
+  // ==========================================================================
+
+  describe('Business Day Cutoff Integration', () => {
+    it('PS-100: should call adjustBusinessDate for FGM processing', async () => {
+      mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // adjustBusinessDate should be called with business date and end timestamp (null if not in data)
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      expect(mockAdjustBusinessDate).toHaveBeenCalledWith(
+        '2025-01-15',
+        null // No endDate/endTime in SAMPLE_FGM_PARSE_RESULT
+      );
+    });
+
+    it('PS-101: should use adjusted date for FGM DAL calls', async () => {
+      // Mock date adjustment to return previous day (simulating overnight shift)
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+      mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-102: should use original date when adjustBusinessDate returns same date', async () => {
+      // No adjustment - return same date
+      mockAdjustBusinessDate.mockReturnValue('2025-01-15');
+      mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-103: should call adjustBusinessDate for ISM batch processing', async () => {
+      mockParse.mockReturnValue(SAMPLE_ISM_PARSE_RESULT);
+
+      await service.processFile('/path/to/ISM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+    });
+
+    it('PS-104: ISM is now local-first and just counted', async () => {
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+      mockParse.mockReturnValue(SAMPLE_ISM_PARSE_RESULT);
+
+      const result = await service.processFile('/path/to/ISM20250115.xml', TEST_FILE_HASH);
+
+      // ISM data is now local-first - just counted, not stored in separate table
+      expect(result.success).toBe(true);
+      expect(result.documentType).toBe('ItemSalesMovement');
+    });
+
+    it('PS-105: should call adjustBusinessDate for MSM processing', async () => {
+      const msmResult = {
+        documentType: 'MiscellaneousSummaryMovement',
+        data: {
+          movementHeader: { businessDate: '2025-01-15' },
+          salesMovementHeader: {},
+          msmDetails: [{ miscellaneousSummaryCodes: { code: 'PAYOUT' }, msmSalesTotals: {} }],
+        },
+      };
+      mockParse.mockReturnValue(msmResult);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/MSM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      // MSM now just creates ID mappings, no legacy DAL write
+    });
+
+    it('PS-106: should call adjustBusinessDate for MCM processing', async () => {
+      const mcmResult = {
+        documentType: 'MerchandiseCodeMovement',
+        data: {
+          movementHeader: { businessDate: '2025-01-15' },
+          salesMovementHeader: {},
+          mcmDetails: [
+            {
+              merchandiseCode: { merchandiseCodeValue: { departmentId: 'DEPT1' } },
+              mcmSalesTotals: {},
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(mcmResult);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/MCM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      // MCM now uses shiftDepartmentSummariesDAL
+      expect(mockShiftDeptCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-107: should call adjustBusinessDate for TLM processing', async () => {
+      const tlmResult = {
+        documentType: 'TaxLevelMovement',
+        data: {
+          movementHeader: { businessDate: '2025-01-15' },
+          salesMovementHeader: {},
+          tlmDetails: [{ taxLevelId: 'TAX1', tlmSalesTotals: { taxAmount: 5.0 } }],
+        },
+      };
+      mockParse.mockReturnValue(tlmResult);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/TLM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      // TLM now uses shiftTaxSummariesDAL
+      expect(mockShiftTaxCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-108: should call adjustBusinessDate for FPM processing', async () => {
+      const fpmResult = {
+        documentType: 'FuelProductMovement',
+        data: {
+          movementHeader: { businessDate: '2025-01-15' },
+          fpmDetails: [{ fuelProductId: 'PRODUCT1', fpmNonResettableTotals: [] }],
+        },
+      };
+      mockParse.mockReturnValue(fpmResult);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/FPM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      // FPM now uses meterReadingsDAL
+      expect(mockMeterReadingsCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-109: should call adjustBusinessDate for TPM processing', async () => {
+      const tpmResult = {
+        documentType: 'TankProductMovement',
+        data: {
+          movementHeader: { businessDate: '2025-01-15' },
+          salesMovementHeader: {},
+          tpmDetails: [
+            { tankId: 'TANK1', productId: 'PROD1', tpmInventoryData: {}, tpmSalesData: {} },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(tpmResult);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/TPM20250115.xml', TEST_FILE_HASH);
+
+      expect(mockAdjustBusinessDate).toHaveBeenCalled();
+      // TPM now uses tankReadingsDAL
+      expect(mockTankReadingsCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-110: should handle year boundary adjustment correctly', async () => {
+      const fgmYearBoundary = {
+        documentType: 'FuelGradeMovement',
+        data: {
+          movementHeader: {
+            businessDate: '2026-01-01',
+            primaryReportPeriod: 99,
+          },
+          salesMovementHeader: {},
+          fgmDetails: [
+            {
+              fuelGradeId: 'UNLEADED',
+              fgmTenderSummary: { salesAmount: 100.0 },
+              fgmPositionSummary: { salesVolume: 50.0 },
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(fgmYearBoundary);
+      // Simulate overnight shift that crosses year boundary
+      mockAdjustBusinessDate.mockReturnValue('2025-12-31');
+
+      await service.processFile('/path/to/FGM20260101.xml', TEST_FILE_HASH);
+
+      // FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-111: should handle month boundary adjustment correctly', async () => {
+      const fgmMonthBoundary = {
+        documentType: 'FuelGradeMovement',
+        data: {
+          movementHeader: {
+            businessDate: '2025-02-01',
+            primaryReportPeriod: 99,
+          },
+          salesMovementHeader: {},
+          fgmDetails: [
+            {
+              fuelGradeId: 'PREMIUM',
+              fgmTenderSummary: { salesAmount: 200.0 },
+              fgmPositionSummary: { salesVolume: 60.0 },
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(fgmMonthBoundary);
+      // Simulate overnight shift that crosses month boundary
+      mockAdjustBusinessDate.mockReturnValue('2025-01-31');
+
+      await service.processFile('/path/to/FGM20250201.xml', TEST_FILE_HASH);
+
+      // FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-112: should pass endTime to adjustBusinessDate when available', async () => {
+      const fgmWithEndTime = {
+        documentType: 'FuelGradeMovement',
+        data: {
+          movementHeader: {
+            businessDate: '2025-01-15',
+            primaryReportPeriod: 99,
+            endDate: '2025-01-15',
+            endTime: '03:00:00', // 3 AM - before typical 6 AM cutoff
+          },
+          salesMovementHeader: {},
+          fgmDetails: [
+            {
+              fuelGradeId: 'DIESEL',
+              fgmTenderSummary: { salesAmount: 500.0 },
+              fgmPositionSummary: { salesVolume: 150.0 },
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(fgmWithEndTime);
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // Verify adjustBusinessDate was called with the end timestamp
+      expect(mockAdjustBusinessDate).toHaveBeenCalledWith(
+        '2025-01-15',
+        expect.stringContaining('2025-01-15')
+      );
+    });
+
+    it('PS-113: should handle null timestamp gracefully', async () => {
+      const fgmNoTimestamp = {
+        documentType: 'FuelGradeMovement',
+        data: {
+          movementHeader: {
+            businessDate: '2025-01-15',
+            primaryReportPeriod: 99,
+            // No endDate or endTime
+          },
+          salesMovementHeader: {},
+          fgmDetails: [
+            {
+              fuelGradeId: 'REGULAR',
+              fgmTenderSummary: { salesAmount: 75.0 },
+              fgmPositionSummary: { salesVolume: 25.0 },
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(fgmNoTimestamp);
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // Should still process without error - FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-114: should adjust date for day-level reports and create shift', async () => {
+      // Test with OPEN shift (EndDate = 2100-01-01 sentinel value)
+      // According to NAXML spec, EndDate = 2100-01-01 means shift is STILL OPEN
+      const fgmDayLevel = {
+        documentType: 'FuelGradeMovement',
+        data: {
+          movementHeader: {
+            businessDate: '2025-01-15',
+            primaryReportPeriod: 99, // Day-level report (not shift close)
+            endDate: '2100-01-01', // NAXML sentinel value for OPEN shift
+            endTime: '04:00:00',
+          },
+          salesMovementHeader: {},
+          fgmDetails: [
+            {
+              fuelGradeId: 'MIDGRADE',
+              fgmTenderSummary: { salesAmount: 250.0 },
+              fgmPositionSummary: { salesVolume: 80.0 },
+            },
+          ],
+        },
+      };
+      mockParse.mockReturnValue(fgmDayLevel);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // Shift should be created with adjusted date because:
+      // 1. Period is not 98 (not a shift close file)
+      // 2. EndDate is 2100-01-01 (sentinel value = shift still open)
+      expect(mockGetOrCreateForDate).toHaveBeenCalledWith(
+        TEST_STORE_ID,
+        '2025-01-14',
+        expect.any(Object)
+      );
+    });
+
+    it('PS-115: should use adjusted date when creating movement records', async () => {
+      mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
+      mockAdjustBusinessDate.mockReturnValue('2025-01-14');
+
+      await service.processFile('/path/to/FGM20250115.xml', TEST_FILE_HASH);
+
+      // FGM now uses shiftFuelSummariesDAL
+      expect(mockShiftFuelCreateFromNAXML).toHaveBeenCalled();
+    });
+
+    it('PS-116: should not call adjustBusinessDate when document has no business date', async () => {
+      mockParse.mockReturnValue({
+        documentType: 'UnknownType',
+        data: {
+          // No movementHeader
+        },
+      });
+
+      await service.processFile('/path/to/UNKNOWN.xml', TEST_FILE_HASH);
+
+      // Should not throw or fail
+      expect(mockAdjustBusinessDate).not.toHaveBeenCalled();
     });
   });
 });

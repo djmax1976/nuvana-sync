@@ -2,11 +2,13 @@
  * Session Management Service
  *
  * Manages user sessions with activity-based timeout for the Electron app.
- * Implements SEC-012 session timeout requirements (≤15 minutes).
+ * Implements SEC-012 session timeout requirements (≤15 minutes inactivity + 8 hour absolute).
  *
  * @module main/services/session
  * @security SEC-012: Session expires after 15 minutes of inactivity
+ * @security SEC-012: Absolute session lifetime of 8 hours enforced
  * @security SEC-017: Audit logging for session lifecycle events
+ * @security FE-001: Session data stored in memory only, never in browser storage
  */
 
 import { BrowserWindow } from 'electron';
@@ -40,6 +42,13 @@ export interface SessionInfo {
  * POS terminals require shorter timeouts due to shared access
  */
 const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * SEC-012: Absolute session lifetime (8 hours max)
+ * Forces re-authentication regardless of activity
+ * Enterprise requirement for shared POS terminals
+ */
+const SESSION_ABSOLUTE_LIFETIME_MS = 8 * 60 * 60 * 1000; // 8 hours
 
 /**
  * Warning threshold before session expiry
@@ -207,24 +216,60 @@ export function destroySession(): void {
 /**
  * Get current session information
  * Returns null if no session or session expired
+ * SEC-012: Enforces both inactivity timeout and absolute lifetime
  *
  * @returns Session info or null
  */
 export function getSessionInfo(): SessionInfo | null {
   const user = getCurrentUser();
 
+  // Debug logging for session state troubleshooting
+  log.debug('getSessionInfo called', {
+    hasUser: !!user,
+    hasSessionState: !!sessionState,
+    userId: user?.user_id,
+    sessionStateLoginAt: sessionState?.loginAt,
+    sessionStateLastActivity: sessionState?.lastActivityAt,
+  });
+
   if (!user || !sessionState) {
+    log.debug('getSessionInfo returning null', {
+      reason: !user ? 'no user' : 'no sessionState',
+    });
     return null;
   }
 
-  // Calculate time until expiry
-  const lastActivity = new Date(sessionState.lastActivityAt).getTime();
-  const elapsed = Date.now() - lastActivity;
-  const timeoutIn = Math.max(0, SESSION_TIMEOUT_MS - elapsed);
+  const now = Date.now();
 
-  // SEC-012: Check if session has expired
-  if (timeoutIn === 0) {
-    log.info('Session expired on access check', {
+  // SEC-012: Check absolute session lifetime first
+  const loginTime = new Date(sessionState.loginAt).getTime();
+  const sessionAge = now - loginTime;
+  if (sessionAge >= SESSION_ABSOLUTE_LIFETIME_MS) {
+    log.info('Session expired: Absolute lifetime exceeded', {
+      userId: user.user_id,
+      username: user.username,
+      sessionAgeMs: sessionAge,
+      maxLifetimeMs: SESSION_ABSOLUTE_LIFETIME_MS,
+    });
+    destroySession();
+    emitSessionExpired();
+    return null;
+  }
+
+  // Calculate time until inactivity expiry
+  const lastActivity = new Date(sessionState.lastActivityAt).getTime();
+  const inactivityElapsed = now - lastActivity;
+  const inactivityTimeoutIn = Math.max(0, SESSION_TIMEOUT_MS - inactivityElapsed);
+
+  // Calculate time until absolute lifetime expiry
+  const absoluteTimeoutIn = Math.max(0, SESSION_ABSOLUTE_LIFETIME_MS - sessionAge);
+
+  // Use the smaller of the two timeouts
+  const timeoutIn = Math.min(inactivityTimeoutIn, absoluteTimeoutIn);
+
+  // SEC-012: Check if session has expired due to inactivity
+  if (inactivityTimeoutIn === 0) {
+    log.info('Session expired: Inactivity timeout', {
       userId: user.user_id,
       username: user.username,
     });
@@ -287,6 +332,59 @@ export function isSessionExpired(): boolean {
  */
 export function hasSession(): boolean {
   return getSessionInfo() !== null;
+}
+
+/**
+ * Check if user has a valid session with minimum role for PIN-protected operations
+ * FE-001: Allows frontend to skip PIN re-entry if session is still valid
+ * SEC-010: Validates role before allowing bypass
+ *
+ * @param requiredRole - Minimum role required for the operation
+ * @returns Object with valid status and user info if valid
+ */
+export function hasValidSessionForRole(requiredRole: string): {
+  valid: boolean;
+  user?: { userId: string; name: string; role: string };
+  timeoutIn?: number;
+} {
+  const info = getSessionInfo();
+
+  // Debug: Log session state for troubleshooting
+  log.info('hasValidSessionForRole called', {
+    requiredRole,
+    hasSessionInfo: !!info,
+    sessionUser: info?.user?.user_id,
+    sessionRole: info?.user?.role,
+  });
+
+  if (!info) {
+    log.info('No valid session found for role check');
+    return { valid: false };
+  }
+
+  // Role hierarchy for comparison
+  const ROLE_HIERARCHY: Record<string, number> = {
+    cashier: 1,
+    shift_manager: 2,
+    store_manager: 3,
+  };
+
+  const userRoleLevel = ROLE_HIERARCHY[info.user.role] || 0;
+  const requiredRoleLevel = ROLE_HIERARCHY[requiredRole] || 0;
+
+  if (userRoleLevel < requiredRoleLevel) {
+    return { valid: false };
+  }
+
+  return {
+    valid: true,
+    user: {
+      userId: info.user.user_id,
+      name: info.user.username,
+      role: info.user.role,
+    },
+    timeoutIn: info.timeoutIn,
+  };
 }
 
 /**

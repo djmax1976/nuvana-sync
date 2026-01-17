@@ -243,6 +243,7 @@ describe('Sync IPC Handlers', () => {
         created: 2,
         updated: 3,
         deactivated: 0,
+        reactivated: 0,
         errors: [],
       };
 

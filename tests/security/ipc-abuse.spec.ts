@@ -323,23 +323,28 @@ describe('IPC Security', () => {
   describe('Authorization Checks', () => {
     /**
      * API-004: Protected endpoints require authentication
+     * SEC-010: Role-based access control
+     *
+     * Role hierarchy (production values from users.dal.ts:36):
+     *   cashier < shift_manager < store_manager
      */
     const PROTECTED_CHANNELS = [
-      // Require authentication
-      { channel: 'lottery:receivePack', requiresAuth: true },
-      { channel: 'lottery:activatePack', requiresAuth: true },
-      { channel: 'lottery:depletePack', requiresAuth: true },
+      // Require authentication (cashier minimum)
+      { channel: 'lottery:receivePack', requiresAuth: true, requiredRole: 'cashier' },
+      { channel: 'lottery:activatePack', requiresAuth: true, requiredRole: 'cashier' },
+      { channel: 'lottery:depletePack', requiresAuth: true, requiredRole: 'cashier' },
       { channel: 'auth:logout', requiresAuth: true },
       { channel: 'auth:updateActivity', requiresAuth: true },
-      // Require MANAGER role
-      { channel: 'lottery:returnPack', requiresAuth: true, requiredRole: 'MANAGER' },
-      { channel: 'lottery:prepareDayClose', requiresAuth: true, requiredRole: 'MANAGER' },
-      { channel: 'lottery:commitDayClose', requiresAuth: true, requiredRole: 'MANAGER' },
-      { channel: 'settings:update', requiresAuth: true, requiredRole: 'MANAGER' },
-      { channel: 'shifts:close', requiresAuth: true, requiredRole: 'MANAGER' },
-      { channel: 'daySummaries:close', requiresAuth: true, requiredRole: 'MANAGER' },
-      // Require ADMIN role
-      { channel: 'settings:reset', requiresAuth: true, requiredRole: 'ADMIN' },
+      // Require shift_manager role (matches lottery.handlers.ts:1191)
+      { channel: 'lottery:returnPack', requiresAuth: true, requiredRole: 'shift_manager' },
+      { channel: 'lottery:prepareDayClose', requiresAuth: true, requiredRole: 'shift_manager' },
+      { channel: 'lottery:commitDayClose', requiresAuth: true, requiredRole: 'shift_manager' },
+      { channel: 'lottery:markSoldOut', requiresAuth: true, requiredRole: 'shift_manager' },
+      // Require store_manager role
+      { channel: 'settings:update', requiresAuth: true, requiredRole: 'store_manager' },
+      { channel: 'shifts:close', requiresAuth: true, requiredRole: 'store_manager' },
+      { channel: 'daySummaries:close', requiresAuth: true, requiredRole: 'store_manager' },
+      { channel: 'settings:reset', requiresAuth: true, requiredRole: 'store_manager' },
     ];
 
     it('should define protected channels requiring authentication', () => {
@@ -347,18 +352,28 @@ describe('IPC Security', () => {
       expect(authRequired.length).toBeGreaterThan(0);
     });
 
-    it('should define manager-only channels', () => {
-      const managerChannels = PROTECTED_CHANNELS.filter((c) => c.requiredRole === 'MANAGER');
-      expect(managerChannels.length).toBeGreaterThan(0);
+    it('should define shift_manager channels', () => {
+      const shiftManagerChannels = PROTECTED_CHANNELS.filter(
+        (c) => c.requiredRole === 'shift_manager'
+      );
+      expect(shiftManagerChannels.length).toBeGreaterThan(0);
+      // Verify lottery:returnPack requires shift_manager
+      expect(shiftManagerChannels.some((c) => c.channel === 'lottery:returnPack')).toBe(true);
     });
 
-    it('should define admin-only channels', () => {
-      const adminChannels = PROTECTED_CHANNELS.filter((c) => c.requiredRole === 'ADMIN');
-      expect(adminChannels.length).toBeGreaterThan(0);
+    it('should define store_manager channels', () => {
+      const storeManagerChannels = PROTECTED_CHANNELS.filter(
+        (c) => c.requiredRole === 'store_manager'
+      );
+      expect(storeManagerChannels.length).toBeGreaterThan(0);
     });
 
-    it('should enforce role hierarchy (CASHIER < MANAGER < ADMIN)', () => {
-      const roleHierarchy = ['CASHIER', 'MANAGER', 'ADMIN'];
+    /**
+     * SEC-010: Role hierarchy enforcement
+     * Production hierarchy from users.dal.ts:36 and ipc/index.ts:27
+     */
+    it('should enforce role hierarchy (cashier < shift_manager < store_manager)', () => {
+      const roleHierarchy = ['cashier', 'shift_manager', 'store_manager'];
 
       const hasRequiredRole = (userRole: string, requiredRole: string): boolean => {
         const userLevel = roleHierarchy.indexOf(userRole);
@@ -366,20 +381,46 @@ describe('IPC Security', () => {
         return userLevel >= requiredLevel;
       };
 
-      // CASHIER tests
-      expect(hasRequiredRole('CASHIER', 'CASHIER')).toBe(true);
-      expect(hasRequiredRole('CASHIER', 'MANAGER')).toBe(false);
-      expect(hasRequiredRole('CASHIER', 'ADMIN')).toBe(false);
+      // cashier tests
+      expect(hasRequiredRole('cashier', 'cashier')).toBe(true);
+      expect(hasRequiredRole('cashier', 'shift_manager')).toBe(false);
+      expect(hasRequiredRole('cashier', 'store_manager')).toBe(false);
 
-      // MANAGER tests
-      expect(hasRequiredRole('MANAGER', 'CASHIER')).toBe(true);
-      expect(hasRequiredRole('MANAGER', 'MANAGER')).toBe(true);
-      expect(hasRequiredRole('MANAGER', 'ADMIN')).toBe(false);
+      // shift_manager tests
+      expect(hasRequiredRole('shift_manager', 'cashier')).toBe(true);
+      expect(hasRequiredRole('shift_manager', 'shift_manager')).toBe(true);
+      expect(hasRequiredRole('shift_manager', 'store_manager')).toBe(false);
 
-      // ADMIN tests
-      expect(hasRequiredRole('ADMIN', 'CASHIER')).toBe(true);
-      expect(hasRequiredRole('ADMIN', 'MANAGER')).toBe(true);
-      expect(hasRequiredRole('ADMIN', 'ADMIN')).toBe(true);
+      // store_manager tests
+      expect(hasRequiredRole('store_manager', 'cashier')).toBe(true);
+      expect(hasRequiredRole('store_manager', 'shift_manager')).toBe(true);
+      expect(hasRequiredRole('store_manager', 'store_manager')).toBe(true);
+    });
+
+    /**
+     * SEC-010: CRITICAL - Verify lottery:returnPack requires shift_manager
+     * This is a business-critical security control preventing unauthorized returns
+     */
+    it('should require shift_manager role for lottery:returnPack (SEC-010)', () => {
+      const returnPackChannel = PROTECTED_CHANNELS.find(
+        (c) => c.channel === 'lottery:returnPack'
+      );
+
+      expect(returnPackChannel).toBeDefined();
+      expect(returnPackChannel?.requiresAuth).toBe(true);
+      expect(returnPackChannel?.requiredRole).toBe('shift_manager');
+
+      // Verify cashier CANNOT return packs
+      const roleHierarchy = ['cashier', 'shift_manager', 'store_manager'];
+      const hasRequiredRole = (userRole: string, requiredRole: string): boolean => {
+        const userLevel = roleHierarchy.indexOf(userRole);
+        const requiredLevel = roleHierarchy.indexOf(requiredRole);
+        return userLevel >= requiredLevel;
+      };
+
+      expect(hasRequiredRole('cashier', 'shift_manager')).toBe(false);
+      expect(hasRequiredRole('shift_manager', 'shift_manager')).toBe(true);
+      expect(hasRequiredRole('store_manager', 'shift_manager')).toBe(true);
     });
   });
 

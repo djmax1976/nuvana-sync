@@ -161,14 +161,84 @@ export function getMockShiftById(shiftId: string): Shift | undefined {
 
 export function getMockShiftSummary(shiftId: string): ShiftSummary | undefined {
   const shift = getMockShiftById(shiftId);
-  if (!shift) return undefined;
+  if (!shift) {
+    console.log('[MOCK] getMockShiftSummary: shift not found for', shiftId);
+    return undefined;
+  }
 
-  return {
+  const netSales = randomAmount(500, 2000);
+  const grossSales = netSales * 1.08; // Add ~8% for tax
+  const taxCollected = grossSales - netSales;
+  const fuelGallons = randomAmount(200, 800);
+  const fuelSales = fuelGallons * 3.25; // ~$3.25/gallon
+
+  const result: ShiftSummary = {
     shift,
     transactionCount: Math.floor(Math.random() * 30) + 10,
-    totalSales: randomAmount(500, 2000),
+    totalSales: netSales,
     totalVoided: randomAmount(0, 50),
+    // Enhanced summary data
+    grossSales,
+    netSales,
+    taxCollected,
+    fuelGallons,
+    fuelSales,
+    lotteryNet: randomAmount(-50, 150),
+    departmentBreakdown: [
+      {
+        departmentCode: '001',
+        departmentName: 'Tobacco',
+        netSales: randomAmount(100, 400),
+        transactionCount: Math.floor(Math.random() * 15) + 5,
+      },
+      {
+        departmentCode: '002',
+        departmentName: 'Beverages',
+        netSales: randomAmount(80, 300),
+        transactionCount: Math.floor(Math.random() * 20) + 10,
+      },
+      {
+        departmentCode: '003',
+        departmentName: 'Snacks',
+        netSales: randomAmount(50, 200),
+        transactionCount: Math.floor(Math.random() * 25) + 8,
+      },
+      {
+        departmentCode: '004',
+        departmentName: 'Grocery',
+        netSales: randomAmount(30, 150),
+        transactionCount: Math.floor(Math.random() * 10) + 3,
+      },
+    ],
+    tenderBreakdown: [
+      {
+        tenderCode: 'CASH',
+        tenderDisplayName: 'Cash',
+        netAmount: randomAmount(200, 600),
+        transactionCount: Math.floor(Math.random() * 15) + 5,
+      },
+      {
+        tenderCode: 'CREDIT',
+        tenderDisplayName: 'Credit Card',
+        netAmount: randomAmount(300, 900),
+        transactionCount: Math.floor(Math.random() * 20) + 10,
+      },
+      {
+        tenderCode: 'DEBIT',
+        tenderDisplayName: 'Debit Card',
+        netAmount: randomAmount(100, 400),
+        transactionCount: Math.floor(Math.random() * 12) + 4,
+      },
+    ],
   };
+
+  console.log('[MOCK] getMockShiftSummary returning:', {
+    shiftId,
+    hasGrossSales: result.grossSales !== undefined,
+    hasDepartmentBreakdown: result.departmentBreakdown?.length,
+    hasTenderBreakdown: result.tenderBreakdown?.length,
+  });
+  return result;
 }
 
 export function getMockOpenShifts(): Shift[] {
@@ -576,5 +646,170 @@ export function getMockParsedBarcode(raw: string): {
     check_digit: cleaned.substring(14, 24),
     checksum_valid: true,
     full_serial: cleaned.substring(0, 11),
+  };
+}
+
+// ============================================================================
+// Employee Mock Data
+// ============================================================================
+
+export interface MockEmployee {
+  user_id: string;
+  store_id: string;
+  role: 'store_manager' | 'shift_manager' | 'cashier';
+  name: string;
+  active: number;
+  last_login_at: string | null;
+  cloud_user_id: string | null;
+  synced_at: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
+export const mockEmployees: MockEmployee[] = [
+  {
+    user_id: 'user-1',
+    store_id: 'store-1',
+    role: 'store_manager',
+    name: 'John Manager',
+    active: 1,
+    last_login_at: new Date().toISOString(),
+    cloud_user_id: null,
+    synced_at: null,
+    created_at: '2024-01-01T00:00:00.000Z',
+    updated_at: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    user_id: 'user-2',
+    store_id: 'store-1',
+    role: 'shift_manager',
+    name: 'Sarah Shift',
+    active: 1,
+    last_login_at: '2024-06-15T08:30:00.000Z',
+    cloud_user_id: null,
+    synced_at: null,
+    created_at: '2024-02-01T00:00:00.000Z',
+    updated_at: '2024-02-01T00:00:00.000Z',
+  },
+  {
+    user_id: 'user-3',
+    store_id: 'store-1',
+    role: 'cashier',
+    name: 'Mike Cashier',
+    active: 1,
+    last_login_at: '2024-06-14T14:20:00.000Z',
+    cloud_user_id: null,
+    synced_at: null,
+    created_at: '2024-03-01T00:00:00.000Z',
+    updated_at: '2024-03-01T00:00:00.000Z',
+  },
+  {
+    user_id: 'user-4',
+    store_id: 'store-1',
+    role: 'cashier',
+    name: 'Emily Register',
+    active: 1,
+    last_login_at: null,
+    cloud_user_id: null,
+    synced_at: null,
+    created_at: '2024-04-01T00:00:00.000Z',
+    updated_at: '2024-04-01T00:00:00.000Z',
+  },
+  {
+    user_id: 'user-5',
+    store_id: 'store-1',
+    role: 'cashier',
+    name: 'Tom Inactive',
+    active: 0,
+    last_login_at: '2024-05-01T10:00:00.000Z',
+    cloud_user_id: null,
+    synced_at: null,
+    created_at: '2024-01-15T00:00:00.000Z',
+    updated_at: '2024-05-15T00:00:00.000Z',
+  },
+];
+
+export function getMockEmployees(): { employees: MockEmployee[]; total: number } {
+  return {
+    employees: mockEmployees,
+    total: mockEmployees.length,
+  };
+}
+
+// ============================================================================
+// Mock Register/Terminal Data
+// ============================================================================
+
+interface MockRegister {
+  id: string;
+  external_register_id: string;
+  terminal_type: string;
+  description: string | null;
+  active: boolean;
+  activeShift: Shift | null;
+  openShiftCount: number;
+  created_at: string;
+  updated_at: string;
+}
+
+/**
+ * Mock registers representing terminals identified during onboarding.
+ * Each register shows its active shift status.
+ */
+const mockRegisters: MockRegister[] = [
+  {
+    id: 'reg-uuid-1',
+    external_register_id: '1',
+    terminal_type: 'REGISTER',
+    description: 'Main Register',
+    active: true,
+    // This register has an active shift
+    activeShift: {
+      shift_id: 'shift-1',
+      store_id: 'store-1',
+      shift_number: 1,
+      business_date: new Date().toISOString().split('T')[0],
+      cashier_id: 'user-1',
+      register_id: '1',
+      start_time: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+      end_time: null,
+      status: 'OPEN' as const,
+      created_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+      updated_at: new Date(Date.now() - 4 * 60 * 60 * 1000).toISOString(),
+    },
+    openShiftCount: 1,
+    created_at: '2024-01-01T00:00:00.000Z',
+    updated_at: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'reg-uuid-2',
+    external_register_id: '2',
+    terminal_type: 'REGISTER',
+    description: 'Secondary Register',
+    active: true,
+    // This register has no active shift
+    activeShift: null,
+    openShiftCount: 0,
+    created_at: '2024-01-01T00:00:00.000Z',
+    updated_at: '2024-01-01T00:00:00.000Z',
+  },
+  {
+    id: 'reg-uuid-3',
+    external_register_id: '3',
+    terminal_type: 'REGISTER',
+    description: 'Back Office Register',
+    active: true,
+    // This register also has no active shift
+    activeShift: null,
+    openShiftCount: 0,
+    created_at: '2024-01-15T00:00:00.000Z',
+    updated_at: '2024-01-15T00:00:00.000Z',
+  },
+];
+
+export function getMockRegisters(): { registers: MockRegister[]; total: number } {
+  return {
+    registers: mockRegisters,
+    total: mockRegisters.length,
   };
 }

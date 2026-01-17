@@ -141,29 +141,42 @@ export class FileWatcherService extends EventEmitter {
         pollInterval: 100,
       },
 
-      // Only watch XML files
-      ignored: (filePath: string) => {
-        const ext = path.extname(filePath).toLowerCase();
-        return ext !== '.xml';
-      },
+      // Watch all files - we filter in handleNewFile
+      // Using a function was causing issues on Windows with ignoreInitial
+      ignored: /^\./, // Only ignore dotfiles
 
       // Watch settings
       persistent: true,
-      ignoreInitial: false, // Process existing files on startup
-      depth: 0, // Only watch top level directory
+      ignoreInitial: true, // Don't fire ADD for existing files - we process them manually in sorted order
+      depth: 2, // Watch subdirectories (e.g., BOOutBox for Gilbarco)
       ignorePermissionErrors: true,
     });
 
     this.watcher
-      .on('add', (filePath) => this.handleNewFile(filePath))
+      .on('add', (filePath) => {
+        log.debug('Chokidar ADD event received', { filePath });
+        this.handleNewFile(filePath);
+      })
       .on('change', (filePath) => this.handleFileChange(filePath))
       .on('error', (error: unknown) =>
         this.handleError(error instanceof Error ? error : new Error(String(error)))
       )
       .on('ready', () => {
-        log.info('File watcher ready');
+        log.info('File watcher ready - processing existing files in sorted order');
         this.stats.isWatching = true;
-        this.emit('watcher-ready');
+        // Process existing files in sorted order (MSM first, then FGM, etc.)
+        // This ensures shifts are created before other file types try to link to them
+        this.processExistingFiles()
+          .then(() => {
+            log.info('Initial file processing complete');
+            this.emit('watcher-ready');
+          })
+          .catch((err) => {
+            log.error('Error processing existing files', {
+              error: err instanceof Error ? err.message : String(err),
+            });
+            this.emit('watcher-ready');
+          });
       });
   }
 
@@ -201,26 +214,147 @@ export class FileWatcherService extends EventEmitter {
   }
 
   /**
-   * Manually process existing files in watch directory
+   * Manually process existing files in watch directory (including subdirectories)
    */
   async processExistingFiles(): Promise<void> {
-    if (!this.config.watchPath) return;
+    log.info('processExistingFiles called', {
+      watchPath: this.config.watchPath,
+      storeId: this.storeId,
+    });
+
+    if (!this.config.watchPath) {
+      log.warn('processExistingFiles: No watch path configured');
+      return;
+    }
 
     try {
-      const files = await fs.readdir(this.config.watchPath);
-      const xmlFiles = files.filter((f) => path.extname(f).toLowerCase() === '.xml');
+      log.info('Finding XML files recursively', { dir: this.config.watchPath, maxDepth: 2 });
+      const unsortedFiles = await this.findXmlFilesRecursive(this.config.watchPath, 2);
 
-      log.info('Processing existing files', { count: xmlFiles.length });
+      // Sort files so MSM files are processed first (they define shifts)
+      const xmlFiles = this.sortFilesForProcessing(unsortedFiles);
 
-      for (const file of xmlFiles) {
-        const filePath = path.join(this.config.watchPath, file);
-        await this.processFile(filePath);
+      log.info('Processing existing files', {
+        count: xmlFiles.length,
+        sampleFiles: xmlFiles.slice(0, 10),
+        sortOrder: 'MSM first, then FGM, MCM, TLM, ISM, TPM, FPM, PJR',
+      });
+
+      let processed = 0;
+      let skipped = 0;
+      let duplicates = 0;
+      for (const filePath of xmlFiles) {
+        try {
+          await this.processFile(filePath);
+          processed++;
+        } catch (err) {
+          const errMsg = err instanceof Error ? err.message : String(err);
+          if (errMsg.includes('Duplicate') || errMsg.includes('already processed')) {
+            duplicates++;
+          } else {
+            skipped++;
+          }
+          log.warn('Error processing individual file', {
+            filePath,
+            error: errMsg,
+          });
+        }
       }
+
+      log.info('processExistingFiles completed', {
+        processed,
+        skipped,
+        duplicates,
+        total: xmlFiles.length,
+      });
     } catch (error) {
       log.error('Error processing existing files', {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Recursively find XML files in directory up to specified depth
+   * SEC-014: Path validation via isPathSafe
+   */
+  private async findXmlFilesRecursive(
+    dir: string,
+    maxDepth: number,
+    currentDepth = 0
+  ): Promise<string[]> {
+    const results: string[] = [];
+
+    if (currentDepth > maxDepth) return results;
+
+    try {
+      const entries = await fs.readdir(dir, { withFileTypes: true });
+
+      for (const entry of entries) {
+        const fullPath = path.join(dir, entry.name);
+
+        // SEC-014: Validate path is within allowed directories
+        if (!isPathSafe(fullPath, this.getAllowedPaths())) {
+          continue;
+        }
+
+        if (entry.isDirectory() && currentDepth < maxDepth) {
+          const subFiles = await this.findXmlFilesRecursive(fullPath, maxDepth, currentDepth + 1);
+          results.push(...subFiles);
+        } else if (entry.isFile() && path.extname(entry.name).toLowerCase() === '.xml') {
+          results.push(fullPath);
+        }
+      }
+    } catch (error) {
+      log.warn('Error reading directory', {
+        dir,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    return results;
+  }
+
+  /**
+   * Sort XML files for optimal processing order.
+   *
+   * MSM (Miscellaneous Summary Movement) files with Period 98 DEFINE shifts,
+   * so they must be processed FIRST before other file types try to link to shifts.
+   *
+   * Processing order:
+   * 1. MSM files (define shifts)
+   * 2. FGM files (fuel grade movement - close shifts)
+   * 3. Other files (MCM, TLM, ISM, PJR - link to existing shifts)
+   *
+   * Within each category, files are sorted by name (which includes date) for
+   * chronological processing.
+   */
+  private sortFilesForProcessing(files: string[]): string[] {
+    const getFilePriority = (filePath: string): number => {
+      const fileName = path.basename(filePath).toUpperCase();
+      if (fileName.startsWith('MSM')) return 0; // MSM first - defines shifts
+      if (fileName.startsWith('FGM')) return 1; // FGM second - may close shifts
+      if (fileName.startsWith('MCM')) return 2; // MCM third
+      if (fileName.startsWith('TLM')) return 3; // TLM fourth
+      if (fileName.startsWith('ISM')) return 4; // ISM fifth
+      if (fileName.startsWith('TPM')) return 5; // TPM sixth
+      if (fileName.startsWith('FPM')) return 6; // FPM seventh
+      if (fileName.startsWith('PJR')) return 7; // PJR last - transactions
+      return 8; // Unknown files at the end
+    };
+
+    return [...files].sort((a, b) => {
+      const priorityA = getFilePriority(a);
+      const priorityB = getFilePriority(b);
+
+      // First sort by priority (file type)
+      if (priorityA !== priorityB) {
+        return priorityA - priorityB;
+      }
+
+      // Then sort alphabetically (includes date in filename)
+      return a.localeCompare(b);
+    });
   }
 
   /**

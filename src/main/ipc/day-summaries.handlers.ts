@@ -294,7 +294,7 @@ registerHandler<DaySummary | DayCloseValidation | ReturnType<typeof createErrorR
       }
 
       // SEC-006: Parameterized update via DAL
-      const closedSummary = daySummariesDAL.close(summary.summary_id);
+      const closedSummary = daySummariesDAL.close(summary.day_summary_id);
 
       if (!closedSummary) {
         return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, 'Failed to close day');
@@ -304,7 +304,7 @@ registerHandler<DaySummary | DayCloseValidation | ReturnType<typeof createErrorR
       syncQueueDAL.enqueue({
         store_id: store.store_id,
         entity_type: 'day_summary',
-        entity_id: summary.summary_id,
+        entity_id: summary.day_summary_id,
         operation: 'UPDATE',
         payload: closedSummary,
       });
@@ -313,9 +313,9 @@ registerHandler<DaySummary | DayCloseValidation | ReturnType<typeof createErrorR
       log.info('Day closed', {
         storeId: store.store_id,
         date,
-        summaryId: summary.summary_id,
-        totalSales: closedSummary.total_sales,
-        totalTransactions: closedSummary.total_transactions,
+        summaryId: summary.day_summary_id,
+        grossSales: closedSummary.gross_sales,
+        transactionCount: closedSummary.transaction_count,
       });
 
       return closedSummary;

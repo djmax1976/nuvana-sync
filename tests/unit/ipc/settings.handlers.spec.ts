@@ -376,4 +376,281 @@ describe('Settings IPC Handlers', () => {
       expect(createSuccessResponse).toHaveBeenCalledWith({ selected: false });
     });
   });
+
+  // ==========================================================================
+  // Business Day Cutoff Time IPC Handler Tests
+  // SEC-014: Input validation for HH:MM format
+  // ==========================================================================
+
+  describe('Business Day Cutoff Time Validation', () => {
+    it('BDCH-001: should accept valid cutoff time in settings:update', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+
+    it('BDCH-002: should accept cutoff time at midnight (00:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '00:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '00:00',
+        })
+      );
+    });
+
+    it('BDCH-003: should accept cutoff time at end of day (23:59)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '23:59' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '23:59',
+        })
+      );
+    });
+
+    it('BDCH-010: should reject invalid hour (25:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '25:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-011: should reject invalid minute (06:60)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:60' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-012: should reject single-digit hour format (6:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '6:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-013: should reject 12-hour format with AM/PM', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00 AM' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-014: should reject empty string', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-015: should reject non-string input', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: 600 });
+
+      expect(createErrorResponse).toHaveBeenCalled();
+    });
+
+    it('BDCH-020: should allow cutoff time update without other settings', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '05:30' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith({
+        businessDayCutoffTime: '05:30',
+      });
+    });
+
+    it('BDCH-021: should allow cutoff time update combined with other settings', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, {
+        businessDayCutoffTime: '07:00',
+        syncIntervalSeconds: 120,
+      });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith({
+        businessDayCutoffTime: '07:00',
+        syncIntervalSeconds: 120,
+      });
+    });
+
+    it('BDCH-030: should include businessDayCutoffTime in settings:get response', async () => {
+      vi.mocked(settingsService.getAll).mockReturnValue({
+        storeId: 'store-123',
+        storeName: 'Test Store',
+        companyId: 'company-456',
+        companyName: 'Test Company',
+        timezone: 'America/New_York',
+        features: [],
+        xmlWatchFolder: '',
+        syncIntervalSeconds: 60,
+        businessDayCutoffTime: '06:00',
+        lottery: { enabled: false, binCount: 0 },
+        setupCompletedAt: null,
+      } as ReturnType<typeof settingsService.getAll>);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+  });
+
+  // ==========================================================================
+  // Business Day Cutoff - Setup Flow Tests
+  // ==========================================================================
+
+  describe('Business Day Cutoff - During Setup', () => {
+    it('BDCS-001: should accept cutoff time in settings:updateDuringSetup', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(false);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+
+    it('BDCS-002: should reject cutoff time update via setup endpoint after setup complete', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(true);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'FORBIDDEN',
+        expect.stringContaining('Setup already complete')
+      );
+    });
+
+    it('BDCS-003: should validate cutoff time format during setup', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(false);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: 'invalid' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+  });
 });

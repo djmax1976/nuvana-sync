@@ -42,6 +42,8 @@ describe('StoresDAL', () => {
         name: 'Test Store',
         timezone: 'America/New_York',
         status: 'ACTIVE',
+        state_id: null,
+        state_code: null,
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-01T00:00:00.000Z',
       };
@@ -78,6 +80,8 @@ describe('StoresDAL', () => {
         'Test Store',
         'America/New_York', // Default timezone
         'ACTIVE',
+        null, // state_id
+        null, // state_code
         expect.any(String),
         expect.any(String)
       );
@@ -93,6 +97,8 @@ describe('StoresDAL', () => {
         name: 'Updated Name',
         timezone: 'America/Los_Angeles',
         status: 'ACTIVE',
+        state_id: null,
+        state_code: null,
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-02T00:00:00.000Z',
       };
@@ -128,6 +134,8 @@ describe('StoresDAL', () => {
         name: 'Test Store',
         timezone: 'America/New_York',
         status: 'ACTIVE',
+        state_id: null,
+        state_code: null,
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-01T00:00:00.000Z',
       };
@@ -184,6 +192,8 @@ describe('StoresDAL', () => {
         name: 'Cloud Store',
         timezone: 'America/New_York',
         status: 'ACTIVE',
+        state_id: null,
+        state_code: null,
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-01T00:00:00.000Z',
       };
@@ -209,6 +219,8 @@ describe('StoresDAL', () => {
         name: 'Old Name',
         timezone: 'America/New_York',
         status: 'ACTIVE',
+        state_id: null,
+        state_code: null,
         created_at: '2024-01-01T00:00:00.000Z',
         updated_at: '2024-01-01T00:00:00.000Z',
       };

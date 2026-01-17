@@ -6,7 +6,7 @@
  * @module renderer/pages/TransactionsPage
  */
 
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useTransactions, useTransaction } from '../lib/hooks';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import type { TransactionListParams } from '../lib/transport';
@@ -38,9 +38,9 @@ export default function TransactionsPage() {
 
   if (error) {
     return (
-      <div className="bg-red-50 border border-red-200 rounded-lg p-4">
-        <h3 className="text-red-800 font-medium">Error loading transactions</h3>
-        <p className="text-red-600 text-sm mt-1">
+      <div className="bg-destructive/10 border border-destructive/20 rounded-lg p-4">
+        <h3 className="text-destructive font-medium">Error loading transactions</h3>
+        <p className="text-destructive/80 text-sm mt-1">
           {error instanceof Error ? error.message : 'Unknown error'}
         </p>
       </div>
@@ -50,10 +50,10 @@ export default function TransactionsPage() {
   return (
     <div className="space-y-6">
       {/* Filters */}
-      <div className="bg-white rounded-lg border border-gray-200 p-4">
+      <div className="bg-card rounded-lg border border-border p-4">
         <div className="flex items-center space-x-4">
           <div>
-            <label className="block text-sm text-gray-500 mb-1">Start Date</label>
+            <label className="block text-sm text-muted-foreground mb-1">Start Date</label>
             <input
               type="date"
               value={filters.startDate || ''}
@@ -64,22 +64,22 @@ export default function TransactionsPage() {
                   offset: 0,
                 }))
               }
-              className="border rounded px-3 py-1.5 text-sm"
+              className="border border-border rounded px-3 py-1.5 text-sm bg-background text-foreground"
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">End Date</label>
+            <label className="block text-sm text-muted-foreground mb-1">End Date</label>
             <input
               type="date"
               value={filters.endDate || ''}
               onChange={(e) =>
                 setFilters((prev) => ({ ...prev, endDate: e.target.value || undefined, offset: 0 }))
               }
-              className="border rounded px-3 py-1.5 text-sm"
+              className="border border-border rounded px-3 py-1.5 text-sm bg-background text-foreground"
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">Min Amount</label>
+            <label className="block text-sm text-muted-foreground mb-1">Min Amount</label>
             <input
               type="number"
               value={filters.minAmount || ''}
@@ -90,12 +90,12 @@ export default function TransactionsPage() {
                   offset: 0,
                 }))
               }
-              className="border rounded px-3 py-1.5 text-sm w-24"
+              className="border border-border rounded px-3 py-1.5 text-sm w-24 bg-background text-foreground"
               placeholder="$0.00"
             />
           </div>
           <div>
-            <label className="block text-sm text-gray-500 mb-1">Max Amount</label>
+            <label className="block text-sm text-muted-foreground mb-1">Max Amount</label>
             <input
               type="number"
               value={filters.maxAmount || ''}
@@ -106,7 +106,7 @@ export default function TransactionsPage() {
                   offset: 0,
                 }))
               }
-              className="border rounded px-3 py-1.5 text-sm w-24"
+              className="border border-border rounded px-3 py-1.5 text-sm w-24 bg-background text-foreground"
               placeholder="$999.99"
             />
           </div>
@@ -115,59 +115,59 @@ export default function TransactionsPage() {
 
       <div className="flex gap-6">
         {/* Transactions List */}
-        <div className="flex-1 bg-white rounded-lg border border-gray-200 overflow-hidden">
+        <div className="flex-1 bg-card rounded-lg border border-border overflow-hidden">
           {isLoading ? (
             <div className="flex items-center justify-center h-48">
               <LoadingSpinner />
             </div>
           ) : data && data.transactions.length > 0 ? (
             <>
-              <table className="min-w-full divide-y divide-gray-200">
-                <thead className="bg-gray-50">
+              <table className="min-w-full divide-y divide-border">
+                <thead className="bg-muted/50">
                   <tr>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
                       #
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
                       Date
                     </th>
-                    <th className="px-4 py-3 text-left text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-left text-xs font-medium text-muted-foreground uppercase">
                       Time
                     </th>
-                    <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-right text-xs font-medium text-muted-foreground uppercase">
                       Amount
                     </th>
-                    <th className="px-4 py-3 text-center text-xs font-medium text-gray-500 uppercase">
+                    <th className="px-4 py-3 text-center text-xs font-medium text-muted-foreground uppercase">
                       Voided
                     </th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-gray-100">
+                <tbody className="divide-y divide-border">
                   {data.transactions.map((tx) => (
                     <tr
                       key={tx.transaction_id}
                       onClick={() => setSelectedId(tx.transaction_id)}
-                      className={`cursor-pointer hover:bg-gray-50 ${
-                        selectedId === tx.transaction_id ? 'bg-blue-50' : ''
+                      className={`cursor-pointer hover:bg-muted/50 ${
+                        selectedId === tx.transaction_id ? 'bg-primary/10' : ''
                       }`}
                     >
-                      <td className="px-4 py-3 text-sm text-gray-900">
+                      <td className="px-4 py-3 text-sm text-foreground">
                         {tx.transaction_number || '-'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
                         {formatDate(tx.business_date)}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-500">
+                      <td className="px-4 py-3 text-sm text-muted-foreground">
                         {tx.transaction_time ? formatTime(tx.transaction_time) : '-'}
                       </td>
-                      <td className="px-4 py-3 text-sm text-gray-900 text-right font-medium">
+                      <td className="px-4 py-3 text-sm text-foreground text-right font-medium">
                         {formatCurrency(tx.total_amount)}
                       </td>
                       <td className="px-4 py-3 text-center">
                         {tx.voided ? (
-                          <span className="text-red-600 text-xs font-medium">VOID</span>
+                          <span className="text-destructive text-xs font-medium">VOID</span>
                         ) : (
-                          <span className="text-gray-400">-</span>
+                          <span className="text-muted-foreground">-</span>
                         )}
                       </td>
                     </tr>
@@ -176,8 +176,8 @@ export default function TransactionsPage() {
               </table>
 
               {/* Pagination */}
-              <div className="px-4 py-3 bg-gray-50 border-t border-gray-200 flex items-center justify-between">
-                <div className="text-sm text-gray-500">
+              <div className="px-4 py-3 bg-muted/50 border-t border-border flex items-center justify-between">
+                <div className="text-sm text-muted-foreground">
                   Showing {data.offset + 1} to{' '}
                   {Math.min(data.offset + data.transactions.length, data.total)} of {data.total}
                 </div>
@@ -185,14 +185,14 @@ export default function TransactionsPage() {
                   <button
                     onClick={handlePrevPage}
                     disabled={!filters.offset || filters.offset === 0}
-                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                    className="px-3 py-1 text-sm border border-border rounded text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
                   >
                     Previous
                   </button>
                   <button
                     onClick={handleNextPage}
                     disabled={!data.hasMore}
-                    className="px-3 py-1 text-sm border rounded disabled:opacity-50 disabled:cursor-not-allowed hover:bg-gray-100"
+                    className="px-3 py-1 text-sm border border-border rounded text-foreground disabled:opacity-50 disabled:cursor-not-allowed hover:bg-muted"
                   >
                     Next
                   </button>
@@ -200,18 +200,18 @@ export default function TransactionsPage() {
               </div>
             </>
           ) : (
-            <div className="p-8 text-center text-gray-500">No transactions found</div>
+            <div className="p-8 text-center text-muted-foreground">No transactions found</div>
           )}
         </div>
 
         {/* Transaction Detail Panel */}
         {selectedId && (
-          <div className="w-96 bg-white rounded-lg border border-gray-200 p-4">
+          <div className="w-96 bg-card rounded-lg border border-border p-4">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-lg font-semibold text-gray-900">Transaction Details</h3>
+              <h3 className="text-lg font-semibold text-foreground">Transaction Details</h3>
               <button
                 onClick={() => setSelectedId(null)}
-                className="text-gray-400 hover:text-gray-600"
+                className="text-muted-foreground hover:text-foreground"
               >
                 <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor">
                   <path
@@ -231,12 +231,12 @@ export default function TransactionsPage() {
             ) : selectedTransaction ? (
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm text-gray-500">Transaction #</p>
-                  <p className="font-medium">{selectedTransaction.transaction_number || '-'}</p>
+                  <p className="text-sm text-muted-foreground">Transaction #</p>
+                  <p className="font-medium text-foreground">{selectedTransaction.transaction_number || '-'}</p>
                 </div>
                 <div>
-                  <p className="text-sm text-gray-500">Total</p>
-                  <p className="text-xl font-bold text-green-600">
+                  <p className="text-sm text-muted-foreground">Total</p>
+                  <p className="text-xl font-bold text-green-600 dark:text-green-400">
                     {formatCurrency(selectedTransaction.total_amount)}
                   </p>
                 </div>
@@ -244,18 +244,18 @@ export default function TransactionsPage() {
                 {/* Line Items */}
                 {selectedTransaction.lineItems && selectedTransaction.lineItems.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-2">Line Items</p>
+                    <p className="text-sm font-medium text-foreground mb-2">Line Items</p>
                     <div className="space-y-2 max-h-48 overflow-y-auto">
                       {selectedTransaction.lineItems.map((item) => (
                         <div
                           key={item.line_item_id}
-                          className="flex justify-between text-sm border-b border-gray-100 pb-1"
+                          className="flex justify-between text-sm border-b border-border pb-1"
                         >
-                          <span className="text-gray-600 truncate flex-1">
+                          <span className="text-muted-foreground truncate flex-1">
                             {item.description || item.item_code || 'Item'}
                           </span>
-                          <span className="text-gray-500 mx-2">x{item.quantity}</span>
-                          <span className="font-medium">{formatCurrency(item.total_price)}</span>
+                          <span className="text-muted-foreground mx-2">x{item.quantity}</span>
+                          <span className="font-medium text-foreground">{formatCurrency(item.total_price)}</span>
                         </div>
                       ))}
                     </div>
@@ -265,12 +265,12 @@ export default function TransactionsPage() {
                 {/* Payments */}
                 {selectedTransaction.payments && selectedTransaction.payments.length > 0 && (
                   <div>
-                    <p className="text-sm font-medium text-gray-700 mb-2">Payments</p>
+                    <p className="text-sm font-medium text-foreground mb-2">Payments</p>
                     <div className="space-y-2">
                       {selectedTransaction.payments.map((payment) => (
                         <div key={payment.payment_id} className="flex justify-between text-sm">
-                          <span className="text-gray-600">{payment.payment_type}</span>
-                          <span className="font-medium">{formatCurrency(payment.amount)}</span>
+                          <span className="text-muted-foreground">{payment.payment_type}</span>
+                          <span className="font-medium text-foreground">{formatCurrency(payment.amount)}</span>
                         </div>
                       ))}
                     </div>
@@ -278,7 +278,7 @@ export default function TransactionsPage() {
                 )}
               </div>
             ) : (
-              <p className="text-gray-500">Transaction not found</p>
+              <p className="text-muted-foreground">Transaction not found</p>
             )}
           </div>
         )}

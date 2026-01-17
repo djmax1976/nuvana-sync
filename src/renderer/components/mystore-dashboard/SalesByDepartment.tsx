@@ -1,5 +1,6 @@
 import { Card, CardHeader, CardTitle, CardContent } from '../ui/card';
-import { PieChart, Pie, Cell, ResponsiveContainer } from 'recharts';
+import { PieChart, Pie, Cell } from 'recharts';
+import { DeferredResponsiveContainer } from '../ui/deferred-responsive-container';
 import { AccessibleChart, generateChartDescription } from '../ui/accessible-chart';
 import { sanitizeForDisplay, formatCurrency } from '../../lib/utils/security';
 
@@ -37,17 +38,17 @@ const chartDescription = generateChartDescription(
 export function SalesByDepartment() {
   return (
     <Card
-      className="min-h-[380px] flex flex-col"
+      className="min-h-[340px] sm:min-h-[380px] flex flex-col"
       data-testid="sales-by-department"
       role="region"
       aria-labelledby="sales-by-department-title"
     >
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="sales-by-department-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b">
+        <CardTitle id="sales-by-department-title" className="text-sm sm:text-base font-semibold">
           Sales
         </CardTitle>
         <select
-          className="px-3 py-1.5 text-sm text-muted-foreground bg-card border rounded-md cursor-pointer"
+          className="px-2 sm:px-3 py-1 sm:py-1.5 text-xs sm:text-sm text-muted-foreground bg-card border rounded-md cursor-pointer"
           aria-label="Select time period for sales data"
         >
           <option>Today</option>
@@ -55,7 +56,7 @@ export function SalesByDepartment() {
           <option>This Month</option>
         </select>
       </CardHeader>
-      <CardContent className="flex-1 p-5">
+      <CardContent className="flex-1 p-3 sm:p-4 lg:p-5">
         {/* Donut Chart with Center Label - Accessible */}
         <AccessibleChart
           title="Sales by Department"
@@ -69,15 +70,15 @@ export function SalesByDepartment() {
           height={180}
         >
           <div className="flex flex-col items-center">
-            <div className="relative w-[180px] h-[180px]">
-              <ResponsiveContainer width={180} height={180}>
+            <div className="relative w-[140px] h-[140px] sm:w-[160px] sm:h-[160px] lg:w-[180px] lg:h-[180px]">
+              <DeferredResponsiveContainer width="100%" height="100%">
                 <PieChart>
                   <Pie
                     data={salesData}
                     cx="50%"
                     cy="50%"
-                    innerRadius={55}
-                    outerRadius={85}
+                    innerRadius="60%"
+                    outerRadius="95%"
                     paddingAngle={2}
                     dataKey="value"
                     stroke="none"
@@ -87,16 +88,16 @@ export function SalesByDepartment() {
                     ))}
                   </Pie>
                 </PieChart>
-              </ResponsiveContainer>
+              </DeferredResponsiveContainer>
               {/* Center label */}
               <div
                 className="absolute inset-0 flex flex-col items-center justify-center"
                 aria-hidden="true"
               >
-                <span className="text-3xl font-bold text-primary">
+                <span className="text-xl sm:text-2xl lg:text-3xl font-bold text-primary">
                   {formatCurrency(total / 1000)}K
                 </span>
-                <span className="text-xs text-muted-foreground">Total</span>
+                <span className="text-[10px] sm:text-xs text-muted-foreground">Total</span>
               </div>
             </div>
           </div>
@@ -104,7 +105,7 @@ export function SalesByDepartment() {
 
         {/* Legend - Accessible */}
         <div
-          className="flex flex-col gap-2 mt-4"
+          className="flex flex-col gap-1.5 sm:gap-2 mt-3 sm:mt-4"
           role="list"
           aria-label="Sales breakdown by department"
         >
@@ -116,19 +117,19 @@ export function SalesByDepartment() {
             return (
               <div
                 key={item.name}
-                className="flex items-center justify-between text-sm"
+                className="flex items-center justify-between text-xs sm:text-sm"
                 role="listitem"
                 aria-label={`${safeName}: ${formattedValue}, ${percentage}% of total`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-1.5 sm:gap-2">
                   <div
-                    className="w-3 h-3 rounded-sm"
+                    className="w-2.5 h-2.5 sm:w-3 sm:h-3 rounded-sm flex-shrink-0"
                     style={{ backgroundColor: item.color }}
                     aria-hidden="true"
                   />
-                  <span>{safeName}</span>
+                  <span className="truncate">{safeName}</span>
                 </div>
-                <span className="font-semibold">{formattedValue}</span>
+                <span className="font-semibold ml-2">{formattedValue}</span>
               </div>
             );
           })}

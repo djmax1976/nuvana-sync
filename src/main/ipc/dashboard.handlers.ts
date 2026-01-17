@@ -120,8 +120,8 @@ registerHandler<DashboardStats | ReturnType<typeof createErrorResponse>>(
       const pendingSync = syncQueueDAL.getPendingCount(store.store_id);
 
       const stats: DashboardStats = {
-        todaySales: todaySummary?.total_sales ?? 0,
-        todayTransactions: todaySummary?.total_transactions ?? 0,
+        todaySales: todaySummary?.gross_sales ?? 0,
+        todayTransactions: todaySummary?.transaction_count ?? 0,
         openShiftCount: openShifts.length,
         pendingSyncCount: pendingSync,
         storeStatus: store.status,
@@ -201,8 +201,8 @@ registerHandler<TodaySalesResponse | ReturnType<typeof createErrorResponse>>(
 
       const response: TodaySalesResponse = {
         hourlyBreakdown,
-        totalSales: daySummary?.total_sales ?? 0,
-        totalTransactions: daySummary?.total_transactions ?? 0,
+        totalSales: daySummary?.gross_sales ?? 0,
+        totalTransactions: daySummary?.transaction_count ?? 0,
         businessDate: today,
       };
 
@@ -249,8 +249,8 @@ registerHandler<WeeklySalesResponse | ReturnType<typeof createErrorResponse>>(
         const summary = daySummariesDAL.findByDate(store.store_id, date);
         return {
           date,
-          sales: summary?.total_sales ?? 0,
-          transactions: summary?.total_transactions ?? 0,
+          sales: summary?.gross_sales ?? 0,
+          transactions: summary?.transaction_count ?? 0,
         };
       });
 

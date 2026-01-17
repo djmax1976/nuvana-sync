@@ -14,8 +14,7 @@ import { z } from 'zod';
 import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { daySummariesDAL } from '../dal/day-summaries.dal';
-import { fuelGradeMovementsDAL } from '../dal/fuel-grade-movements.dal';
-import { merchandiseMovementsDAL } from '../dal/merchandise-movements.dal';
+import { shiftSummariesDAL, shiftFuelSummariesDAL, shiftDepartmentSummariesDAL } from '../dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -124,12 +123,21 @@ function getDateRange(startDate: string, endDate: string): string[] {
 
 /**
  * Get fuel sales total for a date
- * Uses fuel grade movements DAL aggregation
+ * Uses shift_summaries and shift_fuel_summaries tables
  */
 function getFuelSalesForDate(storeId: string, date: string): number {
   try {
-    const aggregation = fuelGradeMovementsDAL.getAggregationByDate(storeId, date);
-    return aggregation.reduce((sum, item) => sum + item.salesAmount, 0);
+    // Get all shift summaries for this date
+    const shiftSummaries = shiftSummariesDAL.findByDate(storeId, date);
+    let totalFuelSales = 0;
+
+    for (const summary of shiftSummaries) {
+      // Get fuel totals for each shift
+      const fuelTotals = shiftFuelSummariesDAL.getShiftTotals(summary.shift_summary_id);
+      totalFuelSales += fuelTotals.totalSales;
+    }
+
+    return totalFuelSales;
   } catch {
     return 0;
   }
@@ -137,12 +145,23 @@ function getFuelSalesForDate(storeId: string, date: string): number {
 
 /**
  * Get merchandise sales total for a date
- * Uses merchandise movements DAL aggregation
+ * Uses shift_summaries and shift_department_summaries tables
  */
 function getMerchandiseSalesForDate(storeId: string, date: string): number {
   try {
-    const aggregation = merchandiseMovementsDAL.getAggregationByDate(storeId, date);
-    return aggregation.reduce((sum, item) => sum + item.salesAmount, 0);
+    // Get all shift summaries for this date
+    const shiftSummaries = shiftSummariesDAL.findByDate(storeId, date);
+    let totalMerchSales = 0;
+
+    for (const summary of shiftSummaries) {
+      // Get department summaries for each shift
+      const deptSummaries = shiftDepartmentSummariesDAL.findByShiftSummary(
+        summary.shift_summary_id
+      );
+      totalMerchSales += deptSummaries.reduce((sum, d) => sum + d.net_sales, 0);
+    }
+
+    return totalMerchSales;
   } catch {
     return 0;
   }
@@ -197,8 +216,8 @@ registerHandler<WeeklyReportResponse | ReturnType<typeof createErrorResponse>>(
 
         return {
           date,
-          totalSales: summary?.total_sales ?? 0,
-          transactionCount: summary?.total_transactions ?? 0,
+          totalSales: summary?.gross_sales ?? 0,
+          transactionCount: summary?.transaction_count ?? 0,
           fuelSales,
           merchandiseSales: merchSales,
           status: summary?.status ?? 'NO_DATA',
@@ -281,15 +300,15 @@ registerHandler<MonthlyReportResponse | ReturnType<typeof createErrorResponse>>(
       // Map to response format
       const mappedSummaries = summaries.map((s) => ({
         date: s.business_date,
-        totalSales: s.total_sales,
-        totalTransactions: s.total_transactions,
+        totalSales: s.gross_sales,
+        totalTransactions: s.transaction_count,
         status: s.status,
       }));
 
       // Calculate totals
       const totals = {
-        sales: summaries.reduce((sum, s) => sum + s.total_sales, 0),
-        transactions: summaries.reduce((sum, s) => sum + s.total_transactions, 0),
+        sales: summaries.reduce((sum, s) => sum + s.gross_sales, 0),
+        transactions: summaries.reduce((sum, s) => sum + s.transaction_count, 0),
         closedDays: summaries.filter((s) => s.status === 'CLOSED').length,
         openDays: summaries.filter((s) => s.status === 'OPEN').length,
       };
@@ -376,15 +395,15 @@ registerHandler<DateRangeReportResponse | ReturnType<typeof createErrorResponse>
       // Map to response format
       const mappedSummaries = summaries.map((s) => ({
         date: s.business_date,
-        totalSales: s.total_sales,
-        totalTransactions: s.total_transactions,
+        totalSales: s.gross_sales,
+        totalTransactions: s.transaction_count,
         status: s.status,
       }));
 
       // Calculate totals
       const totals = {
-        sales: summaries.reduce((sum, s) => sum + s.total_sales, 0),
-        transactions: summaries.reduce((sum, s) => sum + s.total_transactions, 0),
+        sales: summaries.reduce((sum, s) => sum + s.gross_sales, 0),
+        transactions: summaries.reduce((sum, s) => sum + s.transaction_count, 0),
         dayCount: summaries.length,
       };
 

@@ -13,6 +13,7 @@ import { MyStoreSidebar } from './MyStoreSidebar';
 import { Header } from './Header';
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../ui/sheet';
 import { Button } from '../ui/button';
+import { Toaster } from '../ui/toaster';
 import { Menu } from 'lucide-react';
 import { ClientAuthProvider } from '../../contexts/ClientAuthContext';
 import { StoreProvider, type StoreContextValue } from '../../contexts/StoreContext';
@@ -75,6 +76,8 @@ export function AppLayout() {
   return (
     <ClientAuthProvider>
       <StoreProvider value={defaultStoreValue}>
+        {/* Toast notifications container */}
+        <Toaster />
         <div className="flex h-screen overflow-hidden" data-testid="app-layout">
           {/* Desktop Sidebar */}
           <aside className="hidden lg:block">

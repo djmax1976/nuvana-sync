@@ -68,36 +68,56 @@ const voids = [
 export function RecentVoids() {
   return (
     <Card data-testid="recent-voids" role="region" aria-labelledby="recent-voids-title">
-      <CardHeader className="flex flex-row items-center justify-between p-5 border-b">
-        <CardTitle id="recent-voids-title" className="text-base font-semibold">
+      <CardHeader className="flex flex-row items-center justify-between p-3 sm:p-4 lg:p-5 border-b gap-2">
+        <CardTitle id="recent-voids-title" className="text-sm sm:text-base font-semibold">
           Recent Voids
         </CardTitle>
         <Button
           variant="outline"
           size="sm"
-          className="text-xs"
+          className="text-xs flex-shrink-0"
           aria-label="View all voided transactions"
         >
           View All Voids
         </Button>
       </CardHeader>
-      <CardContent className="p-0">
-        <Table aria-label="Recent voided transactions">
+      <CardContent className="overflow-x-auto p-0">
+        <Table
+          aria-label="Recent voided transactions"
+          className="min-w-[500px]"
+          size="compact"
+          nested
+        >
           <TableHeader>
             <TableRow>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Terminal
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden sm:table-cell"
+                scope="col"
+              >
                 Shift
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Cashier
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap"
+                scope="col"
+              >
                 Void Amount
               </TableHead>
-              <TableHead className="text-xs font-semibold uppercase tracking-wider" scope="col">
+              <TableHead
+                className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider whitespace-nowrap hidden md:table-cell"
+                scope="col"
+              >
                 Date & Time
               </TableHead>
             </TableRow>
@@ -115,27 +135,30 @@ export function RecentVoids() {
                 <TableRow key={voidItem.id}>
                   <TableCell>
                     <span
-                      className="font-mono text-sm text-primary"
+                      className="font-mono text-xs sm:text-sm text-primary"
                       title={`Terminal ${safeTerminal}`}
                     >
                       {safeTerminal}
                     </span>
                   </TableCell>
-                  <TableCell>
-                    <span className="font-mono text-sm text-primary" title={`Shift ${safeShiftId}`}>
+                  <TableCell className="hidden sm:table-cell">
+                    <span
+                      className="font-mono text-xs sm:text-sm text-primary"
+                      title={`Shift ${safeShiftId}`}
+                    >
                       {safeShiftId}
                     </span>
                   </TableCell>
-                  <TableCell>{safeCashier}</TableCell>
+                  <TableCell className="text-xs sm:text-sm">{safeCashier}</TableCell>
                   <TableCell>
                     <span
-                      className="font-semibold text-destructive"
+                      className="font-semibold text-destructive text-xs sm:text-sm"
                       aria-label={`Void amount: negative ${formattedAmount}`}
                     >
                       -{formattedAmount}
                     </span>
                   </TableCell>
-                  <TableCell>
+                  <TableCell className="hidden md:table-cell text-xs sm:text-sm">
                     <time dateTime={safeDateTime}>{safeDateTime}</time>
                   </TableCell>
                 </TableRow>

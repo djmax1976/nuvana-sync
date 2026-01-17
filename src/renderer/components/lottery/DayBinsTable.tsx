@@ -252,12 +252,10 @@ export function DayBinsTable({
                 Ending
                 {manualEntryMode && <span className="ml-1 text-xs text-primary">(Edit)</span>}
               </TableHead>
-              {/* Actions column visible when return is available OR in manual entry mode with mark sold */}
-              {(onReturnPack || (onMarkSoldOut && manualEntryMode)) && (
-                <TableHead scope="col" className="w-32 md:w-36 text-center">
-                  Actions
-                </TableHead>
-              )}
+              {/* Actions column - always visible for Return, wider when manual entry active */}
+              <TableHead scope="col" className={manualEntryMode ? "w-40 md:w-44 text-center" : "w-24 md:w-28 text-center"}>
+                Actions
+              </TableHead>
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -382,50 +380,50 @@ export function DayBinsTable({
                     )}
                   </TableCell>
 
-                  {/* Actions Column - Return Pack and/or Mark Sold buttons */}
-                  {(onReturnPack || (onMarkSoldOut && manualEntryMode)) && (
-                    <TableCell className="text-center">
-                      {isEmpty ? (
-                        '--'
-                      ) : (
-                        <div className="flex items-center justify-center gap-1">
-                          {/* Return Pack button - available for packs outside manual entry mode
-                              MCP: SEC-010 AUTHZ - ACTIVE and RECEIVED packs can be returned */}
-                          {onReturnPack && !manualEntryMode && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent row click
-                                onReturnPack(bin.pack!.pack_id);
-                              }}
-                              className="h-7 text-xs px-2"
-                              data-testid={`return-pack-btn-${bin.bin_id}`}
-                              aria-label={`Return pack ${bin.pack!.pack_number} to supplier`}
-                            >
-                              Return
-                            </Button>
-                          )}
-                          {/* Mark Sold button - only visible in manual entry mode */}
-                          {onMarkSoldOut && manualEntryMode && (
-                            <Button
-                              variant="outline"
-                              size="sm"
-                              onClick={(e) => {
-                                e.stopPropagation(); // Prevent row click
-                                onMarkSoldOut(bin.pack!.pack_id);
-                              }}
-                              className="h-7 text-xs px-2"
-                              data-testid={`mark-sold-btn-${bin.bin_id}`}
-                              aria-label={`Mark pack ${bin.pack!.pack_number} as sold out`}
-                            >
-                              Mark Sold
-                            </Button>
-                          )}
-                        </div>
-                      )}
-                    </TableCell>
-                  )}
+                  {/* Actions Column
+                      - Sold Out: Only in manual entry mode - marks pack as sold out (depleted)
+                      - Return: ALWAYS visible - returns pack to supplier */}
+                  <TableCell className="text-center">
+                    {isEmpty ? (
+                      '--'
+                    ) : (
+                      <div className="flex items-center justify-center gap-2">
+                        {/* Sold Out button - only in manual entry mode */}
+                        {manualEntryMode && typeof onMarkSoldOut === 'function' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click
+                              onMarkSoldOut(bin.pack!.pack_id);
+                            }}
+                            className="h-7 text-xs px-2 whitespace-nowrap"
+                            data-testid={`mark-sold-btn-${bin.bin_id}`}
+                            aria-label={`Mark pack ${bin.pack!.pack_number} as sold out`}
+                          >
+                            Sold Out
+                          </Button>
+                        )}
+                        {/* Return button - ALWAYS visible
+                            MCP: SEC-010 AUTHZ - ACTIVATED and RECEIVED packs can be returned */}
+                        {typeof onReturnPack === 'function' && (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={(e) => {
+                              e.stopPropagation(); // Prevent row click
+                              onReturnPack(bin.pack!.pack_id);
+                            }}
+                            className="h-7 text-xs px-2 whitespace-nowrap"
+                            data-testid={`return-pack-btn-${bin.bin_id}`}
+                            aria-label={`Return pack ${bin.pack!.pack_number} to supplier`}
+                          >
+                            Return
+                          </Button>
+                        )}
+                      </div>
+                    )}
+                  </TableCell>
                 </TableRow>
               );
             })}
