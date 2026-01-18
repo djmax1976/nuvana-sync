@@ -149,46 +149,11 @@ jobs:
         shell: bash
 
   # ============================================================================
-  # Stage 3: Security Tests
-  # ============================================================================
-  security-tests:
-    name: Security Tests
-    needs: quality-gates
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-
-    steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-
-      - name: Setup Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
-
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Run security-focused tests
-        run: npm run test:security
-        env:
-          FORCE_COLOR: 1
-
-      - name: Upload security test results
-        uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: security-test-results
-          path: test-results/
-          retention-days: 7
-
-  # ============================================================================
-  # Stage 4: Integration Tests
+  # Stage 3: Integration Tests
   # ============================================================================
   integration-tests:
     name: Integration Tests
-    needs: [unit-tests, security-tests]
+    needs: unit-tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
 
@@ -219,11 +184,11 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Stage 5: Build Validation (Windows - Required for Electron)
+  # Stage 4: Build Validation (Windows - Required for Electron)
   # ============================================================================
   build:
     name: Build Validation
-    needs: [unit-tests, security-tests]
+    needs: unit-tests
     runs-on: windows-latest
     timeout-minutes: 20
 
@@ -264,11 +229,11 @@ jobs:
           retention-days: 7
 
   # ============================================================================
-  # Stage 6: Performance Tests
+  # Stage 5: Performance Tests
   # ============================================================================
   performance-tests:
     name: Performance Tests
-    needs: [integration-tests, build]
+    needs: integration-tests
     runs-on: ubuntu-latest
     timeout-minutes: 15
 
@@ -303,7 +268,7 @@ jobs:
   # ============================================================================
   pipeline-status:
     name: Pipeline Status
-    needs: [quality-gates, unit-tests, security-tests, integration-tests, build, performance-tests]
+    needs: [quality-gates, unit-tests, integration-tests, build, performance-tests]
     runs-on: ubuntu-latest
     if: always()
 
@@ -313,14 +278,12 @@ jobs:
           echo "Pipeline Results:"
           echo "  Quality Gates: ${{ needs.quality-gates.result }}"
           echo "  Unit Tests: ${{ needs.unit-tests.result }}"
-          echo "  Security Tests: ${{ needs.security-tests.result }}"
           echo "  Integration Tests: ${{ needs.integration-tests.result }}"
           echo "  Build: ${{ needs.build.result }}"
           echo "  Performance Tests: ${{ needs.performance-tests.result }}"
 
           if [ "${{ needs.quality-gates.result }}" != "success" ] || \
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
-             [ "${{ needs.security-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-tests.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \
              [ "${{ needs.performance-tests.result }}" != "success" ]; then

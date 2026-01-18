@@ -999,7 +999,6 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
                     shifts: unknown[];
                   };
                 }>('sync:debugDump');
-                console.log('DEBUG DUMP:', result);
                 alert(
                   `Processed Files: ${result.data?.processedFilesCount || 0}\nShifts: ${result.data?.shiftsCount || 0}\n\nCheck console for details`
                 );

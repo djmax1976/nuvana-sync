@@ -401,8 +401,6 @@ export default function TerminalsPage() {
               ),
       };
 
-      console.log('[TerminalsPage] TEST MODE: Simulating shift close event:', simulatedEvent);
-
       // Add to recently closed shifts map (same behavior as real event)
       setRecentlyClosedShifts((prev) => {
         const next = new Map(prev);
@@ -421,8 +419,6 @@ export default function TerminalsPage() {
    */
   useEffect(() => {
     const unsubscribe = terminalsAPI.onShiftClosed((event: ShiftClosedEvent) => {
-      console.log('[TerminalsPage] Shift closed event received:', event);
-
       // Invalidate terminals query to refresh the list
       queryClient.invalidateQueries({ queryKey: ['terminals', 'list'] });
 

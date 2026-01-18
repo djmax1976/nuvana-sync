@@ -220,10 +220,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * @returns Updated pack or throws error
    */
   activate(packId: string, data: ActivatePackData): LotteryPack {
-    console.log('[DAL ACTIVATE] ====== ENTRY ======');
-    console.log('[DAL ACTIVATE] packId:', packId);
-    console.log('[DAL ACTIVATE] data:', JSON.stringify(data));
-    log.info('[ACTIVATE DEBUG] Starting activation', {
+    log.debug('Starting pack activation', {
       packId,
       storeId: data.store_id,
       binId: data.bin_id,
@@ -231,11 +228,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     });
 
     // DB-006: First verify pack exists AND belongs to the specified store
-    console.log('[DAL ACTIVATE] Calling findByIdForStore...');
     const pack = this.findByIdForStore(data.store_id, packId);
-    console.log('[DAL ACTIVATE] findByIdForStore returned:', pack ? 'found' : 'NOT FOUND');
-
-    log.info('[ACTIVATE DEBUG] findByIdForStore result', {
+    log.debug('findByIdForStore result', {
       found: !!pack,
       packStatus: pack?.status,
       packStoreId: pack?.store_id,
@@ -278,7 +272,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.store_id
     );
 
-    log.info('[ACTIVATE DEBUG] UPDATE result', {
+    log.debug('UPDATE result', {
       changes: result.changes,
       lastInsertRowid: result.lastInsertRowid,
     });
@@ -291,7 +285,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const updated = this.findByIdForStore(data.store_id, packId);
 
-    log.info('[ACTIVATE DEBUG] After activation - pack state', {
+    log.debug('After activation - pack state', {
       packId: updated?.pack_id,
       status: updated?.status,
       binId: updated?.bin_id,

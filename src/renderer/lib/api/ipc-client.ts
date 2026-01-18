@@ -22,15 +22,6 @@ import * as mockData from './mock-data';
  */
 export const isElectron = typeof window !== 'undefined' && window.electronAPI !== undefined;
 
-// Debug logging for isElectron detection
-console.log('[IPC-CLIENT] isElectron detection:', {
-  isElectron,
-  windowDefined: typeof window !== 'undefined',
-  electronAPIDefined: typeof window !== 'undefined' && window.electronAPI !== undefined,
-  electronAPIKeys:
-    typeof window !== 'undefined' && window.electronAPI ? Object.keys(window.electronAPI) : 'N/A',
-});
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -76,16 +67,10 @@ class IPCClient {
    * @throws IPCError if the handler returns an error response
    */
   async invoke<T>(channel: string, ...args: unknown[]): Promise<T> {
-    // Debug logging for IPC calls
-    console.log('[IPC-CLIENT] invoke called:', { channel, args, isElectron });
-
     // In dev mode without Electron, return mock data
     if (!isElectron) {
-      console.log('[IPC-CLIENT] Using MOCK data for channel:', channel);
       return this.getMockData<T>(channel, args);
     }
-
-    console.log('[IPC-CLIENT] Using REAL IPC for channel:', channel);
 
     try {
       const response = await window.electronAPI.invoke<

@@ -1001,9 +1001,7 @@ registerHandler(
 registerHandler(
   'lottery:activatePack',
   async (_event, input: unknown) => {
-    console.log('[ACTIVATE HANDLER] ====== ENTRY POINT ======');
-    console.log('[ACTIVATE HANDLER] Input received:', JSON.stringify(input));
-    log.info('[HANDLER DEBUG] lottery:activatePack called', { input });
+    log.debug('lottery:activatePack called', { input });
 
     // API-001: Validate input
     const parseResult = ActivatePackSchema.safeParse(input);
@@ -1011,30 +1009,25 @@ registerHandler(
       const errorMessage = parseResult.error.issues
         .map((e: { message: string }) => e.message)
         .join(', ');
-      console.log('[ACTIVATE HANDLER] Validation failed:', errorMessage);
+      log.debug('Validation failed', { errorMessage });
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
-    console.log(
-      '[ACTIVATE HANDLER] Validation passed, parsed data:',
-      JSON.stringify(parseResult.data)
-    );
+    log.debug('Validation passed', { data: parseResult.data });
 
     try {
       const { pack_id, bin_id, opening_serial } = parseResult.data;
-      console.log('[ACTIVATE HANDLER] Step 1: Getting store ID...');
       const storeId = getStoreId();
-      console.log('[ACTIVATE HANDLER] Step 1 complete: storeId =', storeId);
+      log.debug('Got store ID', { storeId });
 
       // SEC-010: AUTHZ - Get activated_by from authenticated session, not from frontend
       // This ensures we can't spoof who activated the packs
-      console.log('[ACTIVATE HANDLER] Step 2: Getting current user...');
       const currentUser = getCurrentUser();
       const activated_by = currentUser?.user_id;
-      console.log('[ACTIVATE HANDLER] Step 2 complete: activated_by =', activated_by);
+      log.debug('Got current user', { activated_by });
 
       // DB-006: Pass store_id for tenant isolation validation
-      console.log('[ACTIVATE HANDLER] Step 3: Calling DAL.activate with:', {
+      log.debug('Calling DAL.activate', {
         pack_id,
         store_id: storeId,
         bin_id,
@@ -1047,13 +1040,11 @@ registerHandler(
         opening_serial,
         activated_by,
       });
-      console.log('[ACTIVATE HANDLER] Step 3 complete: Pack activated:', JSON.stringify(pack));
+      log.debug('Pack activated successfully', { pack_id: pack.pack_id });
 
       // Increment daily activation count
-      console.log('[ACTIVATE HANDLER] Step 4: Incrementing daily count...');
       const today = getCurrentBusinessDate();
       lotteryBusinessDaysDAL.incrementPacksActivated(storeId, today);
-      console.log('[ACTIVATE HANDLER] Step 4 complete');
 
       log.info('Pack activated', {
         packId: pack.pack_id,
@@ -1062,15 +1053,11 @@ registerHandler(
         activatedBy: activated_by,
       });
 
-      console.log('[ACTIVATE HANDLER] ====== SUCCESS - Returning pack ======');
       return createSuccessResponse(pack);
     } catch (error) {
       // API-003: Log full error server-side
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
       const errorStack = error instanceof Error ? error.stack : undefined;
-      console.log('[ACTIVATE HANDLER] ====== CAUGHT ERROR ======');
-      console.log('[ACTIVATE HANDLER] Error message:', errorMessage);
-      console.log('[ACTIVATE HANDLER] Error stack:', errorStack);
       log.error('Failed to activate pack', {
         error: errorMessage,
         stack: errorStack,
@@ -1085,12 +1072,10 @@ registerHandler(
         errorMessage.includes('Failed to activate pack -') ||
         errorMessage.includes('Store not configured')
       ) {
-        console.log('[ACTIVATE HANDLER] Returning specific error:', errorMessage);
         return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
       }
 
       // Generic error for other failures (security-sensitive)
-      console.log('[ACTIVATE HANDLER] Returning generic error (original was:', errorMessage, ')');
       return createErrorResponse(
         IPCErrorCodes.INTERNAL_ERROR,
         'Failed to activate pack. Please try again.'

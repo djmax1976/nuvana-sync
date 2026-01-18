@@ -179,9 +179,6 @@ export function PinVerificationDialog({
         name: response.data?.user?.name || '',
         role: response.data?.user?.role || '',
       };
-      console.log('[PinVerificationDialog] === PIN VERIFICATION SUCCESS ===');
-      console.log('[PinVerificationDialog] User authenticated:', verifiedUser);
-      console.log('[PinVerificationDialog] Session created - next bypass check should succeed');
       onVerified(verifiedUser);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Verification failed');

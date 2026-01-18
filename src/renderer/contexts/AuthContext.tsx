@@ -168,7 +168,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen for session expiration from main process
   useEffect(() => {
     const unsubscribe = window.electronAPI.on('auth:sessionExpired', () => {
-      console.log('[AuthContext] Session expired, clearing user');
       setUser(null);
       setSession(null);
     });
@@ -181,7 +180,6 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // Listen for session warning (2 minutes before expiry)
   useEffect(() => {
     const unsubscribe = window.electronAPI.on('auth:sessionWarning', () => {
-      console.log('[AuthContext] Session warning: expiring soon');
       // Could show a toast/modal here to warn user
     });
 

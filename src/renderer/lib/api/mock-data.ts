@@ -162,7 +162,6 @@ export function getMockShiftById(shiftId: string): Shift | undefined {
 export function getMockShiftSummary(shiftId: string): ShiftSummary | undefined {
   const shift = getMockShiftById(shiftId);
   if (!shift) {
-    console.log('[MOCK] getMockShiftSummary: shift not found for', shiftId);
     return undefined;
   }
 
@@ -232,12 +231,6 @@ export function getMockShiftSummary(shiftId: string): ShiftSummary | undefined {
     ],
   };
 
-  console.log('[MOCK] getMockShiftSummary returning:', {
-    shiftId,
-    hasGrossSales: result.grossSales !== undefined,
-    hasDepartmentBreakdown: result.departmentBreakdown?.length,
-    hasTenderBreakdown: result.tenderBreakdown?.length,
-  });
   return result;
 }
 

@@ -2,15 +2,14 @@ name: E2E Tests
 
 # End-to-End testing for Electron application
 # Requires built artifacts and runs on Windows
+# Only runs on main branch to save CI resources (development uses unit/integration tests)
 on:
   push:
     branches:
       - main
-      - development
   pull_request:
     branches:
       - main
-      - development
   workflow_dispatch:
     inputs:
       debug_enabled:

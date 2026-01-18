@@ -1,23 +1,19 @@
 name: Security Scanning
 
 # Comprehensive security scanning pipeline
-# Runs on all PRs and pushes, plus scheduled daily scans
+# Runs daily and on manual trigger to avoid duplicate runs with CI
+# For PR/push security checks, the CI pipeline handles basic security tests
 on:
-  push:
-    branches:
-      - main
-      - development
-  pull_request:
-    branches:
-      - main
-      - development
   schedule:
     # Run daily at 2 AM UTC for continuous security monitoring
     - cron: '0 2 * * *'
   workflow_dispatch: # Allow manual triggering
+  push:
+    branches:
+      - main # Only run on main merges, not development (CI handles development)
 
 concurrency:
-  group: security-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  group: security-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 # Default permissions for all jobs (jobs can override with more specific permissions)

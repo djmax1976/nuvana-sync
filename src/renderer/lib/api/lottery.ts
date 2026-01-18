@@ -1020,25 +1020,16 @@ export async function activatePackFull(
   _storeId: string,
   data: FullActivatePackInput
 ): Promise<ApiResponse<ActivatePackResponse>> {
-  // Debug logging for activation
-  console.log('[ACTIVATE-FULL DEBUG] activatePackFull called with:', {
-    storeId: _storeId,
-    data,
-  });
-
   try {
     // Note: store_id is derived from session in the handler via getStoreId()
     // shift_id is optional and not used by current handler (for future use)
-    console.log('[ACTIVATE-FULL DEBUG] Calling ipcClient.invoke lottery:activatePack');
     const result = await ipcClient.invoke<ActivatePackResponse>('lottery:activatePack', {
       pack_id: data.pack_id,
       bin_id: data.bin_id,
       opening_serial: data.opening_serial,
     });
-    console.log('[ACTIVATE-FULL DEBUG] IPC result:', result);
     return wrapSuccess(result);
   } catch (error) {
-    console.error('[ACTIVATE-FULL DEBUG] IPC error:', error);
     return handleIPCError(error);
   }
 }

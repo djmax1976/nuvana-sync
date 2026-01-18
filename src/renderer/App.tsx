@@ -74,44 +74,6 @@ function App() {
       }
     });
 
-    // DEBUG: Check for store managers on app load
-    Promise.all([
-      window.electronAPI.invoke('auth:hasStoreManager'),
-      window.electronAPI.invoke('auth:getUsers'),
-    ])
-      .then(([managerResult, usersResult]) => {
-        console.log('=== STORE MANAGER CHECK ===');
-        console.log('Result:', JSON.stringify(managerResult, null, 2));
-        console.log('=== ALL USERS ===');
-        console.log('Result:', JSON.stringify(usersResult, null, 2));
-
-        // Show alert with results for easy viewing
-        const managerData = (
-          managerResult as { data?: { hasManager: boolean; managerCount: number } }
-        ).data;
-        const usersData =
-          (usersResult as { data?: Array<{ name: string; role: string }> }).data || [];
-        const storeManagers = usersData.filter((u: { role: string }) => u.role === 'store_manager');
-
-        alert(
-          `Store Manager Check:\n` +
-            `Has Manager: ${managerData?.hasManager ?? 'N/A'}\n` +
-            `Manager Count: ${managerData?.managerCount ?? 0}\n\n` +
-            `All Users (${usersData.length}):\n` +
-            usersData
-              .map((u: { name: string; role: string }) => `- ${u.name} (${u.role})`)
-              .join('\n') +
-            `\n\nStore Managers:\n` +
-            (storeManagers.length > 0
-              ? storeManagers.map((u: { name: string }) => `- ${u.name}`).join('\n')
-              : 'None found')
-        );
-      })
-      .catch((err) => {
-        console.error('Failed to check store manager:', err);
-        alert('Failed to check store manager: ' + (err as Error).message);
-      });
-
     // Listen for navigation events from main process
     const unsubscribeNav = window.nuvanaAPI.onNavigate((path) => {
       if (path === '/settings') {
