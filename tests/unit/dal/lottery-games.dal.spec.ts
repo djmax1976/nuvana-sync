@@ -915,11 +915,10 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should default to name ASC for invalid sort column', () => {
-        // @ts-expect-error - Testing invalid input handling
         const result = dal.listGamesWithPackCounts(
           'store-1',
           {},
-          { sortBy: 'invalid_column; DROP TABLE games;--' }
+          { sortBy: 'invalid_column; DROP TABLE games;--' as unknown as 'name' }
         );
 
         // Should not throw and should use default sort (name ASC)
@@ -928,11 +927,10 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should default to ASC for invalid sort order', () => {
-        // @ts-expect-error - Testing invalid input handling
         const result = dal.listGamesWithPackCounts(
           'store-1',
           {},
-          { sortBy: 'name', sortOrder: 'INVALID' }
+          { sortBy: 'name', sortOrder: 'INVALID' as unknown as 'ASC' }
         );
 
         // Should use default ASC order
