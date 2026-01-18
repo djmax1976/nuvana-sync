@@ -682,8 +682,7 @@ export class FileWatcherService extends EventEmitter {
  * @example
  * ```typescript
  * const watcher = createFileWatcherService(config, 'store-123');
- * // eslint-disable-next-line no-console
- * watcher.on('file-processed', (event) => console.log('Processed:', event.filePath));
+ * watcher.on('file-processed', (event) => logger.info('Processed:', event.filePath));
  * watcher.start();
  * ```
  */

@@ -66,8 +66,7 @@ export interface ScannedBin {
  *   gamesMap
  * );
  * if (result.matched) {
- *   // eslint-disable-next-line no-console
- *   console.log("Matched bin:", result.bin.bin_number);
+ *   // Use result.bin.bin_number
  * }
  */
 export function matchSerialToBin(
@@ -193,8 +192,7 @@ export function validateClosingSerial(
  * @example
  * const { complete, pendingBins } = checkAllBinsScanned(bins, scannedPackIds);
  * if (!complete) {
- *   // eslint-disable-next-line no-console
- *   console.log(`${pendingBins.length} bins remaining`);
+ *   // pendingBins.length bins remaining
  * }
  */
 export function checkAllBinsScanned(
