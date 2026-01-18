@@ -172,7 +172,10 @@ describe('Settings Integration', () => {
       const { SettingsService } = await import('../../src/main/services/settings.service');
       const service = new SettingsService();
 
-      const result = service.validateFolder('C:\\NonExistent\\Path');
+      // Use cross-platform absolute path
+      const nonExistentPath =
+        process.platform === 'win32' ? 'C:\\NonExistent\\Path' : '/nonexistent/path';
+      const result = service.validateFolder(nonExistentPath);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('does not exist');
@@ -182,7 +185,12 @@ describe('Settings Integration', () => {
       const { SettingsService } = await import('../../src/main/services/settings.service');
       const service = new SettingsService();
 
-      const result = service.validateFolder('C:\\NAXML\\..\\..\\Windows\\System32');
+      // Use cross-platform path with traversal attempt
+      const traversalPath =
+        process.platform === 'win32'
+          ? 'C:\\NAXML\\..\\..\\Windows\\System32'
+          : '/home/user/../../../etc/passwd';
+      const result = service.validateFolder(traversalPath);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('parent directory references');
