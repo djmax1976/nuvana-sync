@@ -679,6 +679,7 @@ export const terminalsAPI = {
    * ```typescript
    * useEffect(() => {
    *   const unsubscribe = terminalsAPI.onShiftClosed((event) => {
+   *     // eslint-disable-next-line no-console
    *     console.log(`Shift ${event.shiftId} closed: ${event.closeType}`);
    *     if (event.closeType === 'DAY_CLOSE') {
    *       navigate('/day-close');

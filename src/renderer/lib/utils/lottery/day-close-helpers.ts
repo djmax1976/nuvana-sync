@@ -66,6 +66,7 @@ export interface ScannedBin {
  *   gamesMap
  * );
  * if (result.matched) {
+ *   // eslint-disable-next-line no-console
  *   console.log("Matched bin:", result.bin.bin_number);
  * }
  */
@@ -192,6 +193,7 @@ export function validateClosingSerial(
  * @example
  * const { complete, pendingBins } = checkAllBinsScanned(bins, scannedPackIds);
  * if (!complete) {
+ *   // eslint-disable-next-line no-console
  *   console.log(`${pendingBins.length} bins remaining`);
  * }
  */
