@@ -25,6 +25,7 @@
     "build:win:unsigned": "npm run build && electron-builder --win --config electron-builder.config.js --config.win.sign=null",
     "release": "npm run build && electron-builder --publish=always --config electron-builder.config.js",
     "lint": "eslint . --ext .ts,.tsx",
+    "lint:strict": "eslint . --ext .ts,.tsx --max-warnings 0",
     "lint:fix": "eslint . --ext .ts,.tsx --fix",
     "format": "prettier --write \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\"",
     "format:check": "prettier --check \"src/**/*.{ts,tsx}\" \"tests/**/*.ts\"",
@@ -32,11 +33,15 @@
     "test": "vitest",
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
+    "test:unit": "vitest run tests/unit",
     "test:security": "vitest run tests/security",
     "test:performance": "vitest run tests/performance",
+    "test:integration": "vitest run --config vitest.integration.config.ts tests/integration",
     "test:e2e": "playwright test",
     "test:e2e:headed": "playwright test --headed",
     "test:e2e:ui": "playwright test --ui",
+    "test:all": "npm run test:run && npm run test:integration && npm run test:e2e",
+    "validate": "npm run typecheck && npm run lint && npm run format:check && npm run test:coverage",
     "prepare": "husky"
   },
   "dependencies": {

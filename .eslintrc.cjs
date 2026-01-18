@@ -56,5 +56,6 @@ module.exports = {
     'release/',
     '*.cjs', // Config files
     'dashboard/', // External dashboard if present
+    'scripts/', // Development/debug scripts
   ],
 };

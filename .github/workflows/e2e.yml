@@ -1,0 +1,162 @@
+name: E2E Tests
+
+# End-to-End testing for Electron application
+# Requires built artifacts and runs on Windows
+on:
+  push:
+    branches:
+      - main
+      - development
+  pull_request:
+    branches:
+      - main
+      - development
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run with debug logging'
+        required: false
+        default: false
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  CI: true
+
+jobs:
+  # ============================================================================
+  # Build Application for E2E Testing
+  # ============================================================================
+  build-for-e2e:
+    name: Build for E2E
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package application (unsigned for testing)
+        run: npm run build:win:unsigned
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-e2e
+          path: release/win-unpacked/
+          retention-days: 1
+
+  # ============================================================================
+  # E2E Tests - Electron Application
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests
+    needs: build-for-e2e
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Download packaged app
+        uses: actions/download-artifact@v4
+        with:
+          name: electron-app-e2e
+          path: release/win-unpacked/
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/e2e-junit.xml
+          DEBUG: ${{ inputs.debug_enabled && 'pw:api' || '' }}
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+      - name: Upload screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-screenshots
+          path: test-results/e2e/**/*.png
+          retention-days: 7
+
+      - name: Upload videos on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-videos
+          path: test-results/e2e/**/*.webm
+          retention-days: 7
+
+  # ============================================================================
+  # E2E Test Report
+  # ============================================================================
+  e2e-report:
+    name: E2E Report
+    needs: e2e-tests
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Download test results
+        uses: actions/download-artifact@v4
+        with:
+          name: e2e-test-results
+          path: test-results/
+        continue-on-error: true
+
+      - name: Publish E2E Test Report
+        uses: dorny/test-reporter@v1
+        if: always()
+        with:
+          name: E2E Test Results
+          path: test-results/e2e-junit.xml
+          reporter: java-junit
+          fail-on-error: true
+        continue-on-error: true
+
+      - name: E2E summary
+        run: |
+          echo "E2E Test Results: ${{ needs.e2e-tests.result }}"
+          if [ "${{ needs.e2e-tests.result }}" != "success" ]; then
+            echo "::error::E2E tests failed"
+            exit 1
+          fi
+        shell: bash

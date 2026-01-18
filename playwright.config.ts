@@ -8,7 +8,7 @@
  * @see https://playwright.dev/docs/api/class-electronapplication
  */
 
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
 import path from 'path';
 
 // Determine if running in CI environment

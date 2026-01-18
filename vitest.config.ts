@@ -29,13 +29,20 @@ export default defineConfig({
     },
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'json', 'html'],
+      reporter: ['text', 'json', 'json-summary', 'html', 'lcov'],
       include: ['src/**/*.ts'],
       exclude: [
         'src/**/*.d.ts',
         'src/renderer/**', // React components - tested separately
         'src/preload/**', // Electron preload scripts
       ],
+      // Enterprise-grade coverage thresholds
+      thresholds: {
+        lines: 60,
+        branches: 50,
+        functions: 60,
+        statements: 60,
+      },
     },
   },
   resolve: {

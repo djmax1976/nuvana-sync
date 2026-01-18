@@ -1,0 +1,334 @@
+name: Release
+
+# Release workflow for production deployments
+# Triggered by version tags or manual dispatch
+on:
+  push:
+    tags:
+      - 'v*.*.*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., 1.2.3)'
+        required: true
+        type: string
+      prerelease:
+        description: 'Mark as pre-release'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  NODE_VERSION: '20'
+  CI: true
+
+jobs:
+  # ============================================================================
+  # Validate Release
+  # ============================================================================
+  validate:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      is_prerelease: ${{ steps.version.outputs.is_prerelease }}
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" == "workflow_dispatch" ]; then
+            VERSION="${{ inputs.version }}"
+            IS_PRERELEASE="${{ inputs.prerelease }}"
+          else
+            VERSION="${GITHUB_REF#refs/tags/v}"
+            # Check if it's a prerelease (contains -, e.g., 1.0.0-beta.1)
+            if [[ "$VERSION" == *"-"* ]]; then
+              IS_PRERELEASE="true"
+            else
+              IS_PRERELEASE="false"
+            fi
+          fi
+
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "is_prerelease=$IS_PRERELEASE" >> $GITHUB_OUTPUT
+          echo "Releasing version: $VERSION (prerelease: $IS_PRERELEASE)"
+        shell: bash
+
+      - name: Validate version format
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9.]+)?$ ]]; then
+            echo "::error::Invalid version format: $VERSION"
+            echo "Expected format: X.Y.Z or X.Y.Z-prerelease"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Check version not already released
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          if git tag | grep -q "^v$VERSION$"; then
+            echo "::error::Version v$VERSION already exists"
+            exit 1
+          fi
+        shell: bash
+        if: github.event_name == 'workflow_dispatch'
+
+  # ============================================================================
+  # Run Full Test Suite Before Release
+  # ============================================================================
+  pre-release-tests:
+    name: Pre-Release Tests
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Type check
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Run all tests
+        run: npm run test:coverage
+
+      - name: Security audit
+        run: npm audit --audit-level=high
+
+  # ============================================================================
+  # Build and Sign Windows Installer
+  # ============================================================================
+  build-windows:
+    name: Build Windows Installer
+    needs: [validate, pre-release-tests]
+    runs-on: windows-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Update version in package.json
+        run: |
+          $version = "${{ needs.validate.outputs.version }}"
+          $packageJson = Get-Content package.json | ConvertFrom-Json
+          $packageJson.version = $version
+          $packageJson | ConvertTo-Json -Depth 100 | Set-Content package.json
+        shell: pwsh
+
+      - name: Build application
+        run: npm run build
+
+      - name: Build Windows installer (signed)
+        run: npm run build:win
+        env:
+          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
+          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
+          # If no signing certs, build unsigned
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+        continue-on-error: true
+
+      - name: Build Windows installer (unsigned fallback)
+        if: failure()
+        run: npm run build:win:unsigned
+
+      - name: Generate checksums
+        run: |
+          cd release
+          Get-ChildItem -Filter "*.exe" | ForEach-Object {
+            $hash = Get-FileHash $_.FullName -Algorithm SHA256
+            "$($hash.Hash)  $($_.Name)" | Out-File -Append checksums.txt
+          }
+          Get-Content checksums.txt
+        shell: pwsh
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-installer
+          path: |
+            release/*.exe
+            release/*.yml
+            release/checksums.txt
+          retention-days: 30
+
+  # ============================================================================
+  # Create GitHub Release
+  # ============================================================================
+  create-release:
+    name: Create GitHub Release
+    needs: [validate, build-windows]
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.validate.outputs.version }}"
+
+          # Get commits since last tag
+          LAST_TAG=$(git describe --tags --abbrev=0 2>/dev/null || echo "")
+
+          if [ -n "$LAST_TAG" ]; then
+            COMMITS=$(git log $LAST_TAG..HEAD --pretty=format:"- %s (%h)" --no-merges)
+          else
+            COMMITS=$(git log --pretty=format:"- %s (%h)" --no-merges -20)
+          fi
+
+          cat << EOF > release_notes.md
+          ## Nuvana v$VERSION
+
+          ### Changes
+          $COMMITS
+
+          ### Checksums (SHA256)
+          \`\`\`
+          $(cat release/checksums.txt 2>/dev/null || echo "No checksums available")
+          \`\`\`
+
+          ### Installation
+          1. Download the installer (.exe)
+          2. Run the installer
+          3. Follow the setup wizard
+
+          ### Verification
+          Verify the installer integrity using the SHA256 checksum above.
+          EOF
+
+          echo "Generated release notes"
+        shell: bash
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: v${{ needs.validate.outputs.version }}
+          name: Nuvana v${{ needs.validate.outputs.version }}
+          body_path: release_notes.md
+          draft: false
+          prerelease: ${{ needs.validate.outputs.is_prerelease == 'true' }}
+          files: |
+            release/*.exe
+            release/checksums.txt
+            release/*.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ============================================================================
+  # Deploy to S3 Auto-Update Server
+  # ============================================================================
+  deploy-auto-update:
+    name: Deploy Auto-Update
+    needs: [validate, build-windows, create-release]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    if: needs.validate.outputs.is_prerelease != 'true'
+
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: windows-installer
+          path: release/
+
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
+        continue-on-error: true
+
+      - name: Deploy to S3
+        if: env.AWS_ACCESS_KEY_ID != ''
+        run: |
+          aws s3 sync release/ s3://${{ secrets.S3_BUCKET }}/releases/ \
+            --exclude "*" \
+            --include "*.exe" \
+            --include "*.yml" \
+            --include "*.yaml" \
+            --acl public-read
+        env:
+          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+        continue-on-error: true
+
+      - name: Deployment summary
+        run: |
+          echo "Release v${{ needs.validate.outputs.version }} deployment complete"
+          echo "GitHub Release: Created"
+          echo "S3 Auto-Update: ${{ secrets.AWS_ACCESS_KEY_ID != '' && 'Deployed' || 'Skipped (no AWS credentials)' }}"
+
+  # ============================================================================
+  # Release Summary
+  # ============================================================================
+  release-summary:
+    name: Release Summary
+    needs: [validate, pre-release-tests, build-windows, create-release, deploy-auto-update]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Release summary
+        run: |
+          echo "Release Pipeline Results for v${{ needs.validate.outputs.version }}:"
+          echo "  Validation: ${{ needs.validate.result }}"
+          echo "  Pre-Release Tests: ${{ needs.pre-release-tests.result }}"
+          echo "  Windows Build: ${{ needs.build-windows.result }}"
+          echo "  GitHub Release: ${{ needs.create-release.result }}"
+          echo "  Auto-Update Deploy: ${{ needs.deploy-auto-update.result }}"
+
+          if [ "${{ needs.validate.result }}" != "success" ] || \
+             [ "${{ needs.pre-release-tests.result }}" != "success" ] || \
+             [ "${{ needs.build-windows.result }}" != "success" ] || \
+             [ "${{ needs.create-release.result }}" != "success" ]; then
+            echo "::error::Release pipeline failed"
+            exit 1
+          fi
+
+          echo "Release v${{ needs.validate.outputs.version }} completed successfully!"
+        shell: bash
