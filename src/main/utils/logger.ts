@@ -192,7 +192,7 @@ class Logger {
     const output = JSON.stringify(entry) + '\n';
 
     // Use process.stdout/stderr.write directly to handle EPIPE errors properly
-    // console.log can throw synchronously on broken pipes
+    // The standard console methods can throw synchronously on broken pipes
     try {
       const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
       if (stream && !stream.destroyed) {
