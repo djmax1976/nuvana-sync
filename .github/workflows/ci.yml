@@ -1,16 +1,12 @@
 name: CI Pipeline
 
-# Enterprise-grade CI pipeline with strict quality gates
-# Triggers on all PRs and pushes to main/development branches
+# CI pipeline with strict quality gates
+# Triggers only on PRs to main (solo developer workflow - no duplicate runs)
 on:
-  push:
-    branches:
-      - main
-      - development
   pull_request:
     branches:
       - main
-      - development
+  workflow_dispatch: # Manual trigger for testing
 
 # Cancel in-progress runs for the same PR/branch
 concurrency:

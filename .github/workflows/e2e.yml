@@ -1,11 +1,8 @@
 name: E2E Tests
 
 # End-to-End testing for Electron application
-# Only runs on main branch to save CI resources (development uses unit/integration tests)
+# Triggers only on PRs to main (solo developer workflow - no duplicate runs)
 on:
-  push:
-    branches:
-      - main
   pull_request:
     branches:
       - main
