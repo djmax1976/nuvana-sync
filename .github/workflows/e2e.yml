@@ -89,8 +89,9 @@ jobs:
           name: electron-app-e2e
           path: release/win-unpacked/
 
-      - name: Install Playwright browsers
-        run: npx playwright install --with-deps
+      # NOTE: Playwright browser installation is NOT needed for Electron E2E tests.
+      # Playwright uses the _electron module to launch the built Electron app directly,
+      # not browser binaries. Removing this step saves ~5-10 minutes of CI time.
 
       - name: Run E2E tests
         run: npm run test:e2e
