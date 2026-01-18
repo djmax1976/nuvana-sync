@@ -7,7 +7,7 @@
  * @module renderer/components/auth/ProtectedPage
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { PinVerificationDialog } from './PinVerificationDialog';
 import { Lock } from 'lucide-react';
@@ -39,29 +39,24 @@ export function ProtectedPage({
   description,
 }: ProtectedPageProps) {
   const navigate = useNavigate();
+  // Initialize state with correct initial values - no need for useEffect to reset
   const [isVerified, setIsVerified] = useState(false);
   const [showDialog, setShowDialog] = useState(true);
 
-  // Reset verification state when component mounts
-  useEffect(() => {
-    setIsVerified(false);
-    setShowDialog(true);
-  }, []);
-
-  const handleVerified = () => {
+  const handleVerified = useCallback(() => {
     setIsVerified(true);
     setShowDialog(false);
-  };
+  }, []);
 
-  const handleClose = () => {
+  const handleClose = useCallback(() => {
     setShowDialog(false);
     // Navigate back to dashboard
     navigate('/');
-  };
+  }, [navigate]);
 
-  const handleRetry = () => {
+  const handleRetry = useCallback(() => {
     setShowDialog(true);
-  };
+  }, []);
 
   // Show verification dialog or locked state
   if (!isVerified) {

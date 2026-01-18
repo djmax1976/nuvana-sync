@@ -15,20 +15,6 @@ import {
   type CreateLotteryGameData,
 } from '../../../src/main/dal/lottery-games.dal';
 
-// Hoist mock functions so they're available when vi.mock factory runs
-const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
-  mockPrepare: vi.fn(),
-  mockTransaction: vi.fn((fn: () => unknown) => () => fn()),
-}));
-
-vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: vi.fn(() => ({
-    prepare: mockPrepare,
-    transaction: mockTransaction,
-  })),
-  isDatabaseInitialized: vi.fn(() => true),
-}));
-
 // Dynamic import for better-sqlite3 (native module)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Database: any;
@@ -42,6 +28,16 @@ try {
   skipTests = true;
 }
 
+// Shared test database instance - will be set in beforeEach and used by mock
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let testDb: any = null;
+
+// Mock database service to return our in-memory test database
+vi.mock('../../../src/main/services/database.service', () => ({
+  getDatabase: vi.fn(() => testDb),
+  isDatabaseInitialized: vi.fn(() => testDb !== null),
+}));
+
 describe.skipIf(skipTests)('Lottery Games DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let db: any;
@@ -50,18 +46,21 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
   beforeEach(() => {
     // Create in-memory database
     db = new Database(':memory:');
+    // Set the shared test database so the mock returns it
+    testDb = db;
 
-    // Create the lottery_games table
+    // Create the lottery_games table (matching DAL expected schema)
     db.exec(`
       CREATE TABLE lottery_games (
         game_id TEXT PRIMARY KEY,
         store_id TEXT NOT NULL,
         game_code TEXT NOT NULL,
         name TEXT NOT NULL,
-        price REAL,
-        tickets_per_pack INTEGER NOT NULL DEFAULT 300,
-        pack_value REAL,
+        price REAL NOT NULL,
+        pack_value REAL NOT NULL DEFAULT 300,
+        tickets_per_pack INTEGER,
         status TEXT NOT NULL DEFAULT 'ACTIVE',
+        state_id TEXT,
         cloud_game_id TEXT,
         synced_at TEXT,
         deleted_at TEXT,
@@ -69,16 +68,37 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         updated_at TEXT NOT NULL
       );
       CREATE UNIQUE INDEX idx_lottery_games_store_code ON lottery_games(store_id, game_code) WHERE deleted_at IS NULL;
+
+      CREATE TABLE lottery_packs (
+        pack_id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        game_id TEXT NOT NULL,
+        pack_number TEXT NOT NULL,
+        bin_id TEXT,
+        status TEXT NOT NULL DEFAULT 'RECEIVED',
+        received_at TEXT,
+        activated_at TEXT,
+        settled_at TEXT,
+        returned_at TEXT,
+        opening_serial TEXT,
+        closing_serial TEXT,
+        tickets_sold INTEGER NOT NULL DEFAULT 0,
+        sales_amount REAL NOT NULL DEFAULT 0,
+        cloud_pack_id TEXT,
+        synced_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(store_id, game_id, pack_number)
+      );
     `);
 
-    // Create DAL with mocked db
+    // Create DAL - it will use testDb via the mocked getDatabase()
     dal = new LotteryGamesDAL();
-    // @ts-expect-error - accessing protected member for testing
-    dal.db = db;
   });
 
   afterEach(() => {
     db.close();
+    testDb = null;
     vi.clearAllMocks();
   });
 

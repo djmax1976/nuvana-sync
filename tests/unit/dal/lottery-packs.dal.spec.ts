@@ -17,20 +17,6 @@ import {
   type ActivatePackData,
 } from '../../../src/main/dal/lottery-packs.dal';
 
-// Hoist mock functions so they're available when vi.mock factory runs
-const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
-  mockPrepare: vi.fn(),
-  mockTransaction: vi.fn((fn: () => unknown) => () => fn()),
-}));
-
-vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: vi.fn(() => ({
-    prepare: mockPrepare,
-    transaction: mockTransaction,
-  })),
-  isDatabaseInitialized: vi.fn(() => true),
-}));
-
 // Dynamic import for better-sqlite3 (native module)
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 let Database: any;
@@ -44,6 +30,16 @@ try {
   skipTests = true;
 }
 
+// Shared test database instance - will be set in beforeEach and used by mock
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let testDb: any = null;
+
+// Mock database service to return our in-memory test database
+vi.mock('../../../src/main/services/database.service', () => ({
+  getDatabase: vi.fn(() => testDb),
+  isDatabaseInitialized: vi.fn(() => testDb !== null),
+}));
+
 describe.skipIf(skipTests)('Lottery Packs DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let db: any;
@@ -52,6 +48,8 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
   beforeEach(() => {
     // Create in-memory database
     db = new Database(':memory:');
+    // Set the shared test database so the mock returns it
+    testDb = db;
 
     // Create required tables
     db.exec(`
@@ -88,10 +86,14 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         opening_serial TEXT,
         closing_serial TEXT,
         status TEXT NOT NULL DEFAULT 'RECEIVED',
-        received_at TEXT NOT NULL,
+        received_at TEXT,
+        received_by TEXT,
         activated_at TEXT,
+        activated_by TEXT,
         settled_at TEXT,
         returned_at TEXT,
+        tickets_sold INTEGER DEFAULT 0,
+        sales_amount REAL DEFAULT 0,
         return_reason TEXT,
         cloud_pack_id TEXT,
         synced_at TEXT,
@@ -114,14 +116,13 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
       VALUES ('bin-1', 'store-1', 1, 'Bin 1', datetime('now'), datetime('now'));
     `);
 
-    // Create DAL with mocked db
+    // Create DAL - it will use testDb via the mocked getDatabase()
     dal = new LotteryPacksDAL();
-    // @ts-expect-error - accessing protected member for testing
-    dal.db = db;
   });
 
   afterEach(() => {
     db.close();
+    testDb = null;
     vi.clearAllMocks();
   });
 

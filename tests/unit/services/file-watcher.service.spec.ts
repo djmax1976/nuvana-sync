@@ -579,12 +579,18 @@ describe('FileWatcherService', () => {
       expect(stats.lastSyncTime!.getTime()).toBeGreaterThanOrEqual(beforeTime.getTime());
     });
 
-    it('FW-083: should emit watcher-ready event', () => {
+    it('FW-083: should emit watcher-ready event', async () => {
+      // Mock readdir to return empty array so processExistingFiles completes quickly
+      vi.mocked(fs.readdir).mockResolvedValue([]);
+
       const readyHandler = vi.fn();
       service.on('watcher-ready', readyHandler);
 
       service.start();
       mockWatcherInstance.emit('ready');
+
+      // Wait for async processExistingFiles to complete and emit watcher-ready
+      await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(readyHandler).toHaveBeenCalled();
     });

@@ -111,7 +111,10 @@ vi.mock('../../../src/main/dal', () => {
     posCashierMappingsDAL: {
       getOrCreate: vi.fn(() => ({ mapping_id: 'c-001', internal_user_id: null })),
     },
-    posTerminalMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 't-001' })) },
+    posTerminalMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 't-001' })),
+      findByExternalId: vi.fn(() => ({ id: 't-001', mapping_id: 't-001' })),
+    },
     posTillMappingsDAL: { getOrCreate: vi.fn(() => ({ id: 'till-001' })), linkToShift: vi.fn() },
     posFuelPositionMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 'fp-001' })) },
     posFuelProductMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 'fprod-001' })) },

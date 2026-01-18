@@ -17,6 +17,19 @@ export interface HeaderProps {
 }
 
 /**
+ * Settings button component - navigates directly to settings page
+ * Defined outside Header to avoid re-creation during render cycles
+ */
+function SettingsButton({ onClick }: { onClick: () => void }) {
+  return (
+    <Button variant="ghost" size="icon" onClick={onClick} data-testid="settings-button">
+      <Settings className="h-5 w-5" />
+      <span className="sr-only">Settings</span>
+    </Button>
+  );
+}
+
+/**
  * Header Component for Electron Desktop App
  *
  * Displays the main header for the dashboard with:
@@ -33,18 +46,7 @@ export interface HeaderProps {
 export function Header({ variant = 'full' }: HeaderProps) {
   const navigate = useNavigate();
 
-  // Settings button - navigates directly to settings page
-  const SettingsButton = () => (
-    <Button
-      variant="ghost"
-      size="icon"
-      onClick={() => navigate('/settings')}
-      data-testid="settings-button"
-    >
-      <Settings className="h-5 w-5" />
-      <span className="sr-only">Settings</span>
-    </Button>
-  );
+  const handleSettingsClick = () => navigate('/settings');
 
   // Controls-only variant: render just the right-side controls for mobile embedding
   if (variant === 'controls-only') {
@@ -52,7 +54,7 @@ export function Header({ variant = 'full' }: HeaderProps) {
       <div className="flex flex-col items-end justify-center">
         {/* Controls row - settings, dark mode toggle (no datetime on mobile) */}
         <div className="flex items-center gap-1">
-          <SettingsButton />
+          <SettingsButton onClick={handleSettingsClick} />
           <ThemeToggle />
         </div>
       </div>
@@ -68,7 +70,7 @@ export function Header({ variant = 'full' }: HeaderProps) {
       {/* Right - Controls */}
       <div className="flex items-center gap-2">
         <CurrentDateTime />
-        <SettingsButton />
+        <SettingsButton onClick={handleSettingsClick} />
         <ThemeToggle />
       </div>
     </header>

@@ -110,8 +110,7 @@ describe('ProcessedFilesDAL', () => {
         0, // default record_count
         'SUCCESS', // default status
         null, // default error_message
-        null, // default processing_duration_ms
-        expect.any(String) // created_at
+        null // default processing_duration_ms
       );
     });
 
