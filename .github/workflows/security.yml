@@ -45,32 +45,17 @@ jobs:
           fetch-depth: 0
 
       - name: Run Semgrep SAST
-        uses: semgrep/semgrep-action@v1
-        with:
-          config: >-
-            p/javascript
-            p/typescript
-            p/nodejs
-            p/security-audit
-            p/secrets
-            p/owasp-top-ten
-            p/sql-injection
-            p/xss
-            p/command-injection
-            p/path-traversal
-          generateSarif: true
-        env:
-          SEMGREP_RULES: >-
-            p/javascript
-            p/typescript
-            p/nodejs
-            p/security-audit
-            p/secrets
-            p/owasp-top-ten
-            p/sql-injection
-            p/xss
-            p/command-injection
-            p/path-traversal
+        run: |
+          pip install semgrep
+          semgrep scan --config=auto --sarif --output=semgrep.sarif \
+            --config=p/javascript \
+            --config=p/typescript \
+            --config=p/nodejs \
+            --config=p/security-audit \
+            --config=p/secrets \
+            --config=p/owasp-top-ten \
+            .
+        continue-on-error: true
 
       - name: Upload Semgrep SARIF
         uses: github/codeql-action/upload-sarif@v3

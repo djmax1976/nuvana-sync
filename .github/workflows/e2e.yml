@@ -1,7 +1,6 @@
 name: E2E Tests
 
 # End-to-End testing for Electron application
-# Requires built artifacts and runs on Windows
 # Only runs on main branch to save CI resources (development uses unit/integration tests)
 on:
   push:
@@ -33,7 +32,7 @@ jobs:
   build-for-e2e:
     name: Build for E2E
     runs-on: windows-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -45,7 +44,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
       - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Build application
@@ -60,6 +69,7 @@ jobs:
           name: electron-app-e2e
           path: release/win-unpacked/
           retention-days: 1
+          compression-level: 1
 
   # ============================================================================
   # E2E Tests - Electron Application
@@ -68,7 +78,7 @@ jobs:
     name: E2E Tests
     needs: build-for-e2e
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 15
 
     steps:
       - name: Checkout code
@@ -80,7 +90,17 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: 'npm'
 
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
       - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
         run: npm ci
 
       - name: Download packaged app
@@ -88,10 +108,6 @@ jobs:
         with:
           name: electron-app-e2e
           path: release/win-unpacked/
-
-      # NOTE: Playwright browser installation is NOT needed for Electron E2E tests.
-      # Playwright uses the _electron module to launch the built Electron app directly,
-      # not browser binaries. Removing this step saves ~5-10 minutes of CI time.
 
       - name: Run E2E tests
         run: npm run test:e2e
@@ -124,39 +140,3 @@ jobs:
           name: e2e-failure-videos
           path: test-results/e2e/**/*.webm
           retention-days: 7
-
-  # ============================================================================
-  # E2E Test Report
-  # ============================================================================
-  e2e-report:
-    name: E2E Report
-    needs: e2e-tests
-    runs-on: ubuntu-latest
-    if: always()
-
-    steps:
-      - name: Download test results
-        uses: actions/download-artifact@v4
-        with:
-          name: e2e-test-results
-          path: test-results/
-        continue-on-error: true
-
-      - name: Publish E2E Test Report
-        uses: dorny/test-reporter@v1
-        if: always()
-        with:
-          name: E2E Test Results
-          path: test-results/e2e-junit.xml
-          reporter: java-junit
-          fail-on-error: true
-        continue-on-error: true
-
-      - name: E2E summary
-        run: |
-          echo "E2E Test Results: ${{ needs.e2e-tests.result }}"
-          if [ "${{ needs.e2e-tests.result }}" != "success" ]; then
-            echo "::error::E2E tests failed"
-            exit 1
-          fi
-        shell: bash

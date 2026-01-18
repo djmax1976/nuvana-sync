@@ -149,17 +149,7 @@ jobs:
       - name: Build application
         run: npm run build
 
-      - name: Build Windows installer (signed)
-        run: npm run build:win
-        env:
-          WIN_CSC_LINK: ${{ secrets.WIN_CSC_LINK }}
-          WIN_CSC_KEY_PASSWORD: ${{ secrets.WIN_CSC_KEY_PASSWORD }}
-          # If no signing certs, build unsigned
-          CSC_IDENTITY_AUTO_DISCOVERY: false
-        continue-on-error: true
-
-      - name: Build Windows installer (unsigned fallback)
-        if: failure()
+      - name: Build Windows installer
         run: npm run build:win:unsigned
 
       - name: Generate checksums
@@ -244,7 +234,7 @@ jobs:
         shell: bash
 
       - name: Create GitHub Release
-        uses: softprops/action-gh-release@v1
+        uses: softprops/action-gh-release@v2
         with:
           tag_name: v${{ needs.validate.outputs.version }}
           name: Nuvana v${{ needs.validate.outputs.version }}
@@ -259,56 +249,11 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ============================================================================
-  # Deploy to S3 Auto-Update Server
-  # ============================================================================
-  deploy-auto-update:
-    name: Deploy Auto-Update
-    needs: [validate, build-windows, create-release]
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    if: needs.validate.outputs.is_prerelease != 'true'
-
-    steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: windows-installer
-          path: release/
-
-      - name: Configure AWS credentials
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-          aws-region: ${{ secrets.AWS_REGION || 'us-east-1' }}
-        continue-on-error: true
-
-      - name: Deploy to S3
-        if: env.AWS_ACCESS_KEY_ID != ''
-        run: |
-          aws s3 sync release/ s3://${{ secrets.S3_BUCKET }}/releases/ \
-            --exclude "*" \
-            --include "*.exe" \
-            --include "*.yml" \
-            --include "*.yaml" \
-            --acl public-read
-        env:
-          AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
-          AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
-        continue-on-error: true
-
-      - name: Deployment summary
-        run: |
-          echo "Release v${{ needs.validate.outputs.version }} deployment complete"
-          echo "GitHub Release: Created"
-          echo "S3 Auto-Update: ${{ secrets.AWS_ACCESS_KEY_ID != '' && 'Deployed' || 'Skipped (no AWS credentials)' }}"
-
-  # ============================================================================
   # Release Summary
   # ============================================================================
   release-summary:
     name: Release Summary
-    needs: [validate, pre-release-tests, build-windows, create-release, deploy-auto-update]
+    needs: [validate, pre-release-tests, build-windows, create-release]
     runs-on: ubuntu-latest
     if: always()
 
@@ -320,7 +265,6 @@ jobs:
           echo "  Pre-Release Tests: ${{ needs.pre-release-tests.result }}"
           echo "  Windows Build: ${{ needs.build-windows.result }}"
           echo "  GitHub Release: ${{ needs.create-release.result }}"
-          echo "  Auto-Update Deploy: ${{ needs.deploy-auto-update.result }}"
 
           if [ "${{ needs.validate.result }}" != "success" ] || \
              [ "${{ needs.pre-release-tests.result }}" != "success" ] || \

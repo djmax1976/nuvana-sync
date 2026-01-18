@@ -528,9 +528,9 @@ describe('ParserService', () => {
       // This tests the path where FGM processes mappings without linking to a shift
       // Note: findShiftByDateAndRegister is called TWICE (with register, then without)
       vi.mocked(dal.shiftsDAL.findShiftByDateAndRegister)
-        .mockReturnValueOnce(null)
-        .mockReturnValueOnce(null);
-      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(null);
+        .mockReturnValueOnce(undefined)
+        .mockReturnValueOnce(undefined);
+      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(undefined);
 
       const fgmShiftResult = {
         documentType: 'FuelGradeMovement',
@@ -725,7 +725,18 @@ describe('ParserService', () => {
 
       // Restore original mock implementation
       vi.mocked(dal.posFuelGradeMappingsDAL.getOrCreate).mockImplementation(
-        originalImpl || (() => ({ mapping_id: 'fuel-grade-mapping-id' }))
+        originalImpl ||
+          (() => ({
+            id: 'fuel-grade-mapping-id',
+            store_id: 'test-store-123',
+            external_grade_id: '001',
+            internal_grade_name: 'REGULAR',
+            fuel_type: 'REGULAR' as const,
+            pos_system_type: 'gilbarco' as const,
+            active: 1,
+            created_at: '2025-01-15T00:00:00.000Z',
+            updated_at: '2025-01-15T00:00:00.000Z',
+          }))
       );
     });
 
@@ -1095,9 +1106,9 @@ describe('ParserService', () => {
       // This tests the shift close detection logic without database interaction
       // Note: findShiftByDateAndRegister is called TWICE (with register, then without)
       vi.mocked(dal.shiftsDAL.findShiftByDateAndRegister)
-        .mockReturnValueOnce(null)
-        .mockReturnValueOnce(null);
-      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(null);
+        .mockReturnValueOnce(undefined)
+        .mockReturnValueOnce(undefined);
+      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(undefined);
 
       const fgmWithEndTime = {
         documentType: 'FuelGradeMovement',
