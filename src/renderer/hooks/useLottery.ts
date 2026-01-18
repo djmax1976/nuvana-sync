@@ -493,10 +493,7 @@ export function useLotteryGames(options?: { enabled?: boolean }) {
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with paginated games list
  */
-export function useGamesListPaginated(
-  input?: ListGamesInput,
-  options?: { enabled?: boolean }
-) {
+export function useGamesListPaginated(input?: ListGamesInput, options?: { enabled?: boolean }) {
   return useQuery({
     queryKey: lotteryKeys.gamesListPaginated(input),
     queryFn: () => listGames(input),

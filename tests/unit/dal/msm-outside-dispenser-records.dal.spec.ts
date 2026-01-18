@@ -88,13 +88,15 @@ const ALL_TENDER_TYPES: OutsideTenderType[] = ['outsideCredit', 'outsideDebit'];
 /**
  * Create test dispenser data
  */
-function createTestDispenserData(overrides: Partial<CreateOutsideDispenserData> = {}): CreateOutsideDispenserData {
+function createTestDispenserData(
+  overrides: Partial<CreateOutsideDispenserData> = {}
+): CreateOutsideDispenserData {
   return {
     store_id: TEST_STORE_ID,
     business_date: TEST_BUSINESS_DATE,
     register_id: TEST_REGISTER_ID,
     tender_type: 'outsideCredit',
-    amount: 1500.00,
+    amount: 1500.0,
     transaction_count: 25,
     shift_id: TEST_SHIFT_ID,
     till_id: TEST_TILL_ID,
@@ -154,8 +156,10 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
       expect(result.store_id).toBe(TEST_STORE_ID);
       expect(result.register_id).toBe(TEST_REGISTER_ID);
       expect(result.tender_type).toBe('outsideCredit');
-      expect(result.amount).toBe(1500.00);
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO msm_outside_dispenser_records'));
+      expect(result.amount).toBe(1500.0);
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO msm_outside_dispenser_records')
+      );
     });
 
     it('MSMO-C-002: should support both tender types', () => {
@@ -201,7 +205,7 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
         business_date: TEST_BUSINESS_DATE,
         register_id: TEST_REGISTER_ID,
         tender_type: 'outsideDebit',
-        amount: 500.00,
+        amount: 500.0,
       };
 
       const result = dal.create(data);
@@ -321,41 +325,41 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
   describe('AGGREGATION Operations', () => {
     it('MSMO-A-001: should calculate daily totals by tender type', () => {
       const mockTotals = {
-        credit_amount: 1750.00,
+        credit_amount: 1750.0,
         credit_count: 35,
-        debit_amount: 500.00,
+        debit_amount: 500.0,
         debit_count: 10,
-        total_amount: 2250.00,
+        total_amount: 2250.0,
         total_count: 45,
       };
       mockPrepare.mockReturnValueOnce({ get: vi.fn().mockReturnValue(mockTotals) });
 
       const totals = dal.getDailyTotals(TEST_STORE_ID, TEST_BUSINESS_DATE);
 
-      expect(totals.creditAmount).toBe(1750.00);
+      expect(totals.creditAmount).toBe(1750.0);
       expect(totals.creditCount).toBe(35);
-      expect(totals.debitAmount).toBe(500.00);
+      expect(totals.debitAmount).toBe(500.0);
       expect(totals.debitCount).toBe(10);
-      expect(totals.totalAmount).toBe(2250.00);
+      expect(totals.totalAmount).toBe(2250.0);
       expect(totals.totalCount).toBe(45);
     });
 
     it('MSMO-A-002: should calculate shift totals by tender type', () => {
       const mockTotals = {
-        credit_amount: 1000.00,
+        credit_amount: 1000.0,
         credit_count: 20,
-        debit_amount: 300.00,
+        debit_amount: 300.0,
         debit_count: 5,
-        total_amount: 1300.00,
+        total_amount: 1300.0,
         total_count: 25,
       };
       mockPrepare.mockReturnValueOnce({ get: vi.fn().mockReturnValue(mockTotals) });
 
       const totals = dal.getShiftTotals(TEST_STORE_ID, TEST_SHIFT_ID);
 
-      expect(totals.creditAmount).toBe(1000.00);
+      expect(totals.creditAmount).toBe(1000.0);
       expect(totals.creditCount).toBe(20);
-      expect(totals.debitAmount).toBe(300.00);
+      expect(totals.debitAmount).toBe(300.0);
       expect(totals.debitCount).toBe(5);
     });
   });
@@ -374,7 +378,9 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
 
       expect(deleted).toBe(2);
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('DELETE FROM msm_outside_dispenser_records WHERE source_file_hash = ?')
+        expect.stringContaining(
+          'DELETE FROM msm_outside_dispenser_records WHERE source_file_hash = ?'
+        )
       );
     });
 
@@ -412,9 +418,11 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
       const sqlInjectionPayload = "'; DROP TABLE msm_outside_dispenser_records; --";
 
       expect(() => {
-        dal.create(createTestDispenserData({
-          tender_type: sqlInjectionPayload as OutsideTenderType,
-        }));
+        dal.create(
+          createTestDispenserData({
+            tender_type: sqlInjectionPayload as OutsideTenderType,
+          })
+        );
       }).toThrow(/Invalid tender type/);
     });
   });
@@ -429,9 +437,7 @@ describe('MSMOutsideDispenserRecordsDAL', () => {
 
       dal.findByBusinessDate(TEST_STORE_ID, TEST_BUSINESS_DATE);
 
-      expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('store_id = ?')
-      );
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('store_id = ?'));
     });
 
     it('MSMO-T-002: should pass store_id as first parameter', () => {

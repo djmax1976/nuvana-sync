@@ -108,7 +108,9 @@ vi.mock('../../../src/main/dal', () => {
     },
     // POS ID Mapping DALs
     posFuelGradeMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 'fg-001' })) },
-    posCashierMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 'c-001', internal_user_id: null })) },
+    posCashierMappingsDAL: {
+      getOrCreate: vi.fn(() => ({ mapping_id: 'c-001', internal_user_id: null })),
+    },
     posTerminalMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 't-001' })) },
     posTillMappingsDAL: { getOrCreate: vi.fn(() => ({ id: 'till-001' })), linkToShift: vi.fn() },
     posFuelPositionMappingsDAL: { getOrCreate: vi.fn(() => ({ mapping_id: 'fp-001' })) },
@@ -375,7 +377,14 @@ const PERIOD_98_MSM_PARSE_RESULT = {
       },
     ],
     outsideDispensers: [
-      { registerId: '1', cashierId: '1001', tillId: '4133', tender: 'outsideCredit', amount: 750.0, count: 25 },
+      {
+        registerId: '1',
+        cashierId: '1001',
+        tillId: '4133',
+        tender: 'outsideCredit',
+        amount: 750.0,
+        count: 25,
+      },
     ],
   },
 };
@@ -894,7 +903,14 @@ describe('ParserService - Phase 4 MSM Fuel Data Processing', () => {
       const dataWithEmptyTill: MSMExtractedFuelData = {
         ...EXTRACTED_PERIOD_98_FUEL_DATA,
         outsideDispensers: [
-          { registerId: '1', cashierId: '1001', tillId: '', tender: 'outsideCredit', amount: 100, count: 5 },
+          {
+            registerId: '1',
+            cashierId: '1001',
+            tillId: '',
+            tender: 'outsideCredit',
+            amount: 100,
+            count: 5,
+          },
         ],
       };
       mockExtractFuelDataFromMSM.mockReturnValue(dataWithEmptyTill);
@@ -1120,7 +1136,14 @@ describe('ParserService - Phase 4 MSM Fuel Data Processing', () => {
         ...EXTRACTED_PERIOD_98_FUEL_DATA,
         insideFuel: [],
         outsideDispensers: [
-          { registerId: '1', cashierId: '1001', tillId: '4133', tender: 'outsideCredit', amount: 500.0, count: 20 },
+          {
+            registerId: '1',
+            cashierId: '1001',
+            tillId: '4133',
+            tender: 'outsideCredit',
+            amount: 500.0,
+            count: 20,
+          },
         ],
       };
       mockExtractFuelDataFromMSM.mockReturnValue(dataWithOnlyDispensers);

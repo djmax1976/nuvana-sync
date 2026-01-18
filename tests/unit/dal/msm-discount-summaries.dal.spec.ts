@@ -93,13 +93,15 @@ const ALL_DISCOUNT_TYPES: MSMDiscountType[] = [
 /**
  * Create test discount data
  */
-function createTestDiscountData(overrides: Partial<CreateMSMDiscountData> = {}): CreateMSMDiscountData {
+function createTestDiscountData(
+  overrides: Partial<CreateMSMDiscountData> = {}
+): CreateMSMDiscountData {
   return {
     store_id: TEST_STORE_ID,
     business_date: TEST_BUSINESS_DATE,
     msm_period: 1,
     discount_type: 'discount_fuel',
-    discount_amount: 125.50,
+    discount_amount: 125.5,
     discount_count: 15,
     source_file_hash: TEST_FILE_HASH,
     ...overrides,
@@ -154,8 +156,10 @@ describe('MSMDiscountSummariesDAL', () => {
       expect(result.msm_discount_id).toBe('test-uuid-discount-001');
       expect(result.store_id).toBe(TEST_STORE_ID);
       expect(result.discount_type).toBe('discount_fuel');
-      expect(result.discount_amount).toBe(125.50);
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO msm_discount_summaries'));
+      expect(result.discount_amount).toBe(125.5);
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('INSERT INTO msm_discount_summaries')
+      );
     });
 
     it('MSMD-C-002: should support all valid discount types', () => {
@@ -199,7 +203,7 @@ describe('MSMDiscountSummariesDAL', () => {
         business_date: TEST_BUSINESS_DATE,
         msm_period: 1,
         discount_type: 'statistics_discounts',
-        discount_amount: 50.00,
+        discount_amount: 50.0,
       };
 
       const result = dal.create(data);
@@ -299,12 +303,12 @@ describe('MSMDiscountSummariesDAL', () => {
 
     it('MSMD-Q-004: should get fuel discount amount', () => {
       mockPrepare.mockReturnValueOnce({
-        get: vi.fn().mockReturnValue({ fuel_discount: 150.00 }),
+        get: vi.fn().mockReturnValue({ fuel_discount: 150.0 }),
       });
 
       const result = dal.getFuelDiscount(TEST_STORE_ID, TEST_BUSINESS_DATE);
 
-      expect(result).toBe(150.00);
+      expect(result).toBe(150.0);
       expect(mockPrepare).toHaveBeenCalledWith(
         expect.stringContaining("discount_type = 'discount_fuel'")
       );
@@ -318,26 +322,26 @@ describe('MSMDiscountSummariesDAL', () => {
   describe('AGGREGATION Operations', () => {
     it('MSMD-A-001: should calculate daily totals by discount type', () => {
       const mockTotals = {
-        statistics_discounts: 100.00,
-        amount_fixed: 50.00,
-        amount_percentage: 75.00,
-        promotional: 200.00,
-        fuel: 150.00,
-        store_coupons: 25.00,
-        total_amount: 600.00,
+        statistics_discounts: 100.0,
+        amount_fixed: 50.0,
+        amount_percentage: 75.0,
+        promotional: 200.0,
+        fuel: 150.0,
+        store_coupons: 25.0,
+        total_amount: 600.0,
         total_count: 30,
       };
       mockPrepare.mockReturnValueOnce({ get: vi.fn().mockReturnValue(mockTotals) });
 
       const totals = dal.getDailyTotals(TEST_STORE_ID, TEST_BUSINESS_DATE);
 
-      expect(totals.statisticsDiscounts).toBe(100.00);
-      expect(totals.amountFixed).toBe(50.00);
-      expect(totals.amountPercentage).toBe(75.00);
-      expect(totals.promotional).toBe(200.00);
-      expect(totals.fuel).toBe(150.00);
-      expect(totals.storeCoupons).toBe(25.00);
-      expect(totals.totalAmount).toBe(600.00);
+      expect(totals.statisticsDiscounts).toBe(100.0);
+      expect(totals.amountFixed).toBe(50.0);
+      expect(totals.amountPercentage).toBe(75.0);
+      expect(totals.promotional).toBe(200.0);
+      expect(totals.fuel).toBe(150.0);
+      expect(totals.storeCoupons).toBe(25.0);
+      expect(totals.totalAmount).toBe(600.0);
       expect(totals.totalCount).toBe(30);
     });
 
@@ -414,9 +418,11 @@ describe('MSMDiscountSummariesDAL', () => {
       const sqlInjectionPayload = "'; DROP TABLE msm_discount_summaries; --";
 
       expect(() => {
-        dal.create(createTestDiscountData({
-          discount_type: sqlInjectionPayload as MSMDiscountType,
-        }));
+        dal.create(
+          createTestDiscountData({
+            discount_type: sqlInjectionPayload as MSMDiscountType,
+          })
+        );
       }).toThrow(/Invalid discount type/);
     });
   });
@@ -431,9 +437,7 @@ describe('MSMDiscountSummariesDAL', () => {
 
       dal.findByBusinessDate(TEST_STORE_ID, TEST_BUSINESS_DATE);
 
-      expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('store_id = ?')
-      );
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('store_id = ?'));
     });
 
     it('MSMD-T-002: should pass store_id as first parameter', () => {

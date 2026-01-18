@@ -632,9 +632,7 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
     return rows.map((row) => {
       // Calculate serial_end: (tickets_per_pack - 1) padded to 3 digits
       // e.g., 300 tickets → serial_end = "299"
-      const serialEnd = row.pack_id
-        ? String(row.tickets_per_pack - 1).padStart(3, '0')
-        : '000';
+      const serialEnd = row.pack_id ? String(row.tickets_per_pack - 1).padStart(3, '0') : '000';
 
       return {
         bin_id: row.bin_id,

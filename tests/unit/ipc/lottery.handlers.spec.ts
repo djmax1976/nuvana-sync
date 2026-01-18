@@ -1931,15 +1931,19 @@ describe('Lottery IPC Handlers', () => {
       // Define expected response structure
       const CheckPackExistsResponseSchema = z.object({
         exists: z.boolean(),
-        pack: z.object({
-          pack_id: z.string(),
-          pack_number: z.string(),
-          status: z.enum(['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED']),
-          game: z.object({
-            game_code: z.string(),
-            name: z.string(),
-          }).optional(),
-        }).optional(),
+        pack: z
+          .object({
+            pack_id: z.string(),
+            pack_number: z.string(),
+            status: z.enum(['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED']),
+            game: z
+              .object({
+                game_code: z.string(),
+                name: z.string(),
+              })
+              .optional(),
+          })
+          .optional(),
       });
 
       it('should validate response when pack exists', () => {

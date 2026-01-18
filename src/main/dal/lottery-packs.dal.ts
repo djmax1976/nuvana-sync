@@ -284,7 +284,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     });
 
     if (result.changes === 0) {
-      throw new Error('Failed to activate pack - status may have changed or pack does not belong to this store');
+      throw new Error(
+        'Failed to activate pack - status may have changed or pack does not belong to this store'
+      );
     }
 
     const updated = this.findByIdForStore(data.store_id, packId);
@@ -353,7 +355,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     );
 
     if (result.changes === 0) {
-      throw new Error('Failed to settle pack - status may have changed or pack does not belong to this store');
+      throw new Error(
+        'Failed to settle pack - status may have changed or pack does not belong to this store'
+      );
     }
 
     log.info('Lottery pack settled', {
@@ -421,7 +425,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     );
 
     if (result.changes === 0) {
-      throw new Error('Failed to return pack - status may have changed or pack does not belong to this store');
+      throw new Error(
+        'Failed to return pack - status may have changed or pack does not belong to this store'
+      );
     }
 
     log.info('Lottery pack returned', {

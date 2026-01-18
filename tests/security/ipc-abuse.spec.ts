@@ -402,9 +402,7 @@ describe('IPC Security', () => {
      * This is a business-critical security control preventing unauthorized returns
      */
     it('should require shift_manager role for lottery:returnPack (SEC-010)', () => {
-      const returnPackChannel = PROTECTED_CHANNELS.find(
-        (c) => c.channel === 'lottery:returnPack'
-      );
+      const returnPackChannel = PROTECTED_CHANNELS.find((c) => c.channel === 'lottery:returnPack');
 
       expect(returnPackChannel).toBeDefined();
       expect(returnPackChannel?.requiresAuth).toBe(true);

@@ -226,9 +226,12 @@ export function PinVerificationDialog({
             <div
               className={cn(
                 'flex items-center gap-2 px-3 py-2 rounded-md text-sm',
-                warningLevel === 'locked' && 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-                warningLevel === 'critical' && 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
-                warningLevel === 'warning' && 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
+                warningLevel === 'locked' &&
+                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+                warningLevel === 'critical' &&
+                  'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-400',
+                warningLevel === 'warning' &&
+                  'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400',
                 warningLevel === 'none' && 'bg-muted text-muted-foreground'
               )}
             >

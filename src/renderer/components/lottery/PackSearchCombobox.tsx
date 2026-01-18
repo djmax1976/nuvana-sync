@@ -372,7 +372,8 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
             // Pack truly doesn't exist in inventory
             toast({
               title: 'Pack not found',
-              description: 'This pack has not been received into inventory. Please receive the pack first before activating.',
+              description:
+                'This pack has not been received into inventory. Please receive the pack first before activating.',
               variant: 'destructive',
             });
           }

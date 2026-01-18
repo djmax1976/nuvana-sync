@@ -27,7 +27,8 @@ console.log('[IPC-CLIENT] isElectron detection:', {
   isElectron,
   windowDefined: typeof window !== 'undefined',
   electronAPIDefined: typeof window !== 'undefined' && window.electronAPI !== undefined,
-  electronAPIKeys: typeof window !== 'undefined' && window.electronAPI ? Object.keys(window.electronAPI) : 'N/A',
+  electronAPIKeys:
+    typeof window !== 'undefined' && window.electronAPI ? Object.keys(window.electronAPI) : 'N/A',
 });
 
 // ============================================================================

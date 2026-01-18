@@ -731,9 +731,10 @@ registerHandler<ShiftFuelDataResponse | ReturnType<typeof createErrorResponse>>(
         totalAmount: dailyFuelTotals.totalAmount,
         totalDiscount: dailyFuelTotals.totalDiscount,
         transactionCount: 0,
-        averagePrice: dailyFuelTotals.totalVolume > 0
-          ? dailyFuelTotals.totalAmount / dailyFuelTotals.totalVolume
-          : 0,
+        averagePrice:
+          dailyFuelTotals.totalVolume > 0
+            ? dailyFuelTotals.totalAmount / dailyFuelTotals.totalVolume
+            : 0,
       };
 
       // Map daily fuel by grade to expected format

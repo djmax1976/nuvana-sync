@@ -1756,7 +1756,8 @@ export class CloudApiService {
         store_id: (cloudRecord.storeId || cloudRecord.store_id || '') as string,
         bin_number: ((cloudRecord.displayOrder as number) ?? 0) + 1, // displayOrder is 0-indexed, bin_number is 1-indexed
         label: (cloudRecord.name || cloudRecord.label) as string | undefined,
-        status: (cloudRecord.isActive === true || cloudRecord.status === 'ACTIVE') ? 'ACTIVE' : 'INACTIVE',
+        status:
+          cloudRecord.isActive === true || cloudRecord.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
         updated_at: (cloudRecord.updatedAt || cloudRecord.updated_at) as string,
         deleted_at: (cloudRecord.deletedAt || cloudRecord.deleted_at) as string | undefined,
       });

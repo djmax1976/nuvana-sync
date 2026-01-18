@@ -725,9 +725,7 @@ export async function getGames(): Promise<ApiResponse<LotteryGameResponse[]>> {
  * @param input - Optional filters and pagination
  * @returns Paginated games list with pack counts
  */
-export async function listGames(
-  input?: ListGamesInput
-): Promise<ApiResponse<GameListResponse>> {
+export async function listGames(input?: ListGamesInput): Promise<ApiResponse<GameListResponse>> {
   try {
     const data = await ipcClient.invoke<GameListResponse>('lottery:listGames', input);
     return wrapSuccess(data);

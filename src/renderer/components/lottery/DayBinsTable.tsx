@@ -253,7 +253,12 @@ export function DayBinsTable({
                 {manualEntryMode && <span className="ml-1 text-xs text-primary">(Edit)</span>}
               </TableHead>
               {/* Actions column - always visible for Return, wider when manual entry active */}
-              <TableHead scope="col" className={manualEntryMode ? "w-40 md:w-44 text-center" : "w-24 md:w-28 text-center"}>
+              <TableHead
+                scope="col"
+                className={
+                  manualEntryMode ? 'w-40 md:w-44 text-center' : 'w-24 md:w-28 text-center'
+                }
+              >
                 Actions
               </TableHead>
             </TableRow>

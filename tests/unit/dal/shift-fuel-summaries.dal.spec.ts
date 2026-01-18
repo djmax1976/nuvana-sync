@@ -996,7 +996,9 @@ describe('ShiftFuelSummariesDAL', () => {
       dal.findByBusinessDate('store-456', '2026-01-15');
 
       // DB-006: Store-scoped via join
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INNER JOIN shift_summaries'));
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('INNER JOIN shift_summaries')
+      );
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ss.store_id = ?'));
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ss.business_date = ?'));
     });
@@ -1009,7 +1011,9 @@ describe('ShiftFuelSummariesDAL', () => {
       dal.findByBusinessDate('store-456', '2026-01-15');
 
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('ORDER BY ss.shift_summary_id ASC, sfs.grade_id ASC, sfs.tender_type ASC')
+        expect.stringContaining(
+          'ORDER BY ss.shift_summary_id ASC, sfs.grade_id ASC, sfs.tender_type ASC'
+        )
       );
     });
 
@@ -1231,7 +1235,9 @@ describe('ShiftFuelSummariesDAL', () => {
 
       dal.getByGradeForBusinessDate('store-456', '2026-01-15');
 
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INNER JOIN shift_summaries'));
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('INNER JOIN shift_summaries')
+      );
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ss.store_id = ?'));
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ss.business_date = ?'));
     });

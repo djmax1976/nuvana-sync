@@ -232,7 +232,9 @@ export default function TransactionsPage() {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm text-muted-foreground">Transaction #</p>
-                  <p className="font-medium text-foreground">{selectedTransaction.transaction_number || '-'}</p>
+                  <p className="font-medium text-foreground">
+                    {selectedTransaction.transaction_number || '-'}
+                  </p>
                 </div>
                 <div>
                   <p className="text-sm text-muted-foreground">Total</p>
@@ -255,7 +257,9 @@ export default function TransactionsPage() {
                             {item.description || item.item_code || 'Item'}
                           </span>
                           <span className="text-muted-foreground mx-2">x{item.quantity}</span>
-                          <span className="font-medium text-foreground">{formatCurrency(item.total_price)}</span>
+                          <span className="font-medium text-foreground">
+                            {formatCurrency(item.total_price)}
+                          </span>
                         </div>
                       ))}
                     </div>
@@ -270,7 +274,9 @@ export default function TransactionsPage() {
                       {selectedTransaction.payments.map((payment) => (
                         <div key={payment.payment_id} className="flex justify-between text-sm">
                           <span className="text-muted-foreground">{payment.payment_type}</span>
-                          <span className="font-medium text-foreground">{formatCurrency(payment.amount)}</span>
+                          <span className="font-medium text-foreground">
+                            {formatCurrency(payment.amount)}
+                          </span>
                         </div>
                       ))}
                     </div>

@@ -36,7 +36,10 @@ interface UseAuthGuardReturn {
    * @param onSuccess - Called immediately if session valid, or after successful PIN entry
    * @param onNeedAuth - Called only if PIN dialog needs to be shown
    */
-  executeWithAuth: (onSuccess: (user: AuthGuardUser) => void, onNeedAuth: () => void) => Promise<void>;
+  executeWithAuth: (
+    onSuccess: (user: AuthGuardUser) => void,
+    onNeedAuth: () => void
+  ) => Promise<void>;
 
   /** Whether a session check is in progress */
   isChecking: boolean;

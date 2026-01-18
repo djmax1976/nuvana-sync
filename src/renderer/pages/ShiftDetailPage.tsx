@@ -366,9 +366,11 @@ export default function ShiftDetailPage() {
             </div>
           </div>
           <details className="mt-4">
-            <summary className="cursor-pointer text-sm font-medium">Show Grade Breakdown (click to expand)</summary>
+            <summary className="cursor-pointer text-sm font-medium">
+              Show Grade Breakdown (click to expand)
+            </summary>
             <pre className="mt-2 p-3 bg-muted rounded text-xs overflow-auto max-h-60">
-{JSON.stringify(fuelData.byGrade, null, 2)}
+              {JSON.stringify(fuelData.byGrade, null, 2)}
             </pre>
           </details>
         </div>

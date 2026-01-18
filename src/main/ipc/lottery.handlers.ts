@@ -1015,7 +1015,10 @@ registerHandler(
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
-    console.log('[ACTIVATE HANDLER] Validation passed, parsed data:', JSON.stringify(parseResult.data));
+    console.log(
+      '[ACTIVATE HANDLER] Validation passed, parsed data:',
+      JSON.stringify(parseResult.data)
+    );
 
     try {
       const { pack_id, bin_id, opening_serial } = parseResult.data;

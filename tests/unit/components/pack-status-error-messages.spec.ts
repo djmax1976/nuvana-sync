@@ -137,7 +137,12 @@ describe('getPackStatusErrorMessage', () => {
 
     // Enterprise: Test with realistic game names and bin labels
     it('should handle game names with special characters', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', '$100 Million Cash', 'Register 3');
+      const result = getPackStatusErrorMessage(
+        'ACTIVATED',
+        '0103230',
+        '$100 Million Cash',
+        'Register 3'
+      );
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toContain('$100 Million Cash');
@@ -240,9 +245,7 @@ describe('getPackStatusErrorMessage', () => {
       const result = getPackStatusErrorMessage('RECEIVED', '0103230', undefined, null);
 
       expect(result.title).toBe('Pack not found in search');
-      expect(result.description).toBe(
-        'Pack #0103230 exists but was not found. Please try again.'
-      );
+      expect(result.description).toBe('Pack #0103230 exists but was not found. Please try again.');
     });
   });
 
@@ -252,7 +255,12 @@ describe('getPackStatusErrorMessage', () => {
   describe('Unknown status (defensive handling)', () => {
     it('should return generic message for unknown status', () => {
       // TypeScript would normally prevent this, but runtime could receive unexpected values
-      const result = getPackStatusErrorMessage('UNKNOWN' as LotteryPackStatus, '0103230', 'Lucky 7s', null);
+      const result = getPackStatusErrorMessage(
+        'UNKNOWN' as LotteryPackStatus,
+        '0103230',
+        'Lucky 7s',
+        null
+      );
 
       expect(result.title).toBe('Pack unavailable');
       expect(result.description).toBe(
@@ -261,7 +269,12 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should include unknown status value in message for debugging', () => {
-      const result = getPackStatusErrorMessage('INVALID_STATUS' as LotteryPackStatus, '0103230', undefined, null);
+      const result = getPackStatusErrorMessage(
+        'INVALID_STATUS' as LotteryPackStatus,
+        '0103230',
+        undefined,
+        null
+      );
 
       expect(result.description).toContain('"INVALID_STATUS"');
     });

@@ -439,7 +439,9 @@ registerHandler(
 
     try {
       // First, check what bins exist locally
-      const localBins = lotteryBinsDAL.findAllByStore(storesDAL.getConfiguredStore()?.store_id || '');
+      const localBins = lotteryBinsDAL.findAllByStore(
+        storesDAL.getConfiguredStore()?.store_id || ''
+      );
       log.info('DEBUG: Local bins before sync', { count: localBins.length, bins: localBins });
 
       // Try to pull directly from cloud
@@ -455,8 +457,13 @@ registerHandler(
       log.info('DEBUG: Sync result', { syncResult: result });
 
       // Check bins after sync
-      const localBinsAfter = lotteryBinsDAL.findAllByStore(storesDAL.getConfiguredStore()?.store_id || '');
-      log.info('DEBUG: Local bins after sync', { count: localBinsAfter.length, bins: localBinsAfter });
+      const localBinsAfter = lotteryBinsDAL.findAllByStore(
+        storesDAL.getConfiguredStore()?.store_id || ''
+      );
+      log.info('DEBUG: Local bins after sync', {
+        count: localBinsAfter.length,
+        bins: localBinsAfter,
+      });
 
       return createSuccessResponse({
         ...result,
@@ -469,7 +476,10 @@ registerHandler(
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Debug sync failed';
-      log.error('DEBUG: Sync failed', { error: message, stack: error instanceof Error ? error.stack : undefined });
+      log.error('DEBUG: Sync failed', {
+        error: message,
+        stack: error instanceof Error ? error.stack : undefined,
+      });
       return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, message);
     }
   },

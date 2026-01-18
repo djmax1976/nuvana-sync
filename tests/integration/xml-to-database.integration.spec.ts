@@ -1046,12 +1046,14 @@ describe('XML to Database Integration', () => {
 
         const processedFile = testDb
           .prepare('SELECT * FROM processed_files WHERE file_hash = ?')
-          .get(fileHash) as {
-          status: string;
-          document_type: string;
-          record_count: number;
-          store_id: string;
-        } | undefined;
+          .get(fileHash) as
+          | {
+              status: string;
+              document_type: string;
+              record_count: number;
+              store_id: string;
+            }
+          | undefined;
 
         expect(processedFile).toBeDefined();
         expect(processedFile?.status).toBe('SUCCESS');
@@ -1069,9 +1071,7 @@ describe('XML to Database Integration', () => {
         await parserService.processFile(filePath, fileHash);
 
         // Verify day_fuel_summaries records
-        const fuelRecords = testDb
-          .prepare('SELECT * FROM day_fuel_summaries')
-          .all() as Array<{
+        const fuelRecords = testDb.prepare('SELECT * FROM day_fuel_summaries').all() as Array<{
           fuel_grade_id: string | null;
           total_volume: number;
           total_sales: number;
@@ -1138,16 +1138,20 @@ describe('XML to Database Integration', () => {
 
         // Get fuel summary for grade 001 (Regular)
         const grade001Record = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT * FROM day_fuel_summaries
             WHERE fuel_grade_id = '001' OR grade_id = '001'
-          `)
-          .get() as {
-          inside_volume: number;
-          inside_amount: number;
-          outside_volume: number;
-          outside_amount: number;
-        } | undefined;
+          `
+          )
+          .get() as
+          | {
+              inside_volume: number;
+              inside_amount: number;
+              outside_volume: number;
+              outside_amount: number;
+            }
+          | undefined;
 
         if (grade001Record) {
           // From SAMPLE_MSM_PERIOD_2_XML: grade 001 has:
@@ -1269,12 +1273,14 @@ describe('XML to Database Integration', () => {
 
         // Query for inside totals
         const insideTotals = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT
               SUM(inside_amount) as total_inside_amount,
               SUM(inside_volume) as total_inside_volume
             FROM day_fuel_summaries
-          `)
+          `
+          )
           .get() as { total_inside_amount: number; total_inside_volume: number } | undefined;
 
         if (insideTotals && insideTotals.total_inside_amount !== null) {
@@ -1293,12 +1299,14 @@ describe('XML to Database Integration', () => {
 
         // Query for outside totals
         const outsideTotals = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT
               SUM(outside_amount) as total_outside_amount,
               SUM(outside_volume) as total_outside_volume
             FROM day_fuel_summaries
-          `)
+          `
+          )
           .get() as { total_outside_amount: number; total_outside_volume: number } | undefined;
 
         if (outsideTotals && outsideTotals.total_outside_amount !== null) {
@@ -1317,12 +1325,14 @@ describe('XML to Database Integration', () => {
 
         // Query for grand totals
         const grandTotals = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT
               SUM(total_sales) as grand_total_amount,
               SUM(total_volume) as grand_total_volume
             FROM day_fuel_summaries
-          `)
+          `
+          )
           .get() as { grand_total_amount: number; grand_total_volume: number } | undefined;
 
         if (grandTotals && grandTotals.grand_total_amount !== null) {
@@ -1359,7 +1369,8 @@ describe('XML to Database Integration', () => {
 
         // Query all fuel components
         const fuelComponents = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT
               SUM(inside_amount) as inside_amount,
               SUM(inside_volume) as inside_volume,
@@ -1368,15 +1379,18 @@ describe('XML to Database Integration', () => {
               SUM(total_sales) as total_amount,
               SUM(total_volume) as total_volume
             FROM day_fuel_summaries
-          `)
-          .get() as {
-          inside_amount: number;
-          inside_volume: number;
-          outside_amount: number;
-          outside_volume: number;
-          total_amount: number;
-          total_volume: number;
-        } | undefined;
+          `
+          )
+          .get() as
+          | {
+              inside_amount: number;
+              inside_volume: number;
+              outside_amount: number;
+              outside_volume: number;
+              total_amount: number;
+              total_volume: number;
+            }
+          | undefined;
 
         if (fuelComponents && fuelComponents.inside_amount !== null) {
           // Verify: inside + outside = total (within floating point tolerance)
@@ -1414,9 +1428,9 @@ describe('XML to Database Integration', () => {
         expect(processedFiles?.store_id).toBe(TEST_STORE_ID);
 
         // Verify day summaries are scoped
-        const daySummaries = testDb
-          .prepare('SELECT store_id FROM day_summaries')
-          .all() as Array<{ store_id: string }>;
+        const daySummaries = testDb.prepare('SELECT store_id FROM day_summaries').all() as Array<{
+          store_id: string;
+        }>;
 
         expect(daySummaries.every((r) => r.store_id === TEST_STORE_ID)).toBe(true);
 
@@ -1540,11 +1554,13 @@ describe('XML to Database Integration', () => {
 
         // Both should be recorded as processed
         const processedCount = testDb
-          .prepare(`
+          .prepare(
+            `
             SELECT COUNT(*) as count FROM processed_files
             WHERE document_type = 'MiscellaneousSummaryMovement'
             AND status = 'SUCCESS'
-          `)
+          `
+          )
           .get() as { count: number };
 
         expect(processedCount.count).toBeGreaterThanOrEqual(2);

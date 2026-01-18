@@ -200,17 +200,29 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
       });
 
       // Activate it
-      dal.activate(receivedPack.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(receivedPack.pack_id, {
+        store_id: 'store-1',
+        bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       // Try to activate again
       expect(() =>
-        dal.activate(receivedPack.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '050' })
+        dal.activate(receivedPack.pack_id, {
+          store_id: 'store-1',
+          bin_id: 'bin-1',
+          opening_serial: '050',
+        })
       ).toThrow();
     });
 
     it('should throw error for non-existent pack', () => {
       expect(() =>
-        dal.activate('non-existent-id', { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' })
+        dal.activate('non-existent-id', {
+          store_id: 'store-1',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+        })
       ).toThrow('Pack not found');
     });
 
@@ -236,7 +248,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
         // Second activation throws with specific error
         expect(() =>
-          dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-2', opening_serial: '050' })
+          dal.activate(pack.pack_id, {
+            store_id: 'store-1',
+            bin_id: 'bin-2',
+            opening_serial: '050',
+          })
         ).toThrow('Cannot activate pack with status ACTIVATED');
       });
 
@@ -256,7 +272,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         });
 
         expect(() =>
-          dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-2', opening_serial: '000' })
+          dal.activate(pack.pack_id, {
+            store_id: 'store-1',
+            bin_id: 'bin-2',
+            opening_serial: '000',
+          })
         ).toThrow('Cannot activate pack with status SETTLED');
       });
 
@@ -270,7 +290,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         dal.returnPack(pack.pack_id, { store_id: 'store-1' });
 
         expect(() =>
-          dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' })
+          dal.activate(pack.pack_id, {
+            store_id: 'store-1',
+            bin_id: 'bin-1',
+            opening_serial: '000',
+          })
         ).toThrow('Cannot activate pack with status RETURNED');
       });
 
@@ -286,7 +310,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
         // Attempt duplicate activation with different serial - should fail
         try {
-          dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-2', opening_serial: '100' });
+          dal.activate(pack.pack_id, {
+            store_id: 'store-1',
+            bin_id: 'bin-2',
+            opening_serial: '100',
+          });
         } catch {
           // Expected
         }
@@ -313,7 +341,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         // SQL UPDATE with WHERE status='RECEIVED' should affect 0 rows
         // and throw "Failed to activate pack - status may have changed"
         expect(() =>
-          dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-2', opening_serial: '100' })
+          dal.activate(pack.pack_id, {
+            store_id: 'store-1',
+            bin_id: 'bin-2',
+            opening_serial: '100',
+          })
         ).toThrow();
       });
     });
@@ -366,7 +398,12 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
       });
 
       expect(() =>
-        dal.settle(pack.pack_id, { store_id: 'store-1', closing_serial: '150', tickets_sold: 150, sales_amount: 150 })
+        dal.settle(pack.pack_id, {
+          store_id: 'store-1',
+          closing_serial: '150',
+          tickets_sold: 150,
+          sales_amount: 150,
+        })
       ).toThrow();
     });
   });
@@ -380,7 +417,10 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
       });
       dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
 
-      const returnedPack = dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'DAMAGED' });
+      const returnedPack = dal.returnPack(pack.pack_id, {
+        store_id: 'store-1',
+        return_reason: 'DAMAGED',
+      });
 
       expect(returnedPack).toBeDefined();
       expect(returnedPack?.status).toBe('RETURNED');
@@ -395,7 +435,10 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         pack_number: 'PKG1234567',
       });
 
-      const returnedPack = dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'SUPPLIER_RECALL' });
+      const returnedPack = dal.returnPack(pack.pack_id, {
+        store_id: 'store-1',
+        return_reason: 'SUPPLIER_RECALL',
+      });
 
       expect(returnedPack).toBeDefined();
       expect(returnedPack?.status).toBe('RETURNED');
@@ -408,9 +451,16 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         pack_number: 'PKG1234567',
       });
       dal.activate(pack.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
-      dal.settle(pack.pack_id, { store_id: 'store-1', closing_serial: '299', tickets_sold: 299, sales_amount: 299 });
+      dal.settle(pack.pack_id, {
+        store_id: 'store-1',
+        closing_serial: '299',
+        tickets_sold: 299,
+        sales_amount: 299,
+      });
 
-      expect(() => dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'DAMAGED' })).toThrow();
+      expect(() =>
+        dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'DAMAGED' })
+      ).toThrow();
     });
 
     it('should accept return data with reason', () => {
@@ -525,7 +575,12 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
       dal.activate(pack2.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
       dal.activate(pack3.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
-      dal.settle(pack3.pack_id, { store_id: 'store-1', closing_serial: '299', tickets_sold: 299, sales_amount: 299 });
+      dal.settle(pack3.pack_id, {
+        store_id: 'store-1',
+        closing_serial: '299',
+        tickets_sold: 299,
+        sales_amount: 299,
+      });
 
       const counts = dal.getStatusCounts('store-1');
 
@@ -621,8 +676,16 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
       it('should filter by status', () => {
         dal.receive({ store_id: 'store-1', game_id: 'game-1', pack_number: '0000001' });
-        const pack2 = dal.receive({ store_id: 'store-1', game_id: 'game-1', pack_number: '0000002' });
-        dal.activate(pack2.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
+        const pack2 = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: '0000002',
+        });
+        dal.activate(pack2.pack_id, {
+          store_id: 'store-1',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         const received = dal.findPacksWithDetails('store-1', { status: 'RECEIVED' });
         const activated = dal.findPacksWithDetails('store-1', { status: 'ACTIVATED' });
@@ -674,7 +737,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         const results = dal.findPacksWithDetails('store-1', { search: '010323' });
 
         expect(results.length).toBe(2);
-        expect(results.every(p => p.pack_number.startsWith('010323'))).toBe(true);
+        expect(results.every((p) => p.pack_number.startsWith('010323'))).toBe(true);
       });
 
       it('should search by exact pack_number', () => {
@@ -704,21 +767,25 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
         // Should find both packs with game 'Lucky 7s'
         expect(results.length).toBe(2);
-        expect(results.every(p => p.game_name === 'Lucky 7s')).toBe(true);
+        expect(results.every((p) => p.game_name === 'Lucky 7s')).toBe(true);
       });
 
       it('should combine search with status filter', () => {
         // Activate one of the Lucky 7s packs
         const packs = dal.findPacksWithDetails('store-1', { search: '0103230' });
-        dal.activate(packs[0].pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(packs[0].pack_id, {
+          store_id: 'store-1',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         const receivedResults = dal.findPacksWithDetails('store-1', {
           search: 'Lucky',
-          status: 'RECEIVED'
+          status: 'RECEIVED',
         });
         const activatedResults = dal.findPacksWithDetails('store-1', {
           search: 'Lucky',
-          status: 'ACTIVATED'
+          status: 'ACTIVATED',
         });
 
         expect(receivedResults.length).toBe(1);
@@ -759,7 +826,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         const injectionAttempts = [
           "'; DROP TABLE lottery_packs; --",
           "1' OR '1'='1",
-          "1; SELECT * FROM users; --",
+          '1; SELECT * FROM users; --',
           "' UNION SELECT * FROM lottery_games --",
           "1%' OR '%'='",
         ];
@@ -786,12 +853,28 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
     describe('ordering and limit behavior', () => {
       it('should order results by updated_at descending (newest first)', () => {
         // Create packs with slight time differences
-        const pack1 = dal.receive({ store_id: 'store-1', game_id: 'game-1', pack_number: '0000001' });
-        const pack2 = dal.receive({ store_id: 'store-1', game_id: 'game-1', pack_number: '0000002' });
-        const pack3 = dal.receive({ store_id: 'store-1', game_id: 'game-1', pack_number: '0000003' });
+        const pack1 = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: '0000001',
+        });
+        const pack2 = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: '0000002',
+        });
+        const pack3 = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: '0000003',
+        });
 
         // Update pack1 to make it most recent
-        dal.activate(pack1.pack_id, { store_id: 'store-1', bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack1.pack_id, {
+          store_id: 'store-1',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         const results = dal.findPacksWithDetails('store-1', {});
 
@@ -989,7 +1072,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         // Scenario: User scans the same pack trying to activate it again
         // The search for RECEIVED packs returns nothing
         const receivedPacks = dal.findByStatus('store-1', 'RECEIVED');
-        const matchingReceived = receivedPacks.filter(p => p.pack_number === '0103230');
+        const matchingReceived = receivedPacks.filter((p) => p.pack_number === '0103230');
         expect(matchingReceived.length).toBe(0); // Pack not found in RECEIVED status
 
         // But findByPackNumberOnly can still find it to provide status info

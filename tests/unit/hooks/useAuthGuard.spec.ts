@@ -41,7 +41,8 @@ type RequiredRole = 'cashier' | 'shift_manager' | 'store_manager';
  * Mock window.electronAPI for Electron IPC testing
  * Type assertion to support both generic invocation and mock methods
  */
-const mockInvoke = vi.fn() as ReturnType<typeof vi.fn> & (<T = unknown>(...args: unknown[]) => Promise<T>);
+const mockInvoke = vi.fn() as ReturnType<typeof vi.fn> &
+  (<T = unknown>(...args: unknown[]) => Promise<T>);
 
 const mockElectronAPI = {
   invoke: mockInvoke,
@@ -567,9 +568,7 @@ describe('useAuthGuard Hook', () => {
       await executeWithAuth(onSuccess, onNeedAuth);
 
       // Verify the response included timeoutIn
-      const callArgs = mockInvoke.mock.calls.find(
-        (call) => call[0] === 'auth:checkSessionForRole'
-      );
+      const callArgs = mockInvoke.mock.calls.find((call) => call[0] === 'auth:checkSessionForRole');
       expect(callArgs).toBeDefined();
     });
   });

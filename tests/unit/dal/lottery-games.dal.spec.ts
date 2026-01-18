@@ -442,10 +442,12 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
     }) {
       const now = new Date().toISOString();
       const packId = `pack-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO lottery_packs (pack_id, store_id, game_id, pack_number, status, received_at, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(packId, data.store_id, data.game_id, data.pack_number, data.status, now, now, now);
+      `
+      ).run(packId, data.store_id, data.game_id, data.pack_number, data.status, now, now, now);
       return packId;
     }
 
@@ -477,13 +479,48 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         });
 
         // Create packs with various statuses
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '001', status: 'RECEIVED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '002', status: 'RECEIVED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '003', status: 'ACTIVATED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '004', status: 'ACTIVATED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '005', status: 'ACTIVATED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '006', status: 'SETTLED' });
-        createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '007', status: 'RETURNED' });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '001',
+          status: 'RECEIVED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '002',
+          status: 'RECEIVED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '003',
+          status: 'ACTIVATED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '004',
+          status: 'ACTIVATED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '005',
+          status: 'ACTIVATED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '006',
+          status: 'SETTLED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game.game_id,
+          pack_number: '007',
+          status: 'RETURNED',
+        });
 
         const result = dal.listGamesWithPackCounts('store-1');
 
@@ -544,13 +581,38 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
       it('should not include pack counts from other stores', () => {
         // Create same game code in two stores
-        const game1 = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Game 1', price: 1 });
-        const game2 = dal.create({ store_id: 'store-2', game_code: '1001', name: 'Game 1 Other', price: 1 });
+        const game1 = dal.create({
+          store_id: 'store-1',
+          game_code: '1001',
+          name: 'Game 1',
+          price: 1,
+        });
+        const game2 = dal.create({
+          store_id: 'store-2',
+          game_code: '1001',
+          name: 'Game 1 Other',
+          price: 1,
+        });
 
         // Create packs for each store's game
-        createPack({ store_id: 'store-1', game_id: game1.game_id, pack_number: '001', status: 'RECEIVED' });
-        createPack({ store_id: 'store-1', game_id: game1.game_id, pack_number: '002', status: 'RECEIVED' });
-        createPack({ store_id: 'store-2', game_id: game2.game_id, pack_number: '001', status: 'ACTIVATED' });
+        createPack({
+          store_id: 'store-1',
+          game_id: game1.game_id,
+          pack_number: '001',
+          status: 'RECEIVED',
+        });
+        createPack({
+          store_id: 'store-1',
+          game_id: game1.game_id,
+          pack_number: '002',
+          status: 'RECEIVED',
+        });
+        createPack({
+          store_id: 'store-2',
+          game_id: game2.game_id,
+          pack_number: '001',
+          status: 'ACTIVATED',
+        });
 
         const result1 = dal.listGamesWithPackCounts('store-1');
         const result2 = dal.listGamesWithPackCounts('store-2');
@@ -656,10 +718,34 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
     describe('Status Filter', () => {
       beforeEach(() => {
-        dal.create({ store_id: 'store-1', game_code: '1001', name: 'Active Game 1', price: 1, status: 'ACTIVE' });
-        dal.create({ store_id: 'store-1', game_code: '1002', name: 'Active Game 2', price: 2, status: 'ACTIVE' });
-        dal.create({ store_id: 'store-1', game_code: '1003', name: 'Inactive Game', price: 3, status: 'INACTIVE' });
-        dal.create({ store_id: 'store-1', game_code: '1004', name: 'Discontinued Game', price: 5, status: 'DISCONTINUED' });
+        dal.create({
+          store_id: 'store-1',
+          game_code: '1001',
+          name: 'Active Game 1',
+          price: 1,
+          status: 'ACTIVE',
+        });
+        dal.create({
+          store_id: 'store-1',
+          game_code: '1002',
+          name: 'Active Game 2',
+          price: 2,
+          status: 'ACTIVE',
+        });
+        dal.create({
+          store_id: 'store-1',
+          game_code: '1003',
+          name: 'Inactive Game',
+          price: 3,
+          status: 'INACTIVE',
+        });
+        dal.create({
+          store_id: 'store-1',
+          game_code: '1004',
+          name: 'Discontinued Game',
+          price: 5,
+          status: 'DISCONTINUED',
+        });
       });
 
       it('should filter by ACTIVE status', () => {
@@ -759,7 +845,12 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should not return soft-deleted games in search results', () => {
-        const game = dal.create({ store_id: 'store-1', game_code: '6666', name: 'Deleted Lucky', price: 1 });
+        const game = dal.create({
+          store_id: 'store-1',
+          game_code: '6666',
+          name: 'Deleted Lucky',
+          price: 1,
+        });
         dal.softDelete(game.game_id);
 
         const result = dal.listGamesWithPackCounts('store-1', { search: 'Deleted' });
@@ -777,7 +868,11 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should sort by name ascending (default)', () => {
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'name', sortOrder: 'ASC' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'name', sortOrder: 'ASC' }
+        );
 
         expect(result.games[0].name).toBe('Alpha Game');
         expect(result.games[1].name).toBe('Middle Game');
@@ -785,14 +880,22 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should sort by name descending', () => {
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'name', sortOrder: 'DESC' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'name', sortOrder: 'DESC' }
+        );
 
         expect(result.games[0].name).toBe('Zebra Game');
         expect(result.games[2].name).toBe('Alpha Game');
       });
 
       it('should sort by game_code', () => {
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'game_code', sortOrder: 'ASC' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'game_code', sortOrder: 'ASC' }
+        );
 
         expect(result.games[0].game_code).toBe('1000');
         expect(result.games[1].game_code).toBe('2000');
@@ -800,7 +903,11 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should sort by price', () => {
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'price', sortOrder: 'DESC' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'price', sortOrder: 'DESC' }
+        );
 
         expect(result.games[0].price).toBe(10);
         expect(result.games[1].price).toBe(5);
@@ -809,7 +916,11 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
       it('should default to name ASC for invalid sort column', () => {
         // @ts-expect-error - Testing invalid input handling
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'invalid_column; DROP TABLE games;--' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'invalid_column; DROP TABLE games;--' }
+        );
 
         // Should not throw and should use default sort (name ASC)
         expect(result.games[0].name).toBe('Alpha Game');
@@ -818,7 +929,11 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
       it('should default to ASC for invalid sort order', () => {
         // @ts-expect-error - Testing invalid input handling
-        const result = dal.listGamesWithPackCounts('store-1', {}, { sortBy: 'name', sortOrder: 'INVALID' });
+        const result = dal.listGamesWithPackCounts(
+          'store-1',
+          {},
+          { sortBy: 'name', sortOrder: 'INVALID' }
+        );
 
         // Should use default ASC order
         expect(result.games[0].name).toBe('Alpha Game');
@@ -898,8 +1013,18 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       });
 
       it('should not return soft-deleted games', () => {
-        const game1 = dal.create({ store_id: 'store-1', game_code: '1001', name: 'Active', price: 1 });
-        const game2 = dal.create({ store_id: 'store-1', game_code: '1002', name: 'Deleted', price: 2 });
+        const game1 = dal.create({
+          store_id: 'store-1',
+          game_code: '1001',
+          name: 'Active',
+          price: 1,
+        });
+        const game2 = dal.create({
+          store_id: 'store-1',
+          game_code: '1002',
+          name: 'Deleted',
+          price: 2,
+        });
         dal.softDelete(game2.game_id);
 
         const result = dal.listGamesWithPackCounts('store-1');
@@ -911,10 +1036,22 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
       it('should handle games with NULL optional fields', () => {
         // Create game without optional fields
-        db.prepare(`
+        db.prepare(
+          `
           INSERT INTO lottery_games (game_id, store_id, game_code, name, price, pack_value, status, created_at, updated_at)
           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        `).run('game-null', 'store-1', '1001', 'Minimal Game', 1, 300, 'ACTIVE', new Date().toISOString(), new Date().toISOString());
+        `
+        ).run(
+          'game-null',
+          'store-1',
+          '1001',
+          'Minimal Game',
+          1,
+          300,
+          'ACTIVE',
+          new Date().toISOString(),
+          new Date().toISOString()
+        );
 
         const result = dal.listGamesWithPackCounts('store-1');
 
@@ -969,10 +1106,12 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
     }) {
       const now = new Date().toISOString();
       const packId = `pack-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO lottery_packs (pack_id, store_id, game_id, pack_number, status, received_at, created_at, updated_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-      `).run(packId, data.store_id, data.game_id, data.pack_number, data.status, now, now, now);
+      `
+      ).run(packId, data.store_id, data.game_id, data.pack_number, data.status, now, now, now);
       return packId;
     }
 
@@ -984,9 +1123,24 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         price: 1,
       });
 
-      createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '001', status: 'RECEIVED' });
-      createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '002', status: 'ACTIVATED' });
-      createPack({ store_id: 'store-1', game_id: game.game_id, pack_number: '003', status: 'SETTLED' });
+      createPack({
+        store_id: 'store-1',
+        game_id: game.game_id,
+        pack_number: '001',
+        status: 'RECEIVED',
+      });
+      createPack({
+        store_id: 'store-1',
+        game_id: game.game_id,
+        pack_number: '002',
+        status: 'ACTIVATED',
+      });
+      createPack({
+        store_id: 'store-1',
+        game_id: game.game_id,
+        pack_number: '003',
+        status: 'SETTLED',
+      });
 
       const result = dal.findByIdWithPackCounts('store-1', game.game_id);
 

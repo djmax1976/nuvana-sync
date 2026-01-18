@@ -36,7 +36,12 @@ export interface LoginResult {
   user?: SafeUser;
   session?: SessionInfo;
   error?: string;
-  errorCode?: 'STORE_NOT_CONFIGURED' | 'USER_NOT_FOUND' | 'INVALID_PIN' | 'USER_INACTIVE' | 'ACCOUNT_LOCKED';
+  errorCode?:
+    | 'STORE_NOT_CONFIGURED'
+    | 'USER_NOT_FOUND'
+    | 'INVALID_PIN'
+    | 'USER_INACTIVE'
+    | 'ACCOUNT_LOCKED';
   /** Remaining attempts before lockout (only present on failed PIN attempts) */
   attemptsRemaining?: number;
   /** Total max attempts allowed */
@@ -181,7 +186,8 @@ function recordFailedAttempt(storeId: string): {
   if (record.attempts >= LOCKOUT_CONFIG.maxAttempts) {
     // Calculate escalating lockout duration
     const escalatedDuration = Math.min(
-      LOCKOUT_CONFIG.baseLockoutMs * Math.pow(LOCKOUT_CONFIG.escalationMultiplier, record.lockoutCount),
+      LOCKOUT_CONFIG.baseLockoutMs *
+        Math.pow(LOCKOUT_CONFIG.escalationMultiplier, record.lockoutCount),
       LOCKOUT_CONFIG.maxLockoutMs
     );
 

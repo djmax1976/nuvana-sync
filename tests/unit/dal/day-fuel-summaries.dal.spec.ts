@@ -881,7 +881,9 @@ describe('DayFuelSummariesDAL', () => {
 
       dal.findByBusinessDate('store-456', '2026-01-15');
 
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('ORDER BY dfs.grade_id ASC'));
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('ORDER BY dfs.grade_id ASC')
+      );
     });
 
     it('DFS-STORE-004: should return empty array when no data exists', () => {

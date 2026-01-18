@@ -565,7 +565,7 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
     if (filters.search && filters.search.length >= 2) {
       // Escape special LIKE characters to prevent pattern injection
       const escapedSearch = filters.search.replace(/[%_\\]/g, '\\$&');
-      conditions.push('(g.name LIKE ? ESCAPE \'\\\' OR g.game_code LIKE ? ESCAPE \'\\\')');
+      conditions.push("(g.name LIKE ? ESCAPE '\\' OR g.game_code LIKE ? ESCAPE '\\')");
       params.push(`%${escapedSearch}%`, `%${escapedSearch}%`);
     }
 
