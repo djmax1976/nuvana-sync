@@ -9,8 +9,29 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
-import _path from 'path';
 import fs from 'fs';
+
+// Helper to get platform-appropriate absolute paths for tests
+// On Windows: C:\path\to\folder
+// On Unix: /path/to/folder
+const getTestAbsolutePath = (name: string): string => {
+  if (process.platform === 'win32') {
+    return `C:\\NAXML\\${name}`;
+  }
+  return `/naxml/${name.toLowerCase()}`;
+};
+
+// Platform-appropriate paths for tests
+const TEST_PATHS = {
+  validFolder: getTestAbsolutePath('Export'),
+  nonExistent: getTestAbsolutePath('NonExistent'),
+  traversal:
+    process.platform === 'win32'
+      ? 'C:\\NAXML\\..\\..\\Windows\\System32'
+      : '/naxml/../../etc/passwd',
+  relative: process.platform === 'win32' ? 'NAXML\\Export' : 'naxml/export',
+  file: getTestAbsolutePath('file.txt'),
+};
 
 // Mock electron modules before importing the service
 vi.mock('electron', () => ({
@@ -197,7 +218,7 @@ describe('SettingsService', () => {
 
       expect(() => {
         settingsService.updateLocal({
-          xmlWatchFolder: 'C:\\NAXML\\Export',
+          xmlWatchFolder: TEST_PATHS.validFolder,
         });
       }).not.toThrow();
     });
@@ -207,7 +228,7 @@ describe('SettingsService', () => {
 
       expect(() => {
         settingsService.updateLocal({
-          xmlWatchFolder: 'C:\\NonExistent\\Path',
+          xmlWatchFolder: TEST_PATHS.nonExistent,
         });
       }).toThrow(/Invalid watch folder/);
     });
@@ -239,14 +260,14 @@ describe('SettingsService', () => {
 
   describe('validateFolder', () => {
     it('should reject paths with path traversal', () => {
-      const result = settingsService.validateFolder('C:\\NAXML\\..\\..\\Windows\\System32');
+      const result = settingsService.validateFolder(TEST_PATHS.traversal);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('parent directory');
     });
 
     it('should reject relative paths', () => {
-      const result = settingsService.validateFolder('NAXML/Export');
+      const result = settingsService.validateFolder(TEST_PATHS.relative);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('absolute');
@@ -255,7 +276,7 @@ describe('SettingsService', () => {
     it('should reject non-existent paths', () => {
       vi.mocked(fs.existsSync).mockReturnValue(false);
 
-      const result = settingsService.validateFolder('C:\\NonExistent');
+      const result = settingsService.validateFolder(TEST_PATHS.nonExistent);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('not exist');
@@ -265,7 +286,7 @@ describe('SettingsService', () => {
       vi.mocked(fs.existsSync).mockReturnValue(true);
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => false } as fs.Stats);
 
-      const result = settingsService.validateFolder('C:\\file.txt');
+      const result = settingsService.validateFolder(TEST_PATHS.file);
 
       expect(result.valid).toBe(false);
       expect(result.error).toContain('not a directory');
@@ -276,7 +297,7 @@ describe('SettingsService', () => {
       vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as fs.Stats);
       vi.mocked(fs.accessSync).mockReturnValue(undefined);
 
-      const result = settingsService.validateFolder('C:\\NAXML\\Export');
+      const result = settingsService.validateFolder(TEST_PATHS.validFolder);
 
       expect(result.valid).toBe(true);
     });

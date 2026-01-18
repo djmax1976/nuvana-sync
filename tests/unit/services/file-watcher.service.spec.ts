@@ -70,6 +70,45 @@ import { validateSafePath } from '../../../src/shared/types/config.types';
 import type { NuvanaConfig } from '../../../src/shared/types/config.types';
 
 // ============================================================================
+// Cross-Platform Path Helpers
+// ============================================================================
+
+/**
+ * Generate platform-appropriate absolute paths for tests.
+ * On Windows: C:\naxml\incoming
+ * On Unix: /naxml/incoming
+ */
+const getTestPath = (...segments: string[]): string => {
+  if (process.platform === 'win32') {
+    return `C:\\naxml\\${segments.join('\\')}`;
+  }
+  return `/naxml/${segments.join('/')}`;
+};
+
+/**
+ * Platform-appropriate test paths used throughout tests
+ */
+const TEST_PATHS = {
+  watchPath: getTestPath('incoming'),
+  archivePath: getTestPath('archive'),
+  errorPath: getTestPath('errors'),
+  fgmFile: (name = 'FGM20250115.xml') => getTestPath('incoming', name),
+  pjrFile: (name = 'PJR20250115.xml') => getTestPath('incoming', name),
+  archiveFile: (name: string) => getTestPath('archive', name),
+  errorFile: (name: string) => getTestPath('errors', name),
+  // Path traversal attempt - platform appropriate
+  traversalPath:
+    process.platform === 'win32'
+      ? 'C:\\naxml\\incoming\\..\\..\\system\\sensitive.xml'
+      : '/naxml/incoming/../../system/sensitive.xml',
+  // Messy path with redundant separators
+  messyPath:
+    process.platform === 'win32'
+      ? 'C:\\naxml\\incoming\\\\FGM20250115.xml'
+      : '/naxml/incoming//FGM20250115.xml',
+};
+
+// ============================================================================
 // Test Fixtures
 // ============================================================================
 
@@ -77,9 +116,9 @@ const createMockConfig = (overrides: Partial<NuvanaConfig> = {}): NuvanaConfig =
   apiUrl: 'https://api.test.com',
   apiKey: 'test-api-key',
   storeId: 'store-123',
-  watchPath: 'C:\\naxml\\incoming',
-  archivePath: 'C:\\naxml\\archive',
-  errorPath: 'C:\\naxml\\errors',
+  watchPath: TEST_PATHS.watchPath,
+  archivePath: TEST_PATHS.archivePath,
+  errorPath: TEST_PATHS.errorPath,
   pollInterval: 5,
   enabledFileTypes: {
     pjr: true,
@@ -150,10 +189,7 @@ describe('FileWatcherService', () => {
       mockWatcherInstance.emit('ready');
 
       // Simulate a file with path traversal attempt
-      const maliciousPath = 'C:\\naxml\\incoming\\..\\..\\system\\sensitive.xml';
-
-      // Trigger file detection
-      mockWatcherInstance.emit('add', maliciousPath);
+      mockWatcherInstance.emit('add', TEST_PATHS.traversalPath);
 
       // Path validation happens synchronously, but processing is async
       await new Promise((resolve) => setTimeout(resolve, 10));
@@ -173,7 +209,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      const validPath = 'C:\\naxml\\incoming\\FGM20250115.xml';
+      const validPath = TEST_PATHS.fgmFile();
       mockWatcherInstance.emit('add', validPath);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
@@ -193,8 +229,7 @@ describe('FileWatcherService', () => {
       mockWatcherInstance.emit('ready');
 
       // Path with redundant separators
-      const messyPath = 'C:\\naxml\\incoming\\\\FGM20250115.xml';
-      mockWatcherInstance.emit('add', messyPath);
+      mockWatcherInstance.emit('add', TEST_PATHS.messyPath);
 
       await new Promise((resolve) => setTimeout(resolve, 50));
 
@@ -230,11 +265,11 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).toHaveBeenCalledWith(
-        'C:\\naxml\\incoming\\FGM20250115.xml',
+        TEST_PATHS.fgmFile(),
         expect.stringMatching(/^[a-f0-9]{64}$/) // SHA-256 hash
       );
     });
@@ -251,7 +286,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Verify hash is consistent (SHA-256 of 'test content')
@@ -276,7 +311,7 @@ describe('FileWatcherService', () => {
       mockWatcherInstance.emit('ready');
 
       // Emit same file twice quickly
-      const filePath = 'C:\\naxml\\incoming\\FGM20250115.xml';
+      const filePath = TEST_PATHS.fgmFile();
       mockWatcherInstance.emit('add', filePath);
       mockWatcherInstance.emit('add', filePath);
 
@@ -303,7 +338,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(errorHandler).toHaveBeenCalledWith(
@@ -329,7 +364,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(processedHandler).toHaveBeenCalledWith(
@@ -354,7 +389,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).toHaveBeenCalled();
@@ -367,7 +402,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\PJR20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.pjrFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).toHaveBeenCalled();
@@ -377,7 +412,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\report.txt');
+      mockWatcherInstance.emit('add', getTestPath('incoming', 'report.txt'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).not.toHaveBeenCalled();
@@ -387,7 +422,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\random.xml');
+      mockWatcherInstance.emit('add', getTestPath('incoming', 'random.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).not.toHaveBeenCalled();
@@ -400,7 +435,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.XML');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM20250115.XML'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(mockProcessFile).toHaveBeenCalled();
@@ -419,7 +454,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Should skip ParserService for disabled types
@@ -445,13 +480,13 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(fs.mkdir).toHaveBeenCalledWith('C:\\naxml\\archive', { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(TEST_PATHS.archivePath, { recursive: true });
       expect(fs.rename).toHaveBeenCalledWith(
-        'C:\\naxml\\incoming\\FGM20250115.xml',
-        'C:\\naxml\\archive\\FGM20250115.xml'
+        TEST_PATHS.fgmFile(),
+        TEST_PATHS.archiveFile('FGM20250115.xml')
       );
     });
 
@@ -469,13 +504,13 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
-      expect(fs.mkdir).toHaveBeenCalledWith('C:\\naxml\\errors', { recursive: true });
+      expect(fs.mkdir).toHaveBeenCalledWith(TEST_PATHS.errorPath, { recursive: true });
       expect(fs.rename).toHaveBeenCalledWith(
-        'C:\\naxml\\incoming\\FGM20250115.xml',
-        'C:\\naxml\\errors\\FGM20250115.xml'
+        TEST_PATHS.fgmFile(),
+        TEST_PATHS.errorFile('FGM20250115.xml')
       );
     });
 
@@ -489,7 +524,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       expect(fs.mkdir).not.toHaveBeenCalled();
@@ -503,7 +538,7 @@ describe('FileWatcherService', () => {
 
       // Mock validateSafePath to fail for archive
       vi.mocked(validateSafePath).mockImplementation((pathArg: string) => {
-        if (pathArg === 'C:\\naxml\\archive') {
+        if (pathArg === TEST_PATHS.archivePath) {
           return { success: false, error: { message: 'Invalid archive path' } } as ReturnType<
             typeof validateSafePath
           >;
@@ -514,7 +549,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM20250115.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile());
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       // Should not attempt rename with invalid archive
@@ -536,9 +571,9 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM001.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM001.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM002.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM002.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const stats = service.getStats();
@@ -554,7 +589,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM001.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM001.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const stats = service.getStats();
@@ -571,7 +606,7 @@ describe('FileWatcherService', () => {
       mockWatcherInstance.emit('ready');
 
       const beforeTime = new Date();
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM001.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM001.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const stats = service.getStats();
@@ -615,7 +650,7 @@ describe('FileWatcherService', () => {
       service.start();
       mockWatcherInstance.emit('ready');
 
-      mockWatcherInstance.emit('add', 'C:\\naxml\\incoming\\FGM001.xml');
+      mockWatcherInstance.emit('add', TEST_PATHS.fgmFile('FGM001.xml'));
       await new Promise((resolve) => setTimeout(resolve, 50));
 
       const recentFiles = service.getRecentFiles();
@@ -635,10 +670,7 @@ describe('FileWatcherService', () => {
 
       // Process more than 50 files
       for (let i = 0; i < 60; i++) {
-        mockWatcherInstance.emit(
-          'add',
-          `C:\\naxml\\incoming\\FGM${String(i).padStart(3, '0')}.xml`
-        );
+        mockWatcherInstance.emit('add', TEST_PATHS.fgmFile(`FGM${String(i).padStart(3, '0')}.xml`));
         await new Promise((resolve) => setTimeout(resolve, 10));
       }
 
@@ -656,7 +688,7 @@ describe('FileWatcherService', () => {
       service.start();
 
       expect(chokidar.watch).toHaveBeenCalledWith(
-        'C:\\naxml\\incoming',
+        TEST_PATHS.watchPath,
         expect.objectContaining({
           usePolling: true,
           persistent: true,
