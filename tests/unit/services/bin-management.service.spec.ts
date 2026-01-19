@@ -171,21 +171,19 @@ describe('BinManagementService', () => {
       expect(result.success).toBe(true);
       expect(result.bin?.label).toBe('Counter Front');
       expect(lotteryBinsDAL.create).toHaveBeenCalled();
-      expect(syncQueueDAL.enqueue).toHaveBeenCalled();
+      // Note: Bins are pull-only from cloud, so no sync enqueue
+      expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
     });
 
-    it('should enqueue create operation for sync', () => {
+    it('should NOT enqueue create operation for sync (bins are pull-only)', () => {
+      // Bins are pulled from cloud, not pushed - no sync queue needed
       vi.mocked(lotteryBinsDAL.getNextBinNumber).mockReturnValue(1);
       vi.mocked(lotteryBinsDAL.create).mockReturnValue(mockBin);
 
       service.createBin({ name: 'New Bin' });
 
-      expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: 'lottery_bin',
-          operation: 'CREATE',
-        })
-      );
+      // Bins are pull-only from cloud per API spec - no push endpoint
+      expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -219,18 +217,15 @@ describe('BinManagementService', () => {
       expect(result.bin?.label).toBe('Updated Name');
     });
 
-    it('should enqueue update operation for sync', () => {
+    it('should NOT enqueue update operation for sync (bins are pull-only)', () => {
+      // Bins are pulled from cloud, not pushed - no sync queue needed
       vi.mocked(lotteryBinsDAL.findById).mockReturnValue(mockBin);
       vi.mocked(lotteryBinsDAL.update).mockReturnValue(mockBin);
 
       service.updateBin(mockBin.bin_id, { name: 'Updated' });
 
-      expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: 'lottery_bin',
-          operation: 'UPDATE',
-        })
-      );
+      // Bins are pull-only from cloud per API spec - no push endpoint
+      expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -283,19 +278,16 @@ describe('BinManagementService', () => {
       expect(lotteryBinsDAL.softDelete).toHaveBeenCalled();
     });
 
-    it('should enqueue delete operation for sync', () => {
+    it('should NOT enqueue delete operation for sync (bins are pull-only)', () => {
+      // Bins are pulled from cloud, not pushed - no sync queue needed
       vi.mocked(lotteryBinsDAL.findById).mockReturnValue(mockBin);
       vi.mocked(lotteryBinsDAL.getPackCount).mockReturnValue(0);
       vi.mocked(lotteryBinsDAL.softDelete).mockReturnValue({ success: true });
 
       service.deleteBin(mockBin.bin_id);
 
-      expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: 'lottery_bin',
-          operation: 'DELETE',
-        })
-      );
+      // Bins are pull-only from cloud per API spec - no push endpoint
+      expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
     });
   });
 
@@ -384,13 +376,15 @@ describe('BinManagementService', () => {
       expect(lotteryBinsDAL.bulkCreate).toHaveBeenCalledWith(mockStore.store_id, 5);
     });
 
-    it('should enqueue all bins for sync', () => {
+    it('should NOT enqueue bins for sync (bins are pull-only)', () => {
+      // Bins are pulled from cloud, not pushed - no sync queue needed
       const mockBins = [mockBin];
       vi.mocked(lotteryBinsDAL.bulkCreate).mockReturnValue(mockBins);
 
       service.bulkCreateBins(1);
 
-      expect(syncQueueDAL.enqueue).toHaveBeenCalledTimes(1);
+      // Bins are pull-only from cloud per API spec - no push endpoint
+      expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
     });
   });
 

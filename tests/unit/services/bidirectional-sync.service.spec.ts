@@ -14,8 +14,11 @@ const {
   mockPushGames,
   mockBinsFindAllByStore,
   mockBinsFindByCloudId,
+  mockBinsFindByCloudIds,
   mockBinsUpsertFromCloud,
+  mockBinsBatchUpsertFromCloud,
   mockBinsSoftDelete,
+  mockBinsBatchSoftDeleteNotInCloudIds,
   mockGamesFindAllByStore,
   mockGamesFindByCloudId,
   mockGamesUpsertFromCloud,
@@ -30,8 +33,11 @@ const {
   mockPushGames: vi.fn(),
   mockBinsFindAllByStore: vi.fn(),
   mockBinsFindByCloudId: vi.fn(),
+  mockBinsFindByCloudIds: vi.fn(),
   mockBinsUpsertFromCloud: vi.fn(),
+  mockBinsBatchUpsertFromCloud: vi.fn(),
   mockBinsSoftDelete: vi.fn(),
+  mockBinsBatchSoftDeleteNotInCloudIds: vi.fn(),
   mockGamesFindAllByStore: vi.fn(),
   mockGamesFindByCloudId: vi.fn(),
   mockGamesUpsertFromCloud: vi.fn(),
@@ -56,8 +62,11 @@ vi.mock('../../../src/main/dal/lottery-bins.dal', () => ({
   lotteryBinsDAL: {
     findAllByStore: mockBinsFindAllByStore,
     findByCloudId: mockBinsFindByCloudId,
+    findByCloudIds: mockBinsFindByCloudIds,
     upsertFromCloud: mockBinsUpsertFromCloud,
+    batchUpsertFromCloud: mockBinsBatchUpsertFromCloud,
     softDelete: mockBinsSoftDelete,
+    batchSoftDeleteNotInCloudIds: mockBinsBatchSoftDeleteNotInCloudIds,
   },
 }));
 
@@ -131,11 +140,18 @@ describe('BidirectionalSyncService', () => {
         ],
       });
       mockBinsFindByCloudId.mockReturnValue(undefined);
+      // Mock batch upsert to return success result
+      mockBinsBatchUpsertFromCloud.mockReturnValue({
+        created: 1,
+        updated: 0,
+        errors: [],
+      });
+      mockBinsBatchSoftDeleteNotInCloudIds.mockReturnValue(0);
 
       const result = await service.syncBins();
 
       expect(result.pulled).toBe(1);
-      expect(mockBinsUpsertFromCloud).toHaveBeenCalled();
+      expect(mockBinsBatchUpsertFromCloud).toHaveBeenCalled();
       expect(mockSetLastPullAt).toHaveBeenCalledWith('store-123', 'bins', expect.any(String));
     });
 
@@ -184,13 +200,20 @@ describe('BidirectionalSyncService', () => {
         cloud_bin_id: 'cloud-bin-1',
         updated_at: '2024-01-02T00:00:00Z', // Local is "newer" but doesn't matter
       });
+      // Mock batch upsert to return success result
+      mockBinsBatchUpsertFromCloud.mockReturnValue({
+        created: 0,
+        updated: 1,
+        errors: [],
+      });
+      mockBinsBatchSoftDeleteNotInCloudIds.mockReturnValue(0);
 
       const result = await service.syncBins();
 
       // Cloud is authoritative, so it should be applied
       expect(result.pulled).toBe(1);
       expect(result.conflicts).toBe(0); // No conflict resolution for pull-only entities
-      expect(mockBinsUpsertFromCloud).toHaveBeenCalled();
+      expect(mockBinsBatchUpsertFromCloud).toHaveBeenCalled();
     });
 
     it('should handle deleted bins from cloud', async () => {
@@ -208,10 +231,21 @@ describe('BidirectionalSyncService', () => {
           },
         ],
       });
-      mockBinsFindByCloudId.mockReturnValue({
-        bin_id: 'local-bin-1',
-        updated_at: '2024-01-01T00:00:00Z',
-      });
+      // Mock findByCloudIds to return a Map with the existing bin
+      mockBinsFindByCloudIds.mockReturnValue(
+        new Map([
+          [
+            'cloud-bin-1',
+            {
+              bin_id: 'local-bin-1',
+              cloud_bin_id: 'cloud-bin-1',
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+          ],
+        ])
+      );
+      mockBinsSoftDelete.mockReturnValue({ success: true });
+      mockBinsBatchSoftDeleteNotInCloudIds.mockReturnValue(0);
 
       const result = await service.syncBins();
 

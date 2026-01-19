@@ -118,8 +118,9 @@ describe('CloudApiService', () => {
       const result = await service.healthCheck();
 
       expect(result).toBe(true);
+      // Health endpoint is at /api/health (not /api/v1/health)
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/api/v1/health',
+        'https://api.nuvanaapp.com/api/health',
         expect.objectContaining({
           method: 'GET',
         })
@@ -738,8 +739,9 @@ describe('CloudApiService', () => {
 
       await service.healthCheck();
 
+      // Health endpoint is at /api/health (not /api/v1/health)
       expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/api/v1/health',
+        'https://api.nuvanaapp.com/api/health',
         expect.any(Object)
       );
     });
@@ -893,9 +895,10 @@ describe('CloudApiService', () => {
       };
 
       it('should push pack receive to cloud successfully', async () => {
+        // API response uses `packId`, service maps it to `cloud_pack_id`
         setupSyncSessionMocks({
           success: true,
-          data: { cloud_pack_id: 'cloud-pack-001' },
+          data: { packId: 'cloud-pack-001' },
         });
 
         const result = await service.pushPackReceive(mockPack);
@@ -1044,8 +1047,8 @@ describe('CloudApiService', () => {
         const body = JSON.parse(activateCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
         expect(body.bin_id).toBe('bin-001');
-        expect(body.opening_serial).toBe('001');
-        expect(body.activated_by).toBe('user-002');
+        // opening_serial is sent as integer (parsed from string)
+        expect(body.opening_serial).toBe(1);
       });
     });
 
@@ -1072,11 +1075,11 @@ describe('CloudApiService', () => {
         expect(depleteCall[0]).toContain('/api/v1/sync/lottery/packs/deplete');
 
         // Verify the request body
+        // API uses `final_serial` (integer), not `closing_serial` (string)
         const body = JSON.parse(depleteCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
-        expect(body.closing_serial).toBe('300');
-        expect(body.tickets_sold).toBe(300);
-        expect(body.sales_amount).toBe(150.0);
+        expect(body.final_serial).toBe(300);
+        expect(body.depletion_reason).toBe('SOLD_OUT');
       });
     });
 
@@ -1104,9 +1107,10 @@ describe('CloudApiService', () => {
         expect(returnCall[0]).toContain('/api/v1/sync/lottery/packs/return');
 
         // Verify the request body
+        // API uses `last_sold_serial` (integer), not `closing_serial` (string)
         const body = JSON.parse(returnCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
-        expect(body.closing_serial).toBe('150');
+        expect(body.last_sold_serial).toBe(150);
         expect(body.return_reason).toBe('Defective pack');
       });
 
@@ -1123,14 +1127,14 @@ describe('CloudApiService', () => {
 
         expect(result.success).toBe(true);
 
-        // Verify null values are sent for optional fields
+        // Verify default values are sent for optional fields
+        // API uses `last_sold_serial`, `tickets_sold_on_return`, and `return_reason`
         const calls = mockFetch.mock.calls;
         const returnCall = calls[1];
         const body = JSON.parse(returnCall[1].body as string);
-        expect(body.closing_serial).toBeNull();
-        expect(body.tickets_sold).toBe(0);
-        expect(body.sales_amount).toBe(0);
-        expect(body.return_reason).toBeNull();
+        expect(body.last_sold_serial).toBe(0);
+        expect(body.tickets_sold_on_return).toBe(0);
+        expect(body.return_reason).toBe('OTHER');
       });
     });
 
