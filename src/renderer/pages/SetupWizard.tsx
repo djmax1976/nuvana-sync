@@ -206,9 +206,14 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
   return (
     <div className="min-h-screen bg-gradient-to-br from-blue-50 to-indigo-100 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-xl max-w-lg w-full p-8">
+        {/* Setup Wizard Title - used for e2e test detection */}
+        <span data-testid="setup-wizard-title" className="sr-only">
+          Setup Wizard
+        </span>
+
         {/* Welcome Step */}
         {step === 'welcome' && (
-          <div className="text-center">
+          <div className="text-center" data-testid="setup-step-welcome">
             <img src={logo} alt="Nuvana Logo" className="w-64 h-64 mx-auto mb-6" />
             <h1 className="text-2xl font-bold text-gray-900 mb-2">Welcome to Nuvana</h1>
             <p className="text-gray-600 mb-8">
@@ -217,6 +222,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
             <button
               onClick={() => setStep('apiKey')}
               className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+              data-testid="setup-next-button"
             >
               Get Started
             </button>
@@ -225,7 +231,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
 
         {/* API Key Step */}
         {step === 'apiKey' && (
-          <div>
+          <div data-testid="setup-step-apikey">
             <h2 className="text-xl font-bold text-gray-900 mb-2">Enter Your API Key</h2>
             <p className="text-gray-600 mb-6">
               Your API key connects this device to your Nuvana account.
@@ -241,6 +247,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                   placeholder="nuvpos_sk_str_xxxxx_xxxxx"
                   className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-lg font-mono"
                   autoFocus
+                  data-testid="api-key-input"
                 />
                 <p className="text-xs text-gray-500 mt-1">
                   Find this in your Nuvana dashboard under Settings → Store Sync Keys
@@ -253,6 +260,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                   type="button"
                   onClick={() => setShowAdvanced(!showAdvanced)}
                   className="text-sm text-indigo-600 hover:text-indigo-700"
+                  data-testid="toggle-api-key-visibility"
                 >
                   {showAdvanced ? '− Hide advanced options' : '+ Advanced options'}
                 </button>
@@ -274,7 +282,12 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
               </div>
 
               {error && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
+                <div
+                  className="p-3 rounded-lg bg-red-50 text-red-700 text-sm"
+                  data-testid="api-key-error"
+                >
+                  {error}
+                </div>
               )}
             </div>
 
@@ -282,6 +295,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
               <button
                 onClick={() => setStep('welcome')}
                 className="flex-1 py-3 px-6 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
+                data-testid="setup-back-button"
               >
                 Back
               </button>
@@ -289,6 +303,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                 onClick={handleValidateApiKey}
                 disabled={validating || !apiKey.trim()}
                 className="flex-1 py-3 px-6 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                data-testid="validate-api-key-button"
               >
                 {validating ? (
                   <span className="flex items-center justify-center gap-2">

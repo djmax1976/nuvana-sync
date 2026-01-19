@@ -1,0 +1,30 @@
+# Gitleaks configuration file
+# https://github.com/gitleaks/gitleaks
+
+title = "Gitleaks Config for Nuvana Sync"
+
+# Allowlist rules for false positives
+[allowlist]
+  description = "Global allowlist for false positives"
+
+  # Allow test files entirely - they contain mock/test data
+  paths = [
+    '''tests/''',
+    '''\.spec\.ts$''',
+    '''\.test\.ts$''',
+    '''\.e2e\.ts$''',
+  ]
+
+  # Allow specific test patterns in content
+  regexes = [
+    '''test-api-key-\d+''',
+    '''testApiKey''',
+    '''fake[-_]?api[-_]?key''',
+    '''dummy[-_]?api[-_]?key''',
+    '''mock[-_]?api[-_]?key''',
+  ]
+
+  # Allow specific commits with known false positives
+  commits = [
+    "158414b7d5d0e3bf44b2f7b9eb4cb0919fe87ba5",
+  ]

@@ -19,6 +19,9 @@ import {
 import path from 'path';
 import fs from 'fs';
 
+// Determine if running in CI environment
+const isCI = !!process.env.CI;
+
 /**
  * Extended test fixtures for Electron testing
  */
@@ -44,6 +47,29 @@ function createTestDatabasePath(testName: string): string {
 }
 
 /**
+ * Get the correct app launch path based on environment
+ * - CI: Use packaged app from release/win-unpacked/Nuvana.exe
+ * - Local: Use built app from out/main/index.js
+ */
+function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
+  const packagedAppPath = path.join(process.cwd(), 'release', 'win-unpacked', 'Nuvana.exe');
+  const devAppPath = path.join(process.cwd(), 'out', 'main', 'index.js');
+
+  // In CI, prefer the packaged app (downloaded from build job)
+  if (isCI && fs.existsSync(packagedAppPath)) {
+    return {
+      executablePath: packagedAppPath,
+      args: [],
+    };
+  }
+
+  // In development or if packaged app doesn't exist, use dev build
+  return {
+    args: [devAppPath],
+  };
+}
+
+/**
  * Electron test fixture configuration
  */
 export const test = base.extend<ElectronTestFixtures>({
@@ -52,13 +78,13 @@ export const test = base.extend<ElectronTestFixtures>({
     // Create isolated test database
     const dbPath = createTestDatabasePath(testInfo.title);
 
+    // Get the correct launch configuration
+    const launchConfig = getAppLaunchConfig();
+
     // Launch Electron app
     const electronApp = await electron.launch({
-      args: [
-        path.join(process.cwd(), 'out/main/index.js'),
-        '--test-mode',
-        `--test-db-path=${dbPath}`,
-      ],
+      ...launchConfig,
+      args: [...launchConfig.args, '--test-mode', `--test-db-path=${dbPath}`],
       env: {
         ...process.env,
         NUVANA_TEST_MODE: 'true',
@@ -89,12 +115,18 @@ export const test = base.extend<ElectronTestFixtures>({
     // Wait for the app to be ready
     await window.waitForLoadState('domcontentloaded');
 
-    // Optionally wait for specific element to ensure app is fully loaded
+    // Wait for the app to finish loading (setup wizard or dashboard)
+    // The app shows either setup-wizard-title or dashboard content
     try {
-      await window.waitForSelector('[data-testid="app-ready"]', { timeout: 30000 });
+      await Promise.race([
+        window.waitForSelector('[data-testid="setup-wizard-title"]', { timeout: 30000 }),
+        window.waitForSelector('[data-testid="dashboard"]', { timeout: 30000 }),
+        window.waitForSelector('h1:has-text("Nuvana")', { timeout: 30000 }),
+      ]);
     } catch {
-      // App ready marker not found, continue anyway
-      console.warn('App ready marker not found, proceeding with test');
+      // If none found, wait a bit and continue
+      console.warn('App ready indicator not found, waiting for load state');
+      await window.waitForLoadState('networkidle');
     }
 
     await use(window);

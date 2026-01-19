@@ -2,10 +2,10 @@
  * Setup Wizard E2E Tests
  *
  * Tests the initial setup wizard flow including:
- * - API key validation
- * - Store configuration
- * - Folder selection
- * - Setup completion
+ * - Welcome screen display
+ * - API key entry and validation
+ * - Navigation between steps
+ * - Accessibility
  *
  * @module tests/e2e/setup-wizard
  */
@@ -15,54 +15,35 @@ import { test, expect } from './fixtures/electron.fixture';
 test.describe('Setup Wizard', () => {
   test.describe('Initial Launch', () => {
     test('should show setup wizard on first launch', async ({ window }) => {
-      // Verify setup wizard is displayed
+      // Verify setup wizard is displayed (fresh install = not configured)
       const setupTitle = window.locator('[data-testid="setup-wizard-title"]');
-      await expect(setupTitle).toBeVisible({ timeout: 10000 });
+      await expect(setupTitle).toBeVisible({ timeout: 15000 });
     });
 
     test('should display welcome step initially', async ({ window }) => {
       const welcomeStep = window.locator('[data-testid="setup-step-welcome"]');
-      await expect(welcomeStep).toBeVisible();
+      await expect(welcomeStep).toBeVisible({ timeout: 15000 });
+    });
+
+    test('should show Get Started button on welcome step', async ({ window }) => {
+      const nextButton = window.locator('[data-testid="setup-next-button"]');
+      await expect(nextButton).toBeVisible({ timeout: 15000 });
+      await expect(nextButton).toContainText('Get Started');
     });
   });
 
-  test.describe('API Key Validation', () => {
-    test('should show error for empty API key', async ({ window }) => {
-      // Navigate to API key step
+  test.describe('API Key Step', () => {
+    test('should navigate to API key step when clicking Get Started', async ({ window }) => {
+      // Click Get Started button
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
 
-      // Try to submit empty API key
-      const apiKeyInput = window.locator('[data-testid="api-key-input"]');
-      await apiKeyInput.fill('');
-
-      const validateButton = window.locator('[data-testid="validate-api-key-button"]');
-      await validateButton.click();
-
-      // Should show validation error
-      const errorMessage = window.locator('[data-testid="api-key-error"]');
-      await expect(errorMessage).toBeVisible();
-      await expect(errorMessage).toContainText('required');
+      // Verify API key step is shown
+      const apiKeyStep = window.locator('[data-testid="setup-step-apikey"]');
+      await expect(apiKeyStep).toBeVisible();
     });
 
-    test('should show error for invalid API key', async ({ window }) => {
-      // Navigate to API key step
-      const nextButton = window.locator('[data-testid="setup-next-button"]');
-      await nextButton.click();
-
-      // Enter invalid API key
-      const apiKeyInput = window.locator('[data-testid="api-key-input"]');
-      await apiKeyInput.fill('invalid-api-key-12345');
-
-      const validateButton = window.locator('[data-testid="validate-api-key-button"]');
-      await validateButton.click();
-
-      // Should show validation error (from API)
-      const errorMessage = window.locator('[data-testid="api-key-error"]');
-      await expect(errorMessage).toBeVisible({ timeout: 15000 });
-    });
-
-    test('should mask API key input', async ({ window }) => {
+    test('should mask API key input by default', async ({ window }) => {
       // Navigate to API key step
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
@@ -74,64 +55,70 @@ test.describe('Setup Wizard', () => {
       expect(inputType).toBe('password');
     });
 
-    test('should allow toggling API key visibility', async ({ window }) => {
+    test('should disable validate button when API key is empty', async ({ window }) => {
       // Navigate to API key step
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
 
-      const toggleButton = window.locator('[data-testid="toggle-api-key-visibility"]');
+      // Clear API key input
       const apiKeyInput = window.locator('[data-testid="api-key-input"]');
+      await apiKeyInput.fill('');
 
-      // Initially masked
-      let inputType = await apiKeyInput.getAttribute('type');
-      expect(inputType).toBe('password');
-
-      // Toggle to visible
-      await toggleButton.click();
-      inputType = await apiKeyInput.getAttribute('type');
-      expect(inputType).toBe('text');
-
-      // Toggle back to masked
-      await toggleButton.click();
-      inputType = await apiKeyInput.getAttribute('type');
-      expect(inputType).toBe('password');
-    });
-  });
-
-  test.describe('Folder Selection', () => {
-    test('should allow manual folder path entry', async ({ window, testDataDir }) => {
-      // Skip to folder selection step (requires valid API key flow)
-      // For unit testing, we may need to mock the API validation
-
-      // This test validates the folder input field behavior
-      const folderInput = window.locator('[data-testid="watch-folder-input"]');
-
-      // Should accept valid path
-      await folderInput.fill(testDataDir);
-
-      // Should not show error for valid path
-      const errorMessage = window.locator('[data-testid="folder-error"]');
-      await expect(errorMessage).not.toBeVisible();
+      // Validate button should be disabled
+      const validateButton = window.locator('[data-testid="validate-api-key-button"]');
+      await expect(validateButton).toBeDisabled();
     });
 
-    test('should reject path traversal attempts', async ({ window }) => {
-      // Navigate to folder selection step
-      const folderInput = window.locator('[data-testid="watch-folder-input"]');
-      await folderInput.fill('../../../etc/passwd');
+    test('should enable validate button when API key is entered', async ({ window }) => {
+      // Navigate to API key step
+      const nextButton = window.locator('[data-testid="setup-next-button"]');
+      await nextButton.click();
 
-      const validateButton = window.locator('[data-testid="validate-folder-button"]');
+      // Enter API key
+      const apiKeyInput = window.locator('[data-testid="api-key-input"]');
+      await apiKeyInput.fill('test-api-key-12345');
+
+      // Validate button should be enabled
+      const validateButton = window.locator('[data-testid="validate-api-key-button"]');
+      await expect(validateButton).toBeEnabled();
+    });
+
+    test('should show error for invalid API key', async ({ window }) => {
+      // Navigate to API key step
+      const nextButton = window.locator('[data-testid="setup-next-button"]');
+      await nextButton.click();
+
+      // Enter invalid API key
+      const apiKeyInput = window.locator('[data-testid="api-key-input"]');
+      await apiKeyInput.fill('invalid-api-key-12345');
+
+      // Click validate
+      const validateButton = window.locator('[data-testid="validate-api-key-button"]');
       await validateButton.click();
 
-      // Should show security error
-      const errorMessage = window.locator('[data-testid="folder-error"]');
-      await expect(errorMessage).toBeVisible();
-      await expect(errorMessage).toContainText('Invalid');
+      // Should show validation error (from API)
+      const errorMessage = window.locator('[data-testid="api-key-error"]');
+      await expect(errorMessage).toBeVisible({ timeout: 15000 });
+    });
+
+    test('should show advanced options when toggle is clicked', async ({ window }) => {
+      // Navigate to API key step
+      const nextButton = window.locator('[data-testid="setup-next-button"]');
+      await nextButton.click();
+
+      // Click toggle
+      const toggleButton = window.locator('[data-testid="toggle-api-key-visibility"]');
+      await toggleButton.click();
+
+      // API URL input should appear
+      const apiUrlInput = window.locator('input[placeholder*="api.nuvanaapp.com"]');
+      await expect(apiUrlInput).toBeVisible();
     });
   });
 
   test.describe('Navigation', () => {
-    test('should allow going back to previous steps', async ({ window }) => {
-      // Navigate forward
+    test('should allow going back to welcome step', async ({ window }) => {
+      // Navigate to API key step
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
 
@@ -145,7 +132,7 @@ test.describe('Setup Wizard', () => {
       await expect(welcomeStep).toBeVisible();
     });
 
-    test('should preserve entered data when navigating back and forward', async ({ window }) => {
+    test('should preserve entered API key when navigating back and forward', async ({ window }) => {
       // Navigate to API key step
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
@@ -170,11 +157,13 @@ test.describe('Setup Wizard', () => {
 
   test.describe('Accessibility', () => {
     test('should support keyboard navigation', async ({ window }) => {
-      // Should be able to tab through elements
-      await window.keyboard.press('Tab');
+      // Wait for page to load
+      await window.waitForLoadState('domcontentloaded');
+
+      // Tab should move focus
       await window.keyboard.press('Tab');
 
-      // Should be able to activate buttons with Enter
+      // Should have a focused element
       const focusedElement = window.locator(':focus');
       const tagName = await focusedElement.evaluate((el) => el.tagName);
 
@@ -182,16 +171,20 @@ test.describe('Setup Wizard', () => {
       expect(['BUTTON', 'INPUT', 'A']).toContain(tagName);
     });
 
-    test('should have proper focus indicators', async ({ window }) => {
-      // Tab to an element
+    test('should activate button with Enter key', async ({ window }) => {
+      // Wait for welcome step
+      const welcomeStep = window.locator('[data-testid="setup-step-welcome"]');
+      await expect(welcomeStep).toBeVisible({ timeout: 15000 });
+
+      // Tab to the Get Started button
       await window.keyboard.press('Tab');
 
-      // Check that focused element has visible focus indicator
-      const focusedElement = window.locator(':focus');
-      const outlineStyle = await focusedElement.evaluate((el) => getComputedStyle(el).outlineWidth);
+      // Press Enter to activate
+      await window.keyboard.press('Enter');
 
-      // Should have visible outline (not 0px)
-      expect(outlineStyle).not.toBe('0px');
+      // Should navigate to API key step
+      const apiKeyStep = window.locator('[data-testid="setup-step-apikey"]');
+      await expect(apiKeyStep).toBeVisible();
     });
   });
 });

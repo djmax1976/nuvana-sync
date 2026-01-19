@@ -11,14 +11,23 @@ import { execSync } from 'child_process';
 import fs from 'fs';
 import path from 'path';
 
+// Determine if running in CI environment
+const isCI = !!process.env.CI;
+
 async function globalSetup(): Promise<void> {
   console.log('\n🚀 E2E Global Setup starting...\n');
 
   // Check if built app exists
+  // In CI: Check for packaged app (downloaded from build job artifact)
+  // In dev: Check for development build
+  const packagedAppPath = path.join(process.cwd(), 'release', 'win-unpacked', 'Nuvana.exe');
   const distPath = path.join(process.cwd(), 'out', 'main');
   const rendererPath = path.join(process.cwd(), 'out', 'renderer');
 
-  if (!fs.existsSync(distPath) || !fs.existsSync(rendererPath)) {
+  // In CI, the packaged app should be downloaded from the build job
+  if (isCI && fs.existsSync(packagedAppPath)) {
+    console.log('✅ Using packaged app from CI build artifact\n');
+  } else if (!fs.existsSync(distPath) || !fs.existsSync(rendererPath)) {
     console.log('📦 Building application for E2E tests...');
     try {
       execSync('npm run build', {
@@ -34,7 +43,7 @@ async function globalSetup(): Promise<void> {
       throw error;
     }
   } else {
-    console.log('✅ Using existing build\n');
+    console.log('✅ Using existing development build\n');
   }
 
   // Set up test database directory
