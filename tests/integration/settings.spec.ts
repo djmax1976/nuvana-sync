@@ -336,11 +336,12 @@ describe('Settings Integration', () => {
       expect(result3.error).toContain('required');
     });
 
-    it('should sync bin changes to cloud queue', async () => {
+    it('should create bins locally without cloud sync (bins are pull-only)', async () => {
       // Reset modules to apply fresh mocks
       vi.resetModules();
 
-      // Define mockEnqueue at module level scope so it's accessible by doMock
+      // Track if enqueue was called - it should NOT be called for bins
+      // Bins are pull-only entities per API spec: GET /api/v1/sync/lottery/bins (pull only)
       const mockEnqueue = vi.fn();
 
       // Use vi.doMock for dynamic mocking (not hoisted)
@@ -382,14 +383,16 @@ describe('Settings Integration', () => {
         await import('../../src/main/services/bin-management.service');
       const service = new BinManagementService();
 
-      service.createBin({ name: 'Test Bin' });
+      const result = service.createBin({ name: 'Test Bin' });
 
-      expect(mockEnqueue).toHaveBeenCalledWith(
-        expect.objectContaining({
-          entity_type: 'lottery_bin',
-          operation: 'CREATE',
-        })
-      );
+      // Bin should be created successfully
+      expect(result.success).toBe(true);
+      expect(result.bin?.label).toBe('Test Bin');
+      expect(result.bin?.bin_number).toBe(1);
+
+      // Sync queue should NOT be called - bins are pull-only entities
+      // Cloud is authoritative for bins; local changes are for offline operation only
+      expect(mockEnqueue).not.toHaveBeenCalled();
     });
   });
 
