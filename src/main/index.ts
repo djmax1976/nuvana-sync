@@ -46,11 +46,6 @@ import { syncQueueDAL } from './dal/sync-queue.dal';
 process.stdout?.on?.('error', () => {});
 process.stderr?.on?.('error', () => {});
 
-// TEMP DEBUG: Verify app is starting
-console.log('=== NUVANA APP STARTING ===');
-console.log('Process args:', process.argv);
-console.log('NODE_ENV:', process.env.NODE_ENV);
-
 // Catch uncaught exceptions - suppress EPIPE
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
   if (err.code === 'EPIPE' || err.message?.includes('EPIPE')) return;

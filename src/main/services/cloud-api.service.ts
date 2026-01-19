@@ -1002,15 +1002,6 @@ export class CloudApiService {
     if (!skipAuth) {
       const apiKey = this.getApiKey();
       headers['X-API-Key'] = apiKey;
-      // TEMP DEBUG: Direct console.log to bypass logger redaction
-      console.log('=== API KEY DEBUG ===');
-      console.log('URL:', url.substring(0, 80));
-      console.log('Key length:', apiKey.length);
-      console.log('Key prefix (first 30):', apiKey.substring(0, 30));
-      console.log('Key suffix (last 15):', apiKey.substring(apiKey.length - 15));
-      console.log('Underscore count:', (apiKey.match(/_/g) || []).length);
-      console.log('Full key for verification:', apiKey);
-      console.log('=== END DEBUG ===');
     }
 
     // Retry loop for transient errors

@@ -587,15 +587,17 @@ registerHandler(
       resetCount,
     });
 
-    // Log updated diagnostics
+    // Get updated counts
     const newPendingCount = syncQueueDAL.getPendingCount(store.store_id);
     const newRetryableItems = syncQueueDAL.getRetryableItems(store.store_id, 100);
 
-    console.log('\n========== AFTER RESET ==========');
-    console.log(`Before: ${beforePending} pending, ${beforeRetryable} retryable`);
-    console.log(`After:  ${newPendingCount} pending, ${newRetryableItems.length} retryable`);
-    console.log(`Reset ${resetCount} items - all now immediately retryable!`);
-    console.log('==================================\n');
+    log.info('Reset all pending sync items completed', {
+      storeId: store.store_id,
+      beforePending,
+      beforeRetryable,
+      newPendingCount,
+      newRetryableCount: newRetryableItems.length,
+    });
 
     return createSuccessResponse({
       resetCount,

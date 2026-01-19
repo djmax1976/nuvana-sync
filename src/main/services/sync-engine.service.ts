@@ -1329,48 +1329,24 @@ export class SyncEngineService {
       const pendingCount = syncQueueDAL.getPendingCount(store.store_id);
       const failedCount = syncQueueDAL.getFailedCount(store.store_id);
       const retryableItems = syncQueueDAL.getRetryableItems(store.store_id, 10);
+      const inBackoff = pendingCount - failedCount - retryableItems.length;
 
-      // Log to console for easy visibility
-      console.log('\n========== SYNC QUEUE DIAGNOSTICS ==========');
-      console.log(`Store ID: ${store.store_id}`);
-      console.log(`Total Pending (unsynced): ${pendingCount}`);
-      console.log(`Failed (exceeded max attempts): ${failedCount}`);
-      console.log(`Retryable Now: ${retryableItems.length}`);
-      console.log(
-        `Items NOT retryable: ${pendingCount - failedCount - retryableItems.length} (in backoff)`
-      );
-
-      if (retryableItems.length > 0 && retryableItems.length >= pendingCount * 0.8) {
-        // Most items are retryable - good state
-        console.log('\nSample retryable items:');
-        retryableItems.slice(0, 5).forEach((item, i) => {
-          console.log(
-            `  ${i + 1}. [${item.entity_type}] ${item.entity_id.slice(0, 8)}... attempts=${item.sync_attempts}/${item.max_attempts}`
-          );
+      // AUTO-RESET: If most items are stuck (in backoff or failed), reset them all
+      if (pendingCount > 10 && (inBackoff > pendingCount * 0.5 || failedCount > 0)) {
+        const resetCount = syncQueueDAL.resetAllPending(store.store_id);
+        log.info('Auto-reset pending items to clear backoff', {
+          storeId: store.store_id,
+          resetCount,
         });
-      } else if (pendingCount > 0) {
-        const inBackoff = pendingCount - failedCount - retryableItems.length;
-        console.log('\nWARNING: Most items stuck in backoff or failed!');
-        console.log('  - Failed items (exceeded max_attempts): ' + failedCount);
-        console.log('  - Items in backoff: ' + inBackoff);
-        console.log('  - Retryable now: ' + retryableItems.length);
-
-        // AUTO-RESET: If most items are stuck (in backoff or failed), reset them all
-        if (pendingCount > 10 && (inBackoff > pendingCount * 0.5 || failedCount > 0)) {
-          console.log('\n*** AUTO-RESETTING all pending items to clear backoff...');
-          const resetCount = syncQueueDAL.resetAllPending(store.store_id);
-          console.log(`    Reset ${resetCount} items. They will all be retried now.`);
-        }
       }
-      console.log('==============================================\n');
 
-      // Also log via structured logger
+      // Log via structured logger
       log.info('Queue diagnostics', {
         storeId: store.store_id,
         pendingCount,
         failedCount,
         retryableCount: retryableItems.length,
-        inBackoff: pendingCount - failedCount - retryableItems.length,
+        inBackoff,
       });
     } catch (error) {
       log.error('Failed to log queue diagnostics', {
