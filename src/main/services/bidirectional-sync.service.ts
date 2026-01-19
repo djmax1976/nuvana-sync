@@ -1,10 +1,13 @@
 /**
  * Bidirectional Sync Service
  *
- * Implements bi-directional synchronization for entities that need
- * to be managed both locally and from the cloud (bins, games).
+ * Handles synchronization for reference data entities:
+ * - Bins: Pull-only from cloud (no push endpoint in API spec)
+ * - Games: Bidirectional sync (push and pull)
  *
- * Uses last-write-wins conflict resolution strategy.
+ * API spec reference:
+ * - GET /api/v1/sync/lottery/bins (pull only - no POST endpoint)
+ * - GET/POST /api/v1/sync/lottery/games (bidirectional)
  *
  * @module main/services/bidirectional-sync
  * @security DB-006: Store-scoped for tenant isolation
@@ -12,7 +15,7 @@
  * @security API-003: Centralized error handling
  */
 
-import { cloudApiService, type CloudBin, type CloudGame } from './cloud-api.service';
+import { cloudApiService, type CloudGame } from './cloud-api.service';
 import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { syncTimestampsDAL } from '../dal/sync-timestamps.dal';
@@ -46,26 +49,40 @@ const log = createLogger('bidirectional-sync');
 /**
  * Bidirectional Sync Service
  *
- * Implements push-then-pull sync pattern:
+ * Sync patterns by entity type:
+ * - Bins: PULL-ONLY (cloud is authoritative, no push endpoint)
+ * - Games: Bidirectional with last-write-wins conflict resolution
+ *
+ * For bidirectional entities:
  * 1. Push local changes to cloud
  * 2. Pull cloud changes locally
- * 3. Apply cloud changes with last-write-wins conflict resolution
- *
- * Conflict Resolution:
- * - Cloud always wins on conflicts (last-write-wins)
- * - If local updated_at > cloud updated_at, local change was already pushed
- * - If cloud updated_at > local updated_at, cloud wins
+ * 3. Apply cloud changes with last-write-wins
  */
 export class BidirectionalSyncService {
   // ==========================================================================
-  // Bins Sync
+  // Bins Sync (PULL-ONLY)
   // ==========================================================================
 
   /**
-   * Sync lottery bins bidirectionally
-   * DB-006: Store-scoped operations
+   * Sync lottery bins from cloud (PULL-ONLY)
    *
-   * @returns Sync result with counts
+   * Enterprise-grade implementation:
+   * - Batch operations to eliminate N+1 queries
+   * - Transaction-based updates for atomicity
+   * - Proper tenant isolation validation
+   * - Comprehensive audit logging
+   *
+   * Bins are cloud-managed reference data. The API only supports:
+   * - GET /api/v1/sync/lottery/bins (pull)
+   *
+   * There is NO push endpoint for bins. Local bin changes are for
+   * offline operation only; cloud data is authoritative.
+   *
+   * @security DB-006: Store-scoped operations for tenant isolation
+   * @security SEC-006: Parameterized queries via DAL batch methods
+   * @security API-003: Centralized error handling
+   *
+   * @returns Sync result with counts (pushed will always be 0)
    */
   async syncBins(): Promise<BidirectionalSyncResult> {
     const store = storesDAL.getConfiguredStore();
@@ -74,7 +91,7 @@ export class BidirectionalSyncService {
     }
 
     const result: BidirectionalSyncResult = {
-      pushed: 0,
+      pushed: 0, // Always 0 - bins are pull-only
       pulled: 0,
       conflicts: 0,
       errors: [],
@@ -83,124 +100,107 @@ export class BidirectionalSyncService {
     const storeId = store.store_id;
     const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'bins');
 
-    log.info('Starting bins sync', { storeId, lastPull: lastPull || 'full' });
+    log.info('Starting bins sync (pull-only)', { storeId, lastPull: lastPull || 'full' });
 
     try {
-      // Step 1: Get local changes since last pull
-      const localBins = lotteryBinsDAL.findAllByStore(storeId);
-      const localChanges = lastPull
-        ? localBins.filter((bin) => new Date(bin.updated_at) > new Date(lastPull))
-        : [];
+      // Pull bins from cloud (no push - bins are cloud-managed)
+      const pullResponse = await cloudApiService.pullBins(lastPull || undefined);
 
-      // Step 2: Push local changes to cloud
-      if (localChanges.length > 0) {
+      log.debug('Bins pull response received', {
+        binsCount: pullResponse.bins?.length ?? 0,
+        totalCount: pullResponse.totalCount,
+        hasBins: Array.isArray(pullResponse.bins),
+      });
+
+      const cloudBins = pullResponse.bins || [];
+
+      if (cloudBins.length === 0) {
+        log.info('No bins to sync from cloud');
+        return result;
+      }
+
+      // Separate active and deleted bins
+      const activeBins = cloudBins.filter((bin) => !bin.deleted_at);
+      const deletedBins = cloudBins.filter((bin) => bin.deleted_at);
+
+      // Track cloud IDs for deletion check
+      const activeCloudIds = new Set<string>(activeBins.map((b) => b.bin_id));
+
+      // Step 1: Batch upsert active bins (eliminates N+1)
+      if (activeBins.length > 0) {
+        const binData = activeBins.map((cloudBin) => ({
+          cloud_bin_id: cloudBin.bin_id,
+          store_id: storeId, // DB-006: Always use configured store ID
+          bin_number: cloudBin.bin_number,
+          label: cloudBin.label,
+          status: cloudBin.status,
+        }));
+
         try {
-          const pushData: CloudBin[] = localChanges.map((bin) => ({
-            bin_id: bin.cloud_bin_id || bin.bin_id,
-            store_id: bin.store_id,
-            bin_number: bin.bin_number,
-            label: bin.label || undefined,
-            status: bin.status,
-            updated_at: bin.updated_at,
-            deleted_at: bin.deleted_at || undefined,
-          }));
+          const upsertResult = lotteryBinsDAL.batchUpsertFromCloud(binData, storeId);
+          result.pulled += upsertResult.created + upsertResult.updated;
+          result.errors.push(...upsertResult.errors);
 
-          const pushResult = await cloudApiService.pushBins(pushData);
-          result.pushed = pushResult.results.filter((r) => r.status === 'synced').length;
-
-          log.debug('Bins pushed to cloud', {
-            attempted: localChanges.length,
-            succeeded: result.pushed,
+          log.info('Active bins synced', {
+            created: upsertResult.created,
+            updated: upsertResult.updated,
+            errors: upsertResult.errors.length,
           });
-        } catch (error: unknown) {
-          const message = error instanceof Error ? error.message : 'Unknown push error';
-          result.errors.push(`Push failed: ${message}`);
-          log.error('Failed to push bins', { error: message });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push(`Batch upsert failed: ${message}`);
+          log.error('Batch upsert failed', { error: message });
         }
       }
 
-      // Step 3: Pull cloud changes
-      try {
-        const pullResponse = await cloudApiService.pullBins(lastPull || undefined);
+      // Step 2: Handle explicitly deleted bins from cloud
+      if (deletedBins.length > 0) {
+        const deletedIds = deletedBins.map((b) => b.bin_id);
+        const existingBins = lotteryBinsDAL.findByCloudIds(deletedIds);
 
-        log.debug('Bins pull response received', {
-          binsCount: pullResponse.bins?.length ?? 0,
-          totalCount: pullResponse.totalCount,
-          hasBins: Array.isArray(pullResponse.bins),
-          firstBin: pullResponse.bins?.[0] ? JSON.stringify(pullResponse.bins[0]) : 'none',
-        });
-
-        // Step 4: Apply cloud changes with last-write-wins
-        for (const cloudBin of pullResponse.bins || []) {
-          try {
-            const localBin = lotteryBinsDAL.findByCloudId(cloudBin.bin_id);
-
-            // Check if update is needed
-            let shouldUpdate = true;
-            if (localBin) {
-              const cloudTime = new Date(cloudBin.updated_at);
-              const localTime = new Date(localBin.updated_at);
-
-              if (localTime >= cloudTime) {
-                // Local is same or newer - skip (already pushed or conflict)
-                shouldUpdate = false;
-                result.conflicts++;
-                log.debug('Skipping bin (local is newer)', {
-                  binId: cloudBin.bin_id,
-                  cloudTime: cloudBin.updated_at,
-                  localTime: localBin.updated_at,
-                });
-              }
-            }
-
-            if (shouldUpdate) {
-              if (cloudBin.deleted_at) {
-                // Handle deletion
-                lotteryBinsDAL.softDelete(localBin?.bin_id || cloudBin.bin_id);
-              } else {
-                // Upsert from cloud
-                lotteryBinsDAL.upsertFromCloud({
-                  cloud_bin_id: cloudBin.bin_id,
-                  store_id: storeId,
-                  bin_number: cloudBin.bin_number,
-                  label: cloudBin.label,
-                  status: cloudBin.status,
-                });
-              }
+        for (const cloudBin of deletedBins) {
+          const localBin = existingBins.get(cloudBin.bin_id);
+          if (localBin && !localBin.deleted_at) {
+            const deleteResult = lotteryBinsDAL.softDelete(localBin.bin_id);
+            if (deleteResult.success) {
               result.pulled++;
+              log.debug('Bin soft deleted from cloud', { cloudBinId: cloudBin.bin_id });
+            } else {
+              result.errors.push(`Delete bin ${cloudBin.bin_id}: ${deleteResult.error}`);
             }
-          } catch (error: unknown) {
-            const message = error instanceof Error ? error.message : 'Unknown apply error';
-            result.errors.push(`Apply bin ${cloudBin.bin_id}: ${message}`);
-            log.error('Failed to apply bin from cloud', {
-              binId: cloudBin.bin_id,
-              error: message,
-            });
           }
         }
-      } catch (error: unknown) {
-        const message = error instanceof Error ? error.message : 'Unknown pull error';
-        result.errors.push(`Pull failed: ${message}`);
-        log.error('Failed to pull bins', { error: message });
       }
 
-      // Step 5: Update sync timestamp
+      // Step 3: Batch soft delete local bins removed from cloud
+      // (bins with cloud_bin_id that are no longer in cloud response)
+      try {
+        const deletedCount = lotteryBinsDAL.batchSoftDeleteNotInCloudIds(storeId, activeCloudIds);
+        if (deletedCount > 0) {
+          log.info('Bins removed from cloud soft deleted locally', { deletedCount });
+        }
+      } catch (error) {
+        const message = error instanceof Error ? error.message : 'Unknown error';
+        result.errors.push(`Batch delete failed: ${message}`);
+        log.error('Batch delete failed', { error: message });
+      }
+
+      // Update sync timestamp on success
       if (result.errors.length === 0) {
         syncTimestampsDAL.setLastPullAt(storeId, 'bins', new Date().toISOString());
       }
 
-      log.info('Bins sync completed', {
-        pushed: result.pushed,
+      log.info('Bins sync completed (pull-only)', {
         pulled: result.pulled,
-        conflicts: result.conflicts,
         errors: result.errors.length,
       });
 
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull failed: ${message}`);
       log.error('Bins sync failed', { error: message });
-      throw error;
+      return result;
     }
   }
 

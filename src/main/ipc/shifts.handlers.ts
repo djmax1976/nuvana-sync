@@ -15,7 +15,6 @@ import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { shiftsDAL, type Shift } from '../dal/shifts.dal';
 import { transactionsDAL } from '../dal/transactions.dal';
-import { syncQueueDAL } from '../dal/sync-queue.dal';
 import {
   shiftSummariesDAL,
   shiftFuelSummariesDAL,
@@ -540,14 +539,9 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         );
       }
 
-      // Enqueue for cloud sync
-      syncQueueDAL.enqueue({
-        store_id: store.store_id,
-        entity_type: 'shift',
-        entity_id: shiftId,
-        operation: 'UPDATE',
-        payload: closedShift,
-      });
+      // NOTE: No sync enqueue for 'shift' entity type - no push endpoint exists
+      // Shift data is synced via shift_opening and shift_closing entity types
+      // in lottery.handlers.ts using /api/v1/sync/lottery/shift/open and /close
 
       // SEC-017: Audit log
       log.info('Shift closed', {

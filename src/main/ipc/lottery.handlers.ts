@@ -23,6 +23,7 @@ import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
 import { lotteryPacksDAL, type PackWithDetails } from '../dal/lottery-packs.dal';
 import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { storesDAL } from '../dal/stores.dal';
+import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { parseBarcode, validateBarcode } from '../services/scanner.service';
 import { createLogger } from '../utils/logger';
 
@@ -151,6 +152,89 @@ function getStoreWithState(): { store_id: string; state_id: string | null } {
  */
 function getCurrentBusinessDate(): string {
   return new Date().toISOString().split('T')[0];
+}
+
+// ============================================================================
+// Pack Sync Payload Types and Helpers
+// ============================================================================
+
+/**
+ * Pack sync payload structure
+ * API-008: OUTPUT_FILTERING - Excludes internal fields (created_at, updated_at, cloud_pack_id)
+ * DB-006: TENANT_ISOLATION - Includes store_id for multi-tenant sync
+ * API-001: Includes game_code as required by cloud API spec
+ */
+interface PackSyncPayload {
+  pack_id: string;
+  store_id: string;
+  game_id: string;
+  game_code: string;
+  pack_number: string;
+  status: string;
+  bin_id: string | null;
+  opening_serial: string | null;
+  closing_serial: string | null;
+  tickets_sold: number;
+  sales_amount: number;
+  received_at: string | null;
+  received_by: string | null;
+  activated_at: string | null;
+  activated_by: string | null;
+  settled_at: string | null;
+  returned_at: string | null;
+}
+
+/**
+ * Build a sync payload for a pack operation
+ * API-008: OUTPUT_FILTERING - Excludes internal fields (created_at, updated_at, cloud_pack_id, synced_at)
+ * SEC-006: Uses structured object, not string interpolation
+ * API-001: Includes game_code as required by cloud API spec
+ *
+ * @param pack - Pack data from DAL
+ * @param gameCode - Game code from lottery_games table (required by API)
+ * @param activatedBy - Optional activated_by user ID (not stored in pack record)
+ * @returns Sync payload suitable for cloud sync
+ */
+function buildPackSyncPayload(
+  pack: {
+    pack_id: string;
+    store_id: string;
+    game_id: string;
+    pack_number: string;
+    status: string;
+    bin_id: string | null;
+    opening_serial: string | null;
+    closing_serial: string | null;
+    tickets_sold: number;
+    sales_amount: number;
+    received_at: string | null;
+    received_by: string | null;
+    activated_at: string | null;
+    settled_at: string | null;
+    returned_at: string | null;
+  },
+  gameCode: string,
+  activatedBy?: string | null
+): PackSyncPayload {
+  return {
+    pack_id: pack.pack_id,
+    store_id: pack.store_id,
+    game_id: pack.game_id,
+    game_code: gameCode,
+    pack_number: pack.pack_number,
+    status: pack.status,
+    bin_id: pack.bin_id,
+    opening_serial: pack.opening_serial,
+    closing_serial: pack.closing_serial,
+    tickets_sold: pack.tickets_sold,
+    sales_amount: pack.sales_amount,
+    received_at: pack.received_at,
+    received_by: pack.received_by,
+    activated_at: pack.activated_at,
+    activated_by: activatedBy ?? null,
+    settled_at: pack.settled_at,
+    returned_at: pack.returned_at,
+  };
 }
 
 /**
@@ -750,15 +834,34 @@ registerHandler(
         }
       }
 
+      // Look up game to get game_code for sync payload
+      const game = lotteryGamesDAL.findById(game_id);
+      if (!game) {
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game not found');
+      }
+
       const pack = lotteryPacksDAL.receive({
         store_id: storeId,
         game_id,
         pack_number: packNum,
       });
 
+      // SYNC-001: Enqueue pack for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
+      // API-001: game_code required by cloud API spec
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'CREATE',
+        payload: buildPackSyncPayload(pack, game.game_code),
+      });
+
       log.info('Pack received', {
         packId: pack.pack_id,
         packNumber: pack.pack_number,
+        syncQueued: true,
       });
 
       return createSuccessResponse(pack);
@@ -937,6 +1040,18 @@ registerHandler(
             received_by,
           });
 
+          // SYNC-001: Enqueue each created pack for cloud synchronization
+          // DB-006: TENANT_ISOLATION - store_id included in sync payload
+          // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
+          // API-001: game_code required by cloud API spec
+          syncQueueDAL.enqueue({
+            store_id: storeId,
+            entity_type: 'pack',
+            entity_id: pack.pack_id,
+            operation: 'CREATE',
+            payload: buildPackSyncPayload(pack, game.game_code),
+          });
+
           created.push({
             pack_id: pack.pack_id,
             game_id: pack.game_id,
@@ -1042,6 +1157,29 @@ registerHandler(
       });
       log.debug('Pack activated successfully', { pack_id: pack.pack_id });
 
+      // Look up game to get game_code for sync payload
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        log.error('Game not found for pack during sync', {
+          packId: pack.pack_id,
+          gameId: pack.game_id,
+        });
+        throw new Error('Game not found for pack');
+      }
+
+      // SYNC-001: Enqueue pack activation for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // SEC-010: AUTHZ - activated_by from session included for audit trail
+      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
+      // API-001: game_code required by cloud API spec
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: buildPackSyncPayload(pack, game.game_code, activated_by),
+      });
+
       // Increment daily activation count
       const today = getCurrentBusinessDate();
       lotteryBusinessDaysDAL.incrementPacksActivated(storeId, today);
@@ -1051,6 +1189,7 @@ registerHandler(
         binId: bin_id,
         openingSerial: opening_serial,
         activatedBy: activated_by,
+        syncQueued: true,
       });
 
       return createSuccessResponse(pack);
@@ -1122,12 +1261,31 @@ registerHandler(
         sales_amount: salesAmount,
       });
 
+      // Look up game to get game_code for sync payload
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        throw new Error('Game not found for pack');
+      }
+
+      // SYNC-001: Enqueue pack depletion for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
+      // API-001: game_code required by cloud API spec
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: buildPackSyncPayload(pack, game.game_code),
+      });
+
       log.info('Pack depleted', {
         packId: pack.pack_id,
         storeId,
         closingSerial: closing_serial,
         ticketsSold,
         salesAmount,
+        syncQueued: true,
       });
 
       return createSuccessResponse({
@@ -1194,10 +1352,29 @@ registerHandler(
         sales_amount: salesAmount,
       });
 
+      // Look up game to get game_code for sync payload
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        throw new Error('Game not found for pack');
+      }
+
+      // SYNC-001: Enqueue pack return for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
+      // API-001: game_code required by cloud API spec
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: buildPackSyncPayload(pack, game.game_code),
+      });
+
       log.info('Pack returned', {
         packId: pack.pack_id,
         storeId,
         closingSerial: closing_serial,
+        syncQueued: true,
       });
 
       return createSuccessResponse(pack);
@@ -1788,6 +1965,434 @@ registerHandler(
     requiresAuth: true,
     requiredRole: 'shift_manager',
     description: 'Create a store-scoped lottery game',
+  }
+);
+
+// ============================================================================
+// Shift Lottery Sync Handlers (Phase 2)
+// ============================================================================
+
+/**
+ * Shift opening payload interface
+ * SEC-006: Typed interface prevents arbitrary field injection
+ */
+interface ShiftOpeningSyncPayload {
+  shift_id: string;
+  store_id: string;
+  openings: Array<{
+    bin_id: string;
+    pack_id: string;
+    opening_serial: string;
+  }>;
+  opened_at: string;
+  opened_by: string | null;
+}
+
+/**
+ * Shift closing payload interface
+ * SEC-006: Typed interface prevents arbitrary field injection
+ */
+interface ShiftClosingSyncPayload {
+  shift_id: string;
+  store_id: string;
+  closings: Array<{
+    bin_id: string;
+    pack_id: string;
+    closing_serial: string;
+    tickets_sold: number;
+    sales_amount: number;
+  }>;
+  closed_at: string;
+  closed_by: string | null;
+}
+
+/**
+ * Schema for shift opening input
+ * API-001: Input validation with Zod schema
+ */
+const RecordShiftOpeningSchema = z.object({
+  shift_id: UUIDSchema,
+  openings: z
+    .array(
+      z.object({
+        bin_id: UUIDSchema,
+        pack_id: UUIDSchema,
+        opening_serial: SerialSchema,
+      })
+    )
+    .min(1, 'At least one opening is required'),
+});
+
+/**
+ * Schema for shift closing input
+ * API-001: Input validation with Zod schema
+ */
+const RecordShiftClosingSchema = z.object({
+  shift_id: UUIDSchema,
+  closings: z
+    .array(
+      z.object({
+        bin_id: UUIDSchema,
+        pack_id: UUIDSchema,
+        closing_serial: SerialSchema,
+      })
+    )
+    .min(1, 'At least one closing is required'),
+});
+
+/**
+ * Build a shift opening sync payload
+ * API-008: OUTPUT_FILTERING - Excludes internal fields
+ * SEC-006: Uses structured object, not string interpolation
+ *
+ * @param storeId - Store ID
+ * @param shiftId - Shift ID
+ * @param openings - Array of bin/pack opening serials
+ * @param openedBy - User ID who recorded the openings
+ * @returns Sync payload suitable for cloud sync
+ */
+function buildShiftOpeningSyncPayload(
+  storeId: string,
+  shiftId: string,
+  openings: Array<{
+    bin_id: string;
+    pack_id: string;
+    opening_serial: string;
+  }>,
+  openedBy: string | null
+): ShiftOpeningSyncPayload {
+  return {
+    shift_id: shiftId,
+    store_id: storeId,
+    openings: openings.map((o) => ({
+      bin_id: o.bin_id,
+      pack_id: o.pack_id,
+      opening_serial: o.opening_serial,
+    })),
+    opened_at: new Date().toISOString(),
+    opened_by: openedBy,
+  };
+}
+
+/**
+ * Build a shift closing sync payload
+ * API-008: OUTPUT_FILTERING - Excludes internal fields
+ * SEC-006: Uses structured object, not string interpolation
+ *
+ * @param storeId - Store ID
+ * @param shiftId - Shift ID
+ * @param closings - Array of bin/pack closing data with sales
+ * @param closedBy - User ID who recorded the closings
+ * @returns Sync payload suitable for cloud sync
+ */
+function buildShiftClosingSyncPayload(
+  storeId: string,
+  shiftId: string,
+  closings: Array<{
+    bin_id: string;
+    pack_id: string;
+    closing_serial: string;
+    tickets_sold: number;
+    sales_amount: number;
+  }>,
+  closedBy: string | null
+): ShiftClosingSyncPayload {
+  return {
+    shift_id: shiftId,
+    store_id: storeId,
+    closings: closings.map((c) => ({
+      bin_id: c.bin_id,
+      pack_id: c.pack_id,
+      closing_serial: c.closing_serial,
+      tickets_sold: c.tickets_sold,
+      sales_amount: c.sales_amount,
+    })),
+    closed_at: new Date().toISOString(),
+    closed_by: closedBy,
+  };
+}
+
+/**
+ * Record lottery shift opening serials
+ * Channel: lottery:recordShiftOpening
+ *
+ * Records the opening serial numbers for all active lottery packs at shift start.
+ * This data is used for lottery reconciliation and variance tracking.
+ *
+ * Enterprise-grade implementation:
+ * - API-001: Input validation with Zod schemas
+ * - API-003: Sanitized error responses with correlation
+ * - API-008: OUTPUT_FILTERING - Excludes internal fields from sync payload
+ * - DB-006: Store-scoped via DAL (tenant isolation)
+ * - SEC-006: Parameterized queries via DAL
+ * - SEC-010: AUTHZ - opened_by from session, not frontend
+ * - SEC-017: Audit logging for compliance
+ * - SYNC-001: Enqueue for cloud synchronization
+ */
+registerHandler(
+  'lottery:recordShiftOpening',
+  async (_event, input: unknown) => {
+    // API-001: Validate input with Zod schema
+    const parseResult = RecordShiftOpeningSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      log.warn('Invalid shift opening input', {
+        errors: parseResult.error.issues,
+      });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const storeId = getStoreId();
+      const { shift_id, openings } = parseResult.data;
+
+      // SEC-010: AUTHZ - Get opened_by from authenticated session, not from frontend
+      const currentUser = getCurrentUser();
+      const openedBy = currentUser?.user_id || null;
+
+      // Validate each pack exists, is activated, and belongs to store
+      const validatedOpenings: Array<{
+        bin_id: string;
+        pack_id: string;
+        opening_serial: string;
+      }> = [];
+
+      for (const opening of openings) {
+        // DB-006: Fetch pack to validate store ownership
+        const pack = lotteryPacksDAL.findById(opening.pack_id);
+
+        if (!pack) {
+          return createErrorResponse(IPCErrorCodes.NOT_FOUND, `Pack not found: ${opening.pack_id}`);
+        }
+
+        // DB-006: TENANT_ISOLATION - Verify pack belongs to configured store
+        if (pack.store_id !== storeId) {
+          log.warn('Pack access denied - store mismatch', {
+            packId: opening.pack_id,
+            packStoreId: pack.store_id,
+            configuredStoreId: storeId,
+          });
+          return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
+        }
+
+        if (pack.status !== 'ACTIVATED') {
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            `Pack ${pack.pack_number} is not activated (status: ${pack.status})`
+          );
+        }
+
+        validatedOpenings.push({
+          bin_id: opening.bin_id,
+          pack_id: opening.pack_id,
+          opening_serial: opening.opening_serial,
+        });
+      }
+
+      // Build sync payload
+      // API-008: OUTPUT_FILTERING - Uses helper to exclude internal fields
+      const syncPayload = buildShiftOpeningSyncPayload(
+        storeId,
+        shift_id,
+        validatedOpenings,
+        openedBy
+      );
+
+      // SYNC-001: Enqueue for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'shift_opening',
+        entity_id: shift_id,
+        operation: 'CREATE',
+        payload: syncPayload,
+      });
+
+      // SEC-017: Audit logging
+      log.info('Shift lottery opening recorded', {
+        shiftId: shift_id,
+        storeId,
+        openingsCount: validatedOpenings.length,
+        openedBy,
+        syncQueued: true,
+      });
+
+      return createSuccessResponse({
+        shift_id,
+        openings_recorded: validatedOpenings.length,
+        opened_at: syncPayload.opened_at,
+        sync_queued: true,
+      });
+    } catch (error) {
+      // API-003: Log full error server-side, return generic message
+      log.error('Failed to record shift opening', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        'Failed to record shift opening. Please try again.'
+      );
+    }
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'cashier', // Any authenticated employee can record openings
+    description: 'Record lottery shift opening serials',
+  }
+);
+
+/**
+ * Record lottery shift closing serials
+ * Channel: lottery:recordShiftClosing
+ *
+ * Records the closing serial numbers and calculated sales for all active lottery packs
+ * at shift end. This data is used for lottery reconciliation and variance tracking.
+ *
+ * Enterprise-grade implementation:
+ * - API-001: Input validation with Zod schemas
+ * - API-003: Sanitized error responses with correlation
+ * - API-008: OUTPUT_FILTERING - Excludes internal fields from sync payload
+ * - DB-006: Store-scoped via DAL (tenant isolation)
+ * - SEC-006: Parameterized queries via DAL
+ * - SEC-010: AUTHZ - closed_by from session, not frontend
+ * - SEC-017: Audit logging for compliance
+ * - SYNC-001: Enqueue for cloud synchronization
+ */
+registerHandler(
+  'lottery:recordShiftClosing',
+  async (_event, input: unknown) => {
+    // API-001: Validate input with Zod schema
+    const parseResult = RecordShiftClosingSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      log.warn('Invalid shift closing input', {
+        errors: parseResult.error.issues,
+      });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const storeId = getStoreId();
+      const { shift_id, closings } = parseResult.data;
+
+      // SEC-010: AUTHZ - Get closed_by from authenticated session, not from frontend
+      const currentUser = getCurrentUser();
+      const closedBy = currentUser?.user_id || null;
+
+      // Validate each pack and calculate sales
+      const validatedClosings: Array<{
+        bin_id: string;
+        pack_id: string;
+        closing_serial: string;
+        tickets_sold: number;
+        sales_amount: number;
+      }> = [];
+
+      let totalTicketsSold = 0;
+      let totalSalesAmount = 0;
+
+      for (const closing of closings) {
+        // DB-006: Fetch pack to validate store ownership
+        const pack = lotteryPacksDAL.findById(closing.pack_id);
+
+        if (!pack) {
+          return createErrorResponse(IPCErrorCodes.NOT_FOUND, `Pack not found: ${closing.pack_id}`);
+        }
+
+        // DB-006: TENANT_ISOLATION - Verify pack belongs to configured store
+        if (pack.store_id !== storeId) {
+          log.warn('Pack access denied - store mismatch', {
+            packId: closing.pack_id,
+            packStoreId: pack.store_id,
+            configuredStoreId: storeId,
+          });
+          return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
+        }
+
+        if (pack.status !== 'ACTIVATED') {
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            `Pack ${pack.pack_number} is not activated (status: ${pack.status})`
+          );
+        }
+
+        // Calculate sales for this pack
+        const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(
+          closing.pack_id,
+          closing.closing_serial
+        );
+
+        validatedClosings.push({
+          bin_id: closing.bin_id,
+          pack_id: closing.pack_id,
+          closing_serial: closing.closing_serial,
+          tickets_sold: ticketsSold,
+          sales_amount: salesAmount,
+        });
+
+        totalTicketsSold += ticketsSold;
+        totalSalesAmount += salesAmount;
+      }
+
+      // Build sync payload with calculated sales
+      // API-008: OUTPUT_FILTERING - Uses helper to exclude internal fields
+      const syncPayload = buildShiftClosingSyncPayload(
+        storeId,
+        shift_id,
+        validatedClosings,
+        closedBy
+      );
+
+      // SYNC-001: Enqueue for cloud synchronization
+      // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'shift_closing',
+        entity_id: shift_id,
+        operation: 'CREATE',
+        payload: syncPayload,
+      });
+
+      // SEC-017: Audit logging with sales totals
+      log.info('Shift lottery closing recorded', {
+        shiftId: shift_id,
+        storeId,
+        closingsCount: validatedClosings.length,
+        totalTicketsSold,
+        totalSalesAmount,
+        closedBy,
+        syncQueued: true,
+      });
+
+      return createSuccessResponse({
+        shift_id,
+        closings_recorded: validatedClosings.length,
+        total_tickets_sold: totalTicketsSold,
+        total_sales_amount: totalSalesAmount,
+        closed_at: syncPayload.closed_at,
+        sync_queued: true,
+      });
+    } catch (error) {
+      // API-003: Log full error server-side, return generic message
+      log.error('Failed to record shift closing', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        'Failed to record shift closing. Please try again.'
+      );
+    }
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'cashier', // Any authenticated employee can record closings
+    description: 'Record lottery shift closing serials',
   }
 );
 

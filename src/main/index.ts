@@ -13,7 +13,6 @@
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, IpcMainInvokeEvent } from 'electron';
 import { join } from 'path';
 import { FileWatcherService } from './services/file-watcher.service';
-import { ConfigService } from './services/config.service';
 import { SyncService } from './services/sync.service';
 import { createLogger } from './utils/logger';
 import { safeValidateConfigUpdate, safeValidateConfig } from '../shared/types/config.types';
@@ -32,9 +31,13 @@ import { cloudApiService } from './services/cloud-api.service';
 import { settingsService } from './services/settings.service';
 import { userSyncService } from './services/user-sync.service';
 import { bidirectionalSyncService } from './services/bidirectional-sync.service';
+import { syncEngineService } from './services/sync-engine.service';
 import { eventBus, MainEvents } from './utils/event-bus';
 import { posTerminalMappingsDAL } from './dal/pos-id-mappings.dal';
 import { storesDAL } from './dal/stores.dal';
+import { lotteryPacksDAL } from './dal/lottery-packs.dal';
+import { lotteryGamesDAL } from './dal/lottery-games.dal';
+import { syncQueueDAL } from './dal/sync-queue.dal';
 
 // ============================================================================
 // EPIPE Error Handling - Suppress broken pipe errors
@@ -42,6 +45,11 @@ import { storesDAL } from './dal/stores.dal';
 // Handle stream errors silently (EPIPE happens when stdout/stderr pipe is closed)
 process.stdout?.on?.('error', () => {});
 process.stderr?.on?.('error', () => {});
+
+// TEMP DEBUG: Verify app is starting
+console.log('=== NUVANA APP STARTING ===');
+console.log('Process args:', process.argv);
+console.log('NODE_ENV:', process.env.NODE_ENV);
 
 // Catch uncaught exceptions - suppress EPIPE
 process.on('uncaughtException', (err: NodeJS.ErrnoException) => {
@@ -74,8 +82,11 @@ if (!gotTheLock) {
   let userSyncInterval: NodeJS.Timeout | null = null;
   const USER_SYNC_INTERVAL_MS = 60 * 1000;
 
-  // Initialize services
-  const configService = new ConfigService();
+  // Lottery sync interval (5 minutes) - bins and games pull from cloud
+  let lotterySyncInterval: NodeJS.Timeout | null = null;
+  const LOTTERY_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+  // Services are initialized via imports (settingsService singleton)
   log.info('Application starting');
 
   // Database bootstrap result (set during initialization)
@@ -133,8 +144,8 @@ if (!gotTheLock) {
 
     // Minimize to tray instead of closing
     mainWindow.on('close', (event) => {
-      const config = configService.getConfig();
-      if (config.minimizeToTray && !(app as { isQuitting?: boolean }).isQuitting) {
+      const minimizeToTray = settingsService.getMinimizeToTray();
+      if (minimizeToTray && !(app as { isQuitting?: boolean }).isQuitting) {
         event.preventDefault();
         mainWindow?.hide();
         log.debug('Window hidden to tray');
@@ -212,10 +223,9 @@ if (!gotTheLock) {
    * Syncs users on startup and every 60 seconds thereafter
    */
   const startUserSync = (): void => {
-    const config = configService.getConfig();
-
-    if (!config.isConfigured || !config.apiUrl || !config.apiKey) {
-      log.info('User sync not started: not fully configured');
+    // Use settingsService.hasApiKey() - the actual encrypted key location
+    if (!settingsService.hasApiKey()) {
+      log.info('User sync not started: API key not configured');
       return;
     }
 
@@ -239,37 +249,95 @@ if (!gotTheLock) {
       });
 
     // Initial lottery data sync (bins and games)
-    // Check if lottery is enabled for this store
-    const appSettings = settingsService.getAll();
-    const lotteryEnabled = appSettings?.lottery?.enabled;
-    if (lotteryEnabled) {
-      log.info('Performing initial lottery sync (bins and games)...');
+    // Always attempt sync - the cloud API will return data if lottery is enabled for this store
+    // This ensures lottery starts working immediately when enabled in cloud without app restart
+    log.info('Performing initial lottery sync (bins and games)...');
 
-      // Sync bins first, then games
-      bidirectionalSyncService
-        .syncBins()
-        .then((binsResult) => {
-          log.info('Initial bins sync completed', {
-            pulled: binsResult.pulled,
-            pushed: binsResult.pushed,
-            errors: binsResult.errors.length,
-          });
-          return bidirectionalSyncService.syncGames();
-        })
-        .then((gamesResult) => {
-          log.info('Initial games sync completed', {
-            pulled: gamesResult.pulled,
-            pushed: gamesResult.pushed,
-            errors: gamesResult.errors.length,
-          });
-        })
-        .catch((error) => {
-          log.warn('Initial lottery sync failed', {
-            error: error instanceof Error ? error.message : String(error),
-          });
+    bidirectionalSyncService
+      .syncBins()
+      .then((binsResult) => {
+        log.info('Initial bins sync completed', {
+          pulled: binsResult.pulled,
+          pushed: binsResult.pushed,
+          errors: binsResult.errors.length,
         });
-    } else {
-      log.debug('Lottery sync skipped - lottery not enabled for this store');
+        return bidirectionalSyncService.syncGames();
+      })
+      .then((gamesResult) => {
+        log.info('Initial games sync completed', {
+          pulled: gamesResult.pulled,
+          pushed: gamesResult.pushed,
+          errors: gamesResult.errors.length,
+        });
+      })
+      .catch((error) => {
+        log.warn('Initial lottery sync failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+
+    // Backfill any packs in RECEIVED status that are not in the sync queue
+    // This handles packs that were received before the sync code was added
+    try {
+      const store = storesDAL.getConfiguredStore();
+      if (store) {
+        const currentStoreId = store.store_id;
+        const receivedPacks = lotteryPacksDAL.findByStatus(currentStoreId, 'RECEIVED');
+        if (receivedPacks.length > 0) {
+          const pendingSyncItems = syncQueueDAL.getUnsyncedByStore(currentStoreId, 10000);
+          const queuedPackIds = new Set(
+            pendingSyncItems
+              .filter((item) => item.entity_type === 'pack')
+              .map((item) => item.entity_id)
+          );
+
+          let enqueuedCount = 0;
+          for (const pack of receivedPacks) {
+            if (queuedPackIds.has(pack.pack_id)) continue;
+
+            const game = lotteryGamesDAL.findById(pack.game_id);
+            if (!game) continue;
+
+            syncQueueDAL.enqueue({
+              store_id: currentStoreId,
+              entity_type: 'pack',
+              entity_id: pack.pack_id,
+              operation: 'CREATE',
+              payload: {
+                pack_id: pack.pack_id,
+                store_id: pack.store_id,
+                game_id: pack.game_id,
+                game_code: game.game_code,
+                pack_number: pack.pack_number,
+                status: pack.status,
+                bin_id: pack.bin_id,
+                opening_serial: pack.opening_serial,
+                closing_serial: pack.closing_serial,
+                tickets_sold: pack.tickets_sold,
+                sales_amount: pack.sales_amount,
+                received_at: pack.received_at,
+                received_by: pack.received_by,
+                activated_at: pack.activated_at,
+                activated_by: null,
+                settled_at: pack.settled_at,
+                returned_at: pack.returned_at,
+              },
+            });
+            enqueuedCount++;
+          }
+
+          if (enqueuedCount > 0) {
+            log.info('Backfilled received packs to sync queue on startup', {
+              totalReceived: receivedPacks.length,
+              enqueuedCount,
+            });
+          }
+        }
+      }
+    } catch (backfillError) {
+      log.warn('Failed to backfill received packs (non-fatal)', {
+        error: backfillError instanceof Error ? backfillError.message : String(backfillError),
+      });
     }
 
     // Start periodic sync
@@ -302,6 +370,51 @@ if (!gotTheLock) {
     }, USER_SYNC_INTERVAL_MS);
 
     log.info('User sync scheduler started', { intervalMs: USER_SYNC_INTERVAL_MS });
+
+    // Start periodic lottery sync (bins and games)
+    // Always start the scheduler - the sync itself will check cloud for lottery feature
+    // This allows lottery to start working immediately when enabled in cloud without app restart
+    if (lotterySyncInterval) {
+      clearInterval(lotterySyncInterval);
+    }
+
+    lotterySyncInterval = setInterval(() => {
+      log.debug('Running periodic lottery sync (bins and games)...');
+      bidirectionalSyncService
+        .syncBins()
+        .then((binsResult) => {
+          if (binsResult.pulled > 0 || binsResult.errors.length > 0) {
+            log.info('Periodic bins sync completed', {
+              pulled: binsResult.pulled,
+              errors: binsResult.errors.length,
+            });
+            // Notify renderer of bin changes
+            mainWindow?.webContents.send('sync:binsUpdated', binsResult);
+          } else {
+            log.debug('Periodic bins sync completed - no changes');
+          }
+          return bidirectionalSyncService.syncGames();
+        })
+        .then((gamesResult) => {
+          if (gamesResult.pulled > 0 || gamesResult.pushed > 0 || gamesResult.errors.length > 0) {
+            log.info('Periodic games sync completed', {
+              pulled: gamesResult.pulled,
+              pushed: gamesResult.pushed,
+              errors: gamesResult.errors.length,
+            });
+            mainWindow?.webContents.send('sync:gamesUpdated', gamesResult);
+          } else {
+            log.debug('Periodic games sync completed - no changes');
+          }
+        })
+        .catch((error) => {
+          log.warn('Periodic lottery sync failed', {
+            error: error instanceof Error ? error.message : String(error),
+          });
+        });
+    }, LOTTERY_SYNC_INTERVAL_MS);
+
+    log.info('Lottery sync scheduler started', { intervalMs: LOTTERY_SYNC_INTERVAL_MS });
   };
 
   /**
@@ -313,17 +426,25 @@ if (!gotTheLock) {
       userSyncInterval = null;
       log.info('User sync scheduler stopped');
     }
+    if (lotterySyncInterval) {
+      clearInterval(lotterySyncInterval);
+      lotterySyncInterval = null;
+      log.info('Lottery sync scheduler stopped');
+    }
   };
 
   const startFileWatcher = (): void => {
-    const config = configService.getConfig();
+    const config = settingsService.getConfig();
 
-    if (!config.watchPath || !config.apiUrl || !config.apiKey) {
-      log.warn('File watcher not started: missing configuration', {
-        hasWatchPath: Boolean(config.watchPath),
-        hasApiUrl: Boolean(config.apiUrl),
-        hasApiKey: Boolean(config.apiKey),
-      });
+    // watchPath is optional - some POS systems connect via API, not file watcher
+    if (!config.watchPath) {
+      log.info('File watcher not started: no watchPath configured (API-based POS)');
+      return;
+    }
+
+    // Use settingsService.hasApiKey() - the actual encrypted key location
+    if (!settingsService.hasApiKey()) {
+      log.warn('File watcher not started: API key not configured');
       return;
     }
 
@@ -411,7 +532,7 @@ if (!gotTheLock) {
 
     // Get current config
     ipcMain.handle('config:get', (_event: IpcMainInvokeEvent) => {
-      const config = configService.getConfig();
+      const config = settingsService.getConfig();
       return {
         isConfigured: config.isConfigured,
         config,
@@ -440,7 +561,7 @@ if (!gotTheLock) {
       }
 
       try {
-        configService.saveConfig(validation.data);
+        settingsService.saveConfig(validation.data);
 
         // Restart file watcher with new config
         fileWatcher?.stop();
@@ -706,8 +827,20 @@ if (!gotTheLock) {
     });
 
     // Perform startup license check if API is configured
-    const startupConfig = configService.getConfig();
-    if (startupConfig.isConfigured && startupConfig.apiUrl && startupConfig.apiKey) {
+    // Use settingsService.hasApiKey() - the actual encrypted key location
+    const hasApiKey = settingsService.hasApiKey();
+
+    // ========================================================================
+    // Step 5: Start Sync Engine EARLY (before license check)
+    // The sync engine must start before async operations to ensure UI shows correct status
+    // ========================================================================
+    if (hasApiKey && isDatabaseReady()) {
+      syncEngineService.setCloudApiService(cloudApiService);
+      syncEngineService.start();
+      log.info('Sync engine started (60-second interval)');
+    }
+
+    if (hasApiKey) {
       try {
         log.info('Performing startup license check...');
         await cloudApiService.checkLicense();
@@ -719,7 +852,7 @@ if (!gotTheLock) {
         // Continue with cached license data - cloudApiService handles the fallback
       }
     } else {
-      log.info('Skipping startup license check: API not configured');
+      log.info('Skipping startup license check: API key not configured');
     }
 
     // Initialize auto-updater service (production only)
@@ -742,23 +875,33 @@ if (!gotTheLock) {
       log.info('Auto-updater disabled in development mode');
     }
 
-    // Start file watcher if configured
-    const config = configService.getConfig();
-    if (config.isConfigured && config.watchPath && config.apiUrl && config.apiKey) {
+    // Start file watcher if configured (watchPath is optional for API-based POS)
+    const config = settingsService.getConfig();
+
+    if (config.watchPath && hasApiKey) {
       startFileWatcher();
+    } else if (!config.watchPath) {
+      log.info('File watcher not started: no watchPath (API-based POS mode)');
     } else {
-      log.info('Skipping file watcher start: not fully configured');
+      log.info('Skipping file watcher start: API key not configured');
     }
 
     // ========================================================================
     // Step 6: Start User Sync (if configured)
     // Syncs users from cloud on startup and periodically
+    // Use settingsService.hasApiKey() - the actual encrypted key location
     // ========================================================================
-    if (config.isConfigured && config.apiUrl && config.apiKey && isDatabaseReady()) {
+    if (hasApiKey && isDatabaseReady()) {
       startUserSync();
     } else {
-      log.info('Skipping user sync start: not fully configured or database not ready');
+      log.info('Skipping user sync start: API key not configured or database not ready', {
+        hasApiKey,
+        dbReady: isDatabaseReady(),
+      });
     }
+
+    // Note: Sync engine is started earlier in the startup sequence (before license check)
+    // to ensure it's running before any async operations that might delay startup
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) {
@@ -786,6 +929,7 @@ if (!gotTheLock) {
     log.info('Application quitting');
     fileWatcher?.stop();
     stopUserSync();
+    syncEngineService.stop();
     autoUpdaterService?.destroy();
     // Gracefully shutdown database (checkpoint WAL, close connections)
     shutdownDatabase();

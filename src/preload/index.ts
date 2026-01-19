@@ -65,6 +65,9 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:debugDump',
   'sync:closeStaleShifts',
   'sync:resetFuelData',
+  'sync:debugQueueState',
+  'sync:resetFailedItems',
+  'sync:backfillReceivedPacks',
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',

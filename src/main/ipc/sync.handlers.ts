@@ -24,12 +24,13 @@ import { processedFilesDAL } from '../dal/processed-files.dal';
 import { shiftsDAL } from '../dal/shifts.dal';
 import { shiftFuelSummariesDAL } from '../dal/shift-fuel-summaries.dal';
 import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
+import { lotteryPacksDAL } from '../dal/lottery-packs.dal';
+import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { userSyncService } from '../services/user-sync.service';
 import { bidirectionalSyncService } from '../services/bidirectional-sync.service';
 import { settingsService } from '../services/settings.service';
 import { cloudApiService } from '../services/cloud-api.service';
 import { BrowserWindow, ipcMain, app } from 'electron';
-import Store from 'electron-store';
 import { createLogger } from '../utils/logger';
 import { eventBus, MainEvents } from '../utils/event-bus';
 
@@ -40,18 +41,17 @@ import { eventBus, MainEvents } from '../utils/event-bus';
 const log = createLogger('sync-handlers');
 
 // ============================================================================
-// Helper: Get storeId from legacy config (same source as FileWatcher)
+// Helper: Get storeId from unified config (SettingsService)
 // ============================================================================
 
 /**
- * Get storeId from the legacy nuvana-config store.
- * This is the same config store used by FileWatcherService via ConfigService.
+ * Get storeId from the unified settings store.
+ * SettingsService is now the single source of truth for all configuration.
  * IMPORTANT: Must match the storeId used by FileWatcher for processed_files to clear correctly.
  */
-function getLegacyStoreId(): string | null {
+function getStoreIdFromSettings(): string | null {
   try {
-    const legacyConfig = new Store({ name: 'nuvana-config' });
-    return (legacyConfig.get('storeId') as string) || null;
+    return settingsService.getStoreId() || null;
   } catch {
     return null;
   }
@@ -63,7 +63,8 @@ function getLegacyStoreId(): string | null {
 
 /**
  * Get current sync status
- * Available to all authenticated users
+ * Available to all users (no auth required) - status bar needs this before login
+ * Only exposes non-sensitive operational data (isOnline, pendingCount, etc.)
  */
 registerHandler(
   'sync:getStatus',
@@ -71,7 +72,7 @@ registerHandler(
     const status = syncEngineService.getStatus();
     return createSuccessResponse(status);
   },
-  { requiresAuth: true, description: 'Get sync status' }
+  { requiresAuth: false, description: 'Get sync status' }
 );
 
 /**
@@ -104,7 +105,7 @@ registerHandler(
 
 /**
  * Trigger manual sync
- * Requires MANAGER role
+ * No auth required - sync status indicator retry button needs this
  */
 registerHandler(
   'sync:triggerNow',
@@ -115,7 +116,7 @@ registerHandler(
 
     return createSuccessResponse({ triggered: true });
   },
-  { requiresAuth: true, requiredRole: 'shift_manager', description: 'Trigger manual sync' }
+  { requiresAuth: false, description: 'Trigger manual sync' }
 );
 
 /**
@@ -316,6 +317,8 @@ registerHandler(
     const params = input as { intervalMs?: number } | undefined;
     const interval = params?.intervalMs;
 
+    // Ensure cloud API service is connected for health checks and sync
+    syncEngineService.setCloudApiService(cloudApiService);
     syncEngineService.start(interval);
 
     log.info('Sync engine started via IPC', { interval });
@@ -366,35 +369,26 @@ registerHandler(
 // ============================================================================
 
 /**
- * Sync users during initial setup
+ * Sync users during setup or re-configuration
  * No auth required - authorization via prior API key validation
- * SEC-017: Only allowed when setup is not yet complete
+ * Used by setup wizard and Settings page re-sync
  */
 registerHandler(
   'sync:syncUsersDuringSetup',
   async () => {
-    // SEC-017: Only allow during setup phase
-    if (settingsService.isSetupComplete()) {
-      log.warn('Attempted to use setup sync endpoint after setup complete');
-      return createErrorResponse(
-        IPCErrorCodes.FORBIDDEN,
-        'Setup already complete. Use sync:syncUsers with authentication.'
-      );
-    }
-
-    log.info('User sync triggered during setup');
+    log.info('User sync triggered (setup/resync)');
 
     try {
       const result = await userSyncService.syncUsers();
       return createSuccessResponse(result);
     } catch (error) {
       const message = error instanceof Error ? error.message : 'User sync failed';
-      log.warn('User sync during setup failed', { error: message });
+      log.warn('User sync failed', { error: message });
       // Return success:false but don't throw - setup can continue
       return createSuccessResponse({ success: false, synced: 0, error: message });
     }
   },
-  { description: 'Sync users during setup wizard' }
+  { description: 'Sync users during setup or re-configuration' }
 );
 
 /**
@@ -517,6 +511,206 @@ registerHandler(
   { description: 'Sync games during setup wizard' }
 );
 
+/**
+ * DEBUG: Analyze sync queue state
+ * Shows why items aren't syncing
+ */
+registerHandler(
+  'sync:debugQueueState',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const pendingCount = syncQueueDAL.getPendingCount(store.store_id);
+    const failedCount = syncQueueDAL.getFailedCount(store.store_id);
+    const retryableItems = syncQueueDAL.getRetryableItems(store.store_id, 10);
+
+    // Get sample of pending items to see their state
+    const sampleItems = syncQueueDAL.getUnsyncedByStore(store.store_id, 10);
+
+    const itemAnalysis = sampleItems.map((item) => ({
+      id: item.id.substring(0, 8),
+      entity_type: item.entity_type,
+      operation: item.operation,
+      sync_attempts: item.sync_attempts,
+      max_attempts: item.max_attempts,
+      last_attempt_at: item.last_attempt_at,
+      last_error: item.last_sync_error?.substring(0, 50),
+      is_failed: item.sync_attempts >= item.max_attempts,
+    }));
+
+    log.info('DEBUG: Queue state analysis', {
+      pendingCount,
+      failedCount,
+      retryableCount: retryableItems.length,
+      sampleItems: itemAnalysis,
+    });
+
+    return createSuccessResponse({
+      pendingCount,
+      failedCount,
+      retryableCount: retryableItems.length,
+      retryableNow: retryableItems.length,
+      sampleItems: itemAnalysis,
+      message:
+        failedCount > 0
+          ? `${failedCount} items have failed permanently (exceeded max attempts). ${retryableItems.length} items are retryable now.`
+          : `${retryableItems.length} items ready to sync out of ${pendingCount} pending.`,
+    });
+  },
+  { description: 'DEBUG: Analyze sync queue state' }
+);
+
+/**
+ * Reset ALL pending sync items to be immediately retryable
+ * This clears backoff and makes all items eligible for sync now
+ * No auth required - used for debugging
+ */
+registerHandler(
+  'sync:resetFailedItems',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const beforePending = syncQueueDAL.getPendingCount(store.store_id);
+    const beforeRetryable = syncQueueDAL.getRetryableItems(store.store_id, 10).length;
+
+    // Reset ALL pending items (not just failed ones)
+    const resetCount = syncQueueDAL.resetAllPending(store.store_id);
+
+    log.info('Reset all pending sync items', {
+      storeId: store.store_id,
+      resetCount,
+    });
+
+    // Log updated diagnostics
+    const newPendingCount = syncQueueDAL.getPendingCount(store.store_id);
+    const newRetryableItems = syncQueueDAL.getRetryableItems(store.store_id, 100);
+
+    console.log('\n========== AFTER RESET ==========');
+    console.log(`Before: ${beforePending} pending, ${beforeRetryable} retryable`);
+    console.log(`After:  ${newPendingCount} pending, ${newRetryableItems.length} retryable`);
+    console.log(`Reset ${resetCount} items - all now immediately retryable!`);
+    console.log('==================================\n');
+
+    return createSuccessResponse({
+      resetCount,
+      beforePending,
+      beforeRetryable,
+      newPendingCount,
+      newRetryableCount: newRetryableItems.length,
+      message: `Reset ${resetCount} items. All are now immediately retryable.`,
+    });
+  },
+  { description: 'Reset all pending sync items for immediate retry' }
+);
+
+/**
+ * Backfill packs that are in RECEIVED status but not in sync queue
+ * This handles packs that were received before the sync code was added
+ */
+registerHandler(
+  'sync:backfillReceivedPacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+
+    // Get all packs in RECEIVED status
+    const receivedPacks = lotteryPacksDAL.findByStatus(storeId, 'RECEIVED');
+
+    if (receivedPacks.length === 0) {
+      return createSuccessResponse({
+        message: 'No packs in RECEIVED status to backfill',
+        enqueuedCount: 0,
+        alreadyQueuedCount: 0,
+        skippedCount: 0,
+      });
+    }
+
+    // Get all pending pack sync items
+    const pendingSyncItems = syncQueueDAL.getUnsyncedByStore(storeId, 10000);
+    const queuedPackIds = new Set(
+      pendingSyncItems.filter((item) => item.entity_type === 'pack').map((item) => item.entity_id)
+    );
+
+    let enqueuedCount = 0;
+    let alreadyQueuedCount = 0;
+    let skippedCount = 0;
+
+    for (const pack of receivedPacks) {
+      // Skip if already in queue
+      if (queuedPackIds.has(pack.pack_id)) {
+        alreadyQueuedCount++;
+        continue;
+      }
+
+      // Get game to get game_code
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        log.warn('Skipping pack backfill: game not found', {
+          packId: pack.pack_id,
+          gameId: pack.game_id,
+        });
+        skippedCount++;
+        continue;
+      }
+
+      // Enqueue the pack with CREATE operation
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'CREATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          game_code: game.game_code,
+          pack_number: pack.pack_number,
+          status: pack.status,
+          bin_id: pack.bin_id,
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold,
+          sales_amount: pack.sales_amount,
+          received_at: pack.received_at,
+          received_by: pack.received_by,
+          activated_at: pack.activated_at,
+          activated_by: null,
+          settled_at: pack.settled_at,
+          returned_at: pack.returned_at,
+        },
+      });
+      enqueuedCount++;
+    }
+
+    log.info('Backfilled received packs to sync queue', {
+      storeId,
+      totalReceived: receivedPacks.length,
+      enqueuedCount,
+      alreadyQueuedCount,
+      skippedCount,
+    });
+
+    return createSuccessResponse({
+      message: `Backfilled ${enqueuedCount} packs to sync queue`,
+      totalReceived: receivedPacks.length,
+      enqueuedCount,
+      alreadyQueuedCount,
+      skippedCount,
+    });
+  },
+  { description: 'Backfill packs in RECEIVED status that are not in sync queue' }
+);
+
 // ============================================================================
 // File Reprocessing Handlers
 // ============================================================================
@@ -573,7 +767,7 @@ registerHandler(
   'sync:reprocessXmlFiles',
   async (_event, input: unknown) => {
     // Get store IDs for debugging
-    const legacyStoreId = getLegacyStoreId();
+    const legacyStoreId = getStoreIdFromSettings();
     const dbStore = storesDAL.getConfiguredStore();
 
     // Get ALL distinct store IDs in processed_files for debugging
@@ -694,21 +888,15 @@ registerHandler(
 registerHandler(
   'sync:debugDump',
   async () => {
-    const legacyStoreId = getLegacyStoreId();
+    const legacyStoreId = getStoreIdFromSettings();
     const dbStore = storesDAL.getConfiguredStore();
 
-    // Get config from legacy store for more details
-    let legacyConfig: Record<string, unknown> = {};
-    try {
-      const legacyConfigStore = new Store({ name: 'nuvana-config' });
-      legacyConfig = {
-        storeId: legacyConfigStore.get('storeId'),
-        watchPath: legacyConfigStore.get('watchPath'),
-        isConfigured: legacyConfigStore.get('isConfigured'),
-      };
-    } catch {
-      // Ignore errors reading legacy config
-    }
+    // Get config from unified settings store
+    const settingsConfig = {
+      storeId: settingsService.getStoreId(),
+      watchPath: settingsService.getWatchPath(),
+      isConfigured: settingsService.isConfigured(),
+    };
 
     // Use whichever storeId is available
     const storeId = legacyStoreId || dbStore?.store_id;
@@ -730,10 +918,10 @@ registerHandler(
     }
 
     log.info('DEBUG DUMP', {
-      legacyStoreId,
+      settingsStoreId: legacyStoreId,
       dbStoreId: dbStore?.store_id,
       storeIdMatch: legacyStoreId === dbStore?.store_id,
-      legacyConfig,
+      settingsConfig,
       processedFilesCount: processedCount,
       dbProcessedFilesCount: dbProcessedCount,
       shiftsCount: shifts.length,
@@ -751,10 +939,10 @@ registerHandler(
     });
 
     return createSuccessResponse({
-      legacyStoreId,
+      settingsStoreId: legacyStoreId,
       dbStoreId: dbStore?.store_id,
       storeIdMatch: legacyStoreId === dbStore?.store_id,
-      legacyConfig,
+      settingsConfig,
       processedFilesCount: processedCount,
       dbProcessedFilesCount: dbProcessedCount,
       shiftsCount: shifts.length,

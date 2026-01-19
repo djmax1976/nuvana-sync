@@ -22,7 +22,7 @@ import { cloudApiService, ValidateApiKeyResponse, type InitialManager } from './
 import { createLogger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
-import { ConfigService } from './config.service';
+// ConfigService has been consolidated into SettingsService - this is now the single source of truth
 
 // ============================================================================
 // Logger
@@ -182,10 +182,16 @@ export interface FolderValidationResult {
 
 /**
  * Settings store schema for type safety
+ * UNIFIED SCHEMA: All app config in one place (nuvana.json)
  */
 interface SettingsStoreSchema {
+  // ========== API Connection ==========
+  /** API URL (e.g., https://api.nuvanaapp.com) */
+  apiUrl?: string;
+  /** Encrypted API key bytes */
   encryptedApiKey?: number[];
-  // Store info from cloud validation (saved for database sync on restart)
+
+  // ========== Store Info (from cloud validation) ==========
   storeId?: string;
   storeName?: string;
   storePublicId?: string;
@@ -194,22 +200,67 @@ interface SettingsStoreSchema {
   timezone?: string;
   stateCode?: string;
   features?: string[];
-  // Offline capabilities from cloud
+
+  // ========== Offline Capabilities ==========
   offlinePermissions?: string[];
   encryptedOfflineToken?: number[];
   offlineTokenExpiresAt?: string;
-  // Initial manager from API key validation (for first login)
+
+  // ========== Initial Manager (from API key validation) ==========
   'initialManager.userId'?: string;
   'initialManager.name'?: string;
   'initialManager.role'?: string;
   'initialManager.pinHash'?: string;
+
+  // ========== Lottery ==========
   'lottery.enabled'?: boolean;
   'lottery.binCount'?: number;
-  xmlWatchFolder?: string;
+
+  // ========== File Watcher ==========
+  /** Path to watch for XML files */
+  watchPath?: string;
+  /** Path to archive processed files */
+  archivePath?: string;
+  /** Path to move failed files */
+  errorPath?: string;
+  /** Poll interval in seconds for file watcher */
+  pollInterval?: number;
+  /** Which file types to process */
+  enabledFileTypes?: {
+    pjr: boolean;
+    fgm: boolean;
+    msm: boolean;
+    fpm: boolean;
+    mcm: boolean;
+    tlm: boolean;
+  };
+
+  // ========== Sync Settings ==========
+  /** Sync interval in seconds */
   syncIntervalSeconds?: number;
   /** Business day cutoff time in HH:MM 24-hour format */
   businessDayCutoffTime?: string;
+
+  // ========== App Behavior ==========
+  /** Start app on login */
+  startOnLogin?: boolean;
+  /** Minimize to tray instead of closing */
+  minimizeToTray?: boolean;
+  /** Show desktop notifications */
+  showNotifications?: boolean;
+  /** Process files in order */
+  processInOrder?: boolean;
+
+  // ========== Setup State ==========
+  /** Timestamp when setup was completed */
   setupCompletedAt?: string;
+  /** Whether app is fully configured */
+  isConfigured?: boolean;
+
+  // ========== Legacy (deprecated, kept for migration) ==========
+  /** @deprecated Use watchPath instead */
+  xmlWatchFolder?: string;
+  /** @deprecated Use apiUrl instead */
   cloudEndpoint?: string;
 }
 
@@ -220,8 +271,29 @@ interface SettingsStoreSchema {
 /** Default sync interval in seconds */
 const DEFAULT_SYNC_INTERVAL = 60;
 
-/** Default cloud API endpoint */
-const DEFAULT_CLOUD_ENDPOINT = 'https://api.nuvanaapp.com';
+/** Default poll interval for file watcher in seconds */
+const DEFAULT_POLL_INTERVAL = 5;
+
+/**
+ * Default API URL
+ * - Development: localhost for testing
+ * - Production: Nuvana cloud API
+ */
+const DEFAULT_API_URL =
+  process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : 'https://api.nuvanaapp.com';
+
+/** @deprecated Use DEFAULT_API_URL instead */
+const DEFAULT_CLOUD_ENDPOINT = DEFAULT_API_URL;
+
+/** Default enabled file types */
+const DEFAULT_ENABLED_FILE_TYPES = {
+  pjr: true,
+  fgm: true,
+  msm: true,
+  fpm: true,
+  mcm: false,
+  tlm: false,
+};
 
 /**
  * Default business day cutoff time (6:00 AM)
@@ -262,7 +334,133 @@ export class SettingsService {
       clearInvalidConfig: false,
     });
 
+    // Run migration from legacy nuvana-config.json
+    this.migrateFromLegacyConfig();
+
     log.info('Settings service initialized');
+  }
+
+  // ==========================================================================
+  // Migration from Legacy Config
+  // ==========================================================================
+
+  /**
+   * Migrate settings from legacy nuvana-config.json to unified nuvana.json
+   * This ensures existing users don't lose their settings after the consolidation
+   */
+  private migrateFromLegacyConfig(): void {
+    try {
+      const legacyStore = new Store({ name: 'nuvana-config' });
+      const legacyConfig = legacyStore.store as Record<string, unknown>;
+
+      // Skip if legacy store is empty
+      if (!legacyConfig || Object.keys(legacyConfig).length === 0) {
+        return;
+      }
+
+      // Skip if we've already migrated (check for a marker or if new fields exist)
+      if (this.configStore.get('apiUrl')) {
+        return;
+      }
+
+      let migrated = false;
+
+      // Migrate apiUrl (from legacy apiUrl or cloudEndpoint)
+      if (legacyConfig.apiUrl && !this.configStore.get('apiUrl')) {
+        this.configStore.set('apiUrl', legacyConfig.apiUrl as string);
+        migrated = true;
+      }
+
+      // Migrate watchPath
+      if (legacyConfig.watchPath && !this.configStore.get('watchPath')) {
+        this.configStore.set('watchPath', legacyConfig.watchPath as string);
+        migrated = true;
+      }
+
+      // Migrate archivePath
+      if (legacyConfig.archivePath && !this.configStore.get('archivePath')) {
+        this.configStore.set('archivePath', legacyConfig.archivePath as string);
+        migrated = true;
+      }
+
+      // Migrate errorPath
+      if (legacyConfig.errorPath && !this.configStore.get('errorPath')) {
+        this.configStore.set('errorPath', legacyConfig.errorPath as string);
+        migrated = true;
+      }
+
+      // Migrate pollInterval
+      if (legacyConfig.pollInterval && !this.configStore.get('pollInterval')) {
+        this.configStore.set('pollInterval', legacyConfig.pollInterval as number);
+        migrated = true;
+      }
+
+      // Migrate enabledFileTypes
+      if (legacyConfig.enabledFileTypes && !this.configStore.get('enabledFileTypes')) {
+        this.configStore.set(
+          'enabledFileTypes',
+          legacyConfig.enabledFileTypes as SettingsStoreSchema['enabledFileTypes']
+        );
+        migrated = true;
+      }
+
+      // Migrate app behavior settings
+      if (
+        legacyConfig.startOnLogin !== undefined &&
+        this.configStore.get('startOnLogin') === undefined
+      ) {
+        this.configStore.set('startOnLogin', legacyConfig.startOnLogin as boolean);
+        migrated = true;
+      }
+
+      if (
+        legacyConfig.minimizeToTray !== undefined &&
+        this.configStore.get('minimizeToTray') === undefined
+      ) {
+        this.configStore.set('minimizeToTray', legacyConfig.minimizeToTray as boolean);
+        migrated = true;
+      }
+
+      if (
+        legacyConfig.showNotifications !== undefined &&
+        this.configStore.get('showNotifications') === undefined
+      ) {
+        this.configStore.set('showNotifications', legacyConfig.showNotifications as boolean);
+        migrated = true;
+      }
+
+      if (
+        legacyConfig.processInOrder !== undefined &&
+        this.configStore.get('processInOrder') === undefined
+      ) {
+        this.configStore.set('processInOrder', legacyConfig.processInOrder as boolean);
+        migrated = true;
+      }
+
+      // Migrate isConfigured flag
+      if (
+        legacyConfig.isConfigured !== undefined &&
+        this.configStore.get('isConfigured') === undefined
+      ) {
+        this.configStore.set('isConfigured', legacyConfig.isConfigured as boolean);
+        migrated = true;
+      }
+
+      // Migrate storeId if not already present
+      if (legacyConfig.storeId && !this.configStore.get('storeId')) {
+        this.configStore.set('storeId', legacyConfig.storeId as string);
+        migrated = true;
+      }
+
+      if (migrated) {
+        log.info('Migrated settings from legacy nuvana-config.json to unified nuvana.json');
+      }
+    } catch (error) {
+      // Don't fail on migration errors - just log and continue
+      log.warn('Failed to migrate from legacy config', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
   }
 
   // ==========================================================================
@@ -384,8 +582,8 @@ export class SettingsService {
         pathLength: validatedUpdates.xmlWatchFolder.length,
       });
 
-      // Sync to legacy nuvana-config for FileWatcher compatibility
-      // FileWatcher reads watchPath from ConfigService (nuvana-config store)
+      // Sync to legacy nuvana-config for FileWatcher compatibility (during migration period)
+      // TODO: Remove this once FileWatcher is fully migrated to read from SettingsService
       try {
         const legacyConfigStore = new Store({ name: 'nuvana-config' });
         legacyConfigStore.set('watchPath', validatedUpdates.xmlWatchFolder);
@@ -525,7 +723,10 @@ export class SettingsService {
       this.configStore.set('companyId', validation.companyId);
       this.configStore.set('companyName', validation.companyName);
       this.configStore.set('timezone', validation.timezone);
-      this.configStore.set('stateCode', validation.stateCode);
+      // Only set stateCode if it has a value (electron-store doesn't allow undefined)
+      if (validation.stateCode) {
+        this.configStore.set('stateCode', validation.stateCode);
+      }
 
       // Store validated - save store info to database (if ready)
       if (storesDAL.isDatabaseReady()) {
@@ -646,15 +847,16 @@ export class SettingsService {
       });
 
       // Set the fields required for isConfigured to be true
-      const storeId = this.configStore.get('storeId') as string;
-      const watchPath = this.configStore.get('xmlWatchFolder') as string;
-
-      // Legacy config needs apiUrl, apiKey, storeId, watchPath for isConfigured
-      legacyConfigStore.set('storeId', storeId || '');
-      legacyConfigStore.set('watchPath', watchPath || '');
+      // Only apiUrl and apiKey are required - watchPath/storeId are optional
       legacyConfigStore.set('apiUrl', this.getCloudEndpoint());
       legacyConfigStore.set('apiKey', 'configured'); // Placeholder - actual key is in settingsService
       legacyConfigStore.set('isConfigured', true);
+
+      // Optional fields - set if available
+      const storeId = this.configStore.get('storeId') as string;
+      const watchPath = this.configStore.get('xmlWatchFolder') as string;
+      if (storeId) legacyConfigStore.set('storeId', storeId);
+      if (watchPath) legacyConfigStore.set('watchPath', watchPath);
 
       log.info('Legacy config synced for App.tsx compatibility');
     } catch (error) {
@@ -690,22 +892,65 @@ export class SettingsService {
   // ==========================================================================
 
   /**
-   * Get cloud API endpoint
+   * Get API URL
+   * Reads from apiUrl, falls back to legacy cloudEndpoint, then defaults
    *
-   * @returns Configured endpoint or default
+   * @returns Configured API URL or environment-appropriate default
    */
-  getCloudEndpoint(): string {
-    return (this.configStore.get('cloudEndpoint') as string) || DEFAULT_CLOUD_ENDPOINT;
+  getApiUrl(): string {
+    // Try new field first
+    const apiUrl = this.configStore.get('apiUrl') as string;
+    if (apiUrl) {
+      return apiUrl;
+    }
+
+    // Fall back to legacy field (migration support)
+    const legacyEndpoint = this.configStore.get('cloudEndpoint') as string;
+    if (legacyEndpoint) {
+      // Migrate to new field
+      this.configStore.set('apiUrl', legacyEndpoint);
+      log.info('Migrated cloudEndpoint to apiUrl');
+      return legacyEndpoint;
+    }
+
+    // Return environment-appropriate default
+    return DEFAULT_API_URL;
   }
 
   /**
-   * Set cloud API endpoint
+   * Set API URL
    *
-   * Used for development/testing with different environments.
-   *
-   * @param endpoint - HTTPS endpoint URL
-   * @throws Error if not HTTPS
-   * @security SEC-008: HTTPS enforcement
+   * @param url - API URL (HTTPS required for non-localhost)
+   * @throws Error if validation fails
+   * @security SEC-008: HTTPS enforcement for production
+   */
+  setApiUrl(url: string): void {
+    // Allow HTTP for localhost/127.0.0.1 (development)
+    const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+    if (!isLocalhost && !url.startsWith('https://')) {
+      throw new Error('API URL must use HTTPS for security (HTTP only allowed for localhost)');
+    }
+
+    this.configStore.set('apiUrl', url);
+    log.info('API URL updated');
+  }
+
+  /**
+   * Get store ID
+   */
+  getStoreId(): string {
+    return (this.configStore.get('storeId') as string) || '';
+  }
+
+  /**
+   * @deprecated Use getApiUrl() instead
+   */
+  getCloudEndpoint(): string {
+    return this.getApiUrl();
+  }
+
+  /**
+   * @deprecated Use setApiUrl() instead
    */
   setCloudEndpoint(endpoint: string): void {
     // SEC-008: Validate HTTPS
@@ -714,8 +959,293 @@ export class SettingsService {
       throw new Error(validation.error.issues[0]?.message || 'Invalid endpoint');
     }
 
-    this.configStore.set('cloudEndpoint', endpoint);
-    log.info('Cloud endpoint updated');
+    this.configStore.set('apiUrl', endpoint);
+    log.info('Cloud endpoint updated (deprecated, use setApiUrl)');
+  }
+
+  // ==========================================================================
+  // File Watcher Configuration
+  // ==========================================================================
+
+  /**
+   * Get watch path for XML files
+   * Falls back to legacy xmlWatchFolder field
+   */
+  getWatchPath(): string {
+    const watchPath = this.configStore.get('watchPath') as string;
+    if (watchPath) return watchPath;
+
+    // Migration from legacy field
+    const legacyPath = this.configStore.get('xmlWatchFolder') as string;
+    if (legacyPath) {
+      this.configStore.set('watchPath', legacyPath);
+      log.info('Migrated xmlWatchFolder to watchPath');
+      return legacyPath;
+    }
+
+    return '';
+  }
+
+  /**
+   * Set watch path for XML files
+   */
+  setWatchPath(watchPath: string): void {
+    if (watchPath && !path.isAbsolute(watchPath)) {
+      throw new Error('Watch path must be absolute');
+    }
+    if (watchPath && watchPath.includes('..')) {
+      throw new Error('Watch path cannot contain parent directory references');
+    }
+    this.configStore.set('watchPath', watchPath);
+    log.info('Watch path updated');
+  }
+
+  /**
+   * Get archive path for processed files
+   */
+  getArchivePath(): string {
+    return (this.configStore.get('archivePath') as string) || '';
+  }
+
+  /**
+   * Set archive path for processed files
+   */
+  setArchivePath(archivePath: string): void {
+    if (archivePath && !path.isAbsolute(archivePath)) {
+      throw new Error('Archive path must be absolute');
+    }
+    this.configStore.set('archivePath', archivePath);
+    log.info('Archive path updated');
+  }
+
+  /**
+   * Get error path for failed files
+   */
+  getErrorPath(): string {
+    return (this.configStore.get('errorPath') as string) || '';
+  }
+
+  /**
+   * Set error path for failed files
+   */
+  setErrorPath(errorPath: string): void {
+    if (errorPath && !path.isAbsolute(errorPath)) {
+      throw new Error('Error path must be absolute');
+    }
+    this.configStore.set('errorPath', errorPath);
+    log.info('Error path updated');
+  }
+
+  /**
+   * Get poll interval for file watcher (seconds)
+   */
+  getPollInterval(): number {
+    return (this.configStore.get('pollInterval') as number) || DEFAULT_POLL_INTERVAL;
+  }
+
+  /**
+   * Set poll interval for file watcher (seconds)
+   */
+  setPollInterval(interval: number): void {
+    if (interval < 1 || interval > 3600) {
+      throw new Error('Poll interval must be between 1 and 3600 seconds');
+    }
+    this.configStore.set('pollInterval', interval);
+    log.info('Poll interval updated', { interval });
+  }
+
+  /**
+   * Get enabled file types
+   */
+  getEnabledFileTypes(): SettingsStoreSchema['enabledFileTypes'] {
+    return this.configStore.get('enabledFileTypes') || DEFAULT_ENABLED_FILE_TYPES;
+  }
+
+  /**
+   * Set enabled file types
+   */
+  setEnabledFileTypes(types: SettingsStoreSchema['enabledFileTypes']): void {
+    this.configStore.set('enabledFileTypes', types);
+    log.info('Enabled file types updated');
+  }
+
+  // ==========================================================================
+  // App Behavior Configuration
+  // ==========================================================================
+
+  /**
+   * Get minimize to tray setting
+   */
+  getMinimizeToTray(): boolean {
+    const value = this.configStore.get('minimizeToTray');
+    return value !== undefined ? value : true; // Default true
+  }
+
+  /**
+   * Set minimize to tray setting
+   */
+  setMinimizeToTray(value: boolean): void {
+    this.configStore.set('minimizeToTray', value);
+    log.info('Minimize to tray updated', { value });
+  }
+
+  /**
+   * Get start on login setting
+   */
+  getStartOnLogin(): boolean {
+    const value = this.configStore.get('startOnLogin');
+    return value !== undefined ? value : true; // Default true
+  }
+
+  /**
+   * Set start on login setting
+   */
+  setStartOnLogin(value: boolean): void {
+    this.configStore.set('startOnLogin', value);
+    log.info('Start on login updated', { value });
+  }
+
+  /**
+   * Get show notifications setting
+   */
+  getShowNotifications(): boolean {
+    const value = this.configStore.get('showNotifications');
+    return value !== undefined ? value : true; // Default true
+  }
+
+  /**
+   * Set show notifications setting
+   */
+  setShowNotifications(value: boolean): void {
+    this.configStore.set('showNotifications', value);
+    log.info('Show notifications updated', { value });
+  }
+
+  /**
+   * Get process in order setting
+   */
+  getProcessInOrder(): boolean {
+    return this.configStore.get('processInOrder') || false;
+  }
+
+  /**
+   * Set process in order setting
+   */
+  setProcessInOrder(value: boolean): void {
+    this.configStore.set('processInOrder', value);
+    log.info('Process in order updated', { value });
+  }
+
+  /**
+   * Get isConfigured flag from store (raw value)
+   * Note: Use isConfigured() for the full check including DB state
+   */
+  getIsConfiguredFlag(): boolean {
+    return this.configStore.get('isConfigured') || false;
+  }
+
+  /**
+   * Set isConfigured flag
+   */
+  setIsConfiguredFlag(value: boolean): void {
+    this.configStore.set('isConfigured', value);
+    log.info('isConfigured flag updated', { value });
+  }
+
+  /**
+   * Get complete config object (NuvanaConfig-compatible)
+   * For services that need the full config type
+   */
+  getConfig(): {
+    apiUrl: string;
+    apiKey: string;
+    storeId: string;
+    watchPath: string;
+    archivePath: string;
+    errorPath: string;
+    pollInterval: number;
+    enabledFileTypes: NonNullable<SettingsStoreSchema['enabledFileTypes']>;
+    startOnLogin: boolean;
+    minimizeToTray: boolean;
+    showNotifications: boolean;
+    processInOrder: boolean;
+    isConfigured: boolean;
+  } {
+    return {
+      apiUrl: this.getApiUrl(),
+      apiKey: '', // API key is encrypted - services use cloudApiService for auth
+      storeId: this.getStoreId(),
+      watchPath: this.getWatchPath(),
+      archivePath: this.getArchivePath(),
+      errorPath: this.getErrorPath(),
+      pollInterval: this.getPollInterval(),
+      enabledFileTypes: this.getEnabledFileTypes()!,
+      startOnLogin: this.getStartOnLogin(),
+      minimizeToTray: this.getMinimizeToTray(),
+      showNotifications: this.getShowNotifications(),
+      processInOrder: this.getProcessInOrder(),
+      isConfigured: this.getIsConfiguredFlag(),
+    };
+  }
+
+  /**
+   * Save config values (partial update)
+   * For IPC config:save handler
+   */
+  saveConfig(
+    update: Partial<{
+      apiUrl: string;
+      storeId: string;
+      watchPath: string;
+      archivePath: string;
+      errorPath: string;
+      pollInterval: number;
+      enabledFileTypes: SettingsStoreSchema['enabledFileTypes'];
+      startOnLogin: boolean;
+      minimizeToTray: boolean;
+      showNotifications: boolean;
+      processInOrder: boolean;
+    }>
+  ): void {
+    if (update.apiUrl !== undefined) this.setApiUrl(update.apiUrl);
+    if (update.storeId !== undefined) this.configStore.set('storeId', update.storeId);
+    if (update.watchPath !== undefined) this.setWatchPath(update.watchPath);
+    if (update.archivePath !== undefined) this.setArchivePath(update.archivePath);
+    if (update.errorPath !== undefined) this.setErrorPath(update.errorPath);
+    if (update.pollInterval !== undefined) this.setPollInterval(update.pollInterval);
+    if (update.enabledFileTypes !== undefined) this.setEnabledFileTypes(update.enabledFileTypes);
+    if (update.startOnLogin !== undefined) this.setStartOnLogin(update.startOnLogin);
+    if (update.minimizeToTray !== undefined) this.setMinimizeToTray(update.minimizeToTray);
+    if (update.showNotifications !== undefined) this.setShowNotifications(update.showNotifications);
+    if (update.processInOrder !== undefined) this.setProcessInOrder(update.processInOrder);
+
+    // Update isConfigured flag based on essential fields
+    const hasApiUrl = !!this.getApiUrl();
+    const hasApiKey = this.hasApiKey();
+    this.setIsConfiguredFlag(hasApiUrl && hasApiKey);
+
+    log.info('Config saved via saveConfig');
+  }
+
+  /**
+   * Get complete file watcher config (for FileWatcherService)
+   */
+  getFileWatcherConfig(): {
+    watchPath: string;
+    archivePath: string;
+    errorPath: string;
+    pollInterval: number;
+    enabledFileTypes: NonNullable<SettingsStoreSchema['enabledFileTypes']>;
+    processInOrder: boolean;
+  } {
+    return {
+      watchPath: this.getWatchPath(),
+      archivePath: this.getArchivePath(),
+      errorPath: this.getErrorPath(),
+      pollInterval: this.getPollInterval(),
+      enabledFileTypes: this.getEnabledFileTypes()!,
+      processInOrder: this.getProcessInOrder(),
+    };
   }
 
   // ==========================================================================

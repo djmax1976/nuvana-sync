@@ -407,6 +407,250 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
   }
 
   /**
+   * Find multiple bins by cloud bin IDs (batch operation)
+   * Enterprise-grade: Eliminates N+1 queries during sync
+   * SEC-006: Parameterized IN clause with placeholders
+   * Performance: Single query for all cloud IDs
+   *
+   * @param cloudBinIds - Array of cloud bin identifiers
+   * @returns Map of cloud_bin_id -> LotteryBin for efficient lookup
+   */
+  findByCloudIds(cloudBinIds: string[]): Map<string, LotteryBin> {
+    const result = new Map<string, LotteryBin>();
+
+    if (cloudBinIds.length === 0) {
+      return result;
+    }
+
+    // SEC-006: Batch in chunks to avoid SQLite parameter limits (max ~999)
+    const CHUNK_SIZE = 500;
+    for (let i = 0; i < cloudBinIds.length; i += CHUNK_SIZE) {
+      const chunk = cloudBinIds.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(', ');
+
+      const stmt = this.db.prepare(`
+        SELECT * FROM lottery_bins WHERE cloud_bin_id IN (${placeholders})
+      `);
+
+      const bins = stmt.all(...chunk) as LotteryBin[];
+
+      for (const bin of bins) {
+        if (bin.cloud_bin_id) {
+          result.set(bin.cloud_bin_id, bin);
+        }
+      }
+    }
+
+    log.debug('Batch lookup by cloud IDs', {
+      requested: cloudBinIds.length,
+      found: result.size,
+    });
+
+    return result;
+  }
+
+  /**
+   * Batch upsert bins from cloud sync
+   * Enterprise-grade: Single transaction for all bins, eliminates N+1 queries
+   * SEC-006: Parameterized queries prevent SQL injection
+   * DB-006: Validates store_id for tenant isolation
+   * Performance: Uses transaction for atomicity and speed
+   *
+   * @param bins - Array of cloud bin data
+   * @param expectedStoreId - Expected store ID for tenant isolation validation
+   * @returns Upsert result with counts
+   */
+  batchUpsertFromCloud(
+    bins: CloudBinData[],
+    expectedStoreId: string
+  ): { created: number; updated: number; errors: string[] } {
+    const result = { created: 0, updated: 0, errors: [] as string[] };
+
+    if (bins.length === 0) {
+      return result;
+    }
+
+    // DB-006: Validate all bins belong to expected store
+    for (const bin of bins) {
+      if (bin.store_id !== expectedStoreId) {
+        const errorMsg = `Store ID mismatch for bin ${bin.cloud_bin_id}: expected ${expectedStoreId}, got ${bin.store_id}`;
+        log.error('Tenant isolation violation in batch upsert', {
+          cloudBinId: bin.cloud_bin_id,
+          expectedStoreId,
+          actualStoreId: bin.store_id,
+        });
+        result.errors.push(errorMsg);
+      }
+    }
+
+    // Abort if any store_id violations
+    if (result.errors.length > 0) {
+      throw new Error(
+        `Tenant isolation violation: ${result.errors.length} bins have wrong store_id`
+      );
+    }
+
+    // Get existing bins in single batch query (eliminates N+1)
+    const cloudBinIds = bins.map((b) => b.cloud_bin_id);
+    const existingBins = this.findByCloudIds(cloudBinIds);
+
+    // Execute all upserts in single transaction for atomicity
+    this.withTransaction(() => {
+      const now = this.now();
+
+      // SEC-006: Prepared statements prevent SQL injection
+      const insertStmt = this.db.prepare(`
+        INSERT INTO lottery_bins (
+          bin_id, store_id, bin_number, label, status,
+          cloud_bin_id, synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      const updateStmt = this.db.prepare(`
+        UPDATE lottery_bins SET
+          bin_number = ?,
+          label = ?,
+          status = ?,
+          synced_at = ?,
+          updated_at = ?
+        WHERE cloud_bin_id = ?
+      `);
+
+      for (const binData of bins) {
+        try {
+          const existing = existingBins.get(binData.cloud_bin_id);
+
+          if (existing) {
+            // Update existing bin
+            updateStmt.run(
+              binData.bin_number,
+              binData.label || null,
+              binData.status || 'ACTIVE',
+              now,
+              now,
+              binData.cloud_bin_id
+            );
+            result.updated++;
+          } else {
+            // Create new bin
+            const binId = this.generateId();
+            insertStmt.run(
+              binId,
+              binData.store_id,
+              binData.bin_number,
+              binData.label || null,
+              binData.status || 'ACTIVE',
+              binData.cloud_bin_id,
+              now,
+              now,
+              now
+            );
+            result.created++;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push(`Bin ${binData.cloud_bin_id}: ${message}`);
+          log.error('Failed to upsert bin in batch', {
+            cloudBinId: binData.cloud_bin_id,
+            error: message,
+          });
+        }
+      }
+    });
+
+    log.info('Batch upsert completed', {
+      total: bins.length,
+      created: result.created,
+      updated: result.updated,
+      errors: result.errors.length,
+    });
+
+    return result;
+  }
+
+  /**
+   * Batch soft delete bins not in provided cloud IDs
+   * Enterprise-grade: Single query for deletion
+   * SEC-006: Parameterized query
+   * DB-006: Store-scoped for tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param activeCloudIds - Set of cloud IDs that should remain active
+   * @returns Number of bins soft deleted
+   */
+  batchSoftDeleteNotInCloudIds(storeId: string, activeCloudIds: Set<string>): number {
+    if (activeCloudIds.size === 0) {
+      // If no active cloud IDs, soft delete all bins for this store that have cloud_bin_id
+      const stmt = this.db.prepare(`
+        UPDATE lottery_bins SET
+          deleted_at = datetime('now'),
+          updated_at = datetime('now')
+        WHERE store_id = ?
+          AND cloud_bin_id IS NOT NULL
+          AND deleted_at IS NULL
+      `);
+      const result = stmt.run(storeId);
+
+      if (result.changes > 0) {
+        log.info('Batch soft deleted all cloud-synced bins', {
+          storeId,
+          deletedCount: result.changes,
+        });
+      }
+
+      return result.changes;
+    }
+
+    // SEC-006: Batch in chunks to avoid SQLite parameter limits
+    const CHUNK_SIZE = 500;
+    const cloudIdsArray = Array.from(activeCloudIds);
+    let totalDeleted = 0;
+
+    // First, get all cloud-synced bins for this store
+    const allBinsStmt = this.db.prepare(`
+      SELECT cloud_bin_id FROM lottery_bins
+      WHERE store_id = ? AND cloud_bin_id IS NOT NULL AND deleted_at IS NULL
+    `);
+    const allBins = allBinsStmt.all(storeId) as Array<{ cloud_bin_id: string }>;
+
+    // Find bins to delete (in local but not in cloud response)
+    const toDelete = allBins
+      .filter((b) => !activeCloudIds.has(b.cloud_bin_id))
+      .map((b) => b.cloud_bin_id);
+
+    if (toDelete.length === 0) {
+      return 0;
+    }
+
+    // Delete in chunks
+    for (let i = 0; i < toDelete.length; i += CHUNK_SIZE) {
+      const chunk = toDelete.slice(i, i + CHUNK_SIZE);
+      const placeholders = chunk.map(() => '?').join(', ');
+
+      const stmt = this.db.prepare(`
+        UPDATE lottery_bins SET
+          deleted_at = datetime('now'),
+          updated_at = datetime('now')
+        WHERE store_id = ?
+          AND cloud_bin_id IN (${placeholders})
+          AND deleted_at IS NULL
+      `);
+
+      const result = stmt.run(storeId, ...chunk);
+      totalDeleted += result.changes;
+    }
+
+    if (totalDeleted > 0) {
+      log.info('Batch soft deleted bins not in cloud', {
+        storeId,
+        deletedCount: totalDeleted,
+      });
+    }
+
+    return totalDeleted;
+  }
+
+  /**
    * Soft delete a bin (set deleted_at)
    * Fails if bin has active packs
    * SEC-006: Parameterized queries

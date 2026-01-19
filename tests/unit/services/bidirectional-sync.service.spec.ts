@@ -139,7 +139,9 @@ describe('BidirectionalSyncService', () => {
       expect(mockSetLastPullAt).toHaveBeenCalledWith('store-123', 'bins', expect.any(String));
     });
 
-    it('should push local changes to cloud', async () => {
+    it('should NOT push local changes (bins are pull-only)', async () => {
+      // Bins have no push endpoint in the API spec
+      // Local bin changes are for offline operation only
       const lastPull = '2024-01-01T00:00:00Z';
       mockGetLastPullAt.mockReturnValue(lastPull);
       mockBinsFindAllByStore.mockReturnValue([
@@ -151,20 +153,20 @@ describe('BidirectionalSyncService', () => {
           updated_at: '2024-01-02T00:00:00Z', // After last pull
         },
       ]);
-      mockPushBins.mockResolvedValue({
-        results: [{ bin_id: 'local-bin-1', status: 'synced' }],
-      });
       mockPullBins.mockResolvedValue({ bins: [] });
 
       const result = await service.syncBins();
 
-      expect(result.pushed).toBe(1);
-      expect(mockPushBins).toHaveBeenCalled();
+      // Pushed should always be 0 for bins (pull-only)
+      expect(result.pushed).toBe(0);
+      // pushBins should NOT be called - there's no push endpoint
+      expect(mockPushBins).not.toHaveBeenCalled();
     });
 
-    it('should apply last-write-wins for conflicts', async () => {
+    it('should always apply cloud data (cloud is authoritative for bins)', async () => {
+      // For bins, cloud is always authoritative - no conflict resolution needed
+      // Cloud data should always overwrite local data
       mockGetLastPullAt.mockReturnValue('2024-01-01T00:00:00Z');
-      mockBinsFindAllByStore.mockReturnValue([]);
       mockPullBins.mockResolvedValue({
         bins: [
           {
@@ -172,21 +174,23 @@ describe('BidirectionalSyncService', () => {
             store_id: 'store-123',
             bin_number: 1,
             status: 'ACTIVE',
-            updated_at: '2024-01-01T00:00:00Z', // Same as local
+            updated_at: '2024-01-01T00:00:00Z',
           },
         ],
       });
+      // Even if local bin exists and is "newer", cloud should overwrite
       mockBinsFindByCloudId.mockReturnValue({
         bin_id: 'local-bin-1',
         cloud_bin_id: 'cloud-bin-1',
-        updated_at: '2024-01-02T00:00:00Z', // Local is newer
+        updated_at: '2024-01-02T00:00:00Z', // Local is "newer" but doesn't matter
       });
 
       const result = await service.syncBins();
 
-      expect(result.conflicts).toBe(1);
-      expect(result.pulled).toBe(0);
-      expect(mockBinsUpsertFromCloud).not.toHaveBeenCalled();
+      // Cloud is authoritative, so it should be applied
+      expect(result.pulled).toBe(1);
+      expect(result.conflicts).toBe(0); // No conflict resolution for pull-only entities
+      expect(mockBinsUpsertFromCloud).toHaveBeenCalled();
     });
 
     it('should handle deleted bins from cloud', async () => {

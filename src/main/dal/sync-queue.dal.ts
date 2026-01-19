@@ -363,6 +363,32 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Reset ALL pending items to be immediately retryable
+   * This clears sync_attempts and last_attempt_at so items escape backoff
+   *
+   * @param storeId - Store identifier
+   * @returns Number of items reset
+   */
+  resetAllPending(storeId: string): number {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        sync_attempts = 0,
+        last_attempt_at = NULL,
+        last_sync_error = NULL
+      WHERE store_id = ? AND synced = 0
+    `);
+
+    const result = stmt.run(storeId);
+
+    log.info('All pending items reset for immediate retry', {
+      storeId,
+      count: result.changes,
+    });
+
+    return result.changes;
+  }
+
+  /**
    * Delete synced items older than specified date
    * Used for queue cleanup
    *

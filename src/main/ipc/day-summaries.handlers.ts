@@ -15,8 +15,11 @@ import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { daySummariesDAL, type DaySummary } from '../dal/day-summaries.dal';
 import { shiftsDAL, type Shift } from '../dal/shifts.dal';
-import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';
+
+// NOTE: day_summary sync removed - summaries are calculated server-side
+// API spec only supports day close via /api/v1/sync/lottery/day/* endpoints
+// which use day_close entity type, not day_summary
 
 // ============================================================================
 // Types
@@ -300,14 +303,9 @@ registerHandler<DaySummary | DayCloseValidation | ReturnType<typeof createErrorR
         return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, 'Failed to close day');
       }
 
-      // Enqueue for cloud sync
-      syncQueueDAL.enqueue({
-        store_id: store.store_id,
-        entity_type: 'day_summary',
-        entity_id: summary.day_summary_id,
-        operation: 'UPDATE',
-        payload: closedSummary,
-      });
+      // NOTE: No sync enqueue for day_summary - summaries are calculated server-side
+      // Day close is synced via lottery.handlers.ts using day_close entity type
+      // with /api/v1/sync/lottery/day/prepare-close and /commit-close endpoints
 
       // SEC-017: Audit log
       log.info('Day closed', {

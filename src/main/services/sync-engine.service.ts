@@ -19,14 +19,36 @@ import { BrowserWindow } from 'electron';
 import { syncQueueDAL, type SyncQueueItem } from '../dal/sync-queue.dal';
 import { syncLogDAL } from '../dal/sync-log.dal';
 import { storesDAL } from '../dal/stores.dal';
+import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { createLogger } from '../utils/logger';
+import { cloudApiService } from './cloud-api.service';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 /**
+ * Sync progress for real-time UI feedback
+ */
+export interface SyncProgress {
+  /** Total items to sync in current batch */
+  totalItems: number;
+  /** Number of items completed (success + failed) */
+  completedItems: number;
+  /** Number of items successfully synced */
+  succeededItems: number;
+  /** Number of items that failed */
+  failedItems: number;
+  /** Current entity type being synced */
+  currentEntityType: string | null;
+  /** Recent errors (last 5) for display */
+  recentErrors: Array<{ entityType: string; error: string; timestamp: string }>;
+}
+
+/**
  * Sync status for UI display
+ * SEC-017: No sensitive data (API keys, tokens) in status response
+ * API-008: Only whitelisted, non-sensitive fields exposed
  */
 export interface SyncStatus {
   /** Whether sync is currently running */
@@ -39,10 +61,30 @@ export interface SyncStatus {
   lastSyncStatus: 'success' | 'partial' | 'failed' | null;
   /** Number of pending items in queue */
   pendingCount: number;
+  /** Number of items successfully synced today */
+  syncedTodayCount: number;
+  /** Number of failed items (exceeded max retry attempts) */
+  failedCount: number;
   /** Milliseconds until next scheduled sync */
   nextSyncIn: number;
   /** Whether cloud API is reachable */
   isOnline: boolean;
+  /** Timestamp of last heartbeat (Phase 5) */
+  lastHeartbeatAt: string | null;
+  /** Status of last heartbeat (Phase 5) */
+  lastHeartbeatStatus: 'ok' | 'suspended' | 'revoked' | 'failed' | null;
+  /** Last known server time from heartbeat (Phase 5) */
+  lastServerTime: string | null;
+  /** Milliseconds until next scheduled heartbeat (Phase 5) */
+  nextHeartbeatIn: number;
+  /** Consecutive sync failures (for UI degradation display) */
+  consecutiveFailures: number;
+  /** Sanitized last error message (API-003: no internal details) */
+  lastErrorMessage: string | null;
+  /** Timestamp of last error */
+  lastErrorAt: string | null;
+  /** Current sync progress (when isRunning is true) */
+  progress: SyncProgress | null;
 }
 
 /**
@@ -68,11 +110,20 @@ export interface BatchSyncResponse {
 }
 
 /**
+ * Heartbeat response from cloud API
+ * LM-002: Includes serverTime for monitoring/clock sync
+ */
+export interface HeartbeatResponse {
+  status: 'ok' | 'suspended' | 'revoked';
+  serverTime: string;
+}
+
+/**
  * Cloud API service interface (to be implemented in Phase 5B)
  */
 interface ICloudApiService {
   healthCheck(): Promise<boolean>;
-  pushBatch(entityType: string, items: SyncQueueItem[]): Promise<BatchSyncResponse>;
+  heartbeat(): Promise<HeartbeatResponse>;
 }
 
 // ============================================================================
@@ -93,6 +144,18 @@ const SYNC_BATCH_SIZE = 100;
 
 /** Health check timeout in milliseconds */
 const HEALTH_CHECK_TIMEOUT_MS = 5000;
+
+/** Default heartbeat interval in milliseconds (5 minutes) */
+const DEFAULT_HEARTBEAT_INTERVAL_MS = 5 * 60 * 1000;
+
+/** Minimum heartbeat interval (1 minute) */
+const MIN_HEARTBEAT_INTERVAL_MS = 60 * 1000;
+
+/** Maximum heartbeat interval (15 minutes) */
+const MAX_HEARTBEAT_INTERVAL_MS = 15 * 60 * 1000;
+
+/** Heartbeat timeout in milliseconds */
+const HEARTBEAT_TIMEOUT_MS = 10000;
 
 /** IPC channel for status updates */
 const SYNC_STATUS_CHANNEL = 'sync:statusChanged';
@@ -119,13 +182,26 @@ const log = createLogger('sync-engine');
  */
 export class SyncEngineService {
   private intervalId: NodeJS.Timeout | null = null;
+  private heartbeatIntervalId: NodeJS.Timeout | null = null;
   private isRunning = false;
   private syncIntervalMs = DEFAULT_SYNC_INTERVAL_MS;
+  private heartbeatIntervalMs = DEFAULT_HEARTBEAT_INTERVAL_MS;
 
   private lastSyncAt: Date | null = null;
   private lastSyncStatus: 'success' | 'partial' | 'failed' | null = null;
+  private lastHeartbeatAt: Date | null = null;
+  private lastHeartbeatStatus: 'ok' | 'suspended' | 'revoked' | 'failed' | null = null;
+  private lastServerTime: string | null = null;
   private pendingCount = 0;
   private isOnline = true;
+  private consecutiveFailures = 0;
+  private lastErrorMessage: string | null = null;
+  private lastErrorAt: Date | null = null;
+
+  /** Current sync progress tracking */
+  private currentProgress: SyncProgress | null = null;
+  /** Recent sync errors for display (capped at 5) */
+  private recentSyncErrors: Array<{ entityType: string; error: string; timestamp: string }> = [];
 
   /** Cloud API service (injected for testability) */
   private cloudApiService: ICloudApiService | null = null;
@@ -147,13 +223,13 @@ export class SyncEngineService {
    *
    * @param intervalMs - Optional custom sync interval
    */
-  start(intervalMs?: number): void {
+  start(intervalMs?: number, heartbeatIntervalMs?: number): void {
     if (this.intervalId) {
       log.warn('Sync engine already running');
       return;
     }
 
-    // Validate and set interval
+    // Validate and set sync interval
     if (intervalMs) {
       this.syncIntervalMs = Math.max(
         MIN_SYNC_INTERVAL_MS,
@@ -161,7 +237,17 @@ export class SyncEngineService {
       );
     }
 
-    log.info(`Starting sync engine (interval: ${this.syncIntervalMs / 1000}s)`);
+    // Validate and set heartbeat interval (Phase 5)
+    if (heartbeatIntervalMs) {
+      this.heartbeatIntervalMs = Math.max(
+        MIN_HEARTBEAT_INTERVAL_MS,
+        Math.min(heartbeatIntervalMs, MAX_HEARTBEAT_INTERVAL_MS)
+      );
+    }
+
+    log.info(
+      `Starting sync engine (sync interval: ${this.syncIntervalMs / 1000}s, heartbeat interval: ${this.heartbeatIntervalMs / 1000}s)`
+    );
 
     // Clean up any stale running syncs from previous session
     this.cleanupStaleRunning();
@@ -169,7 +255,10 @@ export class SyncEngineService {
     // Update pending count
     this.updatePendingCount();
 
-    // Run immediately, then on interval
+    // Log queue diagnostic info at startup
+    this.logQueueDiagnostics();
+
+    // Run sync immediately, then on interval
     this.runSync().catch((err) => {
       log.error('Initial sync failed', { error: err instanceof Error ? err.message : 'Unknown' });
     });
@@ -182,6 +271,9 @@ export class SyncEngineService {
       });
     }, this.syncIntervalMs);
 
+    // Start heartbeat interval
+    this.startHeartbeat();
+
     this.notifyStatusChange();
   }
 
@@ -189,9 +281,22 @@ export class SyncEngineService {
    * Stop the sync engine
    */
   stop(): void {
+    let stopped = false;
+
     if (this.intervalId) {
       clearInterval(this.intervalId);
       this.intervalId = null;
+      stopped = true;
+    }
+
+    // Phase 5: Stop heartbeat interval
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+      stopped = true;
+    }
+
+    if (stopped) {
       log.info('Sync engine stopped');
       this.notifyStatusChange();
     }
@@ -212,6 +317,7 @@ export class SyncEngineService {
   /**
    * Get current sync status for UI display
    * SEC-017: No sensitive data in status response
+   * API-008: OUTPUT_FILTERING - Only whitelisted fields exposed
    *
    * @returns Current sync status
    */
@@ -221,14 +327,44 @@ export class SyncEngineService {
         ? Math.max(0, this.syncIntervalMs - (Date.now() - this.lastSyncAt.getTime()))
         : 0;
 
+    // Phase 5: Calculate next heartbeat time
+    const nextHeartbeatIn =
+      this.heartbeatIntervalId && this.lastHeartbeatAt
+        ? Math.max(0, this.heartbeatIntervalMs - (Date.now() - this.lastHeartbeatAt.getTime()))
+        : 0;
+
+    // SEC-006: Get sync queue stats via parameterized DAL query
+    // DB-006: TENANT_ISOLATION - Query is scoped to current store
+    let syncedTodayCount = 0;
+    let failedCount = 0;
+    const store = storesDAL.getConfiguredStore();
+    if (store) {
+      const stats = syncQueueDAL.getStats(store.store_id);
+      syncedTodayCount = stats.syncedToday;
+      failedCount = stats.failed;
+    }
+
     return {
       isRunning: this.isRunning,
       isStarted: this.intervalId !== null,
       lastSyncAt: this.lastSyncAt?.toISOString() || null,
       lastSyncStatus: this.lastSyncStatus,
       pendingCount: this.pendingCount,
+      syncedTodayCount,
+      failedCount,
       nextSyncIn,
       isOnline: this.isOnline,
+      // Phase 5: Heartbeat status
+      lastHeartbeatAt: this.lastHeartbeatAt?.toISOString() || null,
+      lastHeartbeatStatus: this.lastHeartbeatStatus,
+      lastServerTime: this.lastServerTime,
+      nextHeartbeatIn,
+      // Extended status for UI indicator
+      consecutiveFailures: this.consecutiveFailures,
+      lastErrorMessage: this.lastErrorMessage,
+      lastErrorAt: this.lastErrorAt?.toISOString() || null,
+      // Real-time sync progress
+      progress: this.currentProgress,
     };
   }
 
@@ -298,6 +434,17 @@ export class SyncEngineService {
       this.lastSyncStatus = result.failed === 0 ? 'success' : 'partial';
       this.updatePendingCount();
 
+      // Reset consecutive failures on success
+      if (result.failed === 0) {
+        this.consecutiveFailures = 0;
+        this.lastErrorMessage = null;
+        this.lastErrorAt = null;
+      } else {
+        // Partial success - track error but don't increment failures
+        this.lastErrorMessage = `${result.failed} item(s) failed to sync`;
+        this.lastErrorAt = new Date();
+      }
+
       log.info(`Sync completed: ${result.succeeded}/${result.sent} succeeded`, {
         storeId: store.store_id,
         sent: result.sent,
@@ -310,16 +457,22 @@ export class SyncEngineService {
       // Fail sync log
       syncLogDAL.failSync(syncLogId, errorMessage);
 
-      // Update status
+      // Update status with error tracking
       this.lastSyncAt = new Date();
       this.lastSyncStatus = 'failed';
+      this.consecutiveFailures++;
+      // API-003: Sanitize error message - remove internal details
+      this.lastErrorMessage = this.sanitizeErrorMessage(errorMessage);
+      this.lastErrorAt = new Date();
 
       log.error('Sync failed', {
         storeId: store.store_id,
         error: errorMessage,
+        consecutiveFailures: this.consecutiveFailures,
       });
     } finally {
       this.isRunning = false;
+      this.currentProgress = null; // Clear progress when sync completes
       this.notifyStatusChange();
     }
   }
@@ -327,18 +480,63 @@ export class SyncEngineService {
   /**
    * Process the sync queue for a store
    * Groups items by entity type and sends in batches
+   * Broadcasts real-time progress updates to UI
    *
    * @param storeId - Store identifier
    * @returns Sync result statistics
    */
   private async processSyncQueue(storeId: string): Promise<SyncResult> {
+    // Auto-reset failed items so they can be retried
+    // This ensures items that exceeded max_attempts get another chance
+    const failedCount = syncQueueDAL.getFailedCount(storeId);
+    if (failedCount > 0) {
+      const failedItems = syncQueueDAL.getFailedItems(storeId, 100);
+      if (failedItems.length > 0) {
+        const failedIds = failedItems.map((item) => item.id);
+        syncQueueDAL.retryFailed(failedIds);
+        log.info('Auto-reset failed items for retry', {
+          storeId,
+          count: failedIds.length,
+        });
+      }
+    }
+
     // Get retryable items (respects exponential backoff)
     const items = syncQueueDAL.getRetryableItems(storeId, SYNC_BATCH_SIZE);
 
+    // Get total pending count for progress display (includes items in backoff)
+    const totalPending = this.pendingCount;
+
     if (items.length === 0) {
       log.debug('No items to sync');
+      // Still show pending count even if none are retryable right now
+      if (totalPending > 0) {
+        this.currentProgress = {
+          totalItems: totalPending,
+          completedItems: 0,
+          succeededItems: 0,
+          failedItems: 0,
+          currentEntityType: null,
+          recentErrors: [...this.recentSyncErrors],
+        };
+        this.notifyStatusChange();
+      } else {
+        this.currentProgress = null;
+      }
       return { sent: 0, succeeded: 0, failed: 0 };
     }
+
+    // Initialize progress tracking - use total pending for better UX
+    // This shows "Syncing X/673" instead of "Syncing X/10"
+    this.currentProgress = {
+      totalItems: totalPending,
+      completedItems: 0,
+      succeededItems: 0,
+      failedItems: 0,
+      currentEntityType: null,
+      recentErrors: [...this.recentSyncErrors],
+    };
+    this.notifyStatusChange();
 
     // Group by entity type for batched API calls
     const batches = this.groupByEntityType(items);
@@ -347,6 +545,10 @@ export class SyncEngineService {
     let failed = 0;
 
     for (const [entityType, batchItems] of Object.entries(batches)) {
+      // Update current entity type being processed
+      this.currentProgress.currentEntityType = entityType;
+      this.notifyStatusChange();
+
       try {
         const response = await this.pushBatch(entityType, batchItems);
 
@@ -356,20 +558,37 @@ export class SyncEngineService {
           if (result?.status === 'synced') {
             syncQueueDAL.markSynced(item.id);
             succeeded++;
+            this.currentProgress.succeededItems = succeeded;
           } else {
             const error = result?.error || 'Unknown error';
             syncQueueDAL.incrementAttempts(item.id, error);
             failed++;
+            this.currentProgress.failedItems = failed;
+            // Track error for display
+            this.addRecentError(entityType, this.sanitizeErrorMessage(error));
           }
+
+          // Update completed count and broadcast progress
+          this.currentProgress.completedItems = succeeded + failed;
+          this.currentProgress.recentErrors = [...this.recentSyncErrors];
+          this.notifyStatusChange();
         }
       } catch (error: unknown) {
         const errorMessage = error instanceof Error ? error.message : 'Network error';
+        const sanitizedError = this.sanitizeErrorMessage(errorMessage);
+
+        // Track batch-level error
+        this.addRecentError(entityType, sanitizedError);
 
         // Mark all items in batch as failed
         for (const item of batchItems) {
           syncQueueDAL.incrementAttempts(item.id, errorMessage);
           failed++;
+          this.currentProgress.failedItems = failed;
+          this.currentProgress.completedItems = succeeded + failed;
         }
+        this.currentProgress.recentErrors = [...this.recentSyncErrors];
+        this.notifyStatusChange();
 
         log.error(`Batch sync failed for entity type: ${entityType}`, {
           entityType,
@@ -379,7 +598,25 @@ export class SyncEngineService {
       }
     }
 
+    // Clear progress when done (will be set to null after runSync completes)
+    this.currentProgress.currentEntityType = null;
+
     return { sent: items.length, succeeded, failed };
+  }
+
+  /**
+   * Add an error to the recent errors list (capped at 5)
+   */
+  private addRecentError(entityType: string, error: string): void {
+    this.recentSyncErrors.unshift({
+      entityType,
+      error,
+      timestamp: new Date().toISOString(),
+    });
+    // Keep only the last 5 errors
+    if (this.recentSyncErrors.length > 5) {
+      this.recentSyncErrors = this.recentSyncErrors.slice(0, 5);
+    }
   }
 
   /**
@@ -404,14 +641,28 @@ export class SyncEngineService {
   /**
    * Push a batch of items to the cloud API
    *
+   * Enterprise-grade routing:
+   * - Routes 'pack' entity types to specialized pack sync endpoints
+   * - Routes 'shift_opening' entity types to pushShiftOpening endpoint
+   * - Routes 'shift_closing' entity types to pushShiftClosing endpoint
+   * - Falls back to generic pushBatch for other entity types
+   *
    * @param entityType - Type of entity being synced
    * @param items - Items to sync
    * @returns Batch sync response
    */
   private async pushBatch(entityType: string, items: SyncQueueItem[]): Promise<BatchSyncResponse> {
-    if (!this.cloudApiService) {
-      log.warn('Cloud API service not configured, simulating successful sync');
-      // Return mock success when cloud API not configured (development mode)
+    // Route pack entity type to specialized endpoints
+    if (entityType === 'pack') {
+      return this.pushPackBatch(items);
+    }
+
+    // Employee entity type - employees are pulled from cloud, not pushed
+    // Mark as synced since local employee changes don't sync to cloud
+    if (entityType === 'employee') {
+      log.info('Employee sync skipped - employees are cloud-managed (pull only)', {
+        itemCount: items.length,
+      });
       return {
         success: true,
         results: items.map((item) => ({
@@ -421,7 +672,429 @@ export class SyncEngineService {
       };
     }
 
-    return this.cloudApiService.pushBatch(entityType, items);
+    // Route shift_opening entity type to specialized endpoint
+    if (entityType === 'shift_opening') {
+      return this.pushShiftOpeningBatch(items);
+    }
+
+    // Route shift_closing entity type to specialized endpoint
+    if (entityType === 'shift_closing') {
+      return this.pushShiftClosingBatch(items);
+    }
+
+    // Route day_close entity type to specialized two-phase commit endpoints
+    if (entityType === 'day_close') {
+      return this.pushDayCloseBatch(items);
+    }
+
+    // Route variance_approval entity type to specialized endpoint
+    if (entityType === 'variance_approval') {
+      return this.pushVarianceApprovalBatch(items);
+    }
+
+    // Unsupported entity types - mark as failed
+    // No generic /api/v1/sync/batch endpoint exists in the API
+    log.warn('Unsupported entity type for sync - no API endpoint available', {
+      entityType,
+      itemCount: items.length,
+    });
+
+    return {
+      success: false,
+      results: items.map((item) => ({
+        id: item.entity_id,
+        status: 'failed' as const,
+        error: `Unsupported entity type: ${entityType}. No sync endpoint available.`,
+      })),
+    };
+  }
+
+  /**
+   * Push pack items to specialized cloud endpoints based on operation
+   *
+   * Enterprise-grade pack sync implementation:
+   * - Routes CREATE operations to /packs/receive
+   * - Routes UPDATE operations based on pack status in payload
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-017: Audit logging for all operations
+   *
+   * @param items - Pack sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushPackBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // Parse payload (may or may not include game_code for legacy items)
+        const payload = JSON.parse(item.payload) as {
+          pack_id: string;
+          store_id: string;
+          game_id: string;
+          game_code?: string;
+          pack_number: string;
+          status: string;
+          bin_id: string | null;
+          opening_serial: string | null;
+          closing_serial: string | null;
+          tickets_sold: number;
+          sales_amount: number;
+          received_at: string | null;
+          received_by: string | null;
+          activated_at: string | null;
+          activated_by: string | null;
+          settled_at: string | null;
+          returned_at: string | null;
+        };
+
+        // Look up game_code if not in payload (legacy queue items)
+        let gameCode = payload.game_code;
+        if (!gameCode && payload.game_id) {
+          const game = lotteryGamesDAL.findById(payload.game_id);
+          if (game) {
+            gameCode = game.game_code;
+          } else {
+            log.error('Cannot sync pack: game not found', {
+              packId: payload.pack_id,
+              gameId: payload.game_id,
+            });
+            results.push({
+              id: item.entity_id,
+              status: 'failed',
+              error: 'Game not found for pack',
+            });
+            continue;
+          }
+        }
+
+        if (!gameCode) {
+          log.error('Cannot sync pack: game_code missing', { packId: payload.pack_id });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'game_code missing',
+          });
+          continue;
+        }
+
+        // Route based on operation and status
+        if (item.operation === 'CREATE') {
+          // New pack received - API: POST /api/v1/sync/lottery/packs/receive
+          const response = await cloudApiService.pushPackReceive({
+            pack_id: payload.pack_id,
+            store_id: payload.store_id,
+            game_id: payload.game_id,
+            game_code: gameCode,
+            pack_number: payload.pack_number,
+            received_at: payload.received_at || new Date().toISOString(),
+            received_by: payload.received_by,
+          });
+
+          results.push({
+            id: item.entity_id,
+            cloudId: response.cloud_pack_id,
+            status: response.success ? 'synced' : 'failed',
+          });
+        } else if (item.operation === 'UPDATE') {
+          // Route based on current status
+          let success = false;
+
+          switch (payload.status) {
+            case 'ACTIVATED':
+              // Pack was activated
+              if (payload.bin_id && payload.opening_serial && payload.activated_at) {
+                const activateResponse = await cloudApiService.pushPackActivate({
+                  pack_id: payload.pack_id,
+                  store_id: payload.store_id,
+                  bin_id: payload.bin_id,
+                  opening_serial: payload.opening_serial,
+                  activated_at: payload.activated_at,
+                  activated_by: payload.activated_by,
+                });
+                success = activateResponse.success;
+              } else {
+                log.warn('Pack activation missing required fields', {
+                  packId: payload.pack_id,
+                  hasBinId: Boolean(payload.bin_id),
+                  hasOpeningSerial: Boolean(payload.opening_serial),
+                  hasActivatedAt: Boolean(payload.activated_at),
+                });
+                success = false;
+              }
+              break;
+
+            case 'SETTLED':
+              // Pack was depleted/sold out
+              if (payload.closing_serial && payload.settled_at) {
+                const depleteResponse = await cloudApiService.pushPackDeplete({
+                  pack_id: payload.pack_id,
+                  store_id: payload.store_id,
+                  closing_serial: payload.closing_serial,
+                  tickets_sold: payload.tickets_sold,
+                  sales_amount: payload.sales_amount,
+                  settled_at: payload.settled_at,
+                });
+                success = depleteResponse.success;
+              } else {
+                log.warn('Pack depletion missing required fields', {
+                  packId: payload.pack_id,
+                  hasClosingSerial: Boolean(payload.closing_serial),
+                  hasSettledAt: Boolean(payload.settled_at),
+                });
+                success = false;
+              }
+              break;
+
+            case 'RETURNED':
+              // Pack was returned
+              if (payload.returned_at) {
+                const returnResponse = await cloudApiService.pushPackReturn({
+                  pack_id: payload.pack_id,
+                  store_id: payload.store_id,
+                  closing_serial: payload.closing_serial,
+                  tickets_sold: payload.tickets_sold,
+                  sales_amount: payload.sales_amount,
+                  returned_at: payload.returned_at,
+                });
+                success = returnResponse.success;
+              } else {
+                log.warn('Pack return missing required fields', {
+                  packId: payload.pack_id,
+                  hasReturnedAt: Boolean(payload.returned_at),
+                });
+                success = false;
+              }
+              break;
+
+            default:
+              log.warn('Unknown pack status for UPDATE operation', {
+                packId: payload.pack_id,
+                status: payload.status,
+              });
+              success = false;
+          }
+
+          results.push({
+            id: item.entity_id,
+            status: success ? 'synced' : 'failed',
+            error: success ? undefined : `Failed to sync pack with status: ${payload.status}`,
+          });
+        } else if (item.operation === 'DELETE') {
+          // Pack deletion - not typically supported, log warning
+          log.warn('Pack DELETE operation not supported for cloud sync', {
+            packId: item.entity_id,
+          });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'DELETE operation not supported for packs',
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync pack item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          operation: item.operation,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.entity_id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push shift opening items to cloud API
+   *
+   * Enterprise-grade shift opening sync implementation:
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for all operations
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * @param items - Shift opening sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushShiftOpeningBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        const payload = JSON.parse(item.payload) as {
+          shift_id: string;
+          store_id: string;
+          openings: Array<{
+            bin_id: string;
+            pack_id: string;
+            opening_serial: string;
+          }>;
+          opened_at: string;
+          opened_by: string | null;
+        };
+
+        // API-001: Validate required fields
+        if (!payload.shift_id || !payload.store_id || !payload.openings || !payload.opened_at) {
+          log.warn('Shift opening payload missing required fields', {
+            shiftId: payload.shift_id,
+            hasStoreId: Boolean(payload.store_id),
+            hasOpenings: Boolean(payload.openings),
+            hasOpenedAt: Boolean(payload.opened_at),
+          });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'Missing required fields in shift opening payload',
+          });
+          continue;
+        }
+
+        // Route to cloud API
+        const response = await cloudApiService.pushShiftOpening({
+          shift_id: payload.shift_id,
+          store_id: payload.store_id,
+          openings: payload.openings,
+          opened_at: payload.opened_at,
+          opened_by: payload.opened_by,
+        });
+
+        results.push({
+          id: item.entity_id,
+          status: response.success ? 'synced' : 'failed',
+          error: response.success ? undefined : 'Failed to sync shift opening',
+        });
+
+        // SEC-017: Audit log
+        if (response.success) {
+          log.info('Shift opening synced to cloud', {
+            shiftId: payload.shift_id,
+            openingsCount: payload.openings.length,
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync shift opening item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.entity_id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push shift closing items to cloud API
+   *
+   * Enterprise-grade shift closing sync implementation:
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for all operations
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * @param items - Shift closing sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushShiftClosingBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        const payload = JSON.parse(item.payload) as {
+          shift_id: string;
+          store_id: string;
+          closings: Array<{
+            bin_id: string;
+            pack_id: string;
+            closing_serial: string;
+            tickets_sold: number;
+            sales_amount: number;
+          }>;
+          closed_at: string;
+          closed_by: string | null;
+        };
+
+        // API-001: Validate required fields
+        if (!payload.shift_id || !payload.store_id || !payload.closings || !payload.closed_at) {
+          log.warn('Shift closing payload missing required fields', {
+            shiftId: payload.shift_id,
+            hasStoreId: Boolean(payload.store_id),
+            hasClosings: Boolean(payload.closings),
+            hasClosedAt: Boolean(payload.closed_at),
+          });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'Missing required fields in shift closing payload',
+          });
+          continue;
+        }
+
+        // Route to cloud API
+        const response = await cloudApiService.pushShiftClosing({
+          shift_id: payload.shift_id,
+          store_id: payload.store_id,
+          closings: payload.closings,
+          closed_at: payload.closed_at,
+          closed_by: payload.closed_by,
+        });
+
+        results.push({
+          id: item.entity_id,
+          status: response.success ? 'synced' : 'failed',
+          error: response.success ? undefined : 'Failed to sync shift closing',
+        });
+
+        // SEC-017: Audit log
+        if (response.success) {
+          const totalSales = payload.closings.reduce((sum, c) => sum + c.sales_amount, 0);
+          log.info('Shift closing synced to cloud', {
+            shiftId: payload.shift_id,
+            closingsCount: payload.closings.length,
+            totalSalesAmount: totalSales,
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync shift closing item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.entity_id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
   }
 
   /**
@@ -449,6 +1122,145 @@ export class SyncEngineService {
     }
   }
 
+  // ==========================================================================
+  // Phase 5: Heartbeat Methods
+  // ==========================================================================
+
+  /**
+   * Start the heartbeat interval
+   * Phase 5: Periodic heartbeat to verify API key status and keep session alive
+   *
+   * LM-002: Implements health monitoring per coding standards
+   * API-002: Respects rate limiting via configurable interval
+   */
+  private startHeartbeat(): void {
+    if (this.heartbeatIntervalId) {
+      log.warn('Heartbeat already running');
+      return;
+    }
+
+    log.info(`Starting heartbeat (interval: ${this.heartbeatIntervalMs / 1000}s)`);
+
+    // Run heartbeat immediately, then on interval
+    this.runHeartbeat().catch((err) => {
+      log.error('Initial heartbeat failed', {
+        error: err instanceof Error ? err.message : 'Unknown',
+      });
+    });
+
+    this.heartbeatIntervalId = setInterval(() => {
+      this.runHeartbeat().catch((err) => {
+        log.error('Scheduled heartbeat failed', {
+          error: err instanceof Error ? err.message : 'Unknown',
+        });
+      });
+    }, this.heartbeatIntervalMs);
+  }
+
+  /**
+   * Run a single heartbeat cycle
+   * Phase 5: Sends heartbeat to cloud and processes response
+   *
+   * Enterprise-grade implementation:
+   * - LM-001: Structured logging with timestamps
+   * - LM-002: Updates server time for monitoring
+   * - LICENSE: Handles suspended/revoked status
+   * - API-003: Sanitized error handling
+   */
+  private async runHeartbeat(): Promise<void> {
+    if (!this.cloudApiService) {
+      log.debug('Heartbeat skipped: Cloud API service not configured');
+      return;
+    }
+
+    // Skip if offline (determined by health check in runSync)
+    if (!this.isOnline) {
+      log.debug('Heartbeat skipped: Offline');
+      return;
+    }
+
+    log.debug('Running heartbeat');
+
+    try {
+      // Use Promise.race for timeout
+      const response = await Promise.race([
+        this.cloudApiService.heartbeat(),
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error('Heartbeat timeout')), HEARTBEAT_TIMEOUT_MS)
+        ),
+      ]);
+
+      // Update heartbeat state
+      this.lastHeartbeatAt = new Date();
+      this.lastHeartbeatStatus = response.status;
+      this.lastServerTime = response.serverTime;
+
+      // LM-001: Log successful heartbeat
+      log.debug('Heartbeat successful', {
+        status: response.status,
+        serverTime: response.serverTime,
+      });
+
+      this.notifyStatusChange();
+    } catch (error) {
+      // Update heartbeat state on failure
+      this.lastHeartbeatAt = new Date();
+      this.lastHeartbeatStatus = 'failed';
+
+      // LM-001: Log heartbeat failure (error details server-side only)
+      log.error('Heartbeat failed', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+
+      // If status is suspended/revoked, stop the heartbeat
+      // The license service will handle blocking operations
+      const errorMsg = error instanceof Error ? error.message.toLowerCase() : '';
+      if (errorMsg.includes('suspended')) {
+        this.lastHeartbeatStatus = 'suspended';
+        log.warn('API key suspended, stopping heartbeat');
+        this.stopHeartbeat();
+      } else if (errorMsg.includes('revoked')) {
+        this.lastHeartbeatStatus = 'revoked';
+        log.warn('API key revoked, stopping heartbeat');
+        this.stopHeartbeat();
+      }
+
+      this.notifyStatusChange();
+    }
+  }
+
+  /**
+   * Stop the heartbeat interval
+   * Phase 5: Gracefully stops heartbeat without affecting sync
+   */
+  private stopHeartbeat(): void {
+    if (this.heartbeatIntervalId) {
+      clearInterval(this.heartbeatIntervalId);
+      this.heartbeatIntervalId = null;
+      log.info('Heartbeat stopped');
+    }
+  }
+
+  /**
+   * Trigger an immediate heartbeat (manual trigger)
+   * Phase 5: Allows manual heartbeat verification
+   *
+   * @returns Promise that resolves when heartbeat completes
+   */
+  async triggerHeartbeat(): Promise<void> {
+    await this.runHeartbeat();
+  }
+
+  /**
+   * Get the last server time from heartbeat
+   * Phase 5: Useful for clock synchronization
+   *
+   * @returns Last known server time or null if no heartbeat received
+   */
+  getLastServerTime(): string | null {
+    return this.lastServerTime;
+  }
+
   /**
    * Update pending count from database
    */
@@ -460,12 +1272,126 @@ export class SyncEngineService {
   }
 
   /**
+   * Sanitize error message for UI display
+   * API-003: Remove internal details, stack traces, and sensitive information
+   *
+   * @param message - Raw error message
+   * @returns Sanitized user-friendly message
+   */
+  private sanitizeErrorMessage(message: string): string {
+    // Map of internal error patterns to user-friendly messages
+    const errorMappings: Array<{ pattern: RegExp; replacement: string }> = [
+      { pattern: /ECONNREFUSED/i, replacement: 'Unable to connect to cloud service' },
+      { pattern: /ETIMEDOUT/i, replacement: 'Connection timed out' },
+      { pattern: /ENOTFOUND/i, replacement: 'Cloud service not reachable' },
+      { pattern: /ENETUNREACH/i, replacement: 'Network unreachable' },
+      { pattern: /ECONNRESET/i, replacement: 'Connection was reset' },
+      { pattern: /401|unauthorized/i, replacement: 'Authentication failed' },
+      { pattern: /403|forbidden/i, replacement: 'Access denied' },
+      { pattern: /404|not found/i, replacement: 'Resource not found' },
+      { pattern: /429|rate limit/i, replacement: 'Too many requests - please wait' },
+      { pattern: /500|internal server/i, replacement: 'Cloud service error' },
+      { pattern: /502|bad gateway/i, replacement: 'Cloud service temporarily unavailable' },
+      { pattern: /503|service unavailable/i, replacement: 'Cloud service is down' },
+      { pattern: /socket hang up/i, replacement: 'Connection interrupted' },
+      { pattern: /certificate/i, replacement: 'Security certificate error' },
+    ];
+
+    // Check each pattern
+    for (const { pattern, replacement } of errorMappings) {
+      if (pattern.test(message)) {
+        return replacement;
+      }
+    }
+
+    // If no pattern matched, return a generic message
+    // SEC-017: Never expose raw error messages that might contain sensitive info
+    if (message.length > 100 || message.includes('at ') || message.includes('Error:')) {
+      return 'Sync operation failed';
+    }
+
+    // Return truncated message if it seems safe
+    return message.slice(0, 50);
+  }
+
+  /**
+   * Log detailed queue diagnostics to help debug stuck items
+   * Called at startup to diagnose sync queue issues
+   */
+  private logQueueDiagnostics(): void {
+    try {
+      const store = storesDAL.getConfiguredStore();
+      if (!store) {
+        log.warn('Cannot log queue diagnostics: Store not configured');
+        return;
+      }
+
+      const pendingCount = syncQueueDAL.getPendingCount(store.store_id);
+      const failedCount = syncQueueDAL.getFailedCount(store.store_id);
+      const retryableItems = syncQueueDAL.getRetryableItems(store.store_id, 10);
+
+      // Log to console for easy visibility
+      console.log('\n========== SYNC QUEUE DIAGNOSTICS ==========');
+      console.log(`Store ID: ${store.store_id}`);
+      console.log(`Total Pending (unsynced): ${pendingCount}`);
+      console.log(`Failed (exceeded max attempts): ${failedCount}`);
+      console.log(`Retryable Now: ${retryableItems.length}`);
+      console.log(
+        `Items NOT retryable: ${pendingCount - failedCount - retryableItems.length} (in backoff)`
+      );
+
+      if (retryableItems.length > 0 && retryableItems.length >= pendingCount * 0.8) {
+        // Most items are retryable - good state
+        console.log('\nSample retryable items:');
+        retryableItems.slice(0, 5).forEach((item, i) => {
+          console.log(
+            `  ${i + 1}. [${item.entity_type}] ${item.entity_id.slice(0, 8)}... attempts=${item.sync_attempts}/${item.max_attempts}`
+          );
+        });
+      } else if (pendingCount > 0) {
+        const inBackoff = pendingCount - failedCount - retryableItems.length;
+        console.log('\nWARNING: Most items stuck in backoff or failed!');
+        console.log('  - Failed items (exceeded max_attempts): ' + failedCount);
+        console.log('  - Items in backoff: ' + inBackoff);
+        console.log('  - Retryable now: ' + retryableItems.length);
+
+        // AUTO-RESET: If most items are stuck (in backoff or failed), reset them all
+        if (pendingCount > 10 && (inBackoff > pendingCount * 0.5 || failedCount > 0)) {
+          console.log('\n*** AUTO-RESETTING all pending items to clear backoff...');
+          const resetCount = syncQueueDAL.resetAllPending(store.store_id);
+          console.log(`    Reset ${resetCount} items. They will all be retried now.`);
+        }
+      }
+      console.log('==============================================\n');
+
+      // Also log via structured logger
+      log.info('Queue diagnostics', {
+        storeId: store.store_id,
+        pendingCount,
+        failedCount,
+        retryableCount: retryableItems.length,
+        inBackoff: pendingCount - failedCount - retryableItems.length,
+      });
+    } catch (error) {
+      log.error('Failed to log queue diagnostics', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
    * Clean up stale running syncs from previous session
    */
   private cleanupStaleRunning(): void {
-    const store = storesDAL.getConfiguredStore();
-    if (store) {
-      syncLogDAL.cleanupStaleRunning(store.store_id, 30);
+    try {
+      const store = storesDAL.getConfiguredStore();
+      if (store) {
+        syncLogDAL.cleanupStaleRunning(store.store_id, 30);
+      }
+    } catch (error) {
+      log.warn('Failed to cleanup stale running syncs', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
@@ -499,6 +1425,316 @@ export class SyncEngineService {
   cleanupQueue(olderThanDays: number = 7): number {
     log.info('Running queue cleanup', { olderThanDays });
     return syncQueueDAL.cleanupSynced(olderThanDays);
+  }
+
+  // ==========================================================================
+  // Phase 3: Day Close Sync Methods
+  // ==========================================================================
+
+  /**
+   * Push day close items to cloud API (two-phase commit)
+   *
+   * Enterprise-grade day close sync implementation:
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for all operations
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * Handles the two-phase commit pattern:
+   * 1. PREPARE: Validates inventory and gets validation token
+   * 2. COMMIT: Finalizes day close with token
+   * 3. CANCEL: Rolls back if commit fails
+   *
+   * @param items - Day close sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushDayCloseBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        const payload = JSON.parse(item.payload) as {
+          operation_type: 'PREPARE' | 'COMMIT' | 'CANCEL';
+          store_id: string;
+          business_date: string;
+          // For PREPARE operation
+          expected_inventory?: Array<{
+            bin_id: string;
+            pack_id: string;
+            closing_serial: string;
+          }>;
+          prepared_by?: string | null;
+          // For COMMIT operation
+          validation_token?: string;
+          closed_by?: string | null;
+          // For CANCEL operation
+          reason?: string | null;
+          cancelled_by?: string | null;
+        };
+
+        // API-001: Validate required fields based on operation type
+        if (!payload.operation_type || !payload.store_id) {
+          log.warn('Day close payload missing required fields', {
+            hasOperationType: Boolean(payload.operation_type),
+            hasStoreId: Boolean(payload.store_id),
+          });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'Missing required fields in day close payload',
+          });
+          continue;
+        }
+
+        let success = false;
+
+        switch (payload.operation_type) {
+          case 'PREPARE': {
+            // API-001: Validate PREPARE-specific fields
+            if (!payload.business_date || !payload.expected_inventory) {
+              log.warn('Day close PREPARE missing required fields', {
+                hasBusinessDate: Boolean(payload.business_date),
+                hasInventory: Boolean(payload.expected_inventory),
+              });
+              results.push({
+                id: item.entity_id,
+                status: 'failed',
+                error: 'Missing business_date or expected_inventory for PREPARE',
+              });
+              continue;
+            }
+
+            const prepareResponse = await cloudApiService.prepareDayClose({
+              store_id: payload.store_id,
+              business_date: payload.business_date,
+              expected_inventory: payload.expected_inventory,
+              prepared_by: payload.prepared_by || null,
+            });
+
+            success = prepareResponse.success;
+
+            // SEC-017: Log with validation token info (not the token itself)
+            if (success) {
+              log.info('Day close PREPARE synced', {
+                storeId: payload.store_id,
+                businessDate: payload.business_date,
+                inventoryCount: payload.expected_inventory.length,
+                hasDiscrepancies: Boolean(prepareResponse.discrepancies?.length),
+              });
+            }
+            break;
+          }
+
+          case 'COMMIT': {
+            // API-001: Validate COMMIT-specific fields
+            if (!payload.validation_token) {
+              log.warn('Day close COMMIT missing validation token', {
+                storeId: payload.store_id,
+              });
+              results.push({
+                id: item.entity_id,
+                status: 'failed',
+                error: 'Missing validation_token for COMMIT',
+              });
+              continue;
+            }
+
+            const commitResponse = await cloudApiService.commitDayClose({
+              store_id: payload.store_id,
+              validation_token: payload.validation_token,
+              closed_by: payload.closed_by || null,
+            });
+
+            success = commitResponse.success;
+
+            // SEC-017: Log with summary info
+            if (success) {
+              log.info('Day close COMMIT synced', {
+                storeId: payload.store_id,
+                daySummaryId: commitResponse.day_summary_id,
+                totalSales: commitResponse.total_sales,
+                totalTicketsSold: commitResponse.total_tickets_sold,
+              });
+            }
+            break;
+          }
+
+          case 'CANCEL': {
+            // API-001: Validate CANCEL-specific fields
+            if (!payload.validation_token) {
+              log.warn('Day close CANCEL missing validation token', {
+                storeId: payload.store_id,
+              });
+              results.push({
+                id: item.entity_id,
+                status: 'failed',
+                error: 'Missing validation_token for CANCEL',
+              });
+              continue;
+            }
+
+            const cancelResponse = await cloudApiService.cancelDayClose({
+              store_id: payload.store_id,
+              validation_token: payload.validation_token,
+              reason: payload.reason,
+              cancelled_by: payload.cancelled_by || null,
+            });
+
+            success = cancelResponse.success;
+
+            // SEC-017: Log cancellation
+            if (success) {
+              log.info('Day close CANCEL synced', {
+                storeId: payload.store_id,
+                reason: payload.reason || 'No reason provided',
+              });
+            }
+            break;
+          }
+
+          default:
+            log.warn('Unknown day close operation type', {
+              operationType: payload.operation_type,
+            });
+            results.push({
+              id: item.entity_id,
+              status: 'failed',
+              error: `Unknown operation type: ${payload.operation_type}`,
+            });
+            continue;
+        }
+
+        results.push({
+          id: item.entity_id,
+          status: success ? 'synced' : 'failed',
+          error: success ? undefined : `Failed to sync day close ${payload.operation_type}`,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync day close item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.entity_id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push variance approval items to cloud API
+   *
+   * Enterprise-grade variance approval sync implementation:
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for compliance (variance approvals are auditable events)
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   * - SEC-010: AUTHZ - approved_by required for audit trail
+   *
+   * @param items - Variance approval sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushVarianceApprovalBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        const payload = JSON.parse(item.payload) as {
+          store_id: string;
+          variance_id: string;
+          business_date: string;
+          bin_id: string;
+          pack_id: string;
+          expected_serial: string;
+          actual_serial: string;
+          variance_type: 'SERIAL_MISMATCH' | 'MISSING_PACK' | 'EXTRA_PACK' | 'COUNT_MISMATCH';
+          resolution: string;
+          approved_by: string;
+        };
+
+        // API-001: Validate required fields
+        if (
+          !payload.store_id ||
+          !payload.variance_id ||
+          !payload.business_date ||
+          !payload.approved_by ||
+          !payload.resolution
+        ) {
+          log.warn('Variance approval payload missing required fields', {
+            hasStoreId: Boolean(payload.store_id),
+            hasVarianceId: Boolean(payload.variance_id),
+            hasBusinessDate: Boolean(payload.business_date),
+            hasApprovedBy: Boolean(payload.approved_by),
+            hasResolution: Boolean(payload.resolution),
+          });
+          results.push({
+            id: item.entity_id,
+            status: 'failed',
+            error: 'Missing required fields in variance approval payload',
+          });
+          continue;
+        }
+
+        // Route to cloud API
+        const response = await cloudApiService.approveVariance({
+          store_id: payload.store_id,
+          variance_id: payload.variance_id,
+          business_date: payload.business_date,
+          bin_id: payload.bin_id,
+          pack_id: payload.pack_id,
+          expected_serial: payload.expected_serial,
+          actual_serial: payload.actual_serial,
+          variance_type: payload.variance_type,
+          resolution: payload.resolution,
+          approved_by: payload.approved_by,
+        });
+
+        results.push({
+          id: item.entity_id,
+          status: response.success ? 'synced' : 'failed',
+          error: response.success ? undefined : 'Failed to sync variance approval',
+        });
+
+        // SEC-017: Audit log for compliance
+        if (response.success) {
+          log.info('Variance approval synced to cloud', {
+            varianceId: payload.variance_id,
+            varianceType: payload.variance_type,
+            approvedBy: payload.approved_by,
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync variance approval item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.entity_id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
   }
 }
 

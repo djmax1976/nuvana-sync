@@ -18,6 +18,7 @@ vi.mock('../../../src/main/services/sync-engine.service', () => ({
     start: vi.fn(),
     stop: vi.fn(),
     cleanupQueue: vi.fn(),
+    setCloudApiService: vi.fn(),
   },
 }));
 

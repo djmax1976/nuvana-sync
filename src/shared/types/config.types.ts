@@ -16,13 +16,22 @@ import { z } from 'zod';
 /**
  * API URL validation schema
  * SEC-014: Strict allowlist for URL protocols
+ * Allows HTTP for localhost/127.0.0.1 in development, requires HTTPS otherwise
  */
 export const ApiUrlSchema = z
   .string()
   .min(1, 'API URL is required')
   .max(500, 'API URL too long')
   .url('Invalid URL format')
-  .refine((url) => url.startsWith('https://'), 'API URL must use HTTPS for security');
+  .refine((url) => {
+    // Allow HTTP for localhost/127.0.0.1 (development)
+    const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+    if (isLocalhost) {
+      return url.startsWith('http://') || url.startsWith('https://');
+    }
+    // Require HTTPS for all other URLs (production)
+    return url.startsWith('https://');
+  }, 'API URL must use HTTPS for security (HTTP only allowed for localhost)');
 
 /**
  * API Key validation schema

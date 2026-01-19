@@ -178,3 +178,62 @@ export function validateFileRecord(data: unknown): FileRecord {
 export function validateSyncStats(data: unknown): SyncStats {
   return SyncStatsSchema.parse(data);
 }
+
+// ============================================================================
+// Sync Queue Entity Types
+// ============================================================================
+
+/**
+ * Valid sync entity types that have corresponding cloud API push endpoints
+ *
+ * API-001: VALIDATION - Whitelist of entity types with valid push endpoints
+ * API-008: OUTPUT_FILTERING - Only these types should be enqueued for sync
+ *
+ * Based on api.md specification (Section 4: PUSH DATA):
+ * - pack: /api/v1/sync/lottery/packs/receive, activate, deplete, return, move
+ * - shift_opening: /api/v1/sync/lottery/shift/open
+ * - shift_closing: /api/v1/sync/lottery/shift/close
+ * - day_close: /api/v1/sync/lottery/day/prepare-close, commit-close, cancel-close
+ * - variance_approval: /api/v1/sync/lottery/variances/approve
+ *
+ * Entity types WITHOUT push endpoints (pull-only or unsupported):
+ * - employee: Cloud-managed, pulled from cloud, never pushed
+ * - lottery_bin: Pulled from cloud via /api/v1/sync/lottery/bins
+ * - day_summary: Calculated server-side, no push endpoint
+ * - shift: No dedicated push endpoint (use shift_opening/shift_closing)
+ * - transaction: No push endpoint in API spec
+ *
+ * @security SEC-014: Strict type validation prevents invalid entity types
+ */
+export const ValidSyncEntityTypeSchema = z.enum([
+  'pack',
+  'shift_opening',
+  'shift_closing',
+  'day_close',
+  'variance_approval',
+]);
+
+export type ValidSyncEntityType = z.infer<typeof ValidSyncEntityTypeSchema>;
+
+/**
+ * Array of valid sync entity types for runtime validation
+ * Used by sync-queue.dal.ts to validate entity types before enqueue
+ */
+export const VALID_SYNC_ENTITY_TYPES: readonly ValidSyncEntityType[] = [
+  'pack',
+  'shift_opening',
+  'shift_closing',
+  'day_close',
+  'variance_approval',
+] as const;
+
+/**
+ * Type guard to check if an entity type is valid for sync
+ * API-001: VALIDATION - Runtime check before enqueue
+ *
+ * @param entityType - Entity type to validate
+ * @returns true if entity type has a valid cloud API push endpoint
+ */
+export function isValidSyncEntityType(entityType: string): entityType is ValidSyncEntityType {
+  return VALID_SYNC_ENTITY_TYPES.includes(entityType as ValidSyncEntityType);
+}

@@ -234,77 +234,6 @@ describe('CloudApiService', () => {
     });
   });
 
-  describe('pushBatch', () => {
-    it('should push batch of items to cloud', async () => {
-      const mockResponse = {
-        success: true,
-        results: [
-          { id: 'entity-1', status: 'synced', cloudId: 'cloud-1' },
-          { id: 'entity-2', status: 'synced', cloudId: 'cloud-2' },
-        ],
-      };
-
-      mockFetch.mockResolvedValue({
-        ok: true,
-        json: () => Promise.resolve(mockResponse),
-      });
-
-      const items = [
-        {
-          id: 'queue-1',
-          entity_id: 'entity-1',
-          entity_type: 'transaction',
-          store_id: 'store-123',
-          operation: 'CREATE' as const,
-          payload: '{"amount":100}',
-          priority: 0,
-          synced: 0,
-          sync_attempts: 0,
-          max_attempts: 5,
-          last_sync_error: null,
-          last_attempt_at: null,
-          created_at: '2024-01-01',
-          synced_at: null,
-        },
-        {
-          id: 'queue-2',
-          entity_id: 'entity-2',
-          entity_type: 'transaction',
-          store_id: 'store-123',
-          operation: 'UPDATE' as const,
-          payload: '{"amount":200}',
-          priority: 0,
-          synced: 0,
-          sync_attempts: 0,
-          max_attempts: 5,
-          last_sync_error: null,
-          last_attempt_at: null,
-          created_at: '2024-01-01',
-          synced_at: null,
-        },
-      ];
-
-      const result = await service.pushBatch('transaction', items);
-
-      expect(result.success).toBe(true);
-      expect(result.results).toHaveLength(2);
-      expect(mockFetch).toHaveBeenCalledWith(
-        'https://api.nuvanaapp.com/api/v1/sync/batch',
-        expect.objectContaining({
-          method: 'POST',
-          body: expect.any(String),
-        })
-      );
-    });
-
-    it('should return empty results for empty items', async () => {
-      const result = await service.pushBatch('transaction', []);
-
-      expect(result).toEqual({ success: true, results: [] });
-      expect(mockFetch).not.toHaveBeenCalled();
-    });
-  });
-
   describe('pullUsers', () => {
     // Helper to set up mocks for the full sync flow
     // The new implementation tries /sync/employees first, then falls back to /sync/cashiers
@@ -916,6 +845,1756 @@ describe('CloudApiService', () => {
       expect(result.valid).toBe(true);
       // 1 activate + 2 identity attempts (first fails, second succeeds)
       expect(mockFetch).toHaveBeenCalledTimes(3);
+    });
+  });
+
+  // ==========================================================================
+  // Pack Sync Operations (Phase 1)
+  // ==========================================================================
+
+  describe('Pack Sync Operations', () => {
+    // Helper to set up sync session mocks
+    const setupSyncSessionMocks = (mockResponse: object) => {
+      mockFetch
+        // 1. POST /api/v1/sync/start (startSyncSession)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'VALID',
+                pullPendingCount: 0,
+              },
+            }),
+        })
+        // 2. The actual API call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockResponse),
+        })
+        // 3. POST /api/v1/sync/complete (completeSyncSession)
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+    };
+
+    describe('pushPackReceive', () => {
+      const mockPack = {
+        pack_id: 'pack-123',
+        store_id: 'store-456',
+        game_id: 'game-789',
+        game_code: '1234',
+        pack_number: '1234567',
+        received_at: '2025-01-15T10:00:00Z',
+        received_by: 'user-001',
+      };
+
+      it('should push pack receive to cloud successfully', async () => {
+        setupSyncSessionMocks({
+          success: true,
+          data: { cloud_pack_id: 'cloud-pack-001' },
+        });
+
+        const result = await service.pushPackReceive(mockPack);
+
+        expect(result.success).toBe(true);
+        expect(result.cloud_pack_id).toBe('cloud-pack-001');
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const receiveCall = calls[1];
+        expect(receiveCall[0]).toContain('/api/v1/sync/lottery/packs/receive');
+
+        // Verify the request body (API spec format)
+        const body = JSON.parse(receiveCall[1].body as string);
+        expect(body.session_id).toBe('session-123');
+        expect(body.game_code).toBe('1234');
+        expect(body.pack_number).toBe('1234567');
+        expect(body.local_id).toBe('pack-123');
+      });
+
+      it('should handle session start failure gracefully', async () => {
+        // Session start itself fails - should reject before any pack API call
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: 'Forbidden' }),
+        });
+
+        await expect(service.pushPackReceive(mockPack)).rejects.toThrow();
+      });
+
+      it('should reject when API key is revoked', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'REVOKED',
+                pullPendingCount: 0,
+              },
+            }),
+        });
+
+        await expect(service.pushPackReceive(mockPack)).rejects.toThrow('API key status: REVOKED');
+      });
+    });
+
+    describe('pushPackReceiveBatch', () => {
+      const mockPacks = [
+        {
+          pack_id: 'pack-1',
+          store_id: 'store-456',
+          game_id: 'game-789',
+          pack_number: '1111111',
+          received_at: '2025-01-15T10:00:00Z',
+          received_by: 'user-001',
+        },
+        {
+          pack_id: 'pack-2',
+          store_id: 'store-456',
+          game_id: 'game-789',
+          pack_number: '2222222',
+          received_at: '2025-01-15T10:01:00Z',
+          received_by: 'user-001',
+        },
+      ];
+
+      it('should push batch of packs to cloud successfully', async () => {
+        setupSyncSessionMocks({
+          success: true,
+          data: {
+            results: [
+              { pack_id: 'pack-1', cloud_pack_id: 'cloud-1', status: 'synced' },
+              { pack_id: 'pack-2', cloud_pack_id: 'cloud-2', status: 'synced' },
+            ],
+          },
+        });
+
+        const result = await service.pushPackReceiveBatch(mockPacks);
+
+        expect(result.success).toBe(true);
+        expect(result.results).toHaveLength(2);
+        expect(result.results[0].status).toBe('synced');
+        expect(result.results[1].status).toBe('synced');
+
+        // Verify the API call was made to the batch endpoint
+        const calls = mockFetch.mock.calls;
+        const batchCall = calls[1];
+        expect(batchCall[0]).toContain('/api/v1/sync/lottery/packs/receive/batch');
+      });
+
+      it('should return empty results for empty array', async () => {
+        const result = await service.pushPackReceiveBatch([]);
+
+        expect(result.success).toBe(true);
+        expect(result.results).toHaveLength(0);
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('should handle partial success', async () => {
+        setupSyncSessionMocks({
+          success: true,
+          data: {
+            results: [
+              { pack_id: 'pack-1', cloud_pack_id: 'cloud-1', status: 'synced' },
+              { pack_id: 'pack-2', status: 'failed', error: 'Duplicate pack number' },
+            ],
+          },
+        });
+
+        const result = await service.pushPackReceiveBatch(mockPacks);
+
+        expect(result.success).toBe(true);
+        expect(result.results[0].status).toBe('synced');
+        expect(result.results[1].status).toBe('failed');
+        expect(result.results[1].error).toBe('Duplicate pack number');
+      });
+    });
+
+    describe('pushPackActivate', () => {
+      const mockActivation = {
+        pack_id: 'pack-123',
+        store_id: 'store-456',
+        bin_id: 'bin-001',
+        opening_serial: '001',
+        activated_at: '2025-01-15T11:00:00Z',
+        activated_by: 'user-002',
+      };
+
+      it('should push pack activation to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushPackActivate(mockActivation);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const activateCall = calls[1];
+        expect(activateCall[0]).toContain('/api/v1/sync/lottery/packs/activate');
+
+        // Verify the request body
+        const body = JSON.parse(activateCall[1].body as string);
+        expect(body.pack_id).toBe('pack-123');
+        expect(body.bin_id).toBe('bin-001');
+        expect(body.opening_serial).toBe('001');
+        expect(body.activated_by).toBe('user-002');
+      });
+    });
+
+    describe('pushPackDeplete', () => {
+      const mockDepletion = {
+        pack_id: 'pack-123',
+        store_id: 'store-456',
+        closing_serial: '300',
+        tickets_sold: 300,
+        sales_amount: 150.0,
+        settled_at: '2025-01-16T18:00:00Z',
+      };
+
+      it('should push pack depletion to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushPackDeplete(mockDepletion);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        expect(depleteCall[0]).toContain('/api/v1/sync/lottery/packs/deplete');
+
+        // Verify the request body
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.pack_id).toBe('pack-123');
+        expect(body.closing_serial).toBe('300');
+        expect(body.tickets_sold).toBe(300);
+        expect(body.sales_amount).toBe(150.0);
+      });
+    });
+
+    describe('pushPackReturn', () => {
+      const mockReturn = {
+        pack_id: 'pack-123',
+        store_id: 'store-456',
+        closing_serial: '150',
+        tickets_sold: 150,
+        sales_amount: 75.0,
+        return_reason: 'Defective pack',
+        returned_at: '2025-01-16T12:00:00Z',
+      };
+
+      it('should push pack return to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushPackReturn(mockReturn);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        expect(returnCall[0]).toContain('/api/v1/sync/lottery/packs/return');
+
+        // Verify the request body
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.pack_id).toBe('pack-123');
+        expect(body.closing_serial).toBe('150');
+        expect(body.return_reason).toBe('Defective pack');
+      });
+
+      it('should handle return without closing serial', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnWithoutSerial = {
+          pack_id: 'pack-123',
+          store_id: 'store-456',
+          returned_at: '2025-01-16T12:00:00Z',
+        };
+
+        const result = await service.pushPackReturn(returnWithoutSerial);
+
+        expect(result.success).toBe(true);
+
+        // Verify null values are sent for optional fields
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.closing_serial).toBeNull();
+        expect(body.tickets_sold).toBe(0);
+        expect(body.sales_amount).toBe(0);
+        expect(body.return_reason).toBeNull();
+      });
+    });
+
+    describe('pushPackMove', () => {
+      const mockMove = {
+        pack_id: 'pack-123',
+        store_id: 'store-456',
+        from_bin_id: 'bin-001',
+        to_bin_id: 'bin-002',
+        moved_at: '2025-01-16T14:00:00Z',
+        moved_by: 'user-003',
+      };
+
+      it('should push pack move to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushPackMove(mockMove);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const moveCall = calls[1];
+        expect(moveCall[0]).toContain('/api/v1/sync/lottery/packs/move');
+
+        // Verify the request body
+        const body = JSON.parse(moveCall[1].body as string);
+        expect(body.pack_id).toBe('pack-123');
+        expect(body.from_bin_id).toBe('bin-001');
+        expect(body.to_bin_id).toBe('bin-002');
+        expect(body.moved_by).toBe('user-003');
+      });
+    });
+
+    // ==========================================================================
+    // Phase 2: Shift Lottery Sync Tests
+    // ==========================================================================
+
+    describe('pushShiftOpening', () => {
+      const mockShiftOpening = {
+        shift_id: 'shift-123',
+        store_id: 'store-456',
+        openings: [
+          { bin_id: 'bin-001', pack_id: 'pack-001', opening_serial: '050' },
+          { bin_id: 'bin-002', pack_id: 'pack-002', opening_serial: '025' },
+        ],
+        opened_at: '2025-01-15T08:00:00Z',
+        opened_by: 'user-001',
+      };
+
+      it('should push shift opening to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushShiftOpening(mockShiftOpening);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const openingCall = calls[1];
+        expect(openingCall[0]).toContain('/api/v1/sync/lottery/shift/open');
+        expect(openingCall[0]).toContain('session_id=session-123');
+
+        // Verify the request body
+        const body = JSON.parse(openingCall[1].body as string);
+        expect(body.shift_id).toBe('shift-123');
+        expect(body.store_id).toBe('store-456');
+        expect(body.openings).toHaveLength(2);
+        expect(body.openings[0].bin_id).toBe('bin-001');
+        expect(body.openings[0].pack_id).toBe('pack-001');
+        expect(body.openings[0].opening_serial).toBe('050');
+        expect(body.opened_by).toBe('user-001');
+      });
+
+      it('should return success for empty openings array', async () => {
+        const emptyOpening = {
+          ...mockShiftOpening,
+          openings: [],
+        };
+
+        const result = await service.pushShiftOpening(emptyOpening);
+
+        // Should succeed without making API call
+        expect(result.success).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('should handle session start failure gracefully', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: 'Forbidden' }),
+        });
+
+        await expect(service.pushShiftOpening(mockShiftOpening)).rejects.toThrow();
+      });
+
+      it('should reject when API key is revoked', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'REVOKED',
+                pullPendingCount: 0,
+              },
+            }),
+        });
+
+        await expect(service.pushShiftOpening(mockShiftOpening)).rejects.toThrow(
+          'API key status: REVOKED'
+        );
+      });
+    });
+
+    describe('pushShiftClosing', () => {
+      const mockShiftClosing = {
+        shift_id: 'shift-123',
+        store_id: 'store-456',
+        closings: [
+          {
+            bin_id: 'bin-001',
+            pack_id: 'pack-001',
+            closing_serial: '100',
+            tickets_sold: 50,
+            sales_amount: 25.0,
+          },
+          {
+            bin_id: 'bin-002',
+            pack_id: 'pack-002',
+            closing_serial: '075',
+            tickets_sold: 50,
+            sales_amount: 50.0,
+          },
+        ],
+        closed_at: '2025-01-15T16:00:00Z',
+        closed_by: 'user-002',
+      };
+
+      it('should push shift closing to cloud successfully', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const result = await service.pushShiftClosing(mockShiftClosing);
+
+        expect(result.success).toBe(true);
+
+        // Verify the API call was made to the correct endpoint
+        const calls = mockFetch.mock.calls;
+        const closingCall = calls[1];
+        expect(closingCall[0]).toContain('/api/v1/sync/lottery/shift/close');
+        expect(closingCall[0]).toContain('session_id=session-123');
+
+        // Verify the request body
+        const body = JSON.parse(closingCall[1].body as string);
+        expect(body.shift_id).toBe('shift-123');
+        expect(body.store_id).toBe('store-456');
+        expect(body.closings).toHaveLength(2);
+        expect(body.closings[0].bin_id).toBe('bin-001');
+        expect(body.closings[0].pack_id).toBe('pack-001');
+        expect(body.closings[0].closing_serial).toBe('100');
+        expect(body.closings[0].tickets_sold).toBe(50);
+        expect(body.closings[0].sales_amount).toBe(25.0);
+        expect(body.closed_by).toBe('user-002');
+      });
+
+      it('should return success for empty closings array', async () => {
+        const emptyClosing = {
+          ...mockShiftClosing,
+          closings: [],
+        };
+
+        const result = await service.pushShiftClosing(emptyClosing);
+
+        // Should succeed without making API call
+        expect(result.success).toBe(true);
+        expect(mockFetch).not.toHaveBeenCalled();
+      });
+
+      it('should handle session start failure gracefully', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: 'Forbidden' }),
+        });
+
+        await expect(service.pushShiftClosing(mockShiftClosing)).rejects.toThrow();
+      });
+
+      it('should reject when API key is suspended', async () => {
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: 'SUSPENDED',
+                pullPendingCount: 0,
+              },
+            }),
+        });
+
+        await expect(service.pushShiftClosing(mockShiftClosing)).rejects.toThrow(
+          'API key status: SUSPENDED'
+        );
+      });
+
+      it('should include correct sales totals in request body', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        await service.pushShiftClosing(mockShiftClosing);
+
+        const calls = mockFetch.mock.calls;
+        const closingCall = calls[1];
+        const body = JSON.parse(closingCall[1].body as string);
+
+        // Verify sales totals are correct
+        const totalSales = body.closings.reduce(
+          (sum: number, c: { sales_amount: number }) => sum + c.sales_amount,
+          0
+        );
+        const totalTickets = body.closings.reduce(
+          (sum: number, c: { tickets_sold: number }) => sum + c.tickets_sold,
+          0
+        );
+
+        expect(totalSales).toBe(75.0);
+        expect(totalTickets).toBe(100);
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Phase 3: Day Close Sync Tests
+  // ==========================================================================
+
+  describe('Phase 3: Day Close Sync', () => {
+    // Helper to set up sync session mocks
+    const setupSyncSessionMocks = (options: { success: boolean; revocationStatus?: string }) => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () =>
+          Promise.resolve({
+            success: options.success,
+            data: {
+              sessionId: 'session-day-close-123',
+              revocationStatus: options.revocationStatus ?? 'VALID',
+              pullPendingCount: 0,
+            },
+          }),
+      });
+    };
+
+    // Helper to set up completion mock
+    const setupCompletionMock = () => {
+      mockFetch.mockResolvedValueOnce({
+        ok: true,
+        json: () => Promise.resolve({ success: true }),
+      });
+    };
+
+    describe('prepareDayClose', () => {
+      const mockPrepareData = {
+        store_id: '550e8400-e29b-41d4-a716-446655440000',
+        business_date: '2026-01-18',
+        expected_inventory: [
+          {
+            bin_id: '550e8400-e29b-41d4-a716-446655440001',
+            pack_id: '550e8400-e29b-41d4-a716-446655440002',
+            closing_serial: '001234',
+          },
+          {
+            bin_id: '550e8400-e29b-41d4-a716-446655440003',
+            pack_id: '550e8400-e29b-41d4-a716-446655440004',
+            closing_serial: '005678',
+          },
+        ],
+        prepared_by: '550e8400-e29b-41d4-a716-446655440005',
+      };
+
+      it('should successfully prepare day close and return validation token', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const mockPrepareResponse = {
+          success: true,
+          data: {
+            validation_token: 'validation-token-xyz-123',
+            expires_at: '2026-01-18T23:59:59Z',
+            warnings: [],
+          },
+        };
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockPrepareResponse),
+        });
+
+        setupCompletionMock();
+
+        const result = await service.prepareDayClose(mockPrepareData);
+
+        expect(result.success).toBe(true);
+        expect(result.validation_token).toBe('validation-token-xyz-123');
+        expect(result.expires_at).toBe('2026-01-18T23:59:59Z');
+      });
+
+      it('should return discrepancies when inventory validation fails', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const mockPrepareResponse = {
+          success: true,
+          data: {
+            validation_token: 'validation-token-with-discrepancies',
+            expires_at: '2026-01-18T23:59:59Z',
+            warnings: ['Pack serial mismatch detected'],
+            discrepancies: [
+              {
+                bin_id: '550e8400-e29b-41d4-a716-446655440001',
+                pack_id: '550e8400-e29b-41d4-a716-446655440002',
+                expected_serial: '001234',
+                actual_serial: '001235',
+                issue: 'Serial numbers do not match',
+              },
+            ],
+          },
+        };
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockPrepareResponse),
+        });
+
+        setupCompletionMock();
+
+        const result = await service.prepareDayClose(mockPrepareData);
+
+        expect(result.success).toBe(true);
+        expect(result.warnings).toHaveLength(1);
+        expect(result.discrepancies).toHaveLength(1);
+        expect(result.discrepancies?.[0].issue).toBe('Serial numbers do not match');
+      });
+
+      it('should reject invalid business date format - API-001', async () => {
+        const invalidData = {
+          ...mockPrepareData,
+          business_date: '01-18-2026', // Invalid format
+        };
+
+        await expect(service.prepareDayClose(invalidData)).rejects.toThrow(
+          'Invalid business date format'
+        );
+      });
+
+      it('should reject when API key is revoked', async () => {
+        setupSyncSessionMocks({ success: true, revocationStatus: 'REVOKED' });
+
+        await expect(service.prepareDayClose(mockPrepareData)).rejects.toThrow(
+          'API key status: REVOKED'
+        );
+      });
+
+      it('should call correct endpoint with session_id', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                validation_token: 'token',
+                expires_at: '2026-01-18T23:59:59Z',
+              },
+            }),
+        });
+
+        setupCompletionMock();
+
+        await service.prepareDayClose(mockPrepareData);
+
+        // Check endpoint was called with session_id
+        expect(mockFetch).toHaveBeenNthCalledWith(
+          2,
+          expect.stringContaining(
+            '/api/v1/sync/lottery/day/prepare-close?session_id=session-day-close-123'
+          ),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('commitDayClose', () => {
+      const mockCommitData = {
+        store_id: '550e8400-e29b-41d4-a716-446655440000',
+        validation_token: 'validation-token-xyz-123',
+        closed_by: '550e8400-e29b-41d4-a716-446655440005',
+      };
+
+      it('should successfully commit day close and return summary', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const mockCommitResponse = {
+          success: true,
+          data: {
+            day_summary_id: '550e8400-e29b-41d4-a716-446655440099',
+            business_date: '2026-01-18',
+            total_sales: 1500.0,
+            total_tickets_sold: 250,
+          },
+        };
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(mockCommitResponse),
+        });
+
+        setupCompletionMock();
+
+        const result = await service.commitDayClose(mockCommitData);
+
+        expect(result.success).toBe(true);
+        expect(result.day_summary_id).toBe('550e8400-e29b-41d4-a716-446655440099');
+        expect(result.total_sales).toBe(1500.0);
+        expect(result.total_tickets_sold).toBe(250);
+      });
+
+      it('should reject when validation_token is missing - API-001', async () => {
+        const invalidData = {
+          store_id: '550e8400-e29b-41d4-a716-446655440000',
+          validation_token: '',
+          closed_by: '550e8400-e29b-41d4-a716-446655440005',
+        };
+
+        await expect(service.commitDayClose(invalidData)).rejects.toThrow(
+          'Validation token is required'
+        );
+      });
+
+      it('should reject when API key is suspended', async () => {
+        setupSyncSessionMocks({ success: true, revocationStatus: 'SUSPENDED' });
+
+        await expect(service.commitDayClose(mockCommitData)).rejects.toThrow(
+          'API key status: SUSPENDED'
+        );
+      });
+
+      it('should handle session start failure gracefully - API-003', async () => {
+        // Session start itself fails - should reject before any day close API call
+        mockFetch.mockResolvedValueOnce({
+          ok: false,
+          status: 403,
+          headers: new Headers(),
+          json: () => Promise.resolve({ message: 'Forbidden' }),
+        });
+
+        await expect(service.commitDayClose(mockCommitData)).rejects.toThrow();
+      });
+    });
+
+    describe('cancelDayClose', () => {
+      const mockCancelData = {
+        store_id: '550e8400-e29b-41d4-a716-446655440000',
+        validation_token: 'validation-token-xyz-123',
+        reason: 'Need to add more packs',
+        cancelled_by: '550e8400-e29b-41d4-a716-446655440005',
+      };
+
+      it('should successfully cancel day close', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+
+        setupCompletionMock();
+
+        const result = await service.cancelDayClose(mockCancelData);
+
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject when validation_token is missing - API-001', async () => {
+        const invalidData = {
+          store_id: '550e8400-e29b-41d4-a716-446655440000',
+          validation_token: '',
+          reason: null,
+          cancelled_by: null,
+        };
+
+        await expect(service.cancelDayClose(invalidData)).rejects.toThrow(
+          'Validation token is required'
+        );
+      });
+
+      it('should handle cancellation without reason', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+
+        setupCompletionMock();
+
+        const dataWithoutReason = {
+          ...mockCancelData,
+          reason: null,
+        };
+
+        const result = await service.cancelDayClose(dataWithoutReason);
+
+        expect(result.success).toBe(true);
+      });
+    });
+
+    describe('approveVariance', () => {
+      const mockVarianceData = {
+        store_id: '550e8400-e29b-41d4-a716-446655440000',
+        variance_id: '550e8400-e29b-41d4-a716-446655440099',
+        business_date: '2026-01-18',
+        bin_id: '550e8400-e29b-41d4-a716-446655440001',
+        pack_id: '550e8400-e29b-41d4-a716-446655440002',
+        expected_serial: '001234',
+        actual_serial: '001235',
+        variance_type: 'SERIAL_MISMATCH' as const,
+        resolution: 'Serial was updated due to pack replacement',
+        approved_by: '550e8400-e29b-41d4-a716-446655440005',
+      };
+
+      it('should successfully approve variance', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        mockFetch.mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+
+        setupCompletionMock();
+
+        const result = await service.approveVariance(mockVarianceData);
+
+        expect(result.success).toBe(true);
+      });
+
+      it('should reject invalid variance_id format - API-001', async () => {
+        const invalidData = {
+          ...mockVarianceData,
+          variance_id: 'not-a-uuid',
+        };
+
+        await expect(service.approveVariance(invalidData)).rejects.toThrow(
+          'Invalid variance ID format'
+        );
+      });
+
+      it('should reject empty resolution - API-001', async () => {
+        const invalidData = {
+          ...mockVarianceData,
+          resolution: '',
+        };
+
+        await expect(service.approveVariance(invalidData)).rejects.toThrow(
+          'Resolution is required'
+        );
+      });
+
+      it('should reject whitespace-only resolution - API-001', async () => {
+        const invalidData = {
+          ...mockVarianceData,
+          resolution: '   ',
+        };
+
+        await expect(service.approveVariance(invalidData)).rejects.toThrow(
+          'Resolution is required'
+        );
+      });
+
+      it('should handle all variance types', async () => {
+        const varianceTypes = [
+          'SERIAL_MISMATCH',
+          'MISSING_PACK',
+          'EXTRA_PACK',
+          'COUNT_MISMATCH',
+        ] as const;
+
+        for (const varianceType of varianceTypes) {
+          vi.clearAllMocks();
+
+          setupSyncSessionMocks({ success: true });
+
+          mockFetch.mockResolvedValueOnce({
+            ok: true,
+            json: () => Promise.resolve({ success: true }),
+          });
+
+          setupCompletionMock();
+
+          const data = {
+            ...mockVarianceData,
+            variance_type: varianceType,
+          };
+
+          const result = await service.approveVariance(data);
+
+          expect(result.success).toBe(true);
+        }
+      });
+
+      it('should reject when API key is revoked', async () => {
+        setupSyncSessionMocks({ success: true, revocationStatus: 'REVOKED' });
+
+        await expect(service.approveVariance(mockVarianceData)).rejects.toThrow(
+          'API key status: REVOKED'
+        );
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Phase 4: Pull Endpoints (Multi-Device Sync) Tests
+  // ==========================================================================
+
+  describe('Phase 4: Pull Endpoints', () => {
+    // Reset mocks before each Phase 4 test to ensure complete isolation
+    // mockReset clears mock implementation and call history
+    beforeEach(() => {
+      mockFetch.mockReset();
+    });
+
+    // Helper to set up sync session + pull response + completion mocks
+    const setupPullMocks = (
+      pullResponse: Record<string, unknown>,
+      options?: {
+        revocationStatus?: string;
+      }
+    ) => {
+      mockFetch
+        // 1. POST /api/v1/sync/start
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              success: true,
+              data: {
+                sessionId: 'session-123',
+                revocationStatus: options?.revocationStatus || 'VALID',
+                pullPendingCount: 0,
+              },
+            }),
+        })
+        // 2. GET /api/v1/sync/lottery/...
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true, data: pullResponse }),
+        })
+        // 3. POST /api/v1/sync/complete
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        });
+    };
+
+    describe('pullReceivedPacks', () => {
+      const mockPacks = [
+        {
+          pack_id: 'pack-1',
+          store_id: 'store-123',
+          game_id: 'game-1',
+          game_code: '1234',
+          pack_number: 'PKG001',
+          status: 'RECEIVED',
+          bin_id: null,
+          opening_serial: null,
+          closing_serial: null,
+          tickets_sold: null,
+          sales_amount: null,
+          received_at: '2024-01-15T10:00:00Z',
+          received_by: 'user-1',
+          activated_at: null,
+          activated_by: null,
+          settled_at: null,
+          returned_at: null,
+          return_reason: null,
+          cloud_pack_id: 'cloud-pack-1',
+          sync_sequence: 100,
+          updated_at: '2024-01-15T10:00:00Z',
+        },
+        {
+          pack_id: 'pack-2',
+          store_id: 'store-123',
+          game_id: 'game-2',
+          game_code: '5678',
+          pack_number: 'PKG002',
+          status: 'RECEIVED',
+          bin_id: null,
+          opening_serial: null,
+          closing_serial: null,
+          tickets_sold: null,
+          sales_amount: null,
+          received_at: '2024-01-15T11:00:00Z',
+          received_by: 'user-2',
+          activated_at: null,
+          activated_by: null,
+          settled_at: null,
+          returned_at: null,
+          return_reason: null,
+          cloud_pack_id: 'cloud-pack-2',
+          sync_sequence: 101,
+          updated_at: '2024-01-15T11:00:00Z',
+        },
+      ];
+
+      it('should pull received packs with default options', async () => {
+        setupPullMocks({ packs: mockPacks });
+
+        const result = await service.pullReceivedPacks();
+
+        expect(result.packs).toHaveLength(2);
+        expect(result.packs[0].pack_id).toBe('pack-1');
+        expect(result.packs[0].status).toBe('RECEIVED');
+        expect(result.syncMetadata.lastSequence).toBe(101);
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('/api/v1/sync/lottery/packs/received'),
+          expect.any(Object)
+        );
+      });
+
+      it('should use sinceSequence for delta sync', async () => {
+        setupPullMocks({ packs: [mockPacks[1]] });
+
+        const result = await service.pullReceivedPacks({ sinceSequence: 100 });
+
+        expect(result.packs).toHaveLength(1);
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('since_sequence=100'),
+          expect.any(Object)
+        );
+      });
+
+      it('should enforce bounded pagination (max 1000)', async () => {
+        setupPullMocks({ packs: [] });
+
+        await service.pullReceivedPacks({ limit: 5000 });
+
+        // Should cap at 1000
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('limit=1000'),
+          expect.any(Object)
+        );
+      });
+
+      it('should handle records response format', async () => {
+        setupPullMocks({ records: mockPacks });
+
+        const result = await service.pullReceivedPacks();
+
+        expect(result.packs).toHaveLength(2);
+      });
+
+      it('should reject when API key is revoked', async () => {
+        setupPullMocks({}, { revocationStatus: 'REVOKED' });
+
+        await expect(service.pullReceivedPacks()).rejects.toThrow('API key status: REVOKED');
+      });
+    });
+
+    describe('pullActivatedPacks', () => {
+      const mockActivatedPacks = [
+        {
+          pack_id: 'pack-1',
+          store_id: 'store-123',
+          game_id: 'game-1',
+          game_code: '1234',
+          pack_number: 'PKG001',
+          status: 'ACTIVATED',
+          bin_id: 'bin-1',
+          opening_serial: '001',
+          closing_serial: null,
+          tickets_sold: null,
+          sales_amount: null,
+          received_at: '2024-01-15T10:00:00Z',
+          received_by: 'user-1',
+          activated_at: '2024-01-15T12:00:00Z',
+          activated_by: 'user-1',
+          settled_at: null,
+          returned_at: null,
+          return_reason: null,
+          cloud_pack_id: 'cloud-pack-1',
+          sync_sequence: 200,
+          updated_at: '2024-01-15T12:00:00Z',
+        },
+      ];
+
+      it('should pull activated packs from cloud', async () => {
+        setupPullMocks({ packs: mockActivatedPacks });
+
+        const result = await service.pullActivatedPacks();
+
+        expect(result.packs).toHaveLength(1);
+        expect(result.packs[0].status).toBe('ACTIVATED');
+        expect(result.packs[0].bin_id).toBe('bin-1');
+        expect(result.packs[0].opening_serial).toBe('001');
+      });
+
+      it('should use since parameter for delta sync', async () => {
+        setupPullMocks({ packs: [] });
+
+        await service.pullActivatedPacks({ since: '2024-01-15T00:00:00Z' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('since=2024-01-15'),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('pullReturnedPacks', () => {
+      const mockReturnedPacks = [
+        {
+          pack_id: 'pack-1',
+          store_id: 'store-123',
+          game_id: 'game-1',
+          game_code: '1234',
+          pack_number: 'PKG001',
+          status: 'RETURNED',
+          bin_id: null,
+          opening_serial: null,
+          closing_serial: null,
+          tickets_sold: 0,
+          sales_amount: 0,
+          received_at: '2024-01-15T10:00:00Z',
+          received_by: 'user-1',
+          activated_at: null,
+          activated_by: null,
+          settled_at: null,
+          returned_at: '2024-01-16T09:00:00Z',
+          return_reason: 'Damaged packaging',
+          cloud_pack_id: 'cloud-pack-1',
+          sync_sequence: 300,
+          updated_at: '2024-01-16T09:00:00Z',
+        },
+      ];
+
+      it('should pull returned packs from cloud', async () => {
+        setupPullMocks({ packs: mockReturnedPacks });
+
+        const result = await service.pullReturnedPacks();
+
+        expect(result.packs).toHaveLength(1);
+        expect(result.packs[0].status).toBe('RETURNED');
+        expect(result.packs[0].return_reason).toBe('Damaged packaging');
+      });
+    });
+
+    describe('pullDepletedPacks', () => {
+      const mockDepletedPacks = [
+        {
+          pack_id: 'pack-1',
+          store_id: 'store-123',
+          game_id: 'game-1',
+          game_code: '1234',
+          pack_number: 'PKG001',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '001',
+          closing_serial: '300',
+          tickets_sold: 300,
+          sales_amount: 1500,
+          received_at: '2024-01-15T10:00:00Z',
+          received_by: 'user-1',
+          activated_at: '2024-01-15T12:00:00Z',
+          activated_by: 'user-1',
+          settled_at: '2024-01-20T18:00:00Z',
+          returned_at: null,
+          return_reason: null,
+          cloud_pack_id: 'cloud-pack-1',
+          sync_sequence: 400,
+          updated_at: '2024-01-20T18:00:00Z',
+        },
+      ];
+
+      it('should pull depleted packs from cloud', async () => {
+        setupPullMocks({ packs: mockDepletedPacks });
+
+        const result = await service.pullDepletedPacks();
+
+        expect(result.packs).toHaveLength(1);
+        expect(result.packs[0].status).toBe('DEPLETED');
+        expect(result.packs[0].tickets_sold).toBe(300);
+        expect(result.packs[0].sales_amount).toBe(1500);
+      });
+    });
+
+    describe('pullDayStatus', () => {
+      const mockDayStatus = {
+        store_id: 'store-123',
+        business_date: '2024-01-15',
+        status: 'OPEN',
+        opened_at: '2024-01-15T06:00:00Z',
+        closed_at: null,
+        validation_token: null,
+        token_expires_at: null,
+        total_sales: null,
+        total_tickets_sold: null,
+        sync_sequence: 500,
+      };
+
+      it('should pull current day status from cloud', async () => {
+        setupPullMocks({ dayStatus: mockDayStatus });
+
+        const result = await service.pullDayStatus();
+
+        expect(result.dayStatus).not.toBeNull();
+        expect(result.dayStatus?.status).toBe('OPEN');
+        expect(result.dayStatus?.business_date).toBe('2024-01-15');
+      });
+
+      it('should handle snake_case response format', async () => {
+        setupPullMocks({ day_status: mockDayStatus });
+
+        const result = await service.pullDayStatus();
+
+        expect(result.dayStatus).not.toBeNull();
+      });
+
+      it('should pull specific business date', async () => {
+        setupPullMocks({ dayStatus: mockDayStatus });
+
+        await service.pullDayStatus('2024-01-15');
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('business_date=2024-01-15'),
+          expect.any(Object)
+        );
+      });
+
+      it('should reject invalid business date format', async () => {
+        await expect(service.pullDayStatus('invalid-date')).rejects.toThrow(
+          'Invalid business date format'
+        );
+      });
+
+      it('should handle PREPARING_CLOSE status', async () => {
+        const preparingStatus = {
+          ...mockDayStatus,
+          status: 'PREPARING_CLOSE',
+          validation_token: 'token-123',
+          token_expires_at: '2024-01-15T23:59:59Z',
+        };
+        setupPullMocks({ dayStatus: preparingStatus });
+
+        const result = await service.pullDayStatus();
+
+        expect(result.dayStatus?.status).toBe('PREPARING_CLOSE');
+        expect(result.dayStatus?.validation_token).toBe('token-123');
+      });
+    });
+
+    describe('pullShiftOpenings', () => {
+      const mockOpenings = [
+        {
+          shift_opening_id: 'opening-1',
+          shift_id: 'shift-1',
+          store_id: 'store-123',
+          bin_id: 'bin-1',
+          pack_id: 'pack-1',
+          opening_serial: '001',
+          opened_at: '2024-01-15T06:00:00Z',
+          opened_by: 'user-1',
+          sync_sequence: 600,
+        },
+        {
+          shift_opening_id: 'opening-2',
+          shift_id: 'shift-1',
+          store_id: 'store-123',
+          bin_id: 'bin-2',
+          pack_id: 'pack-2',
+          opening_serial: '050',
+          opened_at: '2024-01-15T06:00:00Z',
+          opened_by: 'user-1',
+          sync_sequence: 601,
+        },
+      ];
+
+      it('should pull shift openings from cloud', async () => {
+        setupPullMocks({ openings: mockOpenings });
+
+        const result = await service.pullShiftOpenings();
+
+        expect(result.openings).toHaveLength(2);
+        expect(result.openings[0].shift_id).toBe('shift-1');
+        expect(result.openings[0].opening_serial).toBe('001');
+      });
+
+      it('should filter by shift ID', async () => {
+        setupPullMocks({ openings: mockOpenings });
+
+        await service.pullShiftOpenings({ shiftId: 'shift-1' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('shift_id=shift-1'),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('pullShiftClosings', () => {
+      const mockClosings = [
+        {
+          shift_closing_id: 'closing-1',
+          shift_id: 'shift-1',
+          store_id: 'store-123',
+          bin_id: 'bin-1',
+          pack_id: 'pack-1',
+          closing_serial: '100',
+          tickets_sold: 99,
+          sales_amount: 495,
+          closed_at: '2024-01-15T14:00:00Z',
+          closed_by: 'user-1',
+          sync_sequence: 700,
+        },
+      ];
+
+      it('should pull shift closings from cloud', async () => {
+        setupPullMocks({ closings: mockClosings });
+
+        const result = await service.pullShiftClosings();
+
+        expect(result.closings).toHaveLength(1);
+        expect(result.closings[0].tickets_sold).toBe(99);
+        expect(result.closings[0].sales_amount).toBe(495);
+      });
+
+      it('should use sinceSequence for delta sync', async () => {
+        setupPullMocks({ closings: [] });
+
+        await service.pullShiftClosings({ sinceSequence: 699 });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('since_sequence=699'),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('pullVariances', () => {
+      const mockVariances = [
+        {
+          variance_id: 'var-1',
+          store_id: 'store-123',
+          business_date: '2024-01-15',
+          bin_id: 'bin-1',
+          pack_id: 'pack-1',
+          expected_serial: '100',
+          actual_serial: '105',
+          variance_type: 'SERIAL_MISMATCH',
+          status: 'PENDING',
+          resolution: null,
+          approved_by: null,
+          approved_at: null,
+          created_at: '2024-01-15T22:00:00Z',
+          sync_sequence: 800,
+        },
+      ];
+
+      it('should pull variances from cloud', async () => {
+        setupPullMocks({ variances: mockVariances });
+
+        const result = await service.pullVariances();
+
+        expect(result.variances).toHaveLength(1);
+        expect(result.variances[0].variance_type).toBe('SERIAL_MISMATCH');
+        expect(result.variances[0].status).toBe('PENDING');
+      });
+
+      it('should filter by status', async () => {
+        setupPullMocks({ variances: mockVariances });
+
+        await service.pullVariances({ status: 'PENDING' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('status=PENDING'),
+          expect.any(Object)
+        );
+      });
+
+      it('should filter by business date', async () => {
+        setupPullMocks({ variances: mockVariances });
+
+        await service.pullVariances({ businessDate: '2024-01-15' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('business_date=2024-01-15'),
+          expect.any(Object)
+        );
+      });
+
+      it('should reject invalid business date format', async () => {
+        await expect(service.pullVariances({ businessDate: 'invalid' })).rejects.toThrow(
+          'Invalid business date format'
+        );
+      });
+    });
+
+    describe('pullDayPacks', () => {
+      const mockDayPacks = [
+        {
+          day_pack_id: 'daypack-1',
+          store_id: 'store-123',
+          business_date: '2024-01-15',
+          bin_id: 'bin-1',
+          pack_id: 'pack-1',
+          opening_serial: '001',
+          closing_serial: '100',
+          tickets_sold: 99,
+          sales_amount: 495,
+          sync_sequence: 900,
+        },
+      ];
+
+      it('should pull day packs from cloud', async () => {
+        setupPullMocks({ dayPacks: mockDayPacks });
+
+        const result = await service.pullDayPacks();
+
+        expect(result.dayPacks).toHaveLength(1);
+        expect(result.dayPacks[0].business_date).toBe('2024-01-15');
+        expect(result.dayPacks[0].tickets_sold).toBe(99);
+      });
+
+      it('should handle snake_case response format', async () => {
+        setupPullMocks({ day_packs: mockDayPacks });
+
+        const result = await service.pullDayPacks();
+
+        expect(result.dayPacks).toHaveLength(1);
+      });
+
+      it('should filter by business date', async () => {
+        setupPullMocks({ dayPacks: mockDayPacks });
+
+        await service.pullDayPacks({ businessDate: '2024-01-15' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('business_date=2024-01-15'),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('pullBinHistory', () => {
+      const mockHistory = [
+        {
+          history_id: 'hist-1',
+          store_id: 'store-123',
+          pack_id: 'pack-1',
+          bin_id: 'bin-1',
+          action: 'ACTIVATED',
+          from_bin_id: null,
+          to_bin_id: 'bin-1',
+          serial_at_action: '001',
+          performed_at: '2024-01-15T12:00:00Z',
+          performed_by: 'user-1',
+          sync_sequence: 1000,
+        },
+        {
+          history_id: 'hist-2',
+          store_id: 'store-123',
+          pack_id: 'pack-1',
+          bin_id: 'bin-2',
+          action: 'MOVED_IN',
+          from_bin_id: 'bin-1',
+          to_bin_id: 'bin-2',
+          serial_at_action: '050',
+          performed_at: '2024-01-15T14:00:00Z',
+          performed_by: 'user-1',
+          sync_sequence: 1001,
+        },
+      ];
+
+      it('should pull bin history from cloud', async () => {
+        setupPullMocks({ history: mockHistory });
+
+        const result = await service.pullBinHistory();
+
+        expect(result.history).toHaveLength(2);
+        expect(result.history[0].action).toBe('ACTIVATED');
+        expect(result.history[1].action).toBe('MOVED_IN');
+      });
+
+      it('should filter by bin ID', async () => {
+        setupPullMocks({ history: [mockHistory[0]] });
+
+        await service.pullBinHistory({ binId: 'bin-1' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('bin_id=bin-1'),
+          expect.any(Object)
+        );
+      });
+
+      it('should filter by pack ID', async () => {
+        setupPullMocks({ history: mockHistory });
+
+        await service.pullBinHistory({ packId: 'pack-1' });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('pack_id=pack-1'),
+          expect.any(Object)
+        );
+      });
+
+      it('should handle records response format', async () => {
+        setupPullMocks({ records: mockHistory });
+
+        const result = await service.pullBinHistory();
+
+        expect(result.history).toHaveLength(2);
+      });
+
+      it('should enforce bounded pagination', async () => {
+        setupPullMocks({ history: [] });
+
+        await service.pullBinHistory({ limit: 2000 });
+
+        expect(mockFetch).toHaveBeenCalledWith(
+          expect.stringContaining('limit=1000'),
+          expect.any(Object)
+        );
+      });
+    });
+
+    describe('Pull Endpoints - Empty Data Handling', () => {
+      it('should handle empty response data gracefully', async () => {
+        setupPullMocks({});
+
+        const result = await service.pullReceivedPacks();
+
+        expect(result.packs).toEqual([]);
+        expect(result.syncMetadata.lastSequence).toBe(0);
+        expect(result.syncMetadata.hasMore).toBe(false);
+      });
+
+      it('should handle null syncMetadata gracefully', async () => {
+        setupPullMocks({ packs: [] });
+
+        const result = await service.pullActivatedPacks();
+
+        expect(result.packs).toEqual([]);
+        expect(result.syncMetadata).toBeDefined();
+        expect(result.syncMetadata.serverTime).toBeDefined();
+      });
+    });
+  });
+
+  // ==========================================================================
+  // Phase 5: Heartbeat Tests
+  // ==========================================================================
+
+  describe('heartbeat', () => {
+    const validHeartbeatResponse = {
+      status: 'ok',
+      serverTime: '2026-01-18T12:00:00.000Z',
+    };
+
+    describe('successful heartbeat', () => {
+      it('should return heartbeat response with ok status', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(validHeartbeatResponse),
+        });
+
+        const result = await service.heartbeat();
+
+        expect(result.status).toBe('ok');
+        expect(result.serverTime).toBe('2026-01-18T12:00:00.000Z');
+        expect(mockFetch).toHaveBeenCalledWith(
+          'https://api.nuvanaapp.com/api/v1/keys/heartbeat',
+          expect.objectContaining({
+            method: 'POST',
+            headers: expect.objectContaining({
+              'X-API-Key': 'decrypted-api-key',
+            }),
+            body: expect.stringContaining('timestamp'),
+          })
+        );
+      });
+
+      it('should handle nested data response structure', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              data: validHeartbeatResponse,
+            }),
+        });
+
+        const result = await service.heartbeat();
+
+        expect(result.status).toBe('ok');
+        expect(result.serverTime).toBe('2026-01-18T12:00:00.000Z');
+      });
+
+      it('should send client timestamp in request body', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(validHeartbeatResponse),
+        });
+
+        await service.heartbeat();
+
+        const callArgs = mockFetch.mock.calls[0];
+        const body = JSON.parse(callArgs[1].body as string);
+        expect(body.timestamp).toBeDefined();
+        // Validate ISO 8601 format
+        expect(new Date(body.timestamp).toISOString()).toBe(body.timestamp);
+      });
+    });
+
+    describe('suspended status handling', () => {
+      it('should throw error and mark license suspended when status is suspended', async () => {
+        const { licenseService } = await import('../../../src/main/services/license.service');
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'suspended',
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'API key suspended. Please contact support.'
+        );
+        expect(licenseService.markSuspended).toHaveBeenCalled();
+      });
+    });
+
+    describe('revoked status handling', () => {
+      it('should throw error and mark license cancelled when status is revoked', async () => {
+        const { licenseService } = await import('../../../src/main/services/license.service');
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'revoked',
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'API key revoked. Please contact support.'
+        );
+        expect(licenseService.markCancelled).toHaveBeenCalled();
+      });
+    });
+
+    describe('response validation', () => {
+      it('should throw error for missing status field', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow('Invalid heartbeat response from server');
+      });
+
+      it('should throw error for missing serverTime field', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'ok',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow('Invalid heartbeat response from server');
+      });
+
+      it('should throw error for invalid status value', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'invalid_status',
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow('Invalid heartbeat response from server');
+      });
+
+      it('should throw error for invalid serverTime format', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'ok',
+              serverTime: 'not-a-date',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow('Invalid heartbeat response from server');
+      });
+    });
+
+    describe('error handling', () => {
+      it('should throw sanitized error on network failure', async () => {
+        mockFetch.mockRejectedValue(new Error('Network connection failed'));
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'Heartbeat request failed. Please check your connection.'
+        );
+      });
+
+      it('should throw sanitized error on server error', async () => {
+        mockFetch.mockResolvedValue({
+          ok: false,
+          status: 500,
+          json: () => Promise.resolve({ message: 'Internal server error' }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'Heartbeat request failed. Please check your connection.'
+        );
+      });
+
+      it('should preserve suspended error message when propagating', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'suspended',
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'API key suspended. Please contact support.'
+        );
+      });
+
+      it('should preserve revoked error message when propagating', async () => {
+        mockFetch.mockResolvedValue({
+          ok: true,
+          json: () =>
+            Promise.resolve({
+              status: 'revoked',
+              serverTime: '2026-01-18T12:00:00.000Z',
+            }),
+        });
+
+        await expect(service.heartbeat()).rejects.toThrow(
+          'API key revoked. Please contact support.'
+        );
+      });
     });
   });
 });

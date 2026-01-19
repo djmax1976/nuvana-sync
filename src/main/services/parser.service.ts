@@ -38,7 +38,6 @@ import type {
 import { createLogger } from '../utils/logger';
 import {
   processedFilesDAL,
-  syncQueueDAL,
   shiftsDAL,
   daySummariesDAL,
   transactionsDAL,
@@ -96,10 +95,9 @@ export interface FileProcessingResult {
   skipped?: boolean;
 }
 
-/**
- * Entity type mapping for sync queue
- */
-type EntityType = 'shift' | 'transaction';
+// NOTE: Transaction sync removed - no push endpoint exists in API spec
+// Transactions are parsed and stored locally but not synced to cloud
+// API spec only supports lottery-related push operations
 
 // ============================================================================
 // Constants
@@ -2119,8 +2117,8 @@ export class ParserService {
           taxSummaries,
         });
 
-        // Enqueue transaction for sync
-        this.enqueueForSync('transaction', created.transaction_id);
+        // NOTE: No sync enqueue - transactions have no cloud push endpoint
+        // Transactions are stored locally for offline POS operation
         count++;
       }
 
@@ -2326,26 +2324,9 @@ export class ParserService {
     return 'normal';
   }
 
-  // ==========================================================================
-  // Sync Queue Helper
-  // ==========================================================================
-
-  /**
-   * Enqueue a record for cloud synchronization
-   * SEC-006: Uses parameterized DAL method
-   *
-   * @param entityType - Type of entity
-   * @param entityId - Entity ID
-   */
-  private enqueueForSync(entityType: EntityType, entityId: string): void {
-    syncQueueDAL.enqueue({
-      store_id: this.storeId,
-      entity_type: entityType,
-      entity_id: entityId,
-      operation: 'CREATE',
-      payload: { entityType, entityId },
-    });
-  }
+  // NOTE: enqueueForSync method removed - no push endpoints for transactions/shifts
+  // Sync queue is only used for lottery entities (pack, shift_opening, shift_closing, etc.)
+  // See VALID_SYNC_ENTITY_TYPES in src/shared/types/sync.types.ts
 
   // ==========================================================================
   // Event Emission Helper

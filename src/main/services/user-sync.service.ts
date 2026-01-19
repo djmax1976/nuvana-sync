@@ -17,9 +17,10 @@
  * @security SEC-017: Audit logging for user changes
  */
 
-import { cloudApiService, type CloudUser } from './cloud-api.service';
-import { usersDAL, type CloudUserData } from '../dal/users.dal';
+import { cloudApiService, type CloudUser, type StoreRole } from './cloud-api.service';
+import { usersDAL, type CloudUserData, type User } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
+import { syncQueueDAL, type SyncQueueItem } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -35,6 +36,15 @@ export interface UserSyncResult {
   updated: number;
   deactivated: number;
   reactivated: number;
+  errors: string[];
+}
+
+/**
+ * Result of employee push operation (local -> cloud)
+ */
+export interface EmployeePushResult {
+  pushed: number;
+  failed: number;
   errors: string[];
 }
 
@@ -243,6 +253,202 @@ export class UserSyncService {
 
     const users = usersDAL.findActiveByStore(store.store_id);
     return users.filter((u) => u.cloud_user_id !== null).length;
+  }
+
+  /**
+   * Push local employee changes to cloud (bidirectional sync)
+   *
+   * Enterprise-grade implementation:
+   * - Processes pending employee sync queue items
+   * - SEC-001: PIN hashes NOT included in push payload
+   * - DB-006: Store-scoped for tenant isolation
+   * - API-002: Respects batch size limits (100)
+   * - SEC-017: Audit logging for all operations
+   *
+   * @returns Push result with counts
+   */
+  async pushLocalEmployees(): Promise<EmployeePushResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: EmployeePushResult = {
+      pushed: 0,
+      failed: 0,
+      errors: [],
+    };
+
+    const storeId = store.store_id;
+
+    log.info('Starting employee push to cloud', { storeId });
+
+    try {
+      // Get pending employee sync queue items (batch limited to 100)
+      // SEC-014: Batch size limit prevents unbounded operations
+      const batch = syncQueueDAL.getBatch(storeId, 100);
+
+      // Filter to only employee entity type
+      const employeeItems = batch.items.filter((item) => item.entity_type === 'employee');
+
+      if (employeeItems.length === 0) {
+        log.info('No employee changes to push');
+        return result;
+      }
+
+      log.info('Found employee changes to push', {
+        count: employeeItems.length,
+        totalPending: batch.totalPending,
+      });
+
+      // Transform sync queue items to push format
+      // SEC-001: PIN hash excluded from payload by design (handled in employees.handlers.ts)
+      // API-008: Only includes required fields
+      const employeesToPush = employeeItems.map((item) => {
+        const payload = JSON.parse(item.payload) as {
+          user_id: string;
+          store_id: string;
+          cloud_user_id: string | null;
+          role: string;
+          name: string;
+          active: boolean;
+        };
+
+        return {
+          user_id: payload.user_id,
+          store_id: payload.store_id,
+          cloud_user_id: payload.cloud_user_id,
+          role: payload.role as StoreRole,
+          name: payload.name,
+          active: payload.active,
+        };
+      });
+
+      // Push to cloud
+      const pushResponse = await cloudApiService.pushEmployees(employeesToPush);
+
+      // Process results and update sync queue
+      for (const pushResult of pushResponse.results) {
+        const syncItem = employeeItems.find((item) => {
+          const payload = JSON.parse(item.payload) as { user_id: string };
+          return payload.user_id === pushResult.user_id;
+        });
+
+        if (!syncItem) continue;
+
+        if (pushResult.status === 'synced') {
+          // Mark as synced
+          syncQueueDAL.markSynced(syncItem.id);
+          result.pushed++;
+
+          // Update user with cloud_user_id if newly assigned
+          if (pushResult.cloud_user_id) {
+            const payload = JSON.parse(syncItem.payload) as { user_id: string };
+            const existingUser = usersDAL.findById(payload.user_id);
+            if (existingUser && !existingUser.cloud_user_id) {
+              // Update the local user with cloud ID
+              this.updateUserCloudId(payload.user_id, pushResult.cloud_user_id);
+            }
+          }
+
+          log.debug('Employee pushed successfully', {
+            userId: pushResult.user_id,
+            cloudUserId: pushResult.cloud_user_id,
+          });
+        } else {
+          // Record failure
+          syncQueueDAL.incrementAttempts(syncItem.id, pushResult.error || 'Unknown error');
+          result.failed++;
+          result.errors.push(
+            `Employee ${pushResult.user_id}: ${pushResult.error || 'Unknown error'}`
+          );
+
+          log.warn('Employee push failed', {
+            userId: pushResult.user_id,
+            error: pushResult.error,
+          });
+        }
+      }
+
+      // SEC-017: Audit log summary
+      log.info('Employee push completed', {
+        pushed: result.pushed,
+        failed: result.failed,
+        errors: result.errors.length,
+      });
+
+      return result;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Employee push failed', { error: message });
+      result.errors.push(`Push failed: ${message}`);
+      return result;
+    }
+  }
+
+  /**
+   * Update user's cloud_user_id after successful push
+   * SEC-006: Parameterized update
+   *
+   * @param userId - Local user ID
+   * @param cloudUserId - Cloud-assigned user ID
+   */
+  private updateUserCloudId(userId: string, cloudUserId: string): void {
+    try {
+      // Use the DAL's db directly for this specific update
+      // This is a sync-specific operation that doesn't fit the standard update pattern
+      const user = usersDAL.findById(userId);
+      if (user) {
+        // Re-upsert with cloud_user_id assigned
+        usersDAL.upsertFromCloud({
+          cloud_user_id: cloudUserId,
+          store_id: user.store_id,
+          role: user.role,
+          name: user.name,
+          pin_hash: user.pin_hash,
+        });
+
+        log.info('User cloud_user_id updated', { userId, cloudUserId });
+      }
+    } catch (error) {
+      log.error('Failed to update user cloud_user_id', {
+        userId,
+        cloudUserId,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+  }
+
+  /**
+   * Check if there are pending employee changes to push
+   *
+   * @returns true if pending employee sync items exist
+   */
+  hasPendingEmployeeChanges(): boolean {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return false;
+    }
+
+    // Get pending count for employee entity type
+    const batch = syncQueueDAL.getBatch(store.store_id, 1);
+    return batch.items.some((item) => item.entity_type === 'employee');
+  }
+
+  /**
+   * Get count of pending employee changes
+   *
+   * @returns Count of pending employee sync items
+   */
+  getPendingEmployeeCount(): number {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return 0;
+    }
+
+    // Get all pending items and filter for employees
+    const batch = syncQueueDAL.getBatch(store.store_id, 500);
+    return batch.items.filter((item) => item.entity_type === 'employee').length;
   }
 }
 

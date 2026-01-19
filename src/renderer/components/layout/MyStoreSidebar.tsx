@@ -1,3 +1,14 @@
+/**
+ * MyStore Terminal Dashboard Sidebar Component
+ *
+ * Main navigation sidebar for the Electron desktop application.
+ * Includes navigation links and sync status indicator in footer.
+ *
+ * @module renderer/components/layout/MyStoreSidebar
+ * @security SEC-004: XSS prevention via React's automatic escaping
+ * @security FE-005: No sensitive data exposed in DOM
+ */
+
 import { Link, useLocation } from 'react-router-dom';
 import { cn } from '../../lib/utils';
 import {
@@ -12,6 +23,7 @@ import {
   Receipt,
 } from 'lucide-react';
 import logo from '../../assets/logo.png';
+import { SyncStatusIndicator } from './SyncStatusIndicator';
 
 interface MyStoreSidebarProps {
   className?: string;
@@ -22,7 +34,14 @@ interface MyStoreSidebarProps {
  * MyStore Terminal Dashboard Sidebar component for Electron
  * Shows navigation links for the desktop application
  *
- * Simplified version for Electron without web API dependencies
+ * Security Compliance:
+ * - SEC-004: XSS prevention via React's automatic escaping
+ * - FE-005: No sensitive data exposed in DOM
+ *
+ * Accessibility (WCAG 2.1 AA):
+ * - Semantic nav element with aria-label
+ * - Proper link focus states
+ * - Keyboard navigable
  */
 export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const location = useLocation();
@@ -194,9 +213,9 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
         </Link>
       </nav>
 
-      {/* Footer with version info */}
-      <div className="border-t px-6 py-4">
-        <p className="text-xs text-muted-foreground">Nuvana Desktop</p>
+      {/* Footer with sync status indicator */}
+      <div className="border-t px-4 py-3" data-testid="sidebar-footer" aria-label="Sync status">
+        <SyncStatusIndicator showTooltip={true} compact={false} />
       </div>
     </div>
   );

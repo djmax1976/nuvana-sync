@@ -5,7 +5,10 @@
  * - Creation with auto-numbering
  * - Deletion with pack validation
  * - Reordering
- * - Sync queue integration
+ *
+ * NOTE: Bins are NOT synced to cloud (pull-only entity).
+ * API spec only supports GET /api/v1/sync/lottery/bins for pulling bin data.
+ * Local bin changes are for offline operation only; cloud is authoritative.
  *
  * @module main/services/bin-management
  * @security SEC-006: All database operations use parameterized queries (via DAL)
@@ -18,8 +21,10 @@ import { z } from 'zod';
 import { lotteryBinsDAL, type LotteryBin } from '../dal/lottery-bins.dal';
 import { lotteryPacksDAL } from '../dal/lottery-packs.dal';
 import { storesDAL } from '../dal/stores.dal';
-import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';
+
+// NOTE: lottery_bin sync removed - bins are pulled from cloud, not pushed
+// API spec only supports GET /api/v1/sync/lottery/bins (pull), no push endpoint
 
 // ============================================================================
 // Logger
@@ -276,20 +281,8 @@ export class BinManagementService {
         status: 'ACTIVE',
       });
 
-      // Enqueue for sync
-      syncQueueDAL.enqueue({
-        store_id: store.store_id,
-        entity_type: 'lottery_bin',
-        entity_id: bin.bin_id,
-        operation: 'CREATE',
-        payload: {
-          bin_id: bin.bin_id,
-          bin_number: bin.bin_number,
-          label: bin.label,
-          status: bin.status,
-          created_at: bin.created_at,
-        },
-      });
+      // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
+      // API spec: GET /api/v1/sync/lottery/bins (pull only)
 
       log.info('Bin created', {
         binId: bin.bin_id,
@@ -359,20 +352,8 @@ export class BinManagementService {
         return { success: false, error: 'Failed to update bin' };
       }
 
-      // Enqueue for sync
-      syncQueueDAL.enqueue({
-        store_id: existingBin.store_id,
-        entity_type: 'lottery_bin',
-        entity_id: binId,
-        operation: 'UPDATE',
-        payload: {
-          bin_id: updatedBin.bin_id,
-          bin_number: updatedBin.bin_number,
-          label: updatedBin.label,
-          status: updatedBin.status,
-          updated_at: updatedBin.updated_at,
-        },
-      });
+      // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
+      // API spec: GET /api/v1/sync/lottery/bins (pull only)
 
       log.info('Bin updated', { binId });
 
@@ -389,7 +370,8 @@ export class BinManagementService {
    *
    * - Validates bin has no active packs
    * - Soft deletes (sets deleted_at)
-   * - Enqueues for cloud sync
+   *
+   * NOTE: No cloud sync - bins are pull-only entities
    *
    * @param binId - Bin UUID
    * @returns Success or error
@@ -426,17 +408,8 @@ export class BinManagementService {
         return { success: false, error: deleteResult.error || 'Delete failed' };
       }
 
-      // Enqueue for sync
-      syncQueueDAL.enqueue({
-        store_id: existingBin.store_id,
-        entity_type: 'lottery_bin',
-        entity_id: binId,
-        operation: 'DELETE',
-        payload: {
-          bin_id: binId,
-          deleted_at: new Date().toISOString(),
-        },
-      });
+      // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
+      // API spec: GET /api/v1/sync/lottery/bins (pull only)
 
       log.info('Bin deleted', { binId, binNumber: existingBin.bin_number });
 
@@ -517,22 +490,8 @@ export class BinManagementService {
     try {
       const bins = lotteryBinsDAL.bulkCreate(store.store_id, count);
 
-      // Enqueue all for sync
-      for (const bin of bins) {
-        syncQueueDAL.enqueue({
-          store_id: store.store_id,
-          entity_type: 'lottery_bin',
-          entity_id: bin.bin_id,
-          operation: 'CREATE',
-          payload: {
-            bin_id: bin.bin_id,
-            bin_number: bin.bin_number,
-            label: bin.label,
-            status: bin.status,
-            created_at: bin.created_at,
-          },
-        });
-      }
+      // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
+      // API spec: GET /api/v1/sync/lottery/bins (pull only)
 
       log.info('Bulk bins created', { storeId: store.store_id, count: bins.length });
 
