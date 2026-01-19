@@ -56,6 +56,21 @@ process.on('unhandledRejection', () => {});
 
 const log = createLogger('main');
 
+// ============================================================================
+// Test Mode Detection
+// ============================================================================
+// Detect test mode from environment variable or command line argument
+// This allows E2E tests to properly close the app without tray interference
+// See: https://github.com/microsoft/playwright/issues/20016
+const isTestMode =
+  process.env.NUVANA_TEST_MODE === 'true' ||
+  process.env.NODE_ENV === 'test' ||
+  process.argv.includes('--test-mode');
+
+if (isTestMode) {
+  log.info('Running in TEST MODE - tray minimize behavior disabled');
+}
+
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 
@@ -138,7 +153,16 @@ if (!gotTheLock) {
     });
 
     // Minimize to tray instead of closing
+    // TEST MODE: Allow normal close behavior for E2E tests
+    // See: https://github.com/microsoft/playwright/issues/20016
     mainWindow.on('close', (event) => {
+      // In test mode, allow the window to close normally
+      // This is required for Playwright's electronApp.close() to work
+      if (isTestMode) {
+        log.debug('Test mode: allowing normal window close');
+        return;
+      }
+
       const minimizeToTray = settingsService.getMinimizeToTray();
       if (minimizeToTray && !(app as { isQuitting?: boolean }).isQuitting) {
         event.preventDefault();

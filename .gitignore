@@ -91,3 +91,6 @@ nul
 NULL
 NUL
 dashboard
+
+test-results/
+playwright-report/
