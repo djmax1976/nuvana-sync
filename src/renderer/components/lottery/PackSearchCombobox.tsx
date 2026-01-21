@@ -98,7 +98,7 @@ export interface PackSearchComboboxProps {
   /** Error message to display */
   error?: string;
   /** Filter by pack status - defaults to RECEIVED for activation */
-  statusFilter?: 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+  statusFilter?: 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
   /** Test ID for the input element */
   testId?: string;
 }
@@ -137,19 +137,19 @@ function getPackStatusErrorMessage(
   status: LotteryPackStatus,
   packNumber: string,
   gameName?: string,
-  binLabel?: string | null
+  binName?: string | null
 ): { title: string; description: string } {
   const gameInfo = gameName ? ` (${gameName})` : '';
 
   switch (status) {
-    case 'ACTIVATED':
+    case 'ACTIVE':
       return {
         title: 'Pack is already active',
-        description: binLabel
-          ? `Pack #${packNumber}${gameInfo} is currently active in ${binLabel}. A pack can only be activated once.`
+        description: binName
+          ? `Pack #${packNumber}${gameInfo} is currently active in ${binName}. A pack can only be activated once.`
           : `Pack #${packNumber}${gameInfo} is already activated. A pack can only be activated once.`,
       };
-    case 'SETTLED':
+    case 'DEPLETED':
       return {
         title: 'Pack has been sold/depleted',
         description: `Pack #${packNumber}${gameInfo} was previously activated and has been depleted. It cannot be activated again.`,
@@ -361,7 +361,7 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
               pack.status,
               pack.pack_number,
               pack.game?.name,
-              pack.bin?.label
+              pack.bin?.name
             );
             toast({
               title: errorMsg.title,

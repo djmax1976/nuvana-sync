@@ -71,6 +71,20 @@ vi.mock('../../../src/main/utils/logger', () => ({
   })),
 }));
 
+// Mock eventBus for SETUP_COMPLETED event emission
+vi.mock('../../../src/main/utils/event-bus', () => ({
+  eventBus: {
+    emit: vi.fn(),
+    on: vi.fn(),
+  },
+  MainEvents: {
+    FILE_WATCHER_RESTART: 'file-watcher:restart',
+    FILE_WATCHER_PROCESS_EXISTING: 'file-watcher:process-existing',
+    SHIFT_CLOSED: 'shift:closed',
+    SETUP_COMPLETED: 'setup:completed',
+  },
+}));
+
 import { dialog } from 'electron';
 import { settingsService } from '../../../src/main/services/settings.service';
 import { cloudApiService } from '../../../src/main/services/cloud-api.service';
@@ -80,6 +94,7 @@ import {
   createSuccessResponse,
   IPCErrorCodes as _IPCErrorCodes,
 } from '../../../src/main/ipc/index';
+import { eventBus } from '../../../src/main/utils/event-bus';
 
 // Import handlers to trigger registration
 import '../../../src/main/ipc/settings.handlers';
@@ -295,6 +310,23 @@ describe('Settings IPC Handlers', () => {
       await handler();
 
       expect(settingsService.completeSetup).toHaveBeenCalled();
+    });
+
+    it('settings:completeSetup should emit SETUP_COMPLETED event to trigger service initialization', async () => {
+      // Reset mock to track this specific test
+      vi.mocked(eventBus.emit).mockClear();
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const completeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:completeSetup');
+
+      const handler = completeCall?.[1] as IPCHandler;
+      await handler();
+
+      // Verify event is emitted to trigger service initialization
+      expect(eventBus.emit).toHaveBeenCalledWith('setup:completed');
     });
 
     it('settings:isSetupComplete should call settingsService.isSetupComplete', async () => {

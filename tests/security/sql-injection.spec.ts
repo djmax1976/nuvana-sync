@@ -127,9 +127,9 @@ describe('SQL Injection Protection', () => {
         });
 
         dal.findWithFilters('store-123', {
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           game_id: 'game-456',
-          bin_id: 'bin-789',
+          current_bin_id: 'bin-789',
         });
 
         const query = mockPrepare.mock.calls[0][0];
@@ -143,10 +143,10 @@ describe('SQL Injection Protection', () => {
           all: vi.fn().mockReturnValue([]),
         });
 
-        // Status must be valid enum, so only test game_id and bin_id with payloads
+        // Status must be valid enum, so only test game_id and current_bin_id with payloads
         const result = dal.findWithFilters(payload, {
           game_id: payload,
-          bin_id: payload,
+          current_bin_id: payload,
         });
 
         const query = mockPrepare.mock.calls[0][0];
@@ -164,7 +164,7 @@ describe('SQL Injection Protection', () => {
           all: vi.fn().mockReturnValue([]),
         });
 
-        dal.findByStatus('store-123', 'ACTIVATED');
+        dal.findByStatus('store-123', 'ACTIVE');
 
         const query = mockPrepare.mock.calls[0][0];
         expect(query).toContain('store_id = ?');
@@ -257,17 +257,17 @@ describe('SQL Injection Protection', () => {
       dal = new LotteryBinsDAL();
     });
 
-    describe('findByBinNumber', () => {
+    describe('findByName', () => {
       it('should use parameterized query', () => {
         mockPrepare.mockReturnValue({
           get: vi.fn().mockReturnValue(undefined),
         });
 
-        dal.findByBinNumber('store-123', 1);
+        dal.findByName('store-123', 'Bin 1');
 
         const query = mockPrepare.mock.calls[0][0];
         expect(query).toContain('store_id = ?');
-        expect(query).toContain('bin_number = ?');
+        expect(query).toContain('name = ?');
       });
     });
 

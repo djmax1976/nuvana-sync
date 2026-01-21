@@ -30,6 +30,12 @@ export interface GameListFilters {
   status?: LotteryGameStatus;
   /** Search by game name or code (min 2 chars) */
   search?: string;
+  /**
+   * When true, only return games that have at least one pack in inventory
+   * (total_packs > 0). Used by inventory views to hide catalog games
+   * with no store inventory.
+   */
+  inventoryOnly?: boolean;
 }
 
 /**
@@ -88,7 +94,6 @@ export interface LotteryGame extends StoreEntity {
   tickets_per_pack: number | null;
   status: LotteryGameStatus;
   deleted_at: string | null;
-  cloud_game_id: string | null;
   state_id: string | null;
   synced_at: string | null;
   created_at: string;
@@ -107,7 +112,6 @@ export interface CreateLotteryGameData {
   pack_value?: number;
   tickets_per_pack?: number;
   status?: LotteryGameStatus;
-  cloud_game_id?: string;
 }
 
 /**
@@ -124,9 +128,10 @@ export interface UpdateLotteryGameData {
 
 /**
  * Cloud game sync data
+ * Field names match cloud schema exactly (no cloud_game_id - use game_id directly)
  */
 export interface CloudGameData {
-  cloud_game_id: string;
+  game_id: string;
   store_id: string;
   game_code: string;
   name: string;
@@ -180,8 +185,8 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
     const stmt = this.db.prepare(`
       INSERT INTO lottery_games (
         game_id, store_id, game_code, name, price, pack_value,
-        tickets_per_pack, status, cloud_game_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        tickets_per_pack, status, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -193,7 +198,6 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
       data.pack_value || 300,
       data.tickets_per_pack || null,
       data.status || 'ACTIVE',
-      data.cloud_game_id || null,
       now,
       now
     );
@@ -315,34 +319,23 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
   }
 
   /**
-   * Find game by cloud ID
-   * Used for cloud sync matching
-   * SEC-006: Parameterized query
-   *
-   * @param cloudGameId - Cloud game identifier
-   * @returns Game or undefined
-   */
-  findByCloudId(cloudGameId: string): LotteryGame | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM lottery_games WHERE cloud_game_id = ?
-    `);
-    return stmt.get(cloudGameId) as LotteryGame | undefined;
-  }
-
-  /**
    * Upsert game from cloud sync
-   * Creates if not exists, updates if exists (by cloud_game_id)
+   * Creates if not exists, updates if exists (by game_id)
+   * Uses cloud's game_id directly as primary key (no separate cloud_game_id)
    * SEC-006: Parameterized queries
+   * DB-006: Tenant isolation via store_id
    *
-   * @param data - Cloud game data
+   * @param data - Cloud game data with game_id matching cloud's ID
    * @returns Upserted game
    */
   upsertFromCloud(data: CloudGameData): LotteryGame {
-    const existing = this.findByCloudId(data.cloud_game_id);
+    // Use cloud's game_id directly - no separate cloud_game_id column
+    const existing = this.findById(data.game_id);
     const now = this.now();
 
     if (existing) {
       // Update existing game
+      // SEC-006: Parameterized UPDATE - all values bound
       const stmt = this.db.prepare(`
         UPDATE lottery_games SET
           game_code = ?,
@@ -353,7 +346,7 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
           status = ?,
           synced_at = ?,
           updated_at = ?
-        WHERE cloud_game_id = ?
+        WHERE game_id = ?
       `);
 
       stmt.run(
@@ -365,29 +358,28 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
         data.status || 'ACTIVE',
         now,
         now,
-        data.cloud_game_id
+        data.game_id
       );
 
-      log.info('Lottery game updated from cloud', { cloudGameId: data.cloud_game_id });
-      const updated = this.findByCloudId(data.cloud_game_id);
+      log.info('Lottery game updated from cloud', { gameId: data.game_id });
+      const updated = this.findById(data.game_id);
       if (!updated) {
-        throw new Error(`Failed to retrieve updated game from cloud: ${data.cloud_game_id}`);
+        throw new Error(`Failed to retrieve updated game: ${data.game_id}`);
       }
       return updated;
     }
 
-    // Create new game
-    const gameId = this.generateId();
-
+    // Create new game - use cloud's game_id directly (no generateId)
+    // SEC-006: Parameterized INSERT - all values bound
     const stmt = this.db.prepare(`
       INSERT INTO lottery_games (
         game_id, store_id, game_code, name, price, pack_value,
-        tickets_per_pack, status, cloud_game_id, synced_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        tickets_per_pack, status, synced_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
-      gameId,
+      data.game_id,
       data.store_id,
       data.game_code,
       data.name,
@@ -395,20 +387,16 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
       data.pack_value,
       data.tickets_per_pack || null,
       data.status || 'ACTIVE',
-      data.cloud_game_id,
       now,
       now,
       now
     );
 
-    log.info('Lottery game created from cloud', {
-      gameId,
-      cloudGameId: data.cloud_game_id,
-    });
+    log.info('Lottery game created from cloud', { gameId: data.game_id });
 
-    const created = this.findById(gameId);
+    const created = this.findById(data.game_id);
     if (!created) {
-      throw new Error(`Failed to retrieve created game from cloud: ${gameId}`);
+      throw new Error(`Failed to retrieve created game: ${data.game_id}`);
     }
     return created;
   }
@@ -572,11 +560,22 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
 
     const whereClause = conditions.join(' AND ');
 
+    // HAVING clause for inventory-only filter
+    // SEC-006: No user input in HAVING clause; boolean flag controls inclusion
+    // Performance: HAVING COUNT(*) > 0 filters after GROUP BY, uses aggregate result
+    const havingClause = filters.inventoryOnly ? 'HAVING COUNT(p.pack_id) > 0' : '';
+
     // Count query for pagination (SEC-006: parameterized)
+    // When inventoryOnly=true, count must also use HAVING to get accurate total
     const countStmt = this.db.prepare(`
-      SELECT COUNT(*) as count
-      FROM lottery_games g
-      WHERE ${whereClause}
+      SELECT COUNT(*) as count FROM (
+        SELECT g.game_id
+        FROM lottery_games g
+        LEFT JOIN lottery_packs p ON g.game_id = p.game_id AND p.store_id = g.store_id
+        WHERE ${whereClause}
+        GROUP BY g.game_id
+        ${havingClause}
+      ) AS filtered_games
     `);
     const countResult = countStmt.get(...params) as { count: number };
     const total = countResult.count;
@@ -584,6 +583,7 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
     // Main query with pack counts aggregation
     // Performance: Single indexed JOIN with conditional aggregation
     // SEC-006: All user input is parameterized, sort column validated against allowlist
+    // DB-006: Tenant isolation via store_id in WHERE and JOIN conditions
     const dataStmt = this.db.prepare(`
       SELECT
         g.game_id,
@@ -595,20 +595,20 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
         g.tickets_per_pack,
         g.status,
         g.deleted_at,
-        g.cloud_game_id,
         g.state_id,
         g.synced_at,
         g.created_at,
         g.updated_at,
         COALESCE(COUNT(p.pack_id), 0) as total_packs,
         COALESCE(SUM(CASE WHEN p.status = 'RECEIVED' THEN 1 ELSE 0 END), 0) as received_packs,
-        COALESCE(SUM(CASE WHEN p.status = 'ACTIVATED' THEN 1 ELSE 0 END), 0) as active_packs,
-        COALESCE(SUM(CASE WHEN p.status = 'SETTLED' THEN 1 ELSE 0 END), 0) as settled_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'ACTIVE' THEN 1 ELSE 0 END), 0) as active_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'DEPLETED' THEN 1 ELSE 0 END), 0) as settled_packs,
         COALESCE(SUM(CASE WHEN p.status = 'RETURNED' THEN 1 ELSE 0 END), 0) as returned_packs
       FROM lottery_games g
       LEFT JOIN lottery_packs p ON g.game_id = p.game_id AND p.store_id = g.store_id
       WHERE ${whereClause}
       GROUP BY g.game_id
+      ${havingClause}
       ORDER BY g.${sortBy} ${sortOrder}
       LIMIT ? OFFSET ?
     `);
@@ -653,15 +653,14 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
         g.tickets_per_pack,
         g.status,
         g.deleted_at,
-        g.cloud_game_id,
         g.state_id,
         g.synced_at,
         g.created_at,
         g.updated_at,
         COALESCE(COUNT(p.pack_id), 0) as total_packs,
         COALESCE(SUM(CASE WHEN p.status = 'RECEIVED' THEN 1 ELSE 0 END), 0) as received_packs,
-        COALESCE(SUM(CASE WHEN p.status = 'ACTIVATED' THEN 1 ELSE 0 END), 0) as active_packs,
-        COALESCE(SUM(CASE WHEN p.status = 'SETTLED' THEN 1 ELSE 0 END), 0) as settled_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'ACTIVE' THEN 1 ELSE 0 END), 0) as active_packs,
+        COALESCE(SUM(CASE WHEN p.status = 'DEPLETED' THEN 1 ELSE 0 END), 0) as settled_packs,
         COALESCE(SUM(CASE WHEN p.status = 'RETURNED' THEN 1 ELSE 0 END), 0) as returned_packs
       FROM lottery_games g
       LEFT JOIN lottery_packs p ON g.game_id = p.game_id AND p.store_id = g.store_id

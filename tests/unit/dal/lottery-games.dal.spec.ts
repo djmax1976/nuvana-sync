@@ -61,7 +61,6 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         tickets_per_pack INTEGER,
         status TEXT NOT NULL DEFAULT 'ACTIVE',
         state_id TEXT,
-        cloud_game_id TEXT,
         synced_at TEXT,
         deleted_at TEXT,
         created_at TEXT NOT NULL,
@@ -77,13 +76,21 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         bin_id TEXT,
         status TEXT NOT NULL DEFAULT 'RECEIVED',
         received_at TEXT,
+        received_by TEXT,
         activated_at TEXT,
-        settled_at TEXT,
+        activated_by TEXT,
+        activated_shift_id TEXT,
+        depleted_at TEXT,
         returned_at TEXT,
         opening_serial TEXT,
         closing_serial TEXT,
         tickets_sold INTEGER NOT NULL DEFAULT 0,
         sales_amount REAL NOT NULL DEFAULT 0,
+        depleted_by TEXT,
+        depleted_shift_id TEXT,
+        depletion_reason TEXT,
+        returned_by TEXT,
+        returned_shift_id TEXT,
         cloud_pack_id TEXT,
         synced_at TEXT,
         created_at TEXT NOT NULL,
@@ -355,7 +362,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
   describe('upsertFromCloud', () => {
     it('should create new game from cloud data', () => {
       const cloudData = {
-        cloud_game_id: 'cloud-123',
+        game_id: 'cloud-123',
         store_id: 'store-1',
         game_code: '1001',
         name: 'Lucky 7s',
@@ -366,13 +373,13 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
 
       const game = dal.upsertFromCloud(cloudData);
 
-      expect(game.cloud_game_id).toBe('cloud-123');
+      expect(game.game_id).toBe('cloud-123');
       expect(game.synced_at).toBeDefined();
     });
 
-    it('should update existing game matched by cloud_game_id', () => {
+    it('should update existing game matched by game_id', () => {
       const cloudData = {
-        cloud_game_id: 'cloud-123',
+        game_id: 'cloud-123',
         store_id: 'store-1',
         game_code: '1001',
         name: 'Lucky 7s',
@@ -441,7 +448,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
           status TEXT NOT NULL DEFAULT 'RECEIVED',
           received_at TEXT,
           activated_at TEXT,
-          settled_at TEXT,
+          depleted_at TEXT,
           returned_at TEXT,
           deleted_at TEXT,
           created_at TEXT NOT NULL,
@@ -458,7 +465,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       store_id: string;
       game_id: string;
       pack_number: string;
-      status: 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+      status: 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
     }) {
       const now = new Date().toISOString();
       const packId = `pack-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -515,25 +522,25 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
           store_id: 'store-1',
           game_id: game.game_id,
           pack_number: '003',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
         });
         createPack({
           store_id: 'store-1',
           game_id: game.game_id,
           pack_number: '004',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
         });
         createPack({
           store_id: 'store-1',
           game_id: game.game_id,
           pack_number: '005',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
         });
         createPack({
           store_id: 'store-1',
           game_id: game.game_id,
           pack_number: '006',
-          status: 'SETTLED',
+          status: 'DEPLETED',
         });
         createPack({
           store_id: 'store-1',
@@ -631,7 +638,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
           store_id: 'store-2',
           game_id: game2.game_id,
           pack_number: '001',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
         });
 
         const result1 = dal.listGamesWithPackCounts('store-1');
@@ -1076,7 +1083,6 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         expect(result.games).toHaveLength(1);
         expect(result.games[0].tickets_per_pack).toBeNull();
         expect(result.games[0].synced_at).toBeNull();
-        expect(result.games[0].cloud_game_id).toBeNull();
       });
 
       it('should handle whitespace-only search as no filter', () => {
@@ -1106,7 +1112,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
           status TEXT NOT NULL DEFAULT 'RECEIVED',
           received_at TEXT,
           activated_at TEXT,
-          settled_at TEXT,
+          depleted_at TEXT,
           returned_at TEXT,
           deleted_at TEXT,
           created_at TEXT NOT NULL,
@@ -1120,7 +1126,7 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
       store_id: string;
       game_id: string;
       pack_number: string;
-      status: 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+      status: 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
     }) {
       const now = new Date().toISOString();
       const packId = `pack-${Date.now()}-${Math.random().toString(36).substring(7)}`;
@@ -1151,13 +1157,13 @@ describe.skipIf(skipTests)('Lottery Games DAL', () => {
         store_id: 'store-1',
         game_id: game.game_id,
         pack_number: '002',
-        status: 'ACTIVATED',
+        status: 'ACTIVE',
       });
       createPack({
         store_id: 'store-1',
         game_id: game.game_id,
         pack_number: '003',
-        status: 'SETTLED',
+        status: 'DEPLETED',
       });
 
       const result = dal.findByIdWithPackCounts('store-1', game.game_id);

@@ -48,6 +48,7 @@ describe('Pack Sync Security Tests', () => {
   describe('PS-S-001: Sync payload should NOT include internal fields', () => {
     /**
      * Validates that sensitive internal fields are excluded from sync payload
+     * API-001: Includes serial_start, serial_end as required by cloud API spec
      */
     interface PackSyncPayload {
       pack_id: string;
@@ -64,8 +65,11 @@ describe('Pack Sync Security Tests', () => {
       received_by: string | null;
       activated_at: string | null;
       activated_by: string | null;
-      settled_at: string | null;
+      depleted_at: string | null;
       returned_at: string | null;
+      // Serial range fields (required by activate API)
+      serial_start: string;
+      serial_end: string;
     }
 
     /**
@@ -80,8 +84,17 @@ describe('Pack Sync Security Tests', () => {
 
     /**
      * Simulate buildPackSyncPayload function - excludes internal fields
+     * API-001: Includes serial_start, serial_end as required by cloud API spec
      */
-    function buildPackSyncPayload(pack: FullPackRecord): PackSyncPayload {
+    function buildPackSyncPayload(
+      pack: Omit<FullPackRecord, 'serial_start' | 'serial_end'>,
+      ticketsPerPack: number | null = 300
+    ): PackSyncPayload {
+      const serialStart = '000';
+      const serialEnd = ticketsPerPack
+        ? String(ticketsPerPack - 1).padStart(3, '0')
+        : '299';
+
       return {
         pack_id: pack.pack_id,
         store_id: pack.store_id,
@@ -97,12 +110,14 @@ describe('Pack Sync Security Tests', () => {
         received_by: pack.received_by,
         activated_at: pack.activated_at,
         activated_by: pack.activated_by ?? null,
-        settled_at: pack.settled_at,
+        depleted_at: pack.depleted_at,
         returned_at: pack.returned_at,
+        serial_start: serialStart,
+        serial_end: serialEnd,
       };
     }
 
-    const mockFullPack: FullPackRecord = {
+    const mockFullPack = {
       pack_id: 'pack-123',
       store_id: 'store-456',
       game_id: 'game-789',
@@ -117,7 +132,7 @@ describe('Pack Sync Security Tests', () => {
       received_by: 'user-123',
       activated_at: null,
       activated_by: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       // Internal fields that should be excluded
       created_at: '2024-01-15T09:00:00.000Z',
@@ -146,7 +161,7 @@ describe('Pack Sync Security Tests', () => {
       expect(payload).not.toHaveProperty('synced_at');
     });
 
-    it('should include only the 16 expected fields in payload', () => {
+    it('should include only the 18 expected fields in payload', () => {
       const payload = buildPackSyncPayload(mockFullPack);
       const expectedFields = [
         'pack_id',
@@ -163,10 +178,18 @@ describe('Pack Sync Security Tests', () => {
         'received_by',
         'activated_at',
         'activated_by',
-        'settled_at',
+        'depleted_at',
         'returned_at',
+        'serial_start',
+        'serial_end',
       ];
       expect(Object.keys(payload).sort()).toEqual(expectedFields.sort());
+    });
+
+    it('should include serial_start and serial_end as required by API spec', () => {
+      const payload = buildPackSyncPayload(mockFullPack, 300);
+      expect(payload.serial_start).toBe('000');
+      expect(payload.serial_end).toBe('299');
     });
   });
 
@@ -453,12 +476,12 @@ describe('Pack Sync Security Tests', () => {
       const fullLifecyclePayload = {
         pack_id: 'pack-1',
         store_id: 'store-1',
-        status: 'SETTLED',
+        status: 'DEPLETED',
         received_by: receiverId,
         received_at: '2024-01-15T08:00:00.000Z',
         activated_by: activatorId,
         activated_at: '2024-01-15T09:00:00.000Z',
-        settled_at: '2024-01-15T17:00:00.000Z',
+        depleted_at: '2024-01-15T17:00:00.000Z',
       };
 
       // Both audit fields should be preserved

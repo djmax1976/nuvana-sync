@@ -298,11 +298,15 @@ export interface ValidateApiKeyResponse {
 /**
  * Pack status enumeration for sync operations
  */
-export type CloudPackStatus = 'RECEIVED' | 'ACTIVATED' | 'DEPLETED' | 'RETURNED';
+export type CloudPackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
 /**
  * Cloud pack data from pull endpoints
  * API: GET /api/v1/sync/lottery/packs/*
+ *
+ * Field names match cloud API exactly per replica_end_points.md:
+ * - current_bin_id (not bin_id) - UUID of bin pack is currently in
+ * - tickets_sold_count (not tickets_sold) - Total tickets sold
  *
  * DB-006: Store-scoped pack data
  * SEC-017: Includes sync metadata for audit trail
@@ -313,22 +317,47 @@ export interface CloudPack {
   game_id: string;
   game_code: string;
   pack_number: string;
+  serial_start: string;
+  serial_end: string;
   status: CloudPackStatus;
-  bin_id: string | null;
+  /** Current bin UUID - matches API field name per replica_end_points.md */
+  current_bin_id: string | null;
+  current_bin_name: string | null;
   opening_serial: string | null;
   closing_serial: string | null;
-  tickets_sold: number | null;
+  /** Total tickets sold - matches API field name per replica_end_points.md */
+  tickets_sold_count: number;
+  last_sold_at: string | null;
   sales_amount: number | null;
-  received_at: string;
+  received_at: string | null;
   received_by: string | null;
   activated_at: string | null;
   activated_by: string | null;
-  settled_at: string | null;
+  activated_shift_id: string | null;
+  depleted_at: string | null;
+  depleted_by: string | null;
+  depleted_shift_id: string | null;
+  depletion_reason: string | null;
   returned_at: string | null;
+  returned_by: string | null;
+  returned_shift_id: string | null;
   return_reason: string | null;
-  cloud_pack_id: string | null;
+  return_notes: string | null;
+  last_sold_serial: string | null;
+  tickets_sold_on_return: number | null;
+  return_sales_amount: number | null;
+  /** Serial override approval fields (API v029 alignment) */
+  serial_override_approved_by: string | null;
+  serial_override_reason: string | null;
+  /** Serial override approval timestamp (v038 alignment) */
+  serial_override_approved_at: string | null;
+  mark_sold_approved_by: string | null;
+  mark_sold_reason: string | null;
+  /** Mark sold approval timestamp (v038 alignment) */
+  mark_sold_approved_at: string | null;
   sync_sequence: number;
   updated_at: string;
+  created_at: string;
 }
 
 /**
@@ -520,14 +549,20 @@ export interface CloudBinHistoryResponse {
 }
 
 /**
- * Cloud bin data
+ * Cloud bin data (cloud-aligned schema)
+ * v039: Matches cloud LotteryBin model exactly
+ * - name: Display name for the bin
+ * - location: Physical location description
+ * - display_order: UI sort order
+ * - is_active: Boolean active status
  */
 export interface CloudBin {
   bin_id: string;
   store_id: string;
-  bin_number: number;
-  label?: string;
-  status: 'ACTIVE' | 'INACTIVE';
+  name: string;
+  location?: string;
+  display_order: number;
+  is_active: boolean;
   updated_at: string;
   deleted_at?: string;
 }
@@ -547,11 +582,16 @@ export interface CloudGame {
 }
 
 /**
- * Bins sync response
+ * Bins sync response with pagination metadata
+ * API spec: GET /api/v1/sync/lottery/bins
  */
 export interface CloudBinsResponse {
   bins: CloudBin[];
   totalCount: number;
+  hasMore: boolean;
+  currentSequence: number;
+  serverTime: string;
+  nextCursor?: string | null;
 }
 
 /**
@@ -2253,11 +2293,16 @@ export class CloudApiService {
   }
 
   /**
-   * Pull bins from cloud
+   * Pull bins from cloud with pagination support
    * API: GET /api/v1/sync/lottery/bins (with session_id parameter)
    *
+   * Enterprise-grade implementation:
+   * - API-002: Handles pagination with hasMore flag
+   * - API-003: Centralized error handling
+   * - SEC-017: Audit logging for all sync operations
+   *
    * @param since - Optional timestamp for delta sync
-   * @returns Cloud bins with totalCount
+   * @returns Cloud bins with totalCount (all pages aggregated)
    */
   async pullBins(since?: string): Promise<CloudBinsResponse> {
     log.debug('Pulling bins from cloud', { since: since || 'full' });
@@ -2269,80 +2314,114 @@ export class CloudApiService {
       throw new Error(`API key status: ${session.revocationStatus}`);
     }
 
+    // v039: Cloud and local schemas are now aligned - pass through directly
+    // CloudBin interface matches cloud LotteryBin model exactly
+    const mapCloudBin = (cloudRecord: Record<string, unknown>): CloudBin =>
+      cloudRecord as unknown as CloudBin;
+
     try {
-      // Build query parameters with session_id
-      const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
-      if (since) {
-        params.set('since', since);
+      // API-002: Paginate until hasMore is false
+      const allBins: CloudBin[] = [];
+      let hasMore = true;
+      let cursor: string | null = null;
+      let totalCount = 0;
+      let currentSequence = 0;
+      let serverTime = '';
+      let pageCount = 0;
+      const MAX_PAGES = 100; // Safety limit to prevent infinite loops
+
+      while (hasMore && pageCount < MAX_PAGES) {
+        pageCount++;
+
+        // Build query parameters with session_id
+        const params = new URLSearchParams();
+        params.set('session_id', session.sessionId);
+        if (since) {
+          params.set('since', since);
+        }
+        if (cursor) {
+          params.set('cursor', cursor);
+        }
+
+        const path = `/api/v1/sync/lottery/bins?${params.toString()}`;
+        const rawResponse = await this.request<Record<string, unknown>>('GET', path);
+
+        // Log response structure on first page for debugging
+        if (pageCount === 1) {
+          log.debug('Bins API raw response', {
+            responseKeys: Object.keys(rawResponse),
+            hasSuccess: 'success' in rawResponse,
+            hasData: 'data' in rawResponse,
+            dataKeys:
+              rawResponse.data && typeof rawResponse.data === 'object'
+                ? Object.keys(rawResponse.data as Record<string, unknown>)
+                : [],
+          });
+        }
+
+        // Parse the response
+        let records: CloudBin[] = [];
+        let pageHasMore = false;
+        let pageCursor: string | null = null;
+
+        if ('data' in rawResponse && rawResponse.data && typeof rawResponse.data === 'object') {
+          const data = rawResponse.data as Record<string, unknown>;
+          const rawRecords = (data.records || data.bins || []) as Record<string, unknown>[];
+          records = rawRecords.map(mapCloudBin);
+          totalCount = (data.total_count ?? data.totalCount ?? records.length) as number;
+          currentSequence = (data.current_sequence ?? data.currentSequence ?? 0) as number;
+          serverTime = (data.server_time ?? data.serverTime ?? '') as string;
+          pageHasMore = (data.has_more ?? data.hasMore ?? false) as boolean;
+          pageCursor = (data.next_cursor ?? data.nextCursor ?? null) as string | null;
+        } else if ('records' in rawResponse) {
+          const rawRecords = (rawResponse.records || []) as Record<string, unknown>[];
+          records = rawRecords.map(mapCloudBin);
+          totalCount = (rawResponse.total_count ?? rawResponse.totalCount ?? records.length) as number;
+          currentSequence = (rawResponse.current_sequence ?? rawResponse.currentSequence ?? 0) as number;
+          serverTime = (rawResponse.server_time ?? rawResponse.serverTime ?? '') as string;
+          pageHasMore = (rawResponse.has_more ?? rawResponse.hasMore ?? false) as boolean;
+          pageCursor = (rawResponse.next_cursor ?? rawResponse.nextCursor ?? null) as string | null;
+        } else if ('bins' in rawResponse) {
+          const rawRecords = (rawResponse.bins || []) as Record<string, unknown>[];
+          records = rawRecords.map(mapCloudBin);
+          totalCount = (rawResponse.totalCount ?? records.length) as number;
+          pageHasMore = false;
+        } else {
+          log.error('Unexpected bins API response structure', { rawResponse });
+          throw new Error('Invalid bins API response structure');
+        }
+
+        allBins.push(...records);
+        hasMore = pageHasMore;
+        cursor = pageCursor;
+
+        log.debug('Bins page fetched', {
+          page: pageCount,
+          recordsInPage: records.length,
+          totalFetched: allBins.length,
+          hasMore,
+        });
       }
 
-      const path = `/api/v1/sync/lottery/bins?${params.toString()}`;
-
-      const rawResponse = await this.request<Record<string, unknown>>('GET', path);
-
-      // Log full response structure for debugging
-      log.debug('Bins API raw response', {
-        responseKeys: Object.keys(rawResponse),
-        hasSuccess: 'success' in rawResponse,
-        hasData: 'data' in rawResponse,
-        hasBins: 'bins' in rawResponse,
-        dataType: rawResponse.data ? typeof rawResponse.data : 'undefined',
-        dataKeys:
-          rawResponse.data && typeof rawResponse.data === 'object'
-            ? Object.keys(rawResponse.data as Record<string, unknown>)
-            : [],
-      });
-
-      // Handle the API response format: { success, data: { records, totalCount, ... } }
-      // The cloud API returns 'records' with different field names than our CloudBin interface:
-      // Cloud: { binId, name, location, displayOrder, isActive, updatedAt, syncSequence }
-      // Local: { bin_id, store_id, bin_number, label, status, updated_at, deleted_at }
-      let response: CloudBinsResponse;
-
-      // Helper to map cloud bin format to local format
-      const mapCloudBin = (cloudRecord: Record<string, unknown>): CloudBin => ({
-        bin_id: (cloudRecord.binId || cloudRecord.bin_id) as string,
-        store_id: (cloudRecord.storeId || cloudRecord.store_id || '') as string,
-        bin_number: ((cloudRecord.displayOrder as number) ?? 0) + 1, // displayOrder is 0-indexed, bin_number is 1-indexed
-        label: (cloudRecord.name || cloudRecord.label) as string | undefined,
-        status:
-          cloudRecord.isActive === true || cloudRecord.status === 'ACTIVE' ? 'ACTIVE' : 'INACTIVE',
-        updated_at: (cloudRecord.updatedAt || cloudRecord.updated_at) as string,
-        deleted_at: (cloudRecord.deletedAt || cloudRecord.deleted_at) as string | undefined,
-      });
-
-      if ('data' in rawResponse && rawResponse.data && typeof rawResponse.data === 'object') {
-        const data = rawResponse.data as Record<string, unknown>;
-        // Cloud API returns 'records' array, not 'bins'
-        const rawRecords = (data.records || data.bins || []) as Record<string, unknown>[];
-        const records = rawRecords.map(mapCloudBin);
-        response = {
-          bins: records,
-          totalCount: (data.totalCount as number) || records.length,
-        };
-      } else if ('records' in rawResponse) {
-        // Direct format with records
-        const rawRecords = (rawResponse.records || []) as Record<string, unknown>[];
-        const records = rawRecords.map(mapCloudBin);
-        response = {
-          bins: records,
-          totalCount: (rawResponse.totalCount as number) || records.length,
-        };
-      } else if ('bins' in rawResponse) {
-        // Direct format with bins (already in correct format)
-        response = rawResponse as unknown as CloudBinsResponse;
-      } else {
-        log.error('Unexpected bins API response structure', { rawResponse });
-        throw new Error('Invalid bins API response structure');
+      if (pageCount >= MAX_PAGES) {
+        log.warn('Bins pagination hit safety limit', { maxPages: MAX_PAGES, totalFetched: allBins.length });
       }
 
+      // SEC-017: Audit log
       log.info('Bins pulled successfully', {
-        count: response.bins?.length ?? 0,
-        totalCount: response.totalCount,
+        count: allBins.length,
+        totalCount,
+        pages: pageCount,
       });
 
-      return response;
+      return {
+        bins: allBins,
+        totalCount,
+        hasMore: false, // All pages fetched
+        currentSequence,
+        serverTime,
+        nextCursor: null,
+      };
     } catch (error) {
       log.error('Failed to pull bins from cloud', {
         error: error instanceof Error ? error.message : 'Unknown error',
@@ -2564,12 +2643,54 @@ export class CloudApiService {
 
       const path = `/api/v1/sync/lottery/games?${params.toString()}`;
 
+      // API returns: { success: true, data: { records: [...], total_count, has_more, server_time } }
+      // per replica_end_points.md specification
+      // Use unknown[] to allow flexible field name handling (camelCase or snake_case)
       const response = await this.request<{
         success: boolean;
-        data: { games: CloudGame[] };
+        data: {
+          records?: unknown[];
+          games?: unknown[]; // Fallback for legacy format
+          total_count?: number;
+          has_more?: boolean;
+          server_time?: string;
+        };
       }>('GET', path);
 
-      const games = response.success && response.data?.games ? response.data.games : [];
+      // Extract games from response - API uses 'records', fallback to 'games' for compatibility
+      // API may return camelCase or snake_case fields, so we normalize to snake_case
+      let games: CloudGame[] = [];
+      if (response.success && response.data) {
+        let rawRecords: Array<Record<string, unknown>> = [];
+
+        if (Array.isArray(response.data.records)) {
+          rawRecords = response.data.records as Array<Record<string, unknown>>;
+          log.debug('Games found in data.records', { count: rawRecords.length });
+        } else if (Array.isArray(response.data.games)) {
+          rawRecords = response.data.games as Array<Record<string, unknown>>;
+          log.debug('Games found in data.games (legacy)', { count: rawRecords.length });
+        }
+
+        // Transform camelCase to snake_case (API may use either format)
+        games = rawRecords.map((r) => ({
+          game_id: (r.gameId || r.game_id || r.id) as string,
+          game_code: (r.gameCode || r.game_code) as string,
+          name: (r.name || r.gameName) as string,
+          price: Number(r.price || r.ticketPrice || 0),
+          pack_value: Number(r.packValue || r.pack_value || 0),
+          tickets_per_pack:
+            r.ticketsPerPack !== undefined
+              ? Number(r.ticketsPerPack)
+              : r.tickets_per_pack !== undefined
+                ? Number(r.tickets_per_pack)
+                : undefined,
+          status: ((r.status || 'ACTIVE') as string).toUpperCase() as
+            | 'ACTIVE'
+            | 'INACTIVE'
+            | 'DISCONTINUED',
+          updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
+        }));
+      }
 
       log.info('Lottery games pulled successfully', { count: games.length });
 
@@ -3148,6 +3269,13 @@ export class CloudApiService {
    * Push pack activation to cloud
    * API: POST /api/v1/sync/lottery/packs/activate
    *
+   * Per API spec, the desktop app sends all pack data with every activation request.
+   * The server handles:
+   * 1. Pack doesn't exist: Create it and activate
+   * 2. Pack exists with RECEIVED status: Activate it
+   * 3. Pack already ACTIVE in same bin: Idempotent success (returns idempotent: true)
+   * 4. Pack ACTIVE in different bin: Error
+   *
    * Enterprise-grade implementation:
    * - API-001: Input validation via Zod schema
    * - API-003: Centralized error handling with sanitized responses
@@ -3156,22 +3284,35 @@ export class CloudApiService {
    * - SEC-010: AUTHZ - activated_by from session for audit trail
    * - SEC-017: Audit logging for sync operations
    *
-   * @param data - Pack activation data
-   * @returns Success status
+   * @param data - Pack activation data (all fields required by API spec)
+   * @returns Success status and idempotent flag
    */
   async pushPackActivate(data: {
+    // Required fields per API spec
     pack_id: string;
-    store_id: string;
     bin_id: string;
     opening_serial: string;
+    game_code: string;
+    pack_number: string;
+    serial_start: string;
+    serial_end: string;
     activated_at: string;
-    activated_by: string | null;
+    received_at: string;
+    // Optional fields
+    store_id?: string;
+    activated_by?: string | null;
     shift_id?: string | null;
     local_id?: string;
-  }): Promise<{ success: boolean }> {
+    // Mark-sold fields - only include if pack was mark-sold at activation
+    mark_sold_tickets?: number;
+    mark_sold_reason?: string;
+    mark_sold_approved_by?: string | null;
+  }): Promise<{ success: boolean; idempotent?: boolean }> {
     log.debug('Pushing pack activation to cloud', {
       packId: data.pack_id,
       binId: data.bin_id,
+      gameCode: data.game_code,
+      packNumber: data.pack_number,
     });
 
     // Start a sync session (required by API)
@@ -3185,19 +3326,55 @@ export class CloudApiService {
       const path = `/api/v1/sync/lottery/packs/activate`;
 
       // API spec: POST /api/v1/sync/lottery/packs/activate
-      // Required: session_id, pack_id, bin_id, opening_serial, activated_at, shift_id, local_id
-      const response = await this.request<{
-        success: boolean;
-        data?: { packId?: string; status?: string; sequence?: number };
-      }>('POST', path, {
+      // Required: session_id, pack_id, bin_id, opening_serial, game_code, pack_number,
+      //           serial_start, serial_end, activated_at, received_at
+      // Optional: shift_id, local_id
+      // Mark-sold fields (only if mark_sold_tickets > 0): mark_sold_reason, mark_sold_tickets, mark_sold_approved_by
+      const requestBody: Record<string, unknown> = {
         session_id: session.sessionId,
         pack_id: data.pack_id,
         bin_id: data.bin_id,
-        opening_serial: parseInt(data.opening_serial, 10) || 0,
+        opening_serial: String(data.opening_serial),
+        game_code: data.game_code,
+        pack_number: data.pack_number,
+        serial_start: String(data.serial_start),
+        serial_end: String(data.serial_end),
         activated_at: data.activated_at,
-        shift_id: data.shift_id || null,
+        received_at: data.received_at,
         local_id: data.local_id || data.pack_id,
-      });
+      };
+
+      // Optional: shift_id (omit if null, don't send null)
+      if (data.shift_id) {
+        requestBody.shift_id = data.shift_id;
+      }
+
+      // Mark-sold fields - only include if pack was mark-sold at activation
+      if (data.mark_sold_tickets && data.mark_sold_tickets > 0) {
+        requestBody.mark_sold_tickets = data.mark_sold_tickets;
+        if (data.mark_sold_reason) {
+          requestBody.mark_sold_reason = data.mark_sold_reason;
+        }
+        if (data.mark_sold_approved_by) {
+          requestBody.mark_sold_approved_by = data.mark_sold_approved_by;
+        }
+      }
+
+      const response = await this.request<{
+        success: boolean;
+        data?: {
+          success?: boolean;
+          pack?: {
+            pack_id: string;
+            pack_number: string;
+            game_code: string;
+            status: string;
+            bin_id: string;
+          };
+          serverTime?: string;
+          idempotent?: boolean;
+        };
+      }>('POST', path, requestBody);
 
       // Complete sync session
       await this.completeSyncSession(session.sessionId, 0, {
@@ -3206,12 +3383,15 @@ export class CloudApiService {
         conflictsResolved: 0,
       });
 
+      const idempotent = response.data?.idempotent || false;
       log.info('Pack activation pushed to cloud', {
         packId: data.pack_id,
         binId: data.bin_id,
+        gameCode: data.game_code,
+        idempotent,
       });
 
-      return { success: response.success };
+      return { success: response.success, idempotent };
     } catch (error) {
       // Try to complete session even on error
       try {
@@ -3247,7 +3427,7 @@ export class CloudApiService {
     closing_serial: string;
     tickets_sold: number;
     sales_amount: number;
-    settled_at: string;
+    depleted_at: string;
     shift_id?: string | null;
     local_id?: string;
   }): Promise<{ success: boolean }> {
@@ -3268,19 +3448,26 @@ export class CloudApiService {
       const path = `/api/v1/sync/lottery/packs/deplete`;
 
       // API spec: POST /api/v1/sync/lottery/packs/deplete
-      // Required: session_id, pack_id, final_serial, depletion_reason, depleted_at, shift_id, local_id
+      // Required: session_id, pack_id, final_serial, depletion_reason, depleted_at, local_id
+      // Optional: shift_id (omit if null, don't send null)
+      const requestBody: Record<string, unknown> = {
+        session_id: session.sessionId,
+        pack_id: data.pack_id,
+        final_serial: String(data.closing_serial), // API expects string, not number
+        depletion_reason: 'SOLD_OUT',
+        depleted_at: data.depleted_at,
+        local_id: data.local_id || data.pack_id,
+      };
+
+      // Only include shift_id if it has a value (API doesn't accept null)
+      if (data.shift_id) {
+        requestBody.shift_id = data.shift_id;
+      }
+
       const response = await this.request<{
         success: boolean;
         data?: { packId?: string; status?: string; sequence?: number };
-      }>('POST', path, {
-        session_id: session.sessionId,
-        pack_id: data.pack_id,
-        final_serial: parseInt(data.closing_serial, 10) || 0,
-        depletion_reason: 'SOLD_OUT',
-        depleted_at: data.settled_at,
-        shift_id: data.shift_id || null,
-        local_id: data.local_id || data.pack_id,
-      });
+      }>('POST', path, requestBody);
 
       // Complete sync session
       await this.completeSyncSession(session.sessionId, 0, {
@@ -3353,21 +3540,30 @@ export class CloudApiService {
       const path = `/api/v1/sync/lottery/packs/return`;
 
       // API spec: POST /api/v1/sync/lottery/packs/return
-      // Required: session_id, pack_id, return_reason, last_sold_serial, tickets_sold_on_return, returned_at, shift_id, local_id
-      const response = await this.request<{
-        success: boolean;
-        data?: { packId?: string; status?: string; sequence?: number };
-      }>('POST', path, {
+      // Required: session_id, pack_id, return_reason, last_sold_serial, tickets_sold_on_return, returned_at, local_id
+      // Optional: shift_id, return_notes (omit if null, don't send null)
+      const requestBody: Record<string, unknown> = {
         session_id: session.sessionId,
         pack_id: data.pack_id,
         return_reason: data.return_reason || 'OTHER',
-        last_sold_serial: data.closing_serial ? parseInt(data.closing_serial, 10) : 0,
+        last_sold_serial: data.closing_serial ? String(data.closing_serial) : '0', // API expects string
         tickets_sold_on_return: data.tickets_sold || 0,
-        return_notes: data.return_notes || null,
         returned_at: data.returned_at,
-        shift_id: data.shift_id || null,
         local_id: data.local_id || data.pack_id,
-      });
+      };
+
+      // Only include optional fields if they have values (API doesn't accept null)
+      if (data.shift_id) {
+        requestBody.shift_id = data.shift_id;
+      }
+      if (data.return_notes) {
+        requestBody.return_notes = data.return_notes;
+      }
+
+      const response = await this.request<{
+        success: boolean;
+        data?: { packId?: string; status?: string; sequence?: number };
+      }>('POST', path, requestBody);
 
       // Complete sync session
       await this.completeSyncSession(session.sessionId, 0, {
@@ -4185,15 +4381,59 @@ export class CloudApiService {
       const rawResponse = await this.request<{
         success: boolean;
         data?: {
-          packs?: CloudPack[];
-          records?: CloudPack[];
+          packs?: Array<Record<string, unknown>>;
+          records?: Array<Record<string, unknown>>;
           syncMetadata?: CloudSyncMetadata;
         };
       }>('GET', path);
 
-      // Handle various response formats
+      // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
-      const packs = data.packs || data.records || [];
+      const rawPacks = (data.packs || data.records || []) as Array<Record<string, unknown>>;
+
+      // Transform camelCase to snake_case (API may use either format)
+      const packs: CloudPack[] = rawPacks.map((r) => ({
+        pack_id: (r.packId || r.pack_id) as string,
+        store_id: (r.storeId || r.store_id) as string,
+        game_id: (r.gameId || r.game_id) as string,
+        game_code: (r.gameCode || r.game_code) as string,
+        pack_number: (r.packNumber || r.pack_number) as string,
+        serial_start: (r.serialStart || r.serial_start) as string,
+        serial_end: (r.serialEnd || r.serial_end) as string,
+        status: (r.status as CloudPackStatus) || 'RECEIVED',
+        current_bin_id: (r.currentBinId || r.current_bin_id || null) as string | null,
+        current_bin_name: (r.currentBinName || r.current_bin_name || null) as string | null,
+        opening_serial: (r.openingSerial || r.opening_serial || null) as string | null,
+        closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
+        tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
+        last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
+        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        received_at: (r.receivedAt || r.received_at || null) as string | null,
+        received_by: (r.receivedBy || r.received_by || null) as string | null,
+        activated_at: (r.activatedAt || r.activated_at || null) as string | null,
+        activated_by: (r.activatedBy || r.activated_by || null) as string | null,
+        activated_shift_id: (r.activatedShiftId || r.activated_shift_id || null) as string | null,
+        depleted_at: (r.depletedAt || r.depleted_at || null) as string | null,
+        depleted_by: (r.depletedBy || r.depleted_by || null) as string | null,
+        depleted_shift_id: (r.depletedShiftId || r.depleted_shift_id || null) as string | null,
+        depletion_reason: (r.depletionReason || r.depletion_reason || null) as string | null,
+        returned_at: (r.returnedAt || r.returned_at || null) as string | null,
+        returned_by: (r.returnedBy || r.returned_by || null) as string | null,
+        returned_shift_id: (r.returnedShiftId || r.returned_shift_id || null) as string | null,
+        return_reason: (r.returnReason || r.return_reason || null) as string | null,
+        return_notes: (r.returnNotes || r.return_notes || null) as string | null,
+        last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
+        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
+        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
+        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
+        sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
+        updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
+        created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
+      }));
+
       const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
         lastSequence: packs.length > 0 ? Math.max(...packs.map((p) => p.sync_sequence || 0)) : 0,
         hasMore: packs.length === limit,
@@ -4287,15 +4527,59 @@ export class CloudApiService {
       const rawResponse = await this.request<{
         success: boolean;
         data?: {
-          packs?: CloudPack[];
-          records?: CloudPack[];
+          packs?: Array<Record<string, unknown>>;
+          records?: Array<Record<string, unknown>>;
           syncMetadata?: CloudSyncMetadata;
         };
       }>('GET', path);
 
-      // Handle various response formats
+      // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
-      const packs = data.packs || data.records || [];
+      const rawPacks = (data.packs || data.records || []) as Array<Record<string, unknown>>;
+
+      // Transform camelCase to snake_case (API may use either format)
+      const packs: CloudPack[] = rawPacks.map((r) => ({
+        pack_id: (r.packId || r.pack_id) as string,
+        store_id: (r.storeId || r.store_id) as string,
+        game_id: (r.gameId || r.game_id) as string,
+        game_code: (r.gameCode || r.game_code) as string,
+        pack_number: (r.packNumber || r.pack_number) as string,
+        serial_start: (r.serialStart || r.serial_start) as string,
+        serial_end: (r.serialEnd || r.serial_end) as string,
+        status: (r.status as CloudPackStatus) || 'RECEIVED',
+        current_bin_id: (r.currentBinId || r.current_bin_id || null) as string | null,
+        current_bin_name: (r.currentBinName || r.current_bin_name || null) as string | null,
+        opening_serial: (r.openingSerial || r.opening_serial || null) as string | null,
+        closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
+        tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
+        last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
+        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        received_at: (r.receivedAt || r.received_at || null) as string | null,
+        received_by: (r.receivedBy || r.received_by || null) as string | null,
+        activated_at: (r.activatedAt || r.activated_at || null) as string | null,
+        activated_by: (r.activatedBy || r.activated_by || null) as string | null,
+        activated_shift_id: (r.activatedShiftId || r.activated_shift_id || null) as string | null,
+        depleted_at: (r.depletedAt || r.depleted_at || null) as string | null,
+        depleted_by: (r.depletedBy || r.depleted_by || null) as string | null,
+        depleted_shift_id: (r.depletedShiftId || r.depleted_shift_id || null) as string | null,
+        depletion_reason: (r.depletionReason || r.depletion_reason || null) as string | null,
+        returned_at: (r.returnedAt || r.returned_at || null) as string | null,
+        returned_by: (r.returnedBy || r.returned_by || null) as string | null,
+        returned_shift_id: (r.returnedShiftId || r.returned_shift_id || null) as string | null,
+        return_reason: (r.returnReason || r.return_reason || null) as string | null,
+        return_notes: (r.returnNotes || r.return_notes || null) as string | null,
+        last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
+        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
+        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
+        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
+        sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
+        updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
+        created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
+      }));
+
       const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
         lastSequence: packs.length > 0 ? Math.max(...packs.map((p) => p.sync_sequence || 0)) : 0,
         hasMore: packs.length === limit,
@@ -4389,15 +4673,59 @@ export class CloudApiService {
       const rawResponse = await this.request<{
         success: boolean;
         data?: {
-          packs?: CloudPack[];
-          records?: CloudPack[];
+          packs?: Array<Record<string, unknown>>;
+          records?: Array<Record<string, unknown>>;
           syncMetadata?: CloudSyncMetadata;
         };
       }>('GET', path);
 
-      // Handle various response formats
+      // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
-      const packs = data.packs || data.records || [];
+      const rawPacks = (data.packs || data.records || []) as Array<Record<string, unknown>>;
+
+      // Transform camelCase to snake_case (API may use either format)
+      const packs: CloudPack[] = rawPacks.map((r) => ({
+        pack_id: (r.packId || r.pack_id) as string,
+        store_id: (r.storeId || r.store_id) as string,
+        game_id: (r.gameId || r.game_id) as string,
+        game_code: (r.gameCode || r.game_code) as string,
+        pack_number: (r.packNumber || r.pack_number) as string,
+        serial_start: (r.serialStart || r.serial_start) as string,
+        serial_end: (r.serialEnd || r.serial_end) as string,
+        status: (r.status as CloudPackStatus) || 'RECEIVED',
+        current_bin_id: (r.currentBinId || r.current_bin_id || null) as string | null,
+        current_bin_name: (r.currentBinName || r.current_bin_name || null) as string | null,
+        opening_serial: (r.openingSerial || r.opening_serial || null) as string | null,
+        closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
+        tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
+        last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
+        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        received_at: (r.receivedAt || r.received_at || null) as string | null,
+        received_by: (r.receivedBy || r.received_by || null) as string | null,
+        activated_at: (r.activatedAt || r.activated_at || null) as string | null,
+        activated_by: (r.activatedBy || r.activated_by || null) as string | null,
+        activated_shift_id: (r.activatedShiftId || r.activated_shift_id || null) as string | null,
+        depleted_at: (r.depletedAt || r.depleted_at || null) as string | null,
+        depleted_by: (r.depletedBy || r.depleted_by || null) as string | null,
+        depleted_shift_id: (r.depletedShiftId || r.depleted_shift_id || null) as string | null,
+        depletion_reason: (r.depletionReason || r.depletion_reason || null) as string | null,
+        returned_at: (r.returnedAt || r.returned_at || null) as string | null,
+        returned_by: (r.returnedBy || r.returned_by || null) as string | null,
+        returned_shift_id: (r.returnedShiftId || r.returned_shift_id || null) as string | null,
+        return_reason: (r.returnReason || r.return_reason || null) as string | null,
+        return_notes: (r.returnNotes || r.return_notes || null) as string | null,
+        last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
+        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
+        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
+        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
+        sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
+        updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
+        created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
+      }));
+
       const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
         lastSequence: packs.length > 0 ? Math.max(...packs.map((p) => p.sync_sequence || 0)) : 0,
         hasMore: packs.length === limit,
@@ -4491,15 +4819,59 @@ export class CloudApiService {
       const rawResponse = await this.request<{
         success: boolean;
         data?: {
-          packs?: CloudPack[];
-          records?: CloudPack[];
+          packs?: Array<Record<string, unknown>>;
+          records?: Array<Record<string, unknown>>;
           syncMetadata?: CloudSyncMetadata;
         };
       }>('GET', path);
 
-      // Handle various response formats
+      // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
-      const packs = data.packs || data.records || [];
+      const rawPacks = (data.packs || data.records || []) as Array<Record<string, unknown>>;
+
+      // Transform camelCase to snake_case (API may use either format)
+      const packs: CloudPack[] = rawPacks.map((r) => ({
+        pack_id: (r.packId || r.pack_id) as string,
+        store_id: (r.storeId || r.store_id) as string,
+        game_id: (r.gameId || r.game_id) as string,
+        game_code: (r.gameCode || r.game_code) as string,
+        pack_number: (r.packNumber || r.pack_number) as string,
+        serial_start: (r.serialStart || r.serial_start) as string,
+        serial_end: (r.serialEnd || r.serial_end) as string,
+        status: (r.status as CloudPackStatus) || 'RECEIVED',
+        current_bin_id: (r.currentBinId || r.current_bin_id || null) as string | null,
+        current_bin_name: (r.currentBinName || r.current_bin_name || null) as string | null,
+        opening_serial: (r.openingSerial || r.opening_serial || null) as string | null,
+        closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
+        tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
+        last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
+        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        received_at: (r.receivedAt || r.received_at || null) as string | null,
+        received_by: (r.receivedBy || r.received_by || null) as string | null,
+        activated_at: (r.activatedAt || r.activated_at || null) as string | null,
+        activated_by: (r.activatedBy || r.activated_by || null) as string | null,
+        activated_shift_id: (r.activatedShiftId || r.activated_shift_id || null) as string | null,
+        depleted_at: (r.depletedAt || r.depleted_at || null) as string | null,
+        depleted_by: (r.depletedBy || r.depleted_by || null) as string | null,
+        depleted_shift_id: (r.depletedShiftId || r.depleted_shift_id || null) as string | null,
+        depletion_reason: (r.depletionReason || r.depletion_reason || null) as string | null,
+        returned_at: (r.returnedAt || r.returned_at || null) as string | null,
+        returned_by: (r.returnedBy || r.returned_by || null) as string | null,
+        returned_shift_id: (r.returnedShiftId || r.returned_shift_id || null) as string | null,
+        return_reason: (r.returnReason || r.return_reason || null) as string | null,
+        return_notes: (r.returnNotes || r.return_notes || null) as string | null,
+        last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
+        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
+        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
+        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
+        sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
+        updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
+        created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
+      }));
+
       const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
         lastSequence: packs.length > 0 ? Math.max(...packs.map((p) => p.sync_sequence || 0)) : 0,
         hasMore: packs.length === limit,
@@ -5191,6 +5563,136 @@ export class CloudApiService {
       } catch {
         log.warn('Failed to complete sync session after pull bin history error');
       }
+      throw error;
+    }
+  }
+
+  // ============================================================================
+  // Store Reset
+  // ============================================================================
+
+  /**
+   * Reset store data via cloud API
+   * API: POST /api/v1/store/reset
+   *
+   * Enterprise-grade implementation for authorized store data reset.
+   * This endpoint provides server-side audit logging of the reset action.
+   *
+   * Security & Standards Compliance:
+   * - API-001: Input validation via Zod schema
+   * - API-003: Centralized error handling with sanitized responses
+   * - SEC-008: HTTPS enforcement (via base request method)
+   * - SEC-017: Full audit trail recorded server-side (auditReferenceId returned)
+   * - SEC-010: AUTHZ - Cloud auth user context captured for audit
+   *
+   * @param data - Reset configuration
+   * @returns Reset authorization with clear targets and audit reference
+   */
+  async resetStore(data: {
+    resetType: 'FULL_RESET' | 'LOTTERY_ONLY' | 'SYNC_STATE';
+    reason?: string;
+    appVersion: string;
+    confirmed: boolean;
+  }): Promise<{
+    success: boolean;
+    data: {
+      authorized: boolean;
+      resetType: 'FULL_RESET' | 'LOTTERY_ONLY' | 'SYNC_STATE';
+      serverTime: string;
+      auditReferenceId: string;
+      instructions: {
+        clearTargets: string[];
+        resyncRequired: boolean;
+      };
+    };
+  }> {
+    log.info('Requesting store reset authorization', {
+      resetType: data.resetType,
+      hasReason: !!data.reason,
+    });
+
+    // Generate device fingerprint (same pattern used in startSyncSession)
+    const machineIdModule = await import('node-machine-id');
+    const machineIdSync =
+      machineIdModule.machineIdSync ||
+      (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
+    if (typeof machineIdSync !== 'function') {
+      log.error('Failed to import machineIdSync function for reset');
+      throw new Error('Device fingerprint generation unavailable');
+    }
+    const deviceFingerprint = machineIdSync();
+
+    // API-001: Validate request payload
+    // Note: deviceFingerprint length varies by platform (typically 32-64 chars)
+    const ResetRequestSchema = z.object({
+      resetType: z.enum(['FULL_RESET', 'LOTTERY_ONLY', 'SYNC_STATE']),
+      deviceFingerprint: z.string().min(32).max(128),
+      reason: z.string().max(500).optional(),
+      appVersion: z.string().max(50),
+      confirmed: z.literal(true), // Must be true to proceed
+    });
+
+    const payload: {
+      resetType: 'FULL_RESET' | 'LOTTERY_ONLY' | 'SYNC_STATE';
+      deviceFingerprint: string;
+      reason?: string;
+      appVersion: string;
+      confirmed: boolean;
+    } = {
+      resetType: data.resetType,
+      deviceFingerprint,
+      appVersion: data.appVersion,
+      confirmed: data.confirmed,
+    };
+
+    // Only include reason if provided (backend validates: expected string, not undefined)
+    if (data.reason) {
+      payload.reason = data.reason;
+    }
+
+    // Validate payload before sending
+    const validationResult = ResetRequestSchema.safeParse(payload);
+    if (!validationResult.success) {
+      const flatErrors = validationResult.error.flatten();
+      log.error('Reset request validation failed', {
+        errors: flatErrors,
+        deviceFingerprintLength: deviceFingerprint?.length,
+      });
+      const errorDetails = Object.entries(flatErrors.fieldErrors)
+        .map(([field, errors]) => `${field}: ${(errors as string[]).join(', ')}`)
+        .join('; ');
+      throw new Error(`Invalid reset request: ${errorDetails || 'validation failed'}`);
+    }
+
+    try {
+      const response = await this.request<{
+        success: boolean;
+        data: {
+          authorized: boolean;
+          resetType: 'FULL_RESET' | 'LOTTERY_ONLY' | 'SYNC_STATE';
+          serverTime: string;
+          auditReferenceId: string;
+          instructions: {
+            clearTargets: string[];
+            resyncRequired: boolean;
+          };
+        };
+      }>('POST', '/api/v1/store/reset', payload);
+
+      // SEC-017: Log audit reference for local tracking
+      log.info('Store reset authorized by cloud', {
+        resetType: response.data.resetType,
+        auditReferenceId: response.data.auditReferenceId,
+        clearTargetsCount: response.data.instructions.clearTargets.length,
+        resyncRequired: response.data.instructions.resyncRequired,
+      });
+
+      return response;
+    } catch (error) {
+      log.error('Store reset request failed', {
+        resetType: data.resetType,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
       throw error;
     }
   }

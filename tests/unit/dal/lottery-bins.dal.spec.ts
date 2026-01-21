@@ -5,6 +5,11 @@
  * Validates SEC-006: Parameterized queries
  * Validates DB-006: Tenant isolation via store_id
  *
+ * Cloud-aligned schema (v039):
+ * - name: Display name (replaces label)
+ * - display_order: Sort order (replaces bin_number)
+ * - is_active: Boolean (replaces status enum)
+ *
  * @module tests/unit/dal/lottery-bins
  */
 
@@ -45,7 +50,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     // Set the shared test database so the mock returns it
     testDb = db;
 
-    // Create required tables
+    // Create required tables with cloud-aligned schema
     db.exec(`
       CREATE TABLE lottery_games (
         game_id TEXT PRIMARY KEY,
@@ -60,10 +65,10 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
       CREATE TABLE lottery_bins (
         bin_id TEXT PRIMARY KEY,
         store_id TEXT NOT NULL,
-        bin_number INTEGER NOT NULL,
-        label TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
-        cloud_bin_id TEXT,
+        name TEXT NOT NULL,
+        location TEXT,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
         synced_at TEXT,
         deleted_at TEXT,
         created_at TEXT NOT NULL,
@@ -74,9 +79,26 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
         pack_id TEXT PRIMARY KEY,
         store_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
-        bin_id TEXT,
+        current_bin_id TEXT,
         pack_number TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'RECEIVED',
+        received_at TEXT,
+        received_by TEXT,
+        activated_at TEXT,
+        activated_by TEXT,
+        activated_shift_id TEXT,
+        depleted_at TEXT,
+        returned_at TEXT,
+        opening_serial TEXT,
+        closing_serial TEXT,
+        tickets_sold_count INTEGER NOT NULL DEFAULT 0,
+        sales_amount REAL NOT NULL DEFAULT 0,
+        depleted_by TEXT,
+        depleted_shift_id TEXT,
+        depletion_reason TEXT,
+        returned_by TEXT,
+        returned_shift_id TEXT,
+        synced_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -102,8 +124,8 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     it('should create a new lottery bin', () => {
       const data: CreateLotteryBinData = {
         store_id: 'store-1',
-        bin_number: 1,
-        label: 'Bin 1',
+        name: 'Bin 1',
+        display_order: 1,
       };
 
       const bin = dal.create(data);
@@ -111,27 +133,27 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
       expect(bin).toBeDefined();
       expect(bin.bin_id).toBeDefined();
       expect(bin.store_id).toBe('store-1');
-      expect(bin.bin_number).toBe(1);
-      expect(bin.label).toBe('Bin 1');
-      expect(bin.status).toBe('ACTIVE');
+      expect(bin.name).toBe('Bin 1');
+      expect(bin.display_order).toBe(1);
+      expect(bin.is_active).toBe(1);
     });
 
-    it('should use default status if not provided', () => {
+    it('should use default is_active if not provided', () => {
       const data: CreateLotteryBinData = {
         store_id: 'store-1',
-        bin_number: 1,
+        name: 'Bin 1',
       };
 
       const bin = dal.create(data);
 
-      expect(bin.status).toBe('ACTIVE');
+      expect(bin.is_active).toBe(1);
     });
 
     it('should use provided bin_id if given', () => {
       const data: CreateLotteryBinData = {
         bin_id: 'custom-bin-id',
         store_id: 'store-1',
-        bin_number: 1,
+        name: 'Bin 1',
       };
 
       const bin = dal.create(data);
@@ -144,40 +166,41 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     it('should update bin properties', () => {
       const bin = dal.create({
         store_id: 'store-1',
-        bin_number: 1,
-        label: 'Bin 1',
+        name: 'Bin 1',
+        display_order: 1,
       });
 
-      const updated = dal.update(bin.bin_id, { label: 'Updated Bin 1' });
+      const updated = dal.update(bin.bin_id, { name: 'Updated Bin 1' });
 
       expect(updated).toBeDefined();
-      expect(updated?.label).toBe('Updated Bin 1');
+      expect(updated?.name).toBe('Updated Bin 1');
     });
 
-    it('should update bin number', () => {
+    it('should update display_order', () => {
       const bin = dal.create({
         store_id: 'store-1',
-        bin_number: 1,
+        name: 'Bin 1',
+        display_order: 1,
       });
 
-      const updated = dal.update(bin.bin_id, { bin_number: 2 });
+      const updated = dal.update(bin.bin_id, { display_order: 2 });
 
-      expect(updated?.bin_number).toBe(2);
+      expect(updated?.display_order).toBe(2);
     });
 
-    it('should update status', () => {
+    it('should update is_active', () => {
       const bin = dal.create({
         store_id: 'store-1',
-        bin_number: 1,
+        name: 'Bin 1',
       });
 
-      const updated = dal.update(bin.bin_id, { status: 'INACTIVE' });
+      const updated = dal.update(bin.bin_id, { is_active: false });
 
-      expect(updated?.status).toBe('INACTIVE');
+      expect(updated?.is_active).toBe(0);
     });
 
     it('should return undefined for non-existent bin', () => {
-      const result = dal.update('non-existent-id', { label: 'Test' });
+      const result = dal.update('non-existent-id', { name: 'Test' });
 
       expect(result).toBeUndefined();
     });
@@ -186,11 +209,11 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
   describe('findActiveByStore (DB-006)', () => {
     it('should return only active bins for the specified store', () => {
       // Create bins for store-1
-      dal.create({ store_id: 'store-1', bin_number: 1, label: 'Bin 1' });
-      dal.create({ store_id: 'store-1', bin_number: 2, label: 'Bin 2' });
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
 
       // Create bin for store-2
-      dal.create({ store_id: 'store-2', bin_number: 1, label: 'Other Bin' });
+      dal.create({ store_id: 'store-2', name: 'Other Bin', display_order: 1 });
 
       const bins = dal.findActiveByStore('store-1');
 
@@ -199,79 +222,79 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     });
 
     it('should exclude inactive bins', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.create({ store_id: 'store-1', bin_number: 2 });
-      dal.update(bin.bin_id, { status: 'INACTIVE' });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
+      dal.update(bin.bin_id, { is_active: false });
 
       const bins = dal.findActiveByStore('store-1');
 
       expect(bins.length).toBe(1);
-      expect(bins[0].bin_number).toBe(2);
+      expect(bins[0].display_order).toBe(2);
     });
 
     it('should exclude soft-deleted bins', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.create({ store_id: 'store-1', bin_number: 2 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
       dal.softDelete(bin.bin_id);
 
       const bins = dal.findActiveByStore('store-1');
 
       expect(bins.length).toBe(1);
-      expect(bins[0].bin_number).toBe(2);
+      expect(bins[0].display_order).toBe(2);
     });
 
-    it('should return bins ordered by bin_number', () => {
-      dal.create({ store_id: 'store-1', bin_number: 3 });
-      dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.create({ store_id: 'store-1', bin_number: 2 });
+    it('should return bins ordered by display_order', () => {
+      dal.create({ store_id: 'store-1', name: 'Bin 3', display_order: 3 });
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
 
       const bins = dal.findActiveByStore('store-1');
 
-      expect(bins[0].bin_number).toBe(1);
-      expect(bins[1].bin_number).toBe(2);
-      expect(bins[2].bin_number).toBe(3);
+      expect(bins[0].display_order).toBe(1);
+      expect(bins[1].display_order).toBe(2);
+      expect(bins[2].display_order).toBe(3);
     });
   });
 
   describe('findAllByStore', () => {
     it('should include inactive bins but exclude deleted', () => {
-      const bin1 = dal.create({ store_id: 'store-1', bin_number: 1 });
-      const _bin2 = dal.create({ store_id: 'store-1', bin_number: 2 });
-      const bin3 = dal.create({ store_id: 'store-1', bin_number: 3 });
+      const bin1 = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      const _bin2 = dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
+      const bin3 = dal.create({ store_id: 'store-1', name: 'Bin 3', display_order: 3 });
 
-      dal.update(bin1.bin_id, { status: 'INACTIVE' });
+      dal.update(bin1.bin_id, { is_active: false });
       dal.softDelete(bin3.bin_id);
 
       const bins = dal.findAllByStore('store-1');
 
       expect(bins.length).toBe(2);
-      expect(bins.some((b) => b.status === 'INACTIVE')).toBe(true);
+      expect(bins.some((b) => b.is_active === 0)).toBe(true);
     });
   });
 
-  describe('findByBinNumber', () => {
-    it('should find bin by number within a store', () => {
-      dal.create({ store_id: 'store-1', bin_number: 1, label: 'Bin 1' });
+  describe('findByName', () => {
+    it('should find bin by name within a store', () => {
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
-      const bin = dal.findByBinNumber('store-1', 1);
+      const bin = dal.findByName('store-1', 'Bin 1');
 
       expect(bin).toBeDefined();
-      expect(bin?.label).toBe('Bin 1');
+      expect(bin?.name).toBe('Bin 1');
     });
 
     it('should not find bin from different store', () => {
-      dal.create({ store_id: 'store-1', bin_number: 1, label: 'Bin 1' });
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
-      const bin = dal.findByBinNumber('store-2', 1);
+      const bin = dal.findByName('store-2', 'Bin 1');
 
       expect(bin).toBeUndefined();
     });
 
     it('should not find soft-deleted bins', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
       dal.softDelete(bin.bin_id);
 
-      const found = dal.findByBinNumber('store-1', 1);
+      const found = dal.findByName('store-1', 'Bin 1');
 
       expect(found).toBeUndefined();
     });
@@ -279,24 +302,24 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   describe('getPackCount', () => {
     it('should return count of activated packs in bin', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
-      // Insert test packs directly
+      // Insert test packs directly using current_bin_id
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, status, created_at, updated_at)
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, status, created_at, updated_at)
         VALUES
-          ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVATED', datetime('now'), datetime('now')),
-          ('pack-2', 'store-1', 'game-1', '${bin.bin_id}', 'PKG002', 'ACTIVATED', datetime('now'), datetime('now')),
+          ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVE', datetime('now'), datetime('now')),
+          ('pack-2', 'store-1', 'game-1', '${bin.bin_id}', 'PKG002', 'ACTIVE', datetime('now'), datetime('now')),
           ('pack-3', 'store-1', 'game-1', '${bin.bin_id}', 'PKG003', 'RECEIVED', datetime('now'), datetime('now'));
       `);
 
       const count = dal.getPackCount(bin.bin_id);
 
-      expect(count).toBe(2); // Only ACTIVATED packs
+      expect(count).toBe(2); // Only ACTIVE packs
     });
 
     it('should return 0 for empty bin', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
       const count = dal.getPackCount(bin.bin_id);
 
@@ -306,7 +329,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   describe('softDelete', () => {
     it('should set deleted_at timestamp', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
       const result = dal.softDelete(bin.bin_id);
 
@@ -318,12 +341,12 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     });
 
     it('should fail when bin has active packs', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
-      // Insert active pack
+      // Insert active pack using current_bin_id
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, status, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVATED', datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, status, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVE', datetime('now'), datetime('now'));
       `);
 
       const result = dal.softDelete(bin.bin_id);
@@ -342,7 +365,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   describe('restore', () => {
     it('should clear deleted_at timestamp', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
       dal.softDelete(bin.bin_id);
 
       const result = dal.restore(bin.bin_id);
@@ -356,25 +379,25 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
   });
 
   describe('activate/deactivate', () => {
-    it('should set status to ACTIVE', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.update(bin.bin_id, { status: 'INACTIVE' });
+    it('should set is_active to 1', () => {
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.update(bin.bin_id, { is_active: false });
 
       const result = dal.activate(bin.bin_id);
 
       expect(result).toBe(true);
       const updated = dal.findById(bin.bin_id);
-      expect(updated?.status).toBe('ACTIVE');
+      expect(updated?.is_active).toBe(1);
     });
 
-    it('should set status to INACTIVE', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
+    it('should set is_active to 0', () => {
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
       const result = dal.deactivate(bin.bin_id);
 
       expect(result).toBe(true);
       const updated = dal.findById(bin.bin_id);
-      expect(updated?.status).toBe('INACTIVE');
+      expect(updated?.is_active).toBe(0);
     });
   });
 
@@ -383,8 +406,8 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
       const bins = dal.bulkCreate('store-1', 5);
 
       expect(bins.length).toBe(5);
-      expect(bins[0].bin_number).toBe(1);
-      expect(bins[4].bin_number).toBe(5);
+      expect(bins[0].display_order).toBe(1);
+      expect(bins[4].display_order).toBe(5);
     });
 
     it('should throw error for count > 200', () => {
@@ -396,38 +419,38 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
       expect(() => dal.bulkCreate('store-1', -1)).toThrow();
     });
 
-    it('should create bins with default labels', () => {
+    it('should create bins with default names', () => {
       const bins = dal.bulkCreate('store-1', 3);
 
-      expect(bins[0].label).toBe('Bin 1');
-      expect(bins[1].label).toBe('Bin 2');
-      expect(bins[2].label).toBe('Bin 3');
+      expect(bins[0].name).toBe('Bin 1');
+      expect(bins[1].name).toBe('Bin 2');
+      expect(bins[2].name).toBe('Bin 3');
     });
   });
 
-  describe('getNextBinNumber', () => {
+  describe('getNextDisplayOrder', () => {
     it('should return 1 for empty store', () => {
-      const next = dal.getNextBinNumber('store-1');
+      const next = dal.getNextDisplayOrder('store-1');
 
       expect(next).toBe(1);
     });
 
-    it('should return next available number', () => {
-      dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.create({ store_id: 'store-1', bin_number: 2 });
-      dal.create({ store_id: 'store-1', bin_number: 3 });
+    it('should return next available order', () => {
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
+      dal.create({ store_id: 'store-1', name: 'Bin 3', display_order: 3 });
 
-      const next = dal.getNextBinNumber('store-1');
+      const next = dal.getNextDisplayOrder('store-1');
 
       expect(next).toBe(4);
     });
 
     it('should not consider deleted bins', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1 });
-      dal.create({ store_id: 'store-1', bin_number: 2 });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
+      dal.create({ store_id: 'store-1', name: 'Bin 2', display_order: 2 });
       dal.softDelete(bin.bin_id);
 
-      const next = dal.getNextBinNumber('store-1');
+      const next = dal.getNextDisplayOrder('store-1');
 
       expect(next).toBe(3);
     });
@@ -435,25 +458,28 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   describe('upsertFromCloud', () => {
     it('should create new bin from cloud data', () => {
+      // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       const cloudData = {
-        cloud_bin_id: 'cloud-123',
+        bin_id: 'cloud-123',
         store_id: 'store-1',
-        bin_number: 1,
-        label: 'Bin 1',
+        name: 'Bin 1',
+        display_order: 1,
       };
 
       const bin = dal.upsertFromCloud(cloudData);
 
-      expect(bin.cloud_bin_id).toBe('cloud-123');
+      expect(bin.bin_id).toBe('cloud-123');
+      expect(bin.name).toBe('Bin 1');
       expect(bin.synced_at).toBeDefined();
     });
 
-    it('should update existing bin matched by cloud_bin_id', () => {
+    it('should update existing bin matched by bin_id', () => {
+      // After v037 migration: bin_id IS the cloud's UUID
       const cloudData = {
-        cloud_bin_id: 'cloud-123',
+        bin_id: 'cloud-123',
         store_id: 'store-1',
-        bin_number: 1,
-        label: 'Bin 1',
+        name: 'Bin 1',
+        display_order: 1,
       };
 
       dal.upsertFromCloud(cloudData);
@@ -461,10 +487,10 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
       // Update with new data
       const updated = dal.upsertFromCloud({
         ...cloudData,
-        label: 'Updated Bin 1',
+        name: 'Updated Bin 1',
       });
 
-      expect(updated.label).toBe('Updated Bin 1');
+      expect(updated.name).toBe('Updated Bin 1');
 
       // Should only have one bin
       const allBins = dal.findActiveByStore('store-1');
@@ -474,12 +500,12 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   describe('findBinsWithPacks', () => {
     it('should return bins with active pack info', () => {
-      const bin = dal.create({ store_id: 'store-1', bin_number: 1, label: 'Bin 1' });
+      const bin = dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
-      // Insert pack with game
+      // Insert pack with game using current_bin_id
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, status, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVATED', datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, status, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', '${bin.bin_id}', 'PKG001', 'ACTIVE', datetime('now'), datetime('now'));
       `);
 
       const binsWithPacks = dal.findBinsWithPacks('store-1');
@@ -492,7 +518,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     });
 
     it('should return bins without packs with null pack info', () => {
-      dal.create({ store_id: 'store-1', bin_number: 1, label: 'Bin 1' });
+      dal.create({ store_id: 'store-1', name: 'Bin 1', display_order: 1 });
 
       const binsWithPacks = dal.findBinsWithPacks('store-1');
 
@@ -503,17 +529,20 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
   });
 
   describe('findByCloudId', () => {
-    it('should find bin by cloud ID', () => {
+    it('should find bin by cloud ID (now same as bin_id)', () => {
+      // After v037 migration: bin_id IS the cloud's UUID
       dal.upsertFromCloud({
-        cloud_bin_id: 'cloud-123',
+        bin_id: 'cloud-123',
         store_id: 'store-1',
-        bin_number: 1,
+        name: 'Bin 1',
+        display_order: 1,
       });
 
       const found = dal.findByCloudId('cloud-123');
 
       expect(found).toBeDefined();
-      expect(found?.bin_number).toBe(1);
+      expect(found?.name).toBe('Bin 1');
+      expect(found?.bin_id).toBe('cloud-123');
     });
 
     it('should return undefined for non-existent cloud ID', () => {

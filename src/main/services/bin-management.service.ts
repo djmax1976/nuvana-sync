@@ -173,8 +173,8 @@ export class BinManagementService {
     const binsWithDetails: BinWithDetails[] = bins.map((bin) => {
       const packCount = lotteryBinsDAL.getPackCount(bin.bin_id);
       const packs = lotteryPacksDAL.findPacksWithDetails(store.store_id, {
-        bin_id: bin.bin_id,
-        status: 'ACTIVATED',
+        current_bin_id: bin.bin_id,
+        status: 'ACTIVE',
       });
 
       return {
@@ -217,8 +217,8 @@ export class BinManagementService {
     const store = storesDAL.getConfiguredStore();
     const packs = store
       ? lotteryPacksDAL.findPacksWithDetails(store.store_id, {
-          bin_id: binId,
-          status: 'ACTIVATED',
+          current_bin_id: binId,
+          status: 'ACTIVE',
         })
       : [];
 
@@ -270,15 +270,16 @@ export class BinManagementService {
     }
 
     try {
-      // Get next bin number
-      const nextBinNumber = lotteryBinsDAL.getNextBinNumber(store.store_id);
+      // Get next display order
+      const nextDisplayOrder = lotteryBinsDAL.getNextDisplayOrder(store.store_id);
 
-      // Create bin
+      // Create bin (cloud-aligned schema: uses name, location, display_order, is_active)
       const bin = lotteryBinsDAL.create({
         store_id: store.store_id,
-        bin_number: nextBinNumber,
-        label: validatedData.name,
-        status: 'ACTIVE',
+        name: validatedData.name,
+        location: validatedData.location,
+        display_order: nextDisplayOrder,
+        is_active: true,
       });
 
       // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
@@ -286,7 +287,8 @@ export class BinManagementService {
 
       log.info('Bin created', {
         binId: bin.bin_id,
-        binNumber: bin.bin_number,
+        name: bin.name,
+        displayOrder: bin.display_order,
         storeId: store.store_id,
       });
 
@@ -335,14 +337,21 @@ export class BinManagementService {
     }
 
     try {
-      // Build update object for DAL
-      const dalUpdates: { bin_number?: number; label?: string; status?: 'ACTIVE' | 'INACTIVE' } =
-        {};
+      // Build update object for DAL (cloud-aligned schema)
+      const dalUpdates: {
+        name?: string;
+        location?: string;
+        display_order?: number;
+        is_active?: boolean;
+      } = {};
       if (validatedUpdates.name !== undefined) {
-        dalUpdates.label = validatedUpdates.name;
+        dalUpdates.name = validatedUpdates.name;
+      }
+      if (validatedUpdates.location !== undefined) {
+        dalUpdates.location = validatedUpdates.location;
       }
       if (validatedUpdates.display_order !== undefined) {
-        dalUpdates.bin_number = validatedUpdates.display_order;
+        dalUpdates.display_order = validatedUpdates.display_order;
       }
 
       // Update bin
@@ -411,7 +420,7 @@ export class BinManagementService {
       // NOTE: No sync enqueue - bins are pulled from cloud, not pushed
       // API spec: GET /api/v1/sync/lottery/bins (pull only)
 
-      log.info('Bin deleted', { binId, binNumber: existingBin.bin_number });
+      log.info('Bin deleted', { binId, name: existingBin.name });
 
       return { success: true };
     } catch (error: unknown) {
@@ -446,11 +455,11 @@ export class BinManagementService {
     }
 
     try {
-      // Update each bin's display order
+      // Update each bin's display order (cloud-aligned: uses display_order instead of bin_number)
       binIds.forEach((binId, index) => {
         const bin = lotteryBinsDAL.findById(binId);
         if (bin && bin.store_id === store.store_id) {
-          lotteryBinsDAL.update(binId, { bin_number: index + 1 });
+          lotteryBinsDAL.update(binId, { display_order: index + 1 });
         }
       });
 

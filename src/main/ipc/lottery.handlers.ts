@@ -24,6 +24,7 @@ import { lotteryPacksDAL, type PackWithDetails } from '../dal/lottery-packs.dal'
 import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
+import { shiftsDAL } from '../dal/shifts.dal';
 import { parseBarcode, validateBarcode } from '../services/scanner.service';
 import { createLogger } from '../utils/logger';
 
@@ -57,7 +58,7 @@ const BarcodeSchema = z.string().regex(/^\d{24}$/, 'Barcode must be 24 digits');
  * API-001: Input validation with Zod schema
  */
 const PackFilterSchema = z.object({
-  status: z.enum(['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED']).optional(),
+  status: z.enum(['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED']).optional(),
   game_id: UUIDSchema.optional(),
   bin_id: UUIDSchema.optional(),
   /** Search by pack_number or game name (min 2 chars, max 100 chars for safety) */
@@ -163,6 +164,11 @@ function getCurrentBusinessDate(): string {
  * API-008: OUTPUT_FILTERING - Excludes internal fields (created_at, updated_at, cloud_pack_id)
  * DB-006: TENANT_ISOLATION - Includes store_id for multi-tenant sync
  * API-001: Includes game_code as required by cloud API spec
+ *
+ * Shift tracking fields (v019 schema alignment):
+ * - shift_id: Shift context for activation (required for cashiers, optional for managers)
+ * - depleted_shift_id: Shift context for depletion/settlement
+ * - returned_shift_id: Shift context for returns
  */
 interface PackSyncPayload {
   pack_id: string;
@@ -180,19 +186,55 @@ interface PackSyncPayload {
   received_by: string | null;
   activated_at: string | null;
   activated_by: string | null;
-  settled_at: string | null;
+  depleted_at: string | null;
   returned_at: string | null;
+  // Serial range fields (required by activate API)
+  serial_start: string;              // Starting serial number (e.g., "000")
+  serial_end: string;                // Ending serial number (e.g., "299" for 300-ticket pack)
+  // Shift tracking fields (v019 schema alignment)
+  shift_id: string | null;           // Activation shift context
+  depleted_shift_id: string | null;  // Depletion shift context
+  depleted_by: string | null;        // User who depleted the pack
+  returned_shift_id: string | null;  // Return shift context
+  returned_by: string | null;        // User who returned the pack
+  depletion_reason: string | null;   // Reason for depletion (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
+}
+
+/**
+ * Shift context for pack sync operations
+ * Used to pass shift tracking data to buildPackSyncPayload
+ */
+interface PackSyncShiftContext {
+  /** Shift ID for activation (required for cashiers, optional for managers) */
+  shift_id?: string | null;
+  /** Shift ID when pack was depleted/settled */
+  depleted_shift_id?: string | null;
+  /** User who depleted the pack */
+  depleted_by?: string | null;
+  /** Shift ID when pack was returned */
+  returned_shift_id?: string | null;
+  /** User who returned the pack */
+  returned_by?: string | null;
+  /** Reason for depletion */
+  depletion_reason?: string | null;
 }
 
 /**
  * Build a sync payload for a pack operation
  * API-008: OUTPUT_FILTERING - Excludes internal fields (created_at, updated_at, cloud_pack_id, synced_at)
  * SEC-006: Uses structured object, not string interpolation
- * API-001: Includes game_code as required by cloud API spec
+ * API-001: Includes game_code, serial_start, serial_end as required by cloud API spec
+ *
+ * v019 Schema Alignment: Now includes shift tracking fields for:
+ * - Activation shift context (shift_id)
+ * - Depletion shift context (depleted_shift_id, depleted_by, depletion_reason)
+ * - Return shift context (returned_shift_id, returned_by)
  *
  * @param pack - Pack data from DAL
  * @param gameCode - Game code from lottery_games table (required by API)
- * @param activatedBy - Optional activated_by user ID (not stored in pack record)
+ * @param ticketsPerPack - Number of tickets in pack (for calculating serial_end)
+ * @param activatedBy - Optional activated_by user ID
+ * @param shiftContext - Optional shift tracking context for audit trail
  * @returns Sync payload suitable for cloud sync
  */
 function buildPackSyncPayload(
@@ -202,20 +244,33 @@ function buildPackSyncPayload(
     game_id: string;
     pack_number: string;
     status: string;
-    bin_id: string | null;
+    /** v029 API Alignment: Uses current_bin_id */
+    current_bin_id: string | null;
     opening_serial: string | null;
     closing_serial: string | null;
-    tickets_sold: number;
+    /** v029 API Alignment: Uses tickets_sold_count */
+    tickets_sold_count: number;
     sales_amount: number;
     received_at: string | null;
     received_by: string | null;
     activated_at: string | null;
-    settled_at: string | null;
+    depleted_at: string | null;
     returned_at: string | null;
   },
   gameCode: string,
-  activatedBy?: string | null
+  ticketsPerPack: number | null,
+  activatedBy?: string | null,
+  shiftContext?: PackSyncShiftContext
 ): PackSyncPayload {
+  // Calculate serial_start and serial_end
+  // serial_start is always "000" (packs start at ticket 0)
+  // serial_end = tickets_per_pack - 1, padded to 3 digits (e.g., 300 tickets → "299")
+  const serialStart = '000';
+  const serialEnd = ticketsPerPack
+    ? String(ticketsPerPack - 1).padStart(3, '0')
+    : '299'; // Default to 299 (300 tickets)
+
+  // v029 API Alignment: Map DAL field names to API field names
   return {
     pack_id: pack.pack_id,
     store_id: pack.store_id,
@@ -223,17 +278,27 @@ function buildPackSyncPayload(
     game_code: gameCode,
     pack_number: pack.pack_number,
     status: pack.status,
-    bin_id: pack.bin_id,
+    bin_id: pack.current_bin_id, // Map current_bin_id to API's bin_id
     opening_serial: pack.opening_serial,
     closing_serial: pack.closing_serial,
-    tickets_sold: pack.tickets_sold,
+    tickets_sold: pack.tickets_sold_count, // Map tickets_sold_count to API's tickets_sold
     sales_amount: pack.sales_amount,
     received_at: pack.received_at,
     received_by: pack.received_by,
     activated_at: pack.activated_at,
     activated_by: activatedBy ?? null,
-    settled_at: pack.settled_at,
+    depleted_at: pack.depleted_at,
     returned_at: pack.returned_at,
+    // Serial range fields (required by activate API)
+    serial_start: serialStart,
+    serial_end: serialEnd,
+    // Shift tracking fields (v019 schema alignment)
+    shift_id: shiftContext?.shift_id ?? null,
+    depleted_shift_id: shiftContext?.depleted_shift_id ?? null,
+    depleted_by: shiftContext?.depleted_by ?? null,
+    returned_shift_id: shiftContext?.returned_shift_id ?? null,
+    returned_by: shiftContext?.returned_by ?? null,
+    depletion_reason: shiftContext?.depletion_reason ?? null,
   };
 }
 
@@ -252,7 +317,7 @@ interface PackResponse {
   bin_id: string | null;
   received_at: string | null;
   activated_at: string | null;
-  settled_at: string | null;
+  depleted_at: string | null;
   returned_at: string | null;
   game?: {
     game_id: string;
@@ -264,8 +329,8 @@ interface PackResponse {
   };
   bin?: {
     bin_id: string;
-    bin_number: number;
-    label: string | null;
+    name: string;
+    display_order: number;
   } | null;
   can_return?: boolean;
 }
@@ -273,11 +338,13 @@ interface PackResponse {
 /**
  * Transform flat DAL PackWithDetails to nested PackResponse for API contract
  * API-008: OUTPUT_FILTERING - Ensures consistent response shape for frontend
+ * v029 API Alignment: Maps current_bin_id to bin_id for API compatibility
  *
  * @param pack - Flat pack data from DAL with joined fields
  * @returns Nested response matching LotteryPackResponse interface
  */
 function transformPackToResponse(pack: PackWithDetails): PackResponse {
+  // v029 API Alignment: Map current_bin_id to bin_id for API responses
   const response: PackResponse = {
     pack_id: pack.pack_id,
     game_id: pack.game_id,
@@ -286,13 +353,13 @@ function transformPackToResponse(pack: PackWithDetails): PackResponse {
     closing_serial: pack.closing_serial,
     status: pack.status,
     store_id: pack.store_id,
-    bin_id: pack.bin_id,
+    bin_id: pack.current_bin_id, // Map DAL's current_bin_id to API's bin_id
     received_at: pack.received_at,
     activated_at: pack.activated_at,
-    settled_at: pack.settled_at,
+    depleted_at: pack.depleted_at,
     returned_at: pack.returned_at,
     // SEC-010: AUTHZ - Backend determines returnability
-    can_return: pack.status === 'RECEIVED' || pack.status === 'ACTIVATED',
+    can_return: pack.status === 'RECEIVED' || pack.status === 'ACTIVE',
   };
 
   // Build nested game object if game data exists
@@ -308,11 +375,13 @@ function transformPackToResponse(pack: PackWithDetails): PackResponse {
   }
 
   // Build nested bin object if bin data exists
-  if (pack.bin_id !== null && pack.bin_number !== null) {
+  // v029 API Alignment: Use current_bin_id for bin lookup
+  // v039 Cloud-aligned: Use name and display_order
+  if (pack.current_bin_id !== null && pack.bin_name !== null) {
     response.bin = {
-      bin_id: pack.bin_id,
-      bin_number: pack.bin_number,
-      label: pack.bin_label,
+      bin_id: pack.current_bin_id, // Map DAL's current_bin_id to API's bin_id
+      name: pack.bin_name,
+      display_order: pack.bin_display_order || 0,
     };
   }
 
@@ -362,6 +431,12 @@ registerHandler(
 const ListGamesFilterSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'DISCONTINUED']).optional(),
   search: z.string().min(2).max(100).optional(),
+  /**
+   * When true, only returns games that have at least one pack in inventory.
+   * Used by inventory views to hide catalog games with no store inventory.
+   * SEC-014: Boolean constraint - no injection risk
+   */
+  inventoryOnly: z.boolean().optional(),
 });
 
 /**
@@ -410,7 +485,7 @@ interface GameListItemResponse {
 
 /**
  * Transform game with pack counts to API response
- * API-008: OUTPUT_FILTERING - Excludes internal fields (store_id, cloud_game_id, deleted_at)
+ * API-008: OUTPUT_FILTERING - Excludes internal fields (store_id, deleted_at)
  */
 function transformGameToResponse(
   game: import('../dal/lottery-games.dal').GameWithPackCounts
@@ -631,14 +706,15 @@ registerHandler(
       );
 
       // Transform to API response format with current status preserved
+      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
       const recentlyActivated = activatedPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_number || 0,
+        bin_number: p.bin_display_order || 0,
         activated_at: p.activated_at || '',
-        status: p.status, // Preserves current status: ACTIVATED, SETTLED, or RETURNED
+        status: p.status, // Preserves current status: ACTIVE, DEPLETED, or RETURNED
       }));
 
       // Get depleted packs (settled since period start)
@@ -647,14 +723,15 @@ registerHandler(
         periodStartDate
       );
 
+      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
       const recentlyDepleted = settledPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_number || 0,
+        bin_number: p.bin_display_order || 0,
         activated_at: p.activated_at || '',
-        depleted_at: p.settled_at || '',
+        depleted_at: p.depleted_at || '',
       }));
 
       // Get returned packs (returned since period start)
@@ -663,18 +740,19 @@ registerHandler(
         periodStartDate
       );
 
+      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
       const recentlyReturned = returnedPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_number || 0,
+        bin_number: p.bin_display_order || 0,
         activated_at: p.activated_at || '',
         returned_at: p.returned_at || '',
         return_reason: null,
         return_notes: null,
         last_sold_serial: p.closing_serial,
-        tickets_sold_on_return: p.tickets_sold || null,
+        tickets_sold_on_return: p.tickets_sold_count || null,
         return_sales_amount: p.sales_amount || null,
         returned_by_name: null,
       }));
@@ -849,13 +927,13 @@ registerHandler(
       // SYNC-001: Enqueue pack for cloud synchronization
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
       // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code required by cloud API spec
+      // API-001: game_code, serial_start, serial_end required by cloud API spec
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
         entity_id: pack.pack_id,
         operation: 'CREATE',
-        payload: buildPackSyncPayload(pack, game.game_code),
+        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack),
       });
 
       log.info('Pack received', {
@@ -1043,13 +1121,13 @@ registerHandler(
           // SYNC-001: Enqueue each created pack for cloud synchronization
           // DB-006: TENANT_ISOLATION - store_id included in sync payload
           // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-          // API-001: game_code required by cloud API spec
+          // API-001: game_code, serial_start, serial_end required by cloud API spec
           syncQueueDAL.enqueue({
             store_id: storeId,
             entity_type: 'pack',
             entity_id: pack.pack_id,
             operation: 'CREATE',
-            payload: buildPackSyncPayload(pack, game.game_code),
+            payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack),
           });
 
           created.push({
@@ -1109,9 +1187,15 @@ registerHandler(
  * Activate a pack
  * Channel: lottery:activatePack
  *
+ * v019 Schema Alignment: Now includes role-based shift validation
+ * - Cashiers MUST have an active shift to activate packs
+ * - Managers CAN activate without shift (shift_id = null allowed)
+ * - shift_id is captured and sent to cloud API for audit trail
+ *
  * @security API-001: Input validation with Zod schemas
  * @security API-003: Sanitized error responses
- * @security SEC-010: AUTHZ - Get activated_by from session, not frontend
+ * @security SEC-010: AUTHZ - Get activated_by and shift_id from session, not frontend
+ * @security DB-006: Store-scoped operations via DAL
  */
 registerHandler(
   'lottery:activatePack',
@@ -1135,25 +1219,68 @@ registerHandler(
       const storeId = getStoreId();
       log.debug('Got store ID', { storeId });
 
-      // SEC-010: AUTHZ - Get activated_by from authenticated session, not from frontend
+      // SEC-010: AUTHZ - Get user and role from authenticated session, not from frontend
       // This ensures we can't spoof who activated the packs
       const currentUser = getCurrentUser();
       const activated_by = currentUser?.user_id;
-      log.debug('Got current user', { activated_by });
+      const userRole = currentUser?.role;
+      log.debug('Got current user', { activated_by, userRole });
+
+      // ========================================================================
+      // Role-Based Shift Validation (v019 Schema Alignment)
+      // ========================================================================
+      // Business Logic:
+      // - Cashiers MUST have an active shift to activate packs
+      // - Shift Managers and Store Managers CAN activate without active shift
+      // - If shift exists, capture shift_id for audit trail regardless of role
+      //
+      // SEC-010: AUTHZ - Enforce role-based access control
+      // DB-006: Store-scoped shift lookup via DAL
+      // ========================================================================
+      let shift_id: string | null = null;
+      const openShift = shiftsDAL.getOpenShift(storeId);
+
+      if (userRole === 'cashier') {
+        // Cashiers MUST have an active shift to activate packs
+        if (!openShift) {
+          log.warn('Cashier attempted pack activation without active shift', {
+            userId: activated_by,
+            packId: pack_id,
+            storeId,
+          });
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            'You must have an active shift to activate packs. Please start a shift first.'
+          );
+        }
+        shift_id = openShift.shift_id;
+      } else {
+        // Managers can activate without shift, but capture if available
+        shift_id = openShift?.shift_id || null;
+      }
+
+      log.debug('Shift validation complete', {
+        userRole,
+        shiftId: shift_id,
+        hasOpenShift: Boolean(openShift),
+      });
 
       // DB-006: Pass store_id for tenant isolation validation
+      // v029 API Alignment: Map bin_id to current_bin_id for DAL
       log.debug('Calling DAL.activate', {
         pack_id,
         store_id: storeId,
-        bin_id,
+        current_bin_id: bin_id,
         opening_serial,
         activated_by,
+        activated_shift_id: shift_id,
       });
       const pack = lotteryPacksDAL.activate(pack_id, {
         store_id: storeId,
-        bin_id,
+        current_bin_id: bin_id,
         opening_serial,
         activated_by,
+        activated_shift_id: shift_id,
       });
       log.debug('Pack activated successfully', { pack_id: pack.pack_id });
 
@@ -1169,15 +1296,18 @@ registerHandler(
 
       // SYNC-001: Enqueue pack activation for cloud synchronization
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
-      // SEC-010: AUTHZ - activated_by from session included for audit trail
+      // SEC-010: AUTHZ - activated_by and shift_id from session included for audit trail
       // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code required by cloud API spec
+      // API-001: game_code, serial_start, serial_end required by cloud API spec
+      // v019: shift_id included in sync payload for cloud audit trail
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
         entity_id: pack.pack_id,
         operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code, activated_by),
+        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, activated_by, {
+          shift_id,
+        }),
       });
 
       // Increment daily activation count
@@ -1189,6 +1319,8 @@ registerHandler(
         binId: bin_id,
         openingSerial: opening_serial,
         activatedBy: activated_by,
+        shiftId: shift_id,
+        userRole,
         syncQueued: true,
       });
 
@@ -1231,8 +1363,14 @@ registerHandler(
  * Deplete (settle) a pack manually
  * Channel: lottery:depletePack
  *
+ * v019 Schema Alignment: Now includes shift tracking
+ * - Captures depleted_shift_id, depleted_by, and depletion_reason
+ * - Sends to cloud API for audit trail
+ *
  * @security API-001: Input validation with Zod schemas
  * @security API-003: Sanitized error responses
+ * @security SEC-010: AUTHZ - Get depleted_by from session, not frontend
+ * @security DB-006: Store-scoped operations via DAL
  */
 registerHandler(
   'lottery:depletePack',
@@ -1250,15 +1388,28 @@ registerHandler(
       const { pack_id, closing_serial } = parseResult.data;
       const storeId = getStoreId();
 
+      // SEC-010: AUTHZ - Get depleted_by from authenticated session
+      const currentUser = getCurrentUser();
+      const depleted_by = currentUser?.user_id || null;
+
+      // Get current shift context for audit trail (v019 schema alignment)
+      const openShift = shiftsDAL.getOpenShift(storeId);
+      const depleted_shift_id = openShift?.shift_id || null;
+
       // Calculate sales before settling
       const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(pack_id, closing_serial);
 
       // DB-006: Pass store_id for tenant isolation validation
+      // v019: Pass shift tracking fields
+      // v029 API Alignment: Uses tickets_sold_count
       const pack = lotteryPacksDAL.settle(pack_id, {
         store_id: storeId,
         closing_serial,
-        tickets_sold: ticketsSold,
+        tickets_sold_count: ticketsSold,
         sales_amount: salesAmount,
+        depleted_by,
+        depleted_shift_id,
+        depletion_reason: 'MANUAL_SOLD_OUT',
       });
 
       // Look up game to get game_code for sync payload
@@ -1269,14 +1420,20 @@ registerHandler(
 
       // SYNC-001: Enqueue pack depletion for cloud synchronization
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // SEC-010: AUTHZ - depleted_by and shift context included for audit trail
       // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code required by cloud API spec
+      // API-001: game_code, serial_start, serial_end required by cloud API spec
+      // v019: shift context and depletion reason included in sync payload
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
         entity_id: pack.pack_id,
         operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code),
+        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, null, {
+          depleted_shift_id,
+          depleted_by,
+          depletion_reason: 'MANUAL_SOLD_OUT',
+        }),
       });
 
       log.info('Pack depleted', {
@@ -1285,6 +1442,9 @@ registerHandler(
         closingSerial: closing_serial,
         ticketsSold,
         salesAmount,
+        depletedBy: depleted_by,
+        shiftId: depleted_shift_id,
+        depletionReason: 'MANUAL_SOLD_OUT',
         syncQueued: true,
       });
 
@@ -1315,8 +1475,14 @@ registerHandler(
  * Return a pack
  * Channel: lottery:returnPack
  *
+ * v019 Schema Alignment: Now includes shift tracking
+ * - Captures returned_shift_id and returned_by
+ * - Sends to cloud API for audit trail
+ *
  * @security API-001: Input validation with Zod schemas
  * @security API-003: Sanitized error responses
+ * @security SEC-010: AUTHZ - Get returned_by from session, not frontend
+ * @security DB-006: Store-scoped operations via DAL
  */
 registerHandler(
   'lottery:returnPack',
@@ -1334,6 +1500,14 @@ registerHandler(
       const { pack_id, closing_serial } = parseResult.data;
       const storeId = getStoreId();
 
+      // SEC-010: AUTHZ - Get returned_by from authenticated session
+      const currentUser = getCurrentUser();
+      const returned_by = currentUser?.user_id || null;
+
+      // Get current shift context for audit trail (v019 schema alignment)
+      const openShift = shiftsDAL.getOpenShift(storeId);
+      const returned_shift_id = openShift?.shift_id || null;
+
       // Calculate sales if closing serial provided
       let ticketsSold: number | undefined;
       let salesAmount: number | undefined;
@@ -1345,11 +1519,15 @@ registerHandler(
       }
 
       // DB-006: Pass store_id for tenant isolation validation
+      // v019: Pass shift tracking fields
+      // v029 API Alignment: Uses tickets_sold_count
       const pack = lotteryPacksDAL.returnPack(pack_id, {
         store_id: storeId,
         closing_serial,
-        tickets_sold: ticketsSold,
+        tickets_sold_count: ticketsSold,
         sales_amount: salesAmount,
+        returned_by,
+        returned_shift_id,
       });
 
       // Look up game to get game_code for sync payload
@@ -1360,20 +1538,27 @@ registerHandler(
 
       // SYNC-001: Enqueue pack return for cloud synchronization
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
+      // SEC-010: AUTHZ - returned_by and shift context included for audit trail
       // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code required by cloud API spec
+      // API-001: game_code, serial_start, serial_end required by cloud API spec
+      // v019: shift context included in sync payload
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
         entity_id: pack.pack_id,
         operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code),
+        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, null, {
+          returned_shift_id,
+          returned_by,
+        }),
       });
 
       log.info('Pack returned', {
         packId: pack.pack_id,
         storeId,
         closingSerial: closing_serial,
+        returnedBy: returned_by,
+        shiftId: returned_shift_id,
         syncQueued: true,
       });
 
@@ -1784,7 +1969,7 @@ registerHandler(
 
           // Found in cloud - save locally and return
           const localGame = lotteryGamesDAL.upsertFromCloud({
-            cloud_game_id: validatedGame.game_id,
+            game_id: validatedGame.game_id,
             store_id: storeId,
             game_code: validatedGame.game_code,
             name: validatedGame.name,
@@ -1928,7 +2113,6 @@ registerHandler(
         pack_value,
         tickets_per_pack,
         status: 'ACTIVE',
-        // Note: No cloud_game_id - this is a local store-scoped game
       });
 
       log.info('Store-scoped game created', {
@@ -2177,7 +2361,7 @@ registerHandler(
           return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
         }
 
-        if (pack.status !== 'ACTIVATED') {
+        if (pack.status !== 'ACTIVE') {
           return createErrorResponse(
             IPCErrorCodes.VALIDATION_ERROR,
             `Pack ${pack.pack_number} is not activated (status: ${pack.status})`
@@ -2314,7 +2498,7 @@ registerHandler(
           return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
         }
 
-        if (pack.status !== 'ACTIVATED') {
+        if (pack.status !== 'ACTIVE') {
           return createErrorResponse(
             IPCErrorCodes.VALIDATION_ERROR,
             `Pack ${pack.pack_number} is not activated (status: ${pack.status})`

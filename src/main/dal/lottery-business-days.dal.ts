@@ -41,6 +41,8 @@ export interface LotteryBusinessDay extends StoreEntity {
   total_packs_sold: number;
   total_packs_activated: number;
   cloud_day_id: string | null;
+  /** v034 API Alignment: Cloud day summary reference */
+  day_summary_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -83,7 +85,7 @@ export interface PrepareCloseResult {
   closings_count: number;
   estimated_lottery_total: number;
   bins_preview: Array<{
-    bin_number: number;
+    bin_display_order: number;
     pack_number: string;
     game_name: string;
     starting_serial: string;
@@ -106,7 +108,7 @@ export interface CommitCloseResult {
   closings_created: number;
   lottery_total: number;
   bins_closed: Array<{
-    bin_number: number;
+    bin_display_order: number;
     pack_number: string;
     game_name: string;
     starting_serial: string;
@@ -338,7 +340,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         throw new Error(`Pack ${closing.pack_id} does not belong to this store`);
       }
 
-      if (pack.status !== 'ACTIVATED') {
+      if (pack.status !== 'ACTIVE') {
         throw new Error(`Pack ${pack.pack_number} is not activated`);
       }
 
@@ -351,7 +353,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       totalSales += salesAmount;
 
       binsPreview.push({
-        bin_number: pack.bin_number || 0,
+        bin_display_order: pack.bin_display_order || 0,
         pack_number: pack.pack_number,
         game_name: pack.game_name || 'Unknown',
         starting_serial: pack.opening_serial || '000',
@@ -443,7 +445,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       for (const closing of closingsData) {
         const pack = lotteryPacksDAL.getPackWithDetails(closing.pack_id);
 
-        if (!pack || pack.status !== 'ACTIVATED') {
+        if (!pack || pack.status !== 'ACTIVE') {
           throw new Error(`Pack ${closing.pack_id} is no longer valid for closing`);
         }
 
@@ -455,15 +457,17 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
 
         // Settle the pack
         // DB-006: Pass store_id for tenant isolation validation
+        // v029 API Alignment: Uses tickets_sold_count
         lotteryPacksDAL.settle(closing.pack_id, {
           store_id: day.store_id,
           closing_serial: closing.closing_serial,
-          tickets_sold: ticketsSold,
+          tickets_sold_count: ticketsSold,
           sales_amount: salesAmount,
         });
 
         // Create day pack record
-        this.createDayPack(day.store_id, dayId, closing.pack_id, pack.bin_id, {
+        // v029 API Alignment: Uses current_bin_id from pack
+        this.createDayPack(day.store_id, dayId, closing.pack_id, pack.current_bin_id, {
           starting_serial: pack.opening_serial || '000',
           ending_serial: closing.closing_serial,
           tickets_sold: ticketsSold,
@@ -473,7 +477,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         totalSales += salesAmount;
 
         binsClosed.push({
-          bin_number: pack.bin_number || 0,
+          bin_display_order: pack.bin_display_order || 0,
           pack_number: pack.pack_number,
           game_name: pack.game_name || 'Unknown',
           starting_serial: pack.opening_serial || '000',

@@ -182,15 +182,15 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       game_id: data.game_id,
       pack_number: data.pack_number,
       status: 'RECEIVED',
-      bin_id: null,
+      current_bin_id: null,
       opening_serial: null,
       closing_serial: null,
-      tickets_sold: 0,
+      tickets_sold_count: 0,
       sales_amount: 0,
       received_at: new Date().toISOString(),
       received_by: data.received_by || null,
       activated_at: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -200,17 +200,17 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       store_id: data.store_id,
       game_id: 'game-123',
       pack_number: 'PKG001',
-      status: 'ACTIVATED',
-      bin_id: data.bin_id,
+      status: 'ACTIVE',
+      current_bin_id: data.current_bin_id,
       opening_serial: data.opening_serial,
       closing_serial: null,
-      tickets_sold: 0,
+      tickets_sold_count: 0,
       sales_amount: 0,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: new Date().toISOString(),
       activated_by: data.activated_by,
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -220,17 +220,17 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       store_id: data.store_id,
       game_id: 'game-123',
       pack_number: 'PKG001',
-      status: 'SETTLED',
-      bin_id: 'bin-123',
+      status: 'DEPLETED',
+      current_bin_id: 'bin-123',
       opening_serial: '001',
       closing_serial: data.closing_serial,
-      tickets_sold: data.tickets_sold,
+      tickets_sold_count: data.tickets_sold_count,
       sales_amount: data.sales_amount,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: '2024-01-15T09:00:00.000Z',
       activated_by: 'user-activator',
-      settled_at: new Date().toISOString(),
+      depleted_at: new Date().toISOString(),
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -241,16 +241,16 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       game_id: 'game-123',
       pack_number: 'PKG001',
       status: 'RETURNED',
-      bin_id: null,
+      current_bin_id: null,
       opening_serial: null,
       closing_serial: data.closing_serial || null,
-      tickets_sold: data.tickets_sold || 0,
+      tickets_sold_count: data.tickets_sold_count || 0,
       sales_amount: data.sales_amount || 0,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: null,
       activated_by: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: new Date().toISOString(),
       cloud_pack_id: null,
       synced_at: null,
@@ -384,7 +384,7 @@ describe('Sync E2E Integration Tests', () => {
       // Step 1: Activate pack
       const activatedPack = lotteryPacksDAL.activate(receivedPack.pack_id, {
         store_id: E2E_STORE_ID,
-        bin_id: E2E_BIN_ID,
+        current_bin_id: E2E_BIN_ID,
         opening_serial: '001',
         activated_by: E2E_USER_ID,
       });
@@ -398,7 +398,7 @@ describe('Sync E2E Integration Tests', () => {
         payload: {
           pack_id: activatedPack.pack_id,
           status: activatedPack.status,
-          bin_id: activatedPack.bin_id,
+          current_bin_id: activatedPack.current_bin_id,
           opening_serial: activatedPack.opening_serial,
           activated_at: activatedPack.activated_at,
         },
@@ -408,8 +408,8 @@ describe('Sync E2E Integration Tests', () => {
       expect(syncOperationLog.length).toBe(2);
       expect(syncOperationLog[0].operation).toBe('CREATE');
       expect(syncOperationLog[1].operation).toBe('UPDATE');
-      expect(syncOperationLog[1].payload.status).toBe('ACTIVATED');
-      expect(syncOperationLog[1].payload.bin_id).toBe(E2E_BIN_ID);
+      expect(syncOperationLog[1].payload.status).toBe('ACTIVE');
+      expect(syncOperationLog[1].payload.current_bin_id).toBe(E2E_BIN_ID);
     });
   });
 
@@ -440,7 +440,7 @@ describe('Sync E2E Integration Tests', () => {
       // Step 2: Activate
       const activatedPack = lotteryPacksDAL.activate(receivedPack.pack_id, {
         store_id: E2E_STORE_ID,
-        bin_id: E2E_BIN_ID,
+        current_bin_id: E2E_BIN_ID,
         opening_serial: '001',
         activated_by: E2E_USER_ID,
       });
@@ -450,14 +450,14 @@ describe('Sync E2E Integration Tests', () => {
         entity_type: 'pack',
         entity_id: activatedPack.pack_id,
         operation: 'UPDATE',
-        payload: { status: 'ACTIVATED' },
+        payload: { status: 'ACTIVE' },
       });
 
       // Step 3: Settle
       const settledPack = lotteryPacksDAL.settle(activatedPack.pack_id, {
         store_id: E2E_STORE_ID,
         closing_serial: '300',
-        tickets_sold: 300,
+        tickets_sold_count: 300,
         sales_amount: 300,
       });
 
@@ -466,7 +466,7 @@ describe('Sync E2E Integration Tests', () => {
         entity_type: 'pack',
         entity_id: settledPack.pack_id,
         operation: 'UPDATE',
-        payload: { status: 'SETTLED', tickets_sold: 300, sales_amount: 300 },
+        payload: { status: 'DEPLETED', tickets_sold_count: 300, sales_amount: 300 },
       });
 
       // Verify full lifecycle
@@ -474,8 +474,8 @@ describe('Sync E2E Integration Tests', () => {
       expect(syncOperationLog.map((op) => op.operation)).toEqual(['CREATE', 'UPDATE', 'UPDATE']);
       expect(syncOperationLog.map((op) => op.payload.status)).toEqual([
         'RECEIVED',
-        'ACTIVATED',
-        'SETTLED',
+        'ACTIVE',
+        'DEPLETED',
       ]);
     });
   });

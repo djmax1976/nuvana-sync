@@ -201,7 +201,6 @@ export function validateSyncStats(data: unknown): SyncStats {
  * - lottery_bin: Pulled from cloud via /api/v1/sync/lottery/bins
  * - day_summary: Calculated server-side, no push endpoint
  * - shift: No dedicated push endpoint (use shift_opening/shift_closing)
- * - transaction: No push endpoint in API spec
  *
  * @security SEC-014: Strict type validation prevents invalid entity types
  */
@@ -211,6 +210,7 @@ export const ValidSyncEntityTypeSchema = z.enum([
   'shift_closing',
   'day_close',
   'variance_approval',
+  'transaction',
 ]);
 
 export type ValidSyncEntityType = z.infer<typeof ValidSyncEntityTypeSchema>;
@@ -225,6 +225,7 @@ export const VALID_SYNC_ENTITY_TYPES: readonly ValidSyncEntityType[] = [
   'shift_closing',
   'day_close',
   'variance_approval',
+  'transaction',
 ] as const;
 
 /**

@@ -612,7 +612,7 @@ describe('Lottery IPC Handlers', () => {
     describe('PackFiltersSchema', () => {
       // Updated schema to match actual implementation (max 100 chars)
       const PackFiltersSchema = z.object({
-        status: z.enum(['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED']).optional(),
+        status: z.enum(['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED']).optional(),
         game_id: z.string().uuid().optional(),
         bin_id: z.string().uuid().optional(),
         search: z.string().min(2).max(100).optional(),
@@ -626,7 +626,7 @@ describe('Lottery IPC Handlers', () => {
       });
 
       it('should accept status filter', () => {
-        const input = { status: 'ACTIVATED' };
+        const input = { status: 'ACTIVE' };
 
         const result = PackFiltersSchema.safeParse(input);
         expect(result.success).toBe(true);
@@ -713,7 +713,7 @@ describe('Lottery IPC Handlers', () => {
       bin_id: string | null;
       received_at: string | null;
       activated_at: string | null;
-      settled_at: string | null;
+      depleted_at: string | null;
       returned_at: string | null;
       game_code: string | null;
       game_name: string | null;
@@ -735,7 +735,7 @@ describe('Lottery IPC Handlers', () => {
       bin_id: string | null;
       received_at: string | null;
       activated_at: string | null;
-      settled_at: string | null;
+      depleted_at: string | null;
       returned_at: string | null;
       game?: {
         game_id: string;
@@ -765,9 +765,9 @@ describe('Lottery IPC Handlers', () => {
         bin_id: pack.bin_id,
         received_at: pack.received_at,
         activated_at: pack.activated_at,
-        settled_at: pack.settled_at,
+        depleted_at: pack.depleted_at,
         returned_at: pack.returned_at,
-        can_return: pack.status === 'RECEIVED' || pack.status === 'ACTIVATED',
+        can_return: pack.status === 'RECEIVED' || pack.status === 'ACTIVE',
       };
 
       if (pack.game_name !== null) {
@@ -799,12 +799,12 @@ describe('Lottery IPC Handlers', () => {
         pack_number: '0103230',
         opening_serial: '000',
         closing_serial: null,
-        status: 'ACTIVATED',
+        status: 'ACTIVE',
         store_id: 'store-1',
         bin_id: 'bin-1',
         received_at: '2024-01-01T00:00:00Z',
         activated_at: '2024-01-02T00:00:00Z',
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: '1001',
         game_name: 'Lucky 7s',
@@ -848,7 +848,7 @@ describe('Lottery IPC Handlers', () => {
         bin_id: null,
         received_at: '2024-01-01T00:00:00Z',
         activated_at: null,
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: '1001',
         game_name: 'Lucky 7s',
@@ -871,12 +871,12 @@ describe('Lottery IPC Handlers', () => {
         pack_number: '0103230',
         opening_serial: '000',
         closing_serial: '150',
-        status: 'SETTLED',
+        status: 'DEPLETED',
         store_id: 'store-1',
         bin_id: 'bin-1',
         received_at: '2024-01-01T00:00:00Z',
         activated_at: '2024-01-02T00:00:00Z',
-        settled_at: '2024-01-03T00:00:00Z',
+        depleted_at: '2024-01-03T00:00:00Z',
         returned_at: null,
         game_code: '1001',
         game_name: 'Lucky 7s',
@@ -904,7 +904,7 @@ describe('Lottery IPC Handlers', () => {
         bin_id: null,
         received_at: '2024-01-01T00:00:00Z',
         activated_at: null,
-        settled_at: null,
+        depleted_at: null,
         returned_at: '2024-01-02T00:00:00Z',
         game_code: '1001',
         game_name: 'Lucky 7s',
@@ -932,7 +932,7 @@ describe('Lottery IPC Handlers', () => {
         bin_id: null,
         received_at: '2024-01-01T00:00:00Z',
         activated_at: null,
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: null,
         game_name: null, // No game data
@@ -960,7 +960,7 @@ describe('Lottery IPC Handlers', () => {
         bin_id: null, // No bin assigned
         received_at: '2024-01-01T00:00:00Z',
         activated_at: null,
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: '1001',
         game_name: 'Lucky 7s',
@@ -988,7 +988,7 @@ describe('Lottery IPC Handlers', () => {
         bin_id: null,
         received_at: '2024-01-01T00:00:00Z',
         activated_at: null,
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: null, // Missing game_code
         game_name: 'Lucky 7s',
@@ -1014,12 +1014,12 @@ describe('Lottery IPC Handlers', () => {
         pack_number: '9876543',
         opening_serial: '050',
         closing_serial: '150',
-        status: 'ACTIVATED',
+        status: 'ACTIVE',
         store_id: 'store-789',
         bin_id: 'bin-001',
         received_at: '2024-01-01T10:00:00Z',
         activated_at: '2024-01-02T11:00:00Z',
-        settled_at: null,
+        depleted_at: null,
         returned_at: null,
         game_code: '2002',
         game_name: 'Cash Blast',
@@ -1038,12 +1038,12 @@ describe('Lottery IPC Handlers', () => {
       expect(result.pack_number).toBe('9876543');
       expect(result.opening_serial).toBe('050');
       expect(result.closing_serial).toBe('150');
-      expect(result.status).toBe('ACTIVATED');
+      expect(result.status).toBe('ACTIVE');
       expect(result.store_id).toBe('store-789');
       expect(result.bin_id).toBe('bin-001');
       expect(result.received_at).toBe('2024-01-01T10:00:00Z');
       expect(result.activated_at).toBe('2024-01-02T11:00:00Z');
-      expect(result.settled_at).toBeNull();
+      expect(result.depleted_at).toBeNull();
       expect(result.returned_at).toBeNull();
     });
   });
@@ -1414,7 +1414,6 @@ describe('Lottery IPC Handlers', () => {
         tickets_per_pack: number | null;
         status: string;
         deleted_at: string | null;
-        cloud_game_id: string | null;
         state_id: string | null;
         synced_at: string | null;
         created_at: string;
@@ -1479,7 +1478,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 300,
           status: 'ACTIVE',
           deleted_at: null,
-          cloud_game_id: 'cloud-123',
           state_id: 'CA',
           synced_at: '2024-01-01T00:00:00Z',
           created_at: '2024-01-01T00:00:00Z',
@@ -1496,34 +1494,6 @@ describe('Lottery IPC Handlers', () => {
         expect(response).not.toHaveProperty('store_id');
       });
 
-      it('should exclude cloud_game_id from response (internal field)', () => {
-        const dbGame: GameWithPackCounts = {
-          game_id: 'game-1',
-          store_id: 'store-1',
-          game_code: '1001',
-          name: 'Lucky 7s',
-          price: 1,
-          pack_value: 300,
-          tickets_per_pack: 300,
-          status: 'ACTIVE',
-          deleted_at: null,
-          cloud_game_id: 'cloud-internal-123',
-          state_id: 'CA',
-          synced_at: '2024-01-01T00:00:00Z',
-          created_at: '2024-01-01T00:00:00Z',
-          updated_at: '2024-01-02T00:00:00Z',
-          total_packs: 5,
-          received_packs: 1,
-          active_packs: 2,
-          settled_packs: 1,
-          returned_packs: 1,
-        };
-
-        const response = transformGameToResponse(dbGame);
-
-        expect(response).not.toHaveProperty('cloud_game_id');
-      });
-
       it('should exclude deleted_at from response (internal field)', () => {
         const dbGame: GameWithPackCounts = {
           game_id: 'game-1',
@@ -1535,7 +1505,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 300,
           status: 'ACTIVE',
           deleted_at: '2024-01-15T00:00:00Z',
-          cloud_game_id: null,
           state_id: 'CA',
           synced_at: null,
           created_at: '2024-01-01T00:00:00Z',
@@ -1563,7 +1532,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 300,
           status: 'ACTIVE',
           deleted_at: null,
-          cloud_game_id: null,
           state_id: 'CA-INTERNAL',
           synced_at: null,
           created_at: '2024-01-01T00:00:00Z',
@@ -1591,7 +1559,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 300,
           status: 'ACTIVE',
           deleted_at: null,
-          cloud_game_id: null,
           state_id: null,
           synced_at: null,
           created_at: '2024-01-01T00:00:00Z',
@@ -1631,7 +1598,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 150,
           status: 'INACTIVE',
           deleted_at: null,
-          cloud_game_id: null,
           state_id: null,
           synced_at: '2024-01-10T12:00:00Z',
           created_at: '2024-01-01T00:00:00Z',
@@ -1668,7 +1634,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: null,
           status: 'ACTIVE',
           deleted_at: null,
-          cloud_game_id: null,
           state_id: null,
           synced_at: null,
           created_at: '2024-01-01T00:00:00Z',
@@ -1697,7 +1662,6 @@ describe('Lottery IPC Handlers', () => {
           tickets_per_pack: 300,
           status: 'ACTIVE',
           deleted_at: null,
-          cloud_game_id: null,
           state_id: null,
           synced_at: null,
           created_at: '2024-01-01T00:00:00Z',
@@ -1787,7 +1751,7 @@ describe('Lottery IPC Handlers', () => {
         pack_id: 'pack-1',
         game_id: 'game-1',
         pack_number: 'PKG1234567',
-        status: 'ACTIVATED',
+        status: 'ACTIVE',
         bin_id: 'bin-1',
         opening_serial: '000',
       };
@@ -1947,7 +1911,7 @@ describe('Lottery IPC Handlers', () => {
           .object({
             pack_id: z.string(),
             pack_number: z.string(),
-            status: z.enum(['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED']),
+            status: z.enum(['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED']),
             game: z
               .object({
                 game_code: z.string(),
@@ -1964,7 +1928,7 @@ describe('Lottery IPC Handlers', () => {
           pack: {
             pack_id: 'pack-uuid-123',
             pack_number: '0103230',
-            status: 'ACTIVATED',
+            status: 'ACTIVE',
             game: {
               game_code: '1835',
               name: 'Lucky 7s',
@@ -1991,7 +1955,7 @@ describe('Lottery IPC Handlers', () => {
           pack: {
             pack_id: 'pack-uuid-123',
             pack_number: '0103230',
-            status: 'ACTIVATED',
+            status: 'ACTIVE',
           },
         };
 
@@ -2005,7 +1969,7 @@ describe('Lottery IPC Handlers', () => {
           pack: {
             pack_id: 'pack-uuid-123',
             pack_number: '0103230',
-            status: 'SETTLED',
+            status: 'DEPLETED',
           },
         };
 
@@ -2078,14 +2042,14 @@ describe('Lottery IPC Handlers', () => {
       const gameInfo = gameName ? ` (${gameName})` : '';
 
       switch (status) {
-        case 'ACTIVATED':
+        case 'ACTIVE':
           return {
             title: 'Pack is already active',
             description: binLabel
               ? `Pack #${packNumber}${gameInfo} is currently active in ${binLabel}. A pack can only be activated once.`
               : `Pack #${packNumber}${gameInfo} is already activated. A pack can only be activated once.`,
           };
-        case 'SETTLED':
+        case 'DEPLETED':
           return {
             title: 'Pack has been sold/depleted',
             description: `Pack #${packNumber}${gameInfo} was previously activated and has been depleted. It cannot be activated again.`,
@@ -2105,7 +2069,7 @@ describe('Lottery IPC Handlers', () => {
 
     describe('ACTIVATED pack error messages', () => {
       it('should generate message with bin label', () => {
-        const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', 'Bin 1');
+        const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', 'Bin 1');
 
         expect(result.title).toBe('Pack is already active');
         expect(result.description).toContain('Bin 1');
@@ -2114,7 +2078,7 @@ describe('Lottery IPC Handlers', () => {
       });
 
       it('should generate message without bin label', () => {
-        const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', null);
+        const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', null);
 
         expect(result.title).toBe('Pack is already active');
         expect(result.description).toContain('already activated');
@@ -2124,7 +2088,7 @@ describe('Lottery IPC Handlers', () => {
 
     describe('SETTLED pack error messages', () => {
       it('should indicate pack was depleted', () => {
-        const result = getPackStatusErrorMessage('SETTLED', '0103230', 'Lucky 7s', null);
+        const result = getPackStatusErrorMessage('DEPLETED', '0103230', 'Lucky 7s', null);
 
         expect(result.title).toBe('Pack has been sold/depleted');
         expect(result.description).toContain('depleted');
@@ -2143,7 +2107,7 @@ describe('Lottery IPC Handlers', () => {
 
     describe('Error message clarity requirements', () => {
       it('should always include pack number in description', () => {
-        const statuses = ['ACTIVATED', 'SETTLED', 'RETURNED'];
+        const statuses = ['ACTIVE', 'DEPLETED', 'RETURNED'];
 
         for (const status of statuses) {
           const result = getPackStatusErrorMessage(status, '0103230', undefined, null);
@@ -2152,7 +2116,7 @@ describe('Lottery IPC Handlers', () => {
       });
 
       it('should include game name when provided', () => {
-        const statuses = ['ACTIVATED', 'SETTLED', 'RETURNED'];
+        const statuses = ['ACTIVE', 'DEPLETED', 'RETURNED'];
 
         for (const status of statuses) {
           const result = getPackStatusErrorMessage(status, '0103230', 'Lucky 7s', null);
@@ -2161,7 +2125,7 @@ describe('Lottery IPC Handlers', () => {
       });
 
       it('should have non-empty titles for all statuses', () => {
-        const statuses = ['ACTIVATED', 'SETTLED', 'RETURNED', 'UNKNOWN'];
+        const statuses = ['ACTIVE', 'DEPLETED', 'RETURNED', 'UNKNOWN'];
 
         for (const status of statuses) {
           const result = getPackStatusErrorMessage(status, '0103230', undefined, null);
@@ -2201,7 +2165,7 @@ describe('Lottery IPC Handlers', () => {
       received_by: 'user-550e8400-e29b-41d4-a716-446655440300',
       activated_at: null,
       activated_by: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       opening_serial: null,
       closing_serial: null,
@@ -2215,7 +2179,7 @@ describe('Lottery IPC Handlers', () => {
 
     const mockActivatedPack = {
       ...mockReceivedPack,
-      status: 'ACTIVATED' as const,
+      status: 'ACTIVE' as const,
       bin_id: '550e8400-e29b-41d4-a716-446655440400',
       activated_at: '2024-01-15T11:00:00.000Z',
       opening_serial: '001',
@@ -2224,11 +2188,11 @@ describe('Lottery IPC Handlers', () => {
 
     const mockSettledPack = {
       ...mockActivatedPack,
-      status: 'SETTLED' as const,
+      status: 'DEPLETED' as const,
       closing_serial: '150',
       tickets_sold: 150,
       sales_amount: 150,
-      settled_at: '2024-01-15T12:00:00.000Z',
+      depleted_at: '2024-01-15T12:00:00.000Z',
       updated_at: '2024-01-15T12:00:00.000Z',
     };
 
@@ -2243,7 +2207,7 @@ describe('Lottery IPC Handlers', () => {
       /**
        * PackSyncPayload interface matching the implementation
        * Excludes internal fields: created_at, updated_at, cloud_pack_id, synced_at
-       * API-001: Includes game_code as required by cloud API spec
+       * API-001: Includes game_code, serial_start, serial_end as required by cloud API spec
        */
       interface PackSyncPayload {
         pack_id: string;
@@ -2261,13 +2225,16 @@ describe('Lottery IPC Handlers', () => {
         received_by: string | null;
         activated_at: string | null;
         activated_by: string | null;
-        settled_at: string | null;
+        depleted_at: string | null;
         returned_at: string | null;
+        // Serial range fields (required by activate API)
+        serial_start: string;
+        serial_end: string;
       }
 
       /**
        * Simulate buildPackSyncPayload function
-       * API-001: Includes game_code as required by cloud API spec
+       * API-001: Includes game_code, serial_start, serial_end as required by cloud API spec
        */
       function buildPackSyncPayload(
         pack: {
@@ -2280,7 +2247,7 @@ describe('Lottery IPC Handlers', () => {
           received_at: string | null;
           received_by: string | null;
           activated_at: string | null;
-          settled_at: string | null;
+          depleted_at: string | null;
           returned_at: string | null;
           opening_serial: string | null;
           closing_serial: string | null;
@@ -2288,8 +2255,15 @@ describe('Lottery IPC Handlers', () => {
           sales_amount: number;
         },
         gameCode: string,
+        ticketsPerPack: number | null = 300,
         activatedBy?: string | null
       ): PackSyncPayload {
+        // Calculate serial_start and serial_end
+        const serialStart = '000';
+        const serialEnd = ticketsPerPack
+          ? String(ticketsPerPack - 1).padStart(3, '0')
+          : '299';
+
         return {
           pack_id: pack.pack_id,
           store_id: pack.store_id,
@@ -2306,8 +2280,10 @@ describe('Lottery IPC Handlers', () => {
           received_by: pack.received_by,
           activated_at: pack.activated_at,
           activated_by: activatedBy ?? null,
-          settled_at: pack.settled_at,
+          depleted_at: pack.depleted_at,
           returned_at: pack.returned_at,
+          serial_start: serialStart,
+          serial_end: serialEnd,
         };
       }
 
@@ -2344,7 +2320,7 @@ describe('Lottery IPC Handlers', () => {
         expect(payload.received_by).toBe(mockReceivedPack.received_by);
         expect(payload.activated_at).toBeNull();
         expect(payload.activated_by).toBeNull();
-        expect(payload.settled_at).toBeNull();
+        expect(payload.depleted_at).toBeNull();
         expect(payload.returned_at).toBeNull();
       });
 
@@ -2352,13 +2328,14 @@ describe('Lottery IPC Handlers', () => {
         const payload = buildPackSyncPayload(
           mockActivatedPack,
           mockActivatedPack.game_code,
+          300, // tickets_per_pack
           'user-123'
         );
 
         expect(payload.bin_id).toBe(mockActivatedPack.bin_id);
         expect(payload.opening_serial).toBe(mockActivatedPack.opening_serial);
         expect(payload.activated_at).toBe(mockActivatedPack.activated_at);
-        expect(payload.status).toBe('ACTIVATED');
+        expect(payload.status).toBe('ACTIVE');
       });
 
       it('LP-U-012: should include activated_by from session (SEC-010)', () => {
@@ -2366,6 +2343,7 @@ describe('Lottery IPC Handlers', () => {
         const payload = buildPackSyncPayload(
           mockActivatedPack,
           mockActivatedPack.game_code,
+          300, // tickets_per_pack
           activatedByUserId
         );
 
@@ -2378,8 +2356,8 @@ describe('Lottery IPC Handlers', () => {
         expect(payload.closing_serial).toBe(mockSettledPack.closing_serial);
         expect(payload.tickets_sold).toBe(mockSettledPack.tickets_sold);
         expect(payload.sales_amount).toBe(mockSettledPack.sales_amount);
-        expect(payload.settled_at).toBe(mockSettledPack.settled_at);
-        expect(payload.status).toBe('SETTLED');
+        expect(payload.depleted_at).toBe(mockSettledPack.depleted_at);
+        expect(payload.status).toBe('DEPLETED');
       });
 
       it('LP-U-017: should include return data for returned pack', () => {
@@ -2396,9 +2374,27 @@ describe('Lottery IPC Handlers', () => {
         const activatedPayload = buildPackSyncPayload(
           mockActivatedPack,
           mockActivatedPack.game_code,
+          300, // tickets_per_pack
           'user-who-activated'
         );
         expect(activatedPayload.activated_by).toBe('user-who-activated');
+      });
+
+      it('LP-U-020: should include serial_start and serial_end for API compliance', () => {
+        // Test with default 300 tickets
+        const payload = buildPackSyncPayload(mockReceivedPack, mockReceivedPack.game_code, 300);
+        expect(payload.serial_start).toBe('000');
+        expect(payload.serial_end).toBe('299');
+
+        // Test with different pack size (150 tickets)
+        const payload150 = buildPackSyncPayload(mockReceivedPack, mockReceivedPack.game_code, 150);
+        expect(payload150.serial_start).toBe('000');
+        expect(payload150.serial_end).toBe('149');
+
+        // Test with null (should default to 299)
+        const payloadNull = buildPackSyncPayload(mockReceivedPack, mockReceivedPack.game_code, null);
+        expect(payloadNull.serial_start).toBe('000');
+        expect(payloadNull.serial_end).toBe('299');
       });
     });
 
@@ -2469,24 +2465,24 @@ describe('Lottery IPC Handlers', () => {
       it('LP-U-013: pack must be RECEIVED status before activation', () => {
         // Activated pack should have previous status of RECEIVED
         // The DAL enforces this; here we verify the payload reflects correct status
-        expect(mockActivatedPack.status).toBe('ACTIVATED');
+        expect(mockActivatedPack.status).toBe('ACTIVE');
       });
 
       it('LP-U-016: pack must be ACTIVATED status before depletion', () => {
         // Settled pack should have been ACTIVATED first
-        expect(mockSettledPack.status).toBe('SETTLED');
+        expect(mockSettledPack.status).toBe('DEPLETED');
       });
 
       it('LP-U-018: pack can be returned from RECEIVED or ACTIVATED status', () => {
         // Return is allowed from either status
-        expect(['RECEIVED', 'ACTIVATED']).toContain('RECEIVED');
-        expect(['RECEIVED', 'ACTIVATED']).toContain('ACTIVATED');
+        expect(['RECEIVED', 'ACTIVE']).toContain('RECEIVED');
+        expect(['RECEIVED', 'ACTIVE']).toContain('ACTIVE');
       });
 
       it('LP-U-019: pack cannot be returned from SETTLED or RETURNED status', () => {
         // These are terminal states
-        const terminalStatuses = ['SETTLED', 'RETURNED'];
-        expect(terminalStatuses).toContain('SETTLED');
+        const terminalStatuses = ['DEPLETED', 'RETURNED'];
+        expect(terminalStatuses).toContain('DEPLETED');
         expect(terminalStatuses).toContain('RETURNED');
       });
     });
@@ -2511,9 +2507,9 @@ describe('Lottery IPC Handlers', () => {
     describe('LP-U-008: receivePackBatch should NOT enqueue duplicate packs', () => {
       it('should skip duplicate packs and only enqueue new ones', () => {
         // If pack already exists (duplicate), it should not be enqueued
-        const existingPack = { ...mockReceivedPack, status: 'ACTIVATED' };
+        const existingPack = { ...mockReceivedPack, status: 'ACTIVE' };
         // Duplicate detection happens at DAL level, so no enqueue for duplicates
-        expect(existingPack.status).toBe('ACTIVATED');
+        expect(existingPack.status).toBe('ACTIVE');
       });
     });
   });

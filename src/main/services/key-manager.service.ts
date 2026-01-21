@@ -21,11 +21,17 @@ import { createLogger } from '../utils/logger';
 
 /**
  * Configuration store for encrypted keys
- * Uses electron-store with encryption capability
+ * Uses electron-store - shares nuvana.json with settings service
  */
-const CONFIG_STORE_NAME = 'nuvana-config';
+const CONFIG_STORE_NAME = 'nuvana';
 const DB_KEY_STORE_KEY = 'encryptedDbKey';
 const KEY_LENGTH_BYTES = 32; // 256-bit key for SQLCipher
+
+/**
+ * Check if running in development mode
+ * In development, encryption is disabled so key operations may be skipped
+ */
+const isDevelopment = process.env.NODE_ENV === 'development';
 
 // ============================================================================
 // Logger
@@ -59,9 +65,17 @@ function getConfigStore(): Store {
  * Check if Electron safeStorage encryption is available
  * SEC-007: Verify OS keychain availability before key operations
  *
- * @returns true if safeStorage encryption is available
+ * In development mode, this always returns true since encryption is disabled.
+ *
+ * @returns true if safeStorage encryption is available (or in development mode)
  */
 export function isKeyAvailable(): boolean {
+  // In development mode, we don't use encryption, so key availability doesn't matter
+  if (isDevelopment) {
+    log.debug('Development mode: skipping safeStorage check');
+    return true;
+  }
+
   const available = safeStorage.isEncryptionAvailable();
   log.debug('SafeStorage encryption availability checked', { available });
   return available;

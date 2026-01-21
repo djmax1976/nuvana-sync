@@ -8,7 +8,7 @@
  * Calculates tickets sold and sales amount from serial information.
  *
  * Business Rules:
- * - ACTIVATED and RECEIVED packs can be returned
+ * - ACTIVE and RECEIVED packs can be returned
  * - DEPLETED and already RETURNED packs cannot be returned
  * - Last sold serial is required for sales calculation
  * - Notes are required when return_reason is OTHER
@@ -434,8 +434,8 @@ export function ReturnPackDialog({
         </DialogHeader>
 
         <div className="space-y-4 py-4">
-          {/* Warning for non-returnable packs (only ACTIVATED and RECEIVED can be returned) */}
-          {packData && packData.status !== 'ACTIVATED' && packData.status !== 'RECEIVED' && (
+          {/* Warning for non-returnable packs (only ACTIVE and RECEIVED can be returned) */}
+          {packData && packData.status !== 'ACTIVE' && packData.status !== 'RECEIVED' && (
             <div
               className="flex items-start gap-3 rounded-lg border border-destructive/50 bg-destructive/10 p-4"
               role="alert"
@@ -445,7 +445,7 @@ export function ReturnPackDialog({
               <div className="flex-1 space-y-1">
                 <p className="text-sm font-medium text-destructive">Cannot Return Pack</p>
                 <p className="text-sm text-muted-foreground">
-                  Only ACTIVATED or RECEIVED packs can be returned. This pack is currently{' '}
+                  Only ACTIVE or RECEIVED packs can be returned. This pack is currently{' '}
                   <strong>{currentStatus}</strong>.
                 </p>
               </div>
@@ -601,7 +601,7 @@ export function ReturnPackDialog({
             variant="default"
             onClick={handleReturn}
             disabled={
-              !canSubmit || (packData?.status !== 'ACTIVATED' && packData?.status !== 'RECEIVED')
+              !canSubmit || (packData?.status !== 'ACTIVE' && packData?.status !== 'RECEIVED')
             }
             data-testid="confirm-return-button"
             aria-label={

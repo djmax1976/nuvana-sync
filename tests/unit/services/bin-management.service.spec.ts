@@ -23,9 +23,9 @@ vi.mock('../../../src/main/dal/lottery-bins.dal', () => ({
     findActiveByStore: vi.fn(),
     findAllByStore: vi.fn(),
     findById: vi.fn(),
-    findByBinNumber: vi.fn(),
+    findByName: vi.fn(),
     getPackCount: vi.fn(),
-    getNextBinNumber: vi.fn(),
+    getNextDisplayOrder: vi.fn(),
     create: vi.fn(),
     update: vi.fn(),
     softDelete: vi.fn(),
@@ -80,14 +80,15 @@ describe('BinManagementService', () => {
   };
 
   // Mock bin - using valid UUID format for bin_id
+  // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
   const mockBin: LotteryBin = {
     bin_id: '550e8400-e29b-41d4-a716-446655440001',
     store_id: 'store-123',
-    bin_number: 1,
-    label: 'Bin 1',
-    status: 'ACTIVE',
+    name: 'Bin 1',
+    location: null,
+    display_order: 1,
+    is_active: 1,
     deleted_at: null,
-    cloud_bin_id: null,
     synced_at: null,
     created_at: new Date().toISOString(),
     updated_at: new Date().toISOString(),
@@ -158,18 +159,18 @@ describe('BinManagementService', () => {
     });
 
     it('should create bin with valid data', () => {
-      vi.mocked(lotteryBinsDAL.getNextBinNumber).mockReturnValue(2);
+      vi.mocked(lotteryBinsDAL.getNextDisplayOrder).mockReturnValue(2);
       vi.mocked(lotteryBinsDAL.create).mockReturnValue({
         ...mockBin,
         bin_id: 'bin-002',
-        bin_number: 2,
-        label: 'Counter Front',
+        display_order: 2,
+        name: 'Counter Front',
       });
 
       const result = service.createBin({ name: 'Counter Front' });
 
       expect(result.success).toBe(true);
-      expect(result.bin?.label).toBe('Counter Front');
+      expect(result.bin?.name).toBe('Counter Front');
       expect(lotteryBinsDAL.create).toHaveBeenCalled();
       // Note: Bins are pull-only from cloud, so no sync enqueue
       expect(syncQueueDAL.enqueue).not.toHaveBeenCalled();
@@ -177,7 +178,7 @@ describe('BinManagementService', () => {
 
     it('should NOT enqueue create operation for sync (bins are pull-only)', () => {
       // Bins are pulled from cloud, not pushed - no sync queue needed
-      vi.mocked(lotteryBinsDAL.getNextBinNumber).mockReturnValue(1);
+      vi.mocked(lotteryBinsDAL.getNextDisplayOrder).mockReturnValue(1);
       vi.mocked(lotteryBinsDAL.create).mockReturnValue(mockBin);
 
       service.createBin({ name: 'New Bin' });
@@ -208,13 +209,13 @@ describe('BinManagementService', () => {
       vi.mocked(lotteryBinsDAL.findById).mockReturnValue(mockBin);
       vi.mocked(lotteryBinsDAL.update).mockReturnValue({
         ...mockBin,
-        label: 'Updated Name',
+        name: 'Updated Name',
       });
 
       const result = service.updateBin(mockBin.bin_id, { name: 'Updated Name' });
 
       expect(result.success).toBe(true);
-      expect(result.bin?.label).toBe('Updated Name');
+      expect(result.bin?.name).toBe('Updated Name');
     });
 
     it('should NOT enqueue update operation for sync (bins are pull-only)', () => {
@@ -364,8 +365,8 @@ describe('BinManagementService', () => {
       const mockBins = Array.from({ length: 5 }, (_, i) => ({
         ...mockBin,
         bin_id: `bin-00${i + 1}`,
-        bin_number: i + 1,
-        label: `Bin ${i + 1}`,
+        display_order: i + 1,
+        name: `Bin ${i + 1}`,
       }));
       vi.mocked(lotteryBinsDAL.bulkCreate).mockReturnValue(mockBins);
 

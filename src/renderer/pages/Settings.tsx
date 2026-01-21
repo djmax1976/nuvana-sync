@@ -14,6 +14,7 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { CloudProtectedPage } from '../components/auth/CloudProtectedPage';
 import type { CloudAuthUser } from '../components/auth/CloudAuthDialog';
+import { ResetStoreDialog } from '../components/settings/ResetStoreDialog';
 
 /**
  * Check if running in Electron environment
@@ -181,6 +182,12 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
   const [resettingFuel, setResettingFuel] = useState(false);
   const [fuelResetResult, setFuelResetResult] = useState<{
     success: boolean;
+    message: string;
+  } | null>(null);
+  // Store Reset Dialog state
+  const [showResetDialog, setShowResetDialog] = useState(false);
+  const [resetComplete, setResetComplete] = useState<{
+    auditReferenceId: string;
     message: string;
   } | null>(null);
 
@@ -1045,6 +1052,75 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
             This will delete all fuel summaries and reprocess FGM files with the corrected logic
           </p>
         </section>
+
+        {/* Danger Zone - Store Reset */}
+        <section className="bg-card rounded-xl p-6 border-2 border-red-500/50 mb-6">
+          <h2 className="text-lg font-semibold text-red-500 mb-2 flex items-center gap-2">
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              className="h-5 w-5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              strokeWidth="2"
+              strokeLinecap="round"
+              strokeLinejoin="round"
+            >
+              <path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z" />
+              <line x1="12" y1="9" x2="12" y2="13" />
+              <line x1="12" y1="17" x2="12.01" y2="17" />
+            </svg>
+            Danger Zone
+          </h2>
+          <p className="text-sm text-muted-foreground mb-4">
+            Reset store data for troubleshooting or fresh start. This action is audit-logged and
+            cannot be undone.
+          </p>
+
+          {resetComplete && (
+            <div className="p-3 rounded-lg mb-4 bg-green-500/10 text-green-600" role="alert">
+              {resetComplete.message}
+              <span className="block text-xs mt-1">
+                Audit Reference: {resetComplete.auditReferenceId}
+              </span>
+            </div>
+          )}
+
+          <button
+            onClick={() => setShowResetDialog(true)}
+            className="w-full py-2 px-4 rounded-lg font-medium transition-colors bg-red-600 text-white hover:bg-red-700"
+          >
+            Reset Store Data
+          </button>
+          <p className="text-xs text-muted-foreground mt-2 text-center">
+            Only SUPPORT and SUPERADMIN roles can perform this action
+          </p>
+        </section>
+
+        {/* Reset Store Dialog */}
+        <ResetStoreDialog
+          open={showResetDialog}
+          onClose={() => setShowResetDialog(false)}
+          cloudAuthUser={cloudAuthUser}
+          onResetComplete={(auditReferenceId) => {
+            setShowResetDialog(false);
+            setResetComplete({
+              auditReferenceId,
+              message: 'Store reset completed successfully. The application will restart.',
+            });
+            // Trigger full app restart after a short delay
+            // CRITICAL: Must use app:restart (not window.location.reload) to re-bootstrap database
+            // after FULL_RESET which deletes the database file
+            setTimeout(async () => {
+              if (isElectron) {
+                await window.electronAPI.invoke('app:restart');
+              } else {
+                // Fallback for dev mode without Electron
+                window.location.reload();
+              }
+            }, 2000);
+          }}
+        />
 
         {/* Error Display */}
         {saveError && (

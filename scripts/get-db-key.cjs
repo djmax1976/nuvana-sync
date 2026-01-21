@@ -6,7 +6,7 @@
 const { app, safeStorage } = require('electron');
 const Store = require('electron-store').default;
 
-const CONFIG_STORE_NAME = 'nuvana-config';
+const CONFIG_STORE_NAME = 'nuvana';
 const DB_KEY_STORE_KEY = 'encryptedDbKey';
 
 app.whenReady().then(() => {

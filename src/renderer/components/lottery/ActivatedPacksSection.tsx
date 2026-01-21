@@ -311,8 +311,8 @@ export function ActivatedPacksSection({
         continue;
       }
 
-      if (pack.status === 'ACTIVATED') counts.active++;
-      else if (pack.status === 'SETTLED') counts.depleted++;
+      if (pack.status === 'ACTIVE') counts.active++;
+      else if (pack.status === 'DEPLETED') counts.depleted++;
       else if (pack.status === 'RETURNED') counts.returned++;
     }
     return counts;
@@ -446,7 +446,7 @@ export function ActivatedPacksSection({
                   <TableRow
                     key={pack.pack_id}
                     data-testid={`activated-pack-row-${pack.pack_id}`}
-                    className={pack.status === 'SETTLED' ? 'opacity-75' : undefined}
+                    className={pack.status === 'DEPLETED' ? 'opacity-75' : undefined}
                   >
                     {/* Bin Number */}
                     <TableCell className="font-mono text-primary font-semibold text-center">

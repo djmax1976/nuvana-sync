@@ -4,7 +4,7 @@ app.whenReady().then(async () => {
   const { default: Store } = await import('electron-store');
   const Database = require('better-sqlite3-multiple-ciphers');
 
-  const store = new Store({ name: 'nuvana-config' });
+  const store = new Store({ name: 'nuvana' });
   const storedData = store.get('encryptedDbKey');
   const encryptedBuffer = Buffer.from(storedData);
   const key = safeStorage.decryptString(encryptedBuffer);

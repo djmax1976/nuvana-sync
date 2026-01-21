@@ -149,7 +149,7 @@ export function MarkSoldOutDialog({
   // Pack details for display (sanitized via React's automatic escaping)
   const packNumber = packData?.pack_number || 'Unknown';
   const gameName = packData?.game?.name || 'Unknown';
-  const binName = packData?.bin?.label || 'N/A';
+  const binName = packData?.bin?.name || 'N/A';
   const serialEnd = packData?.closing_serial || 'N/A';
 
   return (

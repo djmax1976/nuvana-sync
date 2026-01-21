@@ -66,8 +66,11 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:closeStaleShifts',
   'sync:resetFuelData',
   'sync:debugQueueState',
+  'sync:debugGetSyncedItems',
   'sync:resetFailedItems',
+  'sync:clearPendingPacks',
   'sync:backfillReceivedPacks',
+  'sync:resyncActivePacks',
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',
@@ -123,6 +126,9 @@ const ALLOWED_INVOKE_CHANNELS = [
   'settings:validateFolder',
   'settings:getStatus',
   'settings:openUserManagement',
+  'settings:getMigrationStatus',
+  'settings:runPendingMigrations',
+  'settings:resetStore', // Cloud-authorized store reset with audit logging
   // Auth
   'auth:login',
   'auth:loginWithUser',
@@ -151,6 +157,8 @@ const ALLOWED_INVOKE_CHANNELS = [
   'terminals:list',
   'terminals:getById',
   'terminals:update',
+  // App Lifecycle
+  'app:restart', // Full app restart (used after FULL_RESET)
 ] as const;
 
 /**

@@ -307,6 +307,10 @@ describe('Sync IPC Handlers', () => {
       const syncResult = {
         bins: { pulled: 10, pushed: 5, conflicts: 0, errors: [] },
         games: { pulled: 20, pushed: 0, conflicts: 0, errors: [] },
+        packs: {
+          received: { pulled: 3, pushed: 0, conflicts: 0, errors: [] },
+          activated: { pulled: 2, pushed: 0, conflicts: 0, errors: [] },
+        },
       };
 
       mockForceFullSync.mockResolvedValue(syncResult);

@@ -1,4 +1,5 @@
 import React, { useState } from 'react';
+import { Eye, EyeOff } from 'lucide-react';
 import logo from '../assets/logo.png';
 
 /**
@@ -35,6 +36,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
   const [apiKey, setApiKey] = useState('');
   const [apiUrl, setApiUrl] = useState('https://api.nuvanaapp.com');
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [showApiKey, setShowApiKey] = useState(false);
   const [watchPath, setWatchPath] = useState('');
   const [archivePath, setArchivePath] = useState('');
 
@@ -240,16 +242,35 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
             <div className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-gray-700 mb-1">API Key</label>
-                <input
-                  type="password"
-                  value={apiKey}
-                  onChange={(e) => setApiKey(e.target.value)}
-                  placeholder="nuvpos_sk_str_xxxxx_xxxxx"
-                  className="w-full px-4 py-3 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent text-lg font-mono"
-                  autoFocus
-                  data-testid="api-key-input"
-                />
-                <p className="text-xs text-gray-500 mt-1">
+                <div className="relative">
+                  <input
+                    type={showApiKey ? 'text' : 'password'}
+                    value={apiKey}
+                    onChange={(e) => setApiKey(e.target.value)}
+                    placeholder="nuvpos_sk_str_xxxxx_xxxxx"
+                    className="w-full px-4 py-3 pr-12 border-2 border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-indigo-500 text-lg font-mono text-gray-900 bg-white placeholder:text-gray-400"
+                    autoFocus
+                    autoComplete="off"
+                    spellCheck={false}
+                    data-testid="api-key-input"
+                    aria-label="API Key"
+                    aria-describedby="api-key-hint"
+                  />
+                  <button
+                    type="button"
+                    onClick={() => setShowApiKey(!showApiKey)}
+                    className="absolute right-3 top-1/2 -translate-y-1/2 p-1 text-gray-500 hover:text-gray-700 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-1 rounded"
+                    data-testid="toggle-api-key-visibility"
+                    aria-label={showApiKey ? 'Hide API key' : 'Show API key'}
+                  >
+                    {showApiKey ? (
+                      <EyeOff className="h-5 w-5" aria-hidden="true" />
+                    ) : (
+                      <Eye className="h-5 w-5" aria-hidden="true" />
+                    )}
+                  </button>
+                </div>
+                <p id="api-key-hint" className="text-xs text-gray-500 mt-1">
                   Find this in your Nuvana dashboard under Settings → Store Sync Keys
                 </p>
               </div>
@@ -260,7 +281,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                   type="button"
                   onClick={() => setShowAdvanced(!showAdvanced)}
                   className="text-sm text-indigo-600 hover:text-indigo-700"
-                  data-testid="toggle-api-key-visibility"
+                  data-testid="toggle-advanced-options"
                 >
                   {showAdvanced ? '− Hide advanced options' : '+ Advanced options'}
                 </button>

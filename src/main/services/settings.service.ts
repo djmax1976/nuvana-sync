@@ -105,15 +105,6 @@ const LocalSettingsUpdateSchema = z
   })
   .strict();
 
-/**
- * Cloud endpoint validation schema
- * SEC-008: HTTPS enforcement
- */
-const CloudEndpointSchema = z
-  .string()
-  .url('Invalid URL format')
-  .refine((url) => url.startsWith('https://'), 'Cloud endpoint must use HTTPS');
-
 // ============================================================================
 // Types
 // ============================================================================
@@ -256,12 +247,6 @@ interface SettingsStoreSchema {
   setupCompletedAt?: string;
   /** Whether app is fully configured */
   isConfigured?: boolean;
-
-  // ========== Legacy (deprecated, kept for migration) ==========
-  /** @deprecated Use watchPath instead */
-  xmlWatchFolder?: string;
-  /** @deprecated Use apiUrl instead */
-  cloudEndpoint?: string;
 }
 
 // ============================================================================
@@ -281,9 +266,6 @@ const DEFAULT_POLL_INTERVAL = 5;
  */
 const DEFAULT_API_URL =
   process.env.NODE_ENV === 'development' ? 'http://localhost:3001' : 'https://api.nuvanaapp.com';
-
-/** @deprecated Use DEFAULT_API_URL instead */
-const DEFAULT_CLOUD_ENDPOINT = DEFAULT_API_URL;
 
 /** Default enabled file types */
 const DEFAULT_ENABLED_FILE_TYPES = {
@@ -334,133 +316,7 @@ export class SettingsService {
       clearInvalidConfig: false,
     });
 
-    // Run migration from legacy nuvana-config.json
-    this.migrateFromLegacyConfig();
-
     log.info('Settings service initialized');
-  }
-
-  // ==========================================================================
-  // Migration from Legacy Config
-  // ==========================================================================
-
-  /**
-   * Migrate settings from legacy nuvana-config.json to unified nuvana.json
-   * This ensures existing users don't lose their settings after the consolidation
-   */
-  private migrateFromLegacyConfig(): void {
-    try {
-      const legacyStore = new Store({ name: 'nuvana-config' });
-      const legacyConfig = legacyStore.store as Record<string, unknown>;
-
-      // Skip if legacy store is empty
-      if (!legacyConfig || Object.keys(legacyConfig).length === 0) {
-        return;
-      }
-
-      // Skip if we've already migrated (check for a marker or if new fields exist)
-      if (this.configStore.get('apiUrl')) {
-        return;
-      }
-
-      let migrated = false;
-
-      // Migrate apiUrl (from legacy apiUrl or cloudEndpoint)
-      if (legacyConfig.apiUrl && !this.configStore.get('apiUrl')) {
-        this.configStore.set('apiUrl', legacyConfig.apiUrl as string);
-        migrated = true;
-      }
-
-      // Migrate watchPath
-      if (legacyConfig.watchPath && !this.configStore.get('watchPath')) {
-        this.configStore.set('watchPath', legacyConfig.watchPath as string);
-        migrated = true;
-      }
-
-      // Migrate archivePath
-      if (legacyConfig.archivePath && !this.configStore.get('archivePath')) {
-        this.configStore.set('archivePath', legacyConfig.archivePath as string);
-        migrated = true;
-      }
-
-      // Migrate errorPath
-      if (legacyConfig.errorPath && !this.configStore.get('errorPath')) {
-        this.configStore.set('errorPath', legacyConfig.errorPath as string);
-        migrated = true;
-      }
-
-      // Migrate pollInterval
-      if (legacyConfig.pollInterval && !this.configStore.get('pollInterval')) {
-        this.configStore.set('pollInterval', legacyConfig.pollInterval as number);
-        migrated = true;
-      }
-
-      // Migrate enabledFileTypes
-      if (legacyConfig.enabledFileTypes && !this.configStore.get('enabledFileTypes')) {
-        this.configStore.set(
-          'enabledFileTypes',
-          legacyConfig.enabledFileTypes as SettingsStoreSchema['enabledFileTypes']
-        );
-        migrated = true;
-      }
-
-      // Migrate app behavior settings
-      if (
-        legacyConfig.startOnLogin !== undefined &&
-        this.configStore.get('startOnLogin') === undefined
-      ) {
-        this.configStore.set('startOnLogin', legacyConfig.startOnLogin as boolean);
-        migrated = true;
-      }
-
-      if (
-        legacyConfig.minimizeToTray !== undefined &&
-        this.configStore.get('minimizeToTray') === undefined
-      ) {
-        this.configStore.set('minimizeToTray', legacyConfig.minimizeToTray as boolean);
-        migrated = true;
-      }
-
-      if (
-        legacyConfig.showNotifications !== undefined &&
-        this.configStore.get('showNotifications') === undefined
-      ) {
-        this.configStore.set('showNotifications', legacyConfig.showNotifications as boolean);
-        migrated = true;
-      }
-
-      if (
-        legacyConfig.processInOrder !== undefined &&
-        this.configStore.get('processInOrder') === undefined
-      ) {
-        this.configStore.set('processInOrder', legacyConfig.processInOrder as boolean);
-        migrated = true;
-      }
-
-      // Migrate isConfigured flag
-      if (
-        legacyConfig.isConfigured !== undefined &&
-        this.configStore.get('isConfigured') === undefined
-      ) {
-        this.configStore.set('isConfigured', legacyConfig.isConfigured as boolean);
-        migrated = true;
-      }
-
-      // Migrate storeId if not already present
-      if (legacyConfig.storeId && !this.configStore.get('storeId')) {
-        this.configStore.set('storeId', legacyConfig.storeId as string);
-        migrated = true;
-      }
-
-      if (migrated) {
-        log.info('Migrated settings from legacy nuvana-config.json to unified nuvana.json');
-      }
-    } catch (error) {
-      // Don't fail on migration errors - just log and continue
-      log.warn('Failed to migrate from legacy config', {
-        error: error instanceof Error ? error.message : 'Unknown error',
-      });
-    }
   }
 
   // ==========================================================================
@@ -492,7 +348,7 @@ export class SettingsService {
         companyName,
         timezone: 'America/New_York',
         features: (this.configStore.get('features') as string[]) || [],
-        xmlWatchFolder: (this.configStore.get('xmlWatchFolder') as string) || '',
+        xmlWatchFolder: this.getWatchPath(),
         syncIntervalSeconds:
           (this.configStore.get('syncIntervalSeconds') as number) || DEFAULT_SYNC_INTERVAL,
         businessDayCutoffTime:
@@ -522,7 +378,7 @@ export class SettingsService {
       features: (this.configStore.get('features') as string[]) || [],
 
       // Local settings
-      xmlWatchFolder: (this.configStore.get('xmlWatchFolder') as string) || '',
+      xmlWatchFolder: this.getWatchPath(),
       syncIntervalSeconds:
         (this.configStore.get('syncIntervalSeconds') as number) || DEFAULT_SYNC_INTERVAL,
       businessDayCutoffTime:
@@ -568,7 +424,7 @@ export class SettingsService {
 
     const validatedUpdates = validation.data;
 
-    // Process xmlWatchFolder if provided
+    // Process xmlWatchFolder if provided (maps to watchPath internally)
     if (validatedUpdates.xmlWatchFolder !== undefined) {
       // Additional runtime validation: folder must exist and be accessible
       const folderValidation = this.validateFolder(validatedUpdates.xmlWatchFolder);
@@ -576,23 +432,12 @@ export class SettingsService {
         throw new Error(`Invalid watch folder: ${folderValidation.error}`);
       }
 
-      this.configStore.set('xmlWatchFolder', validatedUpdates.xmlWatchFolder);
-      log.info('XML watch folder updated', {
+      // Store as watchPath (single source of truth)
+      this.configStore.set('watchPath', validatedUpdates.xmlWatchFolder);
+      log.info('Watch folder updated', {
         // Don't log full path, just confirmation
         pathLength: validatedUpdates.xmlWatchFolder.length,
       });
-
-      // Sync to legacy nuvana-config for FileWatcher compatibility (during migration period)
-      // TODO: Remove this once FileWatcher is fully migrated to read from SettingsService
-      try {
-        const legacyConfigStore = new Store({ name: 'nuvana-config' });
-        legacyConfigStore.set('watchPath', validatedUpdates.xmlWatchFolder);
-        log.debug('Synced watchPath to legacy config');
-      } catch (syncError) {
-        log.warn('Failed to sync watchPath to legacy config', {
-          error: syncError instanceof Error ? syncError.message : String(syncError),
-        });
-      }
     }
 
     // Process syncIntervalSeconds if provided
@@ -833,38 +678,11 @@ export class SettingsService {
    * Mark setup as complete
    *
    * Called after user completes the setup wizard.
-   * Also syncs essential settings to legacy config store for App.tsx compatibility.
    */
   completeSetup(): void {
     const now = new Date().toISOString();
     this.configStore.set('setupCompletedAt', now);
-
-    // Sync essential settings to legacy nuvana-config.json for App.tsx compatibility
-    // App.tsx uses configService.getConfig().isConfigured to determine if setup is done
-    try {
-      const legacyConfigStore = new Store({
-        name: 'nuvana-config',
-      });
-
-      // Set the fields required for isConfigured to be true
-      // Only apiUrl and apiKey are required - watchPath/storeId are optional
-      legacyConfigStore.set('apiUrl', this.getCloudEndpoint());
-      legacyConfigStore.set('apiKey', 'configured'); // Placeholder - actual key is in settingsService
-      legacyConfigStore.set('isConfigured', true);
-
-      // Optional fields - set if available
-      const storeId = this.configStore.get('storeId') as string;
-      const watchPath = this.configStore.get('xmlWatchFolder') as string;
-      if (storeId) legacyConfigStore.set('storeId', storeId);
-      if (watchPath) legacyConfigStore.set('watchPath', watchPath);
-
-      log.info('Legacy config synced for App.tsx compatibility');
-    } catch (error) {
-      log.warn('Failed to sync legacy config', {
-        error: error instanceof Error ? error.message : String(error),
-      });
-    }
-
+    this.configStore.set('isConfigured', true);
     log.info('Setup completed', { completedAt: now });
   }
 
@@ -893,28 +711,11 @@ export class SettingsService {
 
   /**
    * Get API URL
-   * Reads from apiUrl, falls back to legacy cloudEndpoint, then defaults
    *
    * @returns Configured API URL or environment-appropriate default
    */
   getApiUrl(): string {
-    // Try new field first
-    const apiUrl = this.configStore.get('apiUrl') as string;
-    if (apiUrl) {
-      return apiUrl;
-    }
-
-    // Fall back to legacy field (migration support)
-    const legacyEndpoint = this.configStore.get('cloudEndpoint') as string;
-    if (legacyEndpoint) {
-      // Migrate to new field
-      this.configStore.set('apiUrl', legacyEndpoint);
-      log.info('Migrated cloudEndpoint to apiUrl');
-      return legacyEndpoint;
-    }
-
-    // Return environment-appropriate default
-    return DEFAULT_API_URL;
+    return (this.configStore.get('apiUrl') as string) || DEFAULT_API_URL;
   }
 
   /**
@@ -942,48 +743,15 @@ export class SettingsService {
     return (this.configStore.get('storeId') as string) || '';
   }
 
-  /**
-   * @deprecated Use getApiUrl() instead
-   */
-  getCloudEndpoint(): string {
-    return this.getApiUrl();
-  }
-
-  /**
-   * @deprecated Use setApiUrl() instead
-   */
-  setCloudEndpoint(endpoint: string): void {
-    // SEC-008: Validate HTTPS
-    const validation = CloudEndpointSchema.safeParse(endpoint);
-    if (!validation.success) {
-      throw new Error(validation.error.issues[0]?.message || 'Invalid endpoint');
-    }
-
-    this.configStore.set('apiUrl', endpoint);
-    log.info('Cloud endpoint updated (deprecated, use setApiUrl)');
-  }
-
   // ==========================================================================
   // File Watcher Configuration
   // ==========================================================================
 
   /**
    * Get watch path for XML files
-   * Falls back to legacy xmlWatchFolder field
    */
   getWatchPath(): string {
-    const watchPath = this.configStore.get('watchPath') as string;
-    if (watchPath) return watchPath;
-
-    // Migration from legacy field
-    const legacyPath = this.configStore.get('xmlWatchFolder') as string;
-    if (legacyPath) {
-      this.configStore.set('watchPath', legacyPath);
-      log.info('Migrated xmlWatchFolder to watchPath');
-      return legacyPath;
-    }
-
-    return '';
+    return (this.configStore.get('watchPath') as string) || '';
   }
 
   /**
@@ -1523,7 +1291,7 @@ export class SettingsService {
       hasStore: storesDAL.isConfigured(),
       hasApiKey: this.hasApiKey(),
       setupComplete: this.isSetupComplete(),
-      hasWatchFolder: !!(this.configStore.get('xmlWatchFolder') as string),
+      hasWatchFolder: !!this.getWatchPath(),
     };
   }
 
@@ -1637,6 +1405,31 @@ export class SettingsService {
   resetAll(): void {
     this.configStore.clear();
     log.warn('All settings reset');
+  }
+
+  /**
+   * Delete the settings file completely
+   *
+   * Used for FULL_RESET to remove the nuvana.json file entirely.
+   * The file will be recreated on next app startup.
+   *
+   * @returns Path to deleted file, or null if file didn't exist
+   */
+  deleteSettingsFile(): string | null {
+    const configPath = this.configStore.path;
+    const fs = require('fs');
+
+    if (fs.existsSync(configPath)) {
+      // Clear store first to release any handles
+      this.configStore.clear();
+      // Delete the file
+      fs.unlinkSync(configPath);
+      log.warn('Settings file deleted', { path: configPath });
+      return configPath;
+    }
+
+    log.debug('Settings file does not exist, nothing to delete', { path: configPath });
+    return null;
   }
 }
 

@@ -23,6 +23,12 @@ import {
 import { settingsService } from '../services/settings.service';
 import { cloudApiService } from '../services/cloud-api.service';
 import { createLogger } from '../utils/logger';
+import {
+  getAppliedMigrationDetails,
+  getCurrentSchemaVersion,
+  runMigrations,
+} from '../services/migration.service';
+import { eventBus, MainEvents } from '../utils/event-bus';
 
 // ============================================================================
 // Logger
@@ -220,21 +226,32 @@ registerHandler(
 /**
  * Complete setup
  *
- * Marks the initial setup wizard as complete.
+ * Marks the initial setup wizard as complete and triggers service initialization.
+ * Emits SETUP_COMPLETED event to start sync engine, user sync, lottery sync,
+ * and file watcher (if configured) without requiring app restart.
  *
  * Channel: settings:completeSetup
+ *
+ * @security LM-001: Structured logging with relevant context
+ * @security API-003: Error handling with sanitized responses
  */
 registerHandler(
   'settings:completeSetup',
   async () => {
+    // Mark setup as complete first
     settingsService.completeSetup();
 
-    log.info('Setup completed via IPC');
+    log.info('Setup completed via IPC - emitting SETUP_COMPLETED event to initialize services');
+
+    // Emit event to trigger service initialization in main process
+    // This decouples the IPC handler from service management and follows
+    // the established event-driven pattern used by FILE_WATCHER_RESTART
+    eventBus.emit(MainEvents.SETUP_COMPLETED);
 
     return createSuccessResponse({ success: true });
   },
   {
-    description: 'Mark setup as complete',
+    description: 'Mark setup as complete and initialize services',
   }
 );
 
@@ -459,8 +476,8 @@ registerHandler(
 registerHandler(
   'settings:openUserManagement',
   async () => {
-    // Get cloud endpoint from settings service
-    const cloudEndpoint = settingsService.getCloudEndpoint();
+    // Get API URL from settings service
+    const cloudEndpoint = settingsService.getApiUrl();
 
     if (!cloudEndpoint) {
       return createErrorResponse(
@@ -590,6 +607,352 @@ registerHandler(
   {
     // No local auth required - cloud auth is verified in handler
     description: 'Update local settings as cloud-authenticated support user',
+  }
+);
+
+// ============================================================================
+// Debug: Migration Status & Runner
+// ============================================================================
+
+/**
+ * Get migration status (for debugging)
+ *
+ * Channel: settings:getMigrationStatus
+ */
+registerHandler(
+  'settings:getMigrationStatus',
+  async () => {
+    try {
+      const schemaVersion = getCurrentSchemaVersion();
+      const appliedMigrations = getAppliedMigrationDetails();
+
+      return createSuccessResponse({
+        schemaVersion,
+        appliedMigrations,
+        migrationsCount: appliedMigrations.length,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, message);
+    }
+  },
+  {
+    description: 'Get migration status (debug)',
+  }
+);
+
+/**
+ * Run pending migrations (for debugging)
+ *
+ * Channel: settings:runPendingMigrations
+ */
+registerHandler(
+  'settings:runPendingMigrations',
+  async () => {
+    try {
+      const migrationsDir = path.join(__dirname, '..', 'migrations');
+      log.info('Running pending migrations', { migrationsDir });
+
+      const summary = runMigrations(migrationsDir);
+
+      log.info('Migration run completed', {
+        applied: summary.applied.length,
+        skipped: summary.skipped.length,
+        failed: summary.failed,
+      });
+
+      return createSuccessResponse({
+        success: !summary.failed,
+        applied: summary.applied,
+        skipped: summary.skipped,
+        failed: summary.failed,
+        totalDurationMs: summary.totalDurationMs,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Migration run failed', { error: message });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, message);
+    }
+  },
+  {
+    // No auth required - this is a maintenance/debug operation
+    description: 'Run pending database migrations (debug)',
+  }
+);
+
+// ============================================================================
+// Store Reset
+// ============================================================================
+
+/**
+ * Reset store data with cloud authorization and audit logging
+ *
+ * This endpoint is protected by cloud authentication (SUPPORT/SUPERADMIN only).
+ * The reset is authorized and audit-logged by the cloud API before local deletion.
+ *
+ * Flow:
+ * 1. Validate input and cloud auth
+ * 2. Call cloud API for authorization (audit logged server-side)
+ * 3. Clear local tables based on clearTargets from server
+ * 4. Optionally delete settings file
+ * 5. Return audit reference ID
+ * 6. Trigger app restart (handled by renderer)
+ *
+ * @security API-001: Input validation with Zod schema
+ * @security API-004: Cloud-based role verification (SUPPORT/SUPERADMIN only)
+ * @security SEC-017: Full audit trail recorded server-side
+ *
+ * Channel: settings:resetStore
+ */
+const ResetStoreRequestSchema = z.object({
+  resetType: z.enum(['FULL_RESET', 'LOTTERY_ONLY', 'SYNC_STATE']),
+  reason: z.string().max(500).optional(),
+  deleteSettings: z.boolean().default(false),
+  cloudAuth: z.object({
+    email: z.string().email('Invalid email format'),
+    userId: z.string().min(1, 'User ID required'),
+    roles: z.array(z.string()).min(1, 'Roles required'),
+  }),
+});
+
+/** Allowed roles for store reset access */
+const STORE_RESET_ROLES = ['SUPPORT', 'SUPERADMIN'];
+
+registerHandler(
+  'settings:resetStore',
+  async (_event, input: unknown) => {
+    // API-001: Validate input schema
+    const parseResult = ResetStoreRequestSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    const { resetType, reason, deleteSettings, cloudAuth } = parseResult.data;
+
+    // API-004: Verify user has required cloud role
+    const userRoles = cloudAuth.roles.map((r) => r.toUpperCase());
+    const hasRequiredRole = STORE_RESET_ROLES.some((role) =>
+      userRoles.includes(role.toUpperCase())
+    );
+
+    if (!hasRequiredRole) {
+      log.warn('Unauthorized store reset attempt', {
+        userId: cloudAuth.userId,
+        roles: cloudAuth.roles,
+        resetType,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.FORBIDDEN,
+        'Access denied. Only SUPPORT or SUPERADMIN roles can reset store data.'
+      );
+    }
+
+    // SEC-017: Log the reset attempt with cloud user info
+    log.info('Store reset requested by cloud support user', {
+      userId: cloudAuth.userId,
+      email: cloudAuth.email.substring(0, 3) + '***',
+      roles: cloudAuth.roles,
+      resetType,
+      hasReason: !!reason,
+      deleteSettings,
+    });
+
+    try {
+      // Get app version for audit
+      const { app: electronApp } = await import('electron');
+      const appVersion = electronApp.getVersion();
+
+      log.info('Calling cloud API for reset authorization', {
+        resetType,
+        appVersion,
+        hasReason: !!reason,
+      });
+
+      // Step 1: Call cloud API for authorization (audit logged server-side)
+      const resetResponse = await cloudApiService.resetStore({
+        resetType,
+        reason,
+        appVersion,
+        confirmed: true,
+      });
+
+      if (!resetResponse.success || !resetResponse.data.authorized) {
+        log.warn('Store reset not authorized by cloud', {
+          userId: cloudAuth.userId,
+          resetType,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Store reset not authorized. Please contact support.'
+        );
+      }
+
+      const { auditReferenceId, instructions } = resetResponse.data;
+      const { clearTargets, resyncRequired } = instructions;
+
+      log.info('Store reset authorized by cloud', {
+        auditReferenceId,
+        clearTargetsCount: clearTargets.length,
+        clearTargets,
+        resyncRequired,
+      });
+
+      // Step 2: Clear local data based on reset type
+      const {
+        getDatabase,
+        closeDatabase,
+        getDbPath,
+      } = await import('../services/database.service');
+      const fs = await import('fs');
+
+      let tablesCleared = 0;
+      const clearedTables: string[] = [];
+      const failedTables: string[] = [];
+      let databaseDeleted = false;
+
+      if (resetType === 'FULL_RESET') {
+        // For FULL_RESET: Delete the entire database file
+        try {
+          const dbPath = getDbPath();
+          log.info('Deleting database file for FULL_RESET', { dbPath });
+
+          // Close database connection first
+          closeDatabase();
+
+          // Delete the database file
+          if (fs.existsSync(dbPath)) {
+            fs.unlinkSync(dbPath);
+            databaseDeleted = true;
+            log.info('Database file deleted', { dbPath });
+          }
+
+          // Also delete WAL and SHM files if they exist
+          const walPath = dbPath + '-wal';
+          const shmPath = dbPath + '-shm';
+          if (fs.existsSync(walPath)) {
+            fs.unlinkSync(walPath);
+            log.debug('WAL file deleted');
+          }
+          if (fs.existsSync(shmPath)) {
+            fs.unlinkSync(shmPath);
+            log.debug('SHM file deleted');
+          }
+        } catch (dbDeleteError) {
+          log.error('Failed to delete database file', {
+            error: dbDeleteError instanceof Error ? dbDeleteError.message : 'Unknown error',
+          });
+          failedTables.push('DATABASE_FILE');
+        }
+      } else {
+        // For LOTTERY_ONLY and SYNC_STATE: Clear specific tables
+        const db = getDatabase();
+
+        for (const tableName of clearTargets) {
+          try {
+            // SEC-006: Validate table name format to prevent SQL injection
+            if (!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(tableName)) {
+              log.warn('Invalid table name in clearTargets, skipping', { tableName });
+              failedTables.push(tableName);
+              continue;
+            }
+
+            // Check if table exists before attempting to clear
+            const tableExists = db
+              .prepare(`SELECT name FROM sqlite_master WHERE type='table' AND name=?`)
+              .get(tableName);
+
+            if (tableExists) {
+              db.prepare(`DELETE FROM "${tableName}"`).run();
+              tablesCleared++;
+              clearedTables.push(tableName);
+              log.debug('Cleared table', { tableName });
+            } else {
+              log.debug('Table does not exist, skipping', { tableName });
+            }
+          } catch (tableError) {
+            log.warn('Failed to clear table', {
+              tableName,
+              error: tableError instanceof Error ? tableError.message : 'Unknown error',
+            });
+            failedTables.push(tableName);
+          }
+        }
+
+        log.info('Local tables cleared', {
+          tablesCleared,
+          clearedTables,
+          failedTables,
+          auditReferenceId,
+        });
+      }
+
+      // Step 3: Delete or clear settings file
+      let settingsDeleted = false;
+      if (resetType === 'FULL_RESET') {
+        // For FULL_RESET: Delete the nuvana.json file completely
+        try {
+          const deletedPath = settingsService.deleteSettingsFile();
+          settingsDeleted = deletedPath !== null;
+          log.info('Settings file deleted for FULL_RESET', { deletedPath, auditReferenceId });
+        } catch (settingsError) {
+          log.warn('Failed to delete settings file', {
+            error: settingsError instanceof Error ? settingsError.message : 'Unknown error',
+          });
+        }
+      } else if (deleteSettings) {
+        // For other reset types with deleteSettings flag: just clear the store
+        try {
+          settingsService.resetAll();
+          settingsDeleted = true;
+          log.info('Settings cleared', { auditReferenceId });
+        } catch (settingsError) {
+          log.warn('Failed to reset settings', {
+            error: settingsError instanceof Error ? settingsError.message : 'Unknown error',
+          });
+        }
+      }
+
+      // SEC-017: Final audit log
+      log.info('Store reset completed', {
+        auditReferenceId,
+        resetType,
+        databaseDeleted,
+        tablesCleared,
+        settingsDeleted,
+        resyncRequired,
+        performedBy: {
+          userId: cloudAuth.userId,
+          email: cloudAuth.email.substring(0, 3) + '***',
+        },
+      });
+
+      return createSuccessResponse({
+        success: true,
+        auditReferenceId,
+        databaseDeleted,
+        tablesCleared,
+        clearedTables,
+        failedTables,
+        settingsDeleted,
+        resyncRequired,
+        serverTime: resetResponse.data.serverTime,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Store reset failed', {
+        userId: cloudAuth.userId,
+        resetType,
+        error: message,
+      });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, `Reset failed: ${message}`);
+    }
+  },
+  {
+    // No local auth required - cloud auth is verified in handler
+    description: 'Reset store data with cloud authorization and audit logging',
   }
 );
 

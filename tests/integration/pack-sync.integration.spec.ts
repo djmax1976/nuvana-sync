@@ -72,15 +72,15 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       game_id: data.game_id,
       pack_number: data.pack_number,
       status: 'RECEIVED',
-      bin_id: null,
+      current_bin_id: null,
       opening_serial: null,
       closing_serial: null,
-      tickets_sold: 0,
+      tickets_sold_count: 0,
       sales_amount: 0,
       received_at: new Date().toISOString(),
       received_by: data.received_by || null,
       activated_at: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -92,16 +92,16 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       store_id: data.store_id,
       game_id: 'game-123',
       pack_number: 'PKG001',
-      status: 'ACTIVATED',
-      bin_id: data.bin_id,
+      status: 'ACTIVE',
+      current_bin_id: data.current_bin_id,
       opening_serial: data.opening_serial,
       closing_serial: null,
-      tickets_sold: 0,
+      tickets_sold_count: 0,
       sales_amount: 0,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: new Date().toISOString(),
-      settled_at: null,
+      depleted_at: null,
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -113,16 +113,16 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       store_id: data.store_id,
       game_id: 'game-123',
       pack_number: 'PKG001',
-      status: 'SETTLED',
-      bin_id: 'bin-123',
+      status: 'DEPLETED',
+      current_bin_id: 'bin-123',
       opening_serial: '001',
       closing_serial: data.closing_serial,
-      tickets_sold: data.tickets_sold,
+      tickets_sold_count: data.tickets_sold_count,
       sales_amount: data.sales_amount,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: '2024-01-15T09:00:00.000Z',
-      settled_at: new Date().toISOString(),
+      depleted_at: new Date().toISOString(),
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -135,15 +135,15 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       game_id: 'game-123',
       pack_number: 'PKG001',
       status: 'RETURNED',
-      bin_id: null,
+      current_bin_id: null,
       opening_serial: null,
       closing_serial: data.closing_serial || null,
-      tickets_sold: data.tickets_sold || 0,
+      tickets_sold_count: data.tickets_sold_count || 0,
       sales_amount: data.sales_amount || 0,
       received_at: '2024-01-15T08:00:00.000Z',
       received_by: 'user-receiver',
       activated_at: null,
-      settled_at: null,
+      depleted_at: null,
       returned_at: new Date().toISOString(),
       cloud_pack_id: null,
       synced_at: null,
@@ -268,16 +268,16 @@ describe('Pack Sync Integration Tests', () => {
           game_id: pack.game_id,
           pack_number: pack.pack_number,
           status: pack.status,
-          bin_id: pack.bin_id,
+          current_bin_id: pack.current_bin_id,
           opening_serial: pack.opening_serial,
           closing_serial: pack.closing_serial,
-          tickets_sold: pack.tickets_sold,
+          tickets_sold_count: pack.tickets_sold_count,
           sales_amount: pack.sales_amount,
           received_at: pack.received_at,
           received_by: pack.received_by,
           activated_at: pack.activated_at,
           activated_by: null,
-          settled_at: pack.settled_at,
+          depleted_at: pack.depleted_at,
           returned_at: pack.returned_at,
         },
       });
@@ -300,7 +300,7 @@ describe('Pack Sync Integration Tests', () => {
 
       const pack = lotteryPacksDAL.activate(TEST_PACK_ID, {
         store_id: TEST_STORE_ID,
-        bin_id: TEST_BIN_ID,
+        current_bin_id: TEST_BIN_ID,
         opening_serial: '001',
         activated_by: TEST_USER_ID,
       });
@@ -314,7 +314,7 @@ describe('Pack Sync Integration Tests', () => {
           pack_id: pack.pack_id,
           store_id: pack.store_id,
           status: pack.status,
-          bin_id: pack.bin_id,
+          current_bin_id: pack.current_bin_id,
           opening_serial: pack.opening_serial,
           activated_at: pack.activated_at,
           activated_by: TEST_USER_ID,
@@ -326,8 +326,8 @@ describe('Pack Sync Integration Tests', () => {
       expect(enqueueCallHistory[0].operation).toBe('UPDATE');
 
       const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
-      expect(payload.status).toBe('ACTIVATED');
-      expect(payload.bin_id).toBe(TEST_BIN_ID);
+      expect(payload.status).toBe('ACTIVE');
+      expect(payload.current_bin_id).toBe(TEST_BIN_ID);
       expect(payload.opening_serial).toBe('001');
       expect(payload.activated_by).toBe(TEST_USER_ID);
     });
@@ -344,7 +344,7 @@ describe('Pack Sync Integration Tests', () => {
       const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
         store_id: TEST_STORE_ID,
         closing_serial: '150',
-        tickets_sold: 150,
+        tickets_sold_count: 150,
         sales_amount: 150,
       });
 
@@ -358,9 +358,9 @@ describe('Pack Sync Integration Tests', () => {
           store_id: pack.store_id,
           status: pack.status,
           closing_serial: pack.closing_serial,
-          tickets_sold: pack.tickets_sold,
+          tickets_sold_count: pack.tickets_sold_count,
           sales_amount: pack.sales_amount,
-          settled_at: pack.settled_at,
+          depleted_at: pack.depleted_at,
         },
       });
 
@@ -368,9 +368,9 @@ describe('Pack Sync Integration Tests', () => {
       expect(enqueueCallHistory[0].operation).toBe('UPDATE');
 
       const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
-      expect(payload.status).toBe('SETTLED');
+      expect(payload.status).toBe('DEPLETED');
       expect(payload.closing_serial).toBe('150');
-      expect(payload.tickets_sold).toBe(150);
+      expect(payload.tickets_sold_count).toBe(150);
       expect(payload.sales_amount).toBe(150);
     });
   });
@@ -386,7 +386,7 @@ describe('Pack Sync Integration Tests', () => {
       const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
         store_id: TEST_STORE_ID,
         closing_serial: '050',
-        tickets_sold: 50,
+        tickets_sold_count: 50,
         sales_amount: 50,
       });
 
@@ -400,7 +400,7 @@ describe('Pack Sync Integration Tests', () => {
           store_id: pack.store_id,
           status: pack.status,
           closing_serial: pack.closing_serial,
-          tickets_sold: pack.tickets_sold,
+          tickets_sold_count: pack.tickets_sold_count,
           sales_amount: pack.sales_amount,
           returned_at: pack.returned_at,
         },
@@ -525,7 +525,7 @@ describe('Pack Sync Integration Tests', () => {
       // Step 2: Activate pack
       const activatedPack = lotteryPacksDAL.activate(receivedPack.pack_id, {
         store_id: TEST_STORE_ID,
-        bin_id: TEST_BIN_ID,
+        current_bin_id: TEST_BIN_ID,
         opening_serial: '001',
         activated_by: TEST_USER_ID,
       });
@@ -535,14 +535,14 @@ describe('Pack Sync Integration Tests', () => {
         entity_type: 'pack',
         entity_id: activatedPack.pack_id,
         operation: 'UPDATE',
-        payload: { status: 'ACTIVATED' },
+        payload: { status: 'ACTIVE' },
       });
 
       // Step 3: Settle pack
       const settledPack = lotteryPacksDAL.settle(activatedPack.pack_id, {
         store_id: TEST_STORE_ID,
         closing_serial: '150',
-        tickets_sold: 150,
+        tickets_sold_count: 150,
         sales_amount: 150,
       });
 
@@ -551,7 +551,7 @@ describe('Pack Sync Integration Tests', () => {
         entity_type: 'pack',
         entity_id: settledPack.pack_id,
         operation: 'UPDATE',
-        payload: { status: 'SETTLED' },
+        payload: { status: 'DEPLETED' },
       });
 
       // Verify correct sequence
@@ -560,10 +560,10 @@ describe('Pack Sync Integration Tests', () => {
       expect((enqueueCallHistory[0].payload as Record<string, unknown>).status).toBe('RECEIVED');
 
       expect(enqueueCallHistory[1].operation).toBe('UPDATE');
-      expect((enqueueCallHistory[1].payload as Record<string, unknown>).status).toBe('ACTIVATED');
+      expect((enqueueCallHistory[1].payload as Record<string, unknown>).status).toBe('ACTIVE');
 
       expect(enqueueCallHistory[2].operation).toBe('UPDATE');
-      expect((enqueueCallHistory[2].payload as Record<string, unknown>).status).toBe('SETTLED');
+      expect((enqueueCallHistory[2].payload as Record<string, unknown>).status).toBe('DEPLETED');
     });
   });
 

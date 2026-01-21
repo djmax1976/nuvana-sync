@@ -63,7 +63,6 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
         tickets_per_pack INTEGER NOT NULL DEFAULT 300,
         pack_value REAL,
         status TEXT NOT NULL DEFAULT 'ACTIVE',
-        cloud_game_id TEXT,
         synced_at TEXT,
         deleted_at TEXT,
         created_at TEXT NOT NULL,
@@ -73,9 +72,12 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       CREATE TABLE lottery_bins (
         bin_id TEXT PRIMARY KEY,
         store_id TEXT NOT NULL,
-        bin_number INTEGER NOT NULL,
-        label TEXT,
-        status TEXT NOT NULL DEFAULT 'ACTIVE',
+        name TEXT NOT NULL,
+        location TEXT,
+        display_order INTEGER NOT NULL DEFAULT 0,
+        is_active INTEGER NOT NULL DEFAULT 1,
+        synced_at TEXT,
+        deleted_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -85,16 +87,24 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
         store_id TEXT NOT NULL,
         game_id TEXT NOT NULL,
         pack_number TEXT NOT NULL,
-        bin_id TEXT,
+        current_bin_id TEXT,
         status TEXT NOT NULL DEFAULT 'RECEIVED',
         received_at TEXT,
+        received_by TEXT,
         activated_at TEXT,
-        settled_at TEXT,
+        activated_by TEXT,
+        activated_shift_id TEXT,
+        depleted_at TEXT,
         returned_at TEXT,
         opening_serial TEXT,
         closing_serial TEXT,
-        tickets_sold INTEGER NOT NULL DEFAULT 0,
+        tickets_sold_count INTEGER NOT NULL DEFAULT 0,
         sales_amount REAL NOT NULL DEFAULT 0,
+        depleted_by TEXT,
+        depleted_shift_id TEXT,
+        depletion_reason TEXT,
+        returned_by TEXT,
+        returned_shift_id TEXT,
         cloud_pack_id TEXT,
         synced_at TEXT,
         created_at TEXT NOT NULL,
@@ -145,8 +155,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       INSERT INTO lottery_games (game_id, store_id, game_code, name, price, tickets_per_pack, created_at, updated_at)
       VALUES ('game-1', 'store-1', '1001', 'Lucky 7s', 1, 300, datetime('now'), datetime('now'));
 
-      INSERT INTO lottery_bins (bin_id, store_id, bin_number, label, created_at, updated_at)
-      VALUES ('bin-1', 'store-1', 1, 'Bin 1', datetime('now'), datetime('now'));
+      INSERT INTO lottery_bins (bin_id, store_id, name, display_order, is_active, created_at, updated_at)
+      VALUES ('bin-1', 'store-1', 'Bin 1', 1, 1, datetime('now'), datetime('now'));
     `);
 
     // Create DAL - it will use testDb via the mocked getDatabase()
@@ -269,8 +279,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
 
       // Create test pack
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
@@ -293,8 +303,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
         INSERT INTO lottery_games (game_id, store_id, game_code, name, price, tickets_per_pack, created_at, updated_at)
         VALUES ('game-2', 'store-1', '2001', 'Cash Explosion', 2, 150, datetime('now'), datetime('now'));
 
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-2', 'store-1', 'game-2', 'bin-1', 'PKG002', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-2', 'store-1', 'game-2', 'bin-1', 'PKG002', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-2', closing_serial: '100' }];
@@ -309,8 +319,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       const day = dal.getOrCreateForDate('store-1', today);
 
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
@@ -343,8 +353,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
 
       // Create and prepare close
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
@@ -364,8 +374,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       const day = dal.getOrCreateForDate('store-1', today);
 
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
@@ -377,11 +387,11 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       const pack = db.prepare('SELECT * FROM lottery_packs WHERE pack_id = ?').get('pack-1') as {
         status: string;
         closing_serial: string;
-        settled_at: string;
+        depleted_at: string;
       };
-      expect(pack.status).toBe('SETTLED');
+      expect(pack.status).toBe('DEPLETED');
       expect(pack.closing_serial).toBe('150');
-      expect(pack.settled_at).toBeDefined();
+      expect(pack.depleted_at).toBeDefined();
     });
 
     it('should throw error for non-PENDING_CLOSE day', () => {
@@ -411,8 +421,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       const day = dal.getOrCreateForDate('store-1', today);
 
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
@@ -429,8 +439,8 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       const day = dal.getOrCreateForDate('store-1', today);
 
       db.exec(`
-        INSERT INTO lottery_packs (pack_id, store_id, game_id, bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
-        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVATED', datetime('now'), datetime('now'), datetime('now'));
+        INSERT INTO lottery_packs (pack_id, store_id, game_id, current_bin_id, pack_number, opening_serial, status, activated_at, created_at, updated_at)
+        VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
       const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];

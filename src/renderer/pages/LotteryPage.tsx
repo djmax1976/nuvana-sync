@@ -218,12 +218,12 @@ export default function LotteryManagementPage() {
           pack_number: bin.pack.pack_number,
           opening_serial: bin.pack.starting_serial,
           closing_serial: bin.pack.serial_end,
-          status: 'ACTIVATED', // Pack in bins is always ACTIVATED
+          status: 'ACTIVE', // Pack in bins is always ACTIVE
           store_id: storeId || '',
           bin_id: bin.bin_id,
           received_at: '', // Not needed for display
           activated_at: null,
-          settled_at: null,
+          depleted_at: null,
           returned_at: null,
           game: {
             game_id: '',
@@ -640,7 +640,7 @@ export default function LotteryManagementPage() {
 
   // Convert pack details to modal format
   // Note: Map from API response types to modal types
-  // LotteryPackDetailResponse uses opening_serial/closing_serial, settled_at
+  // LotteryPackDetailResponse uses opening_serial/closing_serial, depleted_at
   // PackDetailsData uses serial_start/serial_end, depleted_at
   const packDetailsForModal: PackDetailsData | null = packDetails
     ? ({
@@ -656,13 +656,13 @@ export default function LotteryManagementPage() {
         bin: packDetails.bin
           ? {
               bin_id: packDetails.bin.bin_id,
-              name: packDetails.bin.label || `Bin ${packDetails.bin.bin_number}`,
+              name: packDetails.bin.name || `Bin ${packDetails.bin.display_order}`,
               location: undefined,
             }
           : null,
         received_at: packDetails.received_at,
         activated_at: packDetails.activated_at,
-        depleted_at: packDetails.settled_at ?? undefined,
+        depleted_at: packDetails.depleted_at ?? undefined,
         returned_at: packDetails.returned_at ?? undefined,
         tickets_remaining: packDetails.tickets_remaining,
         // shift_openings and shift_closings are not available in LotteryPackDetailResponse

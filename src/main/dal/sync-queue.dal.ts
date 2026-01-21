@@ -18,8 +18,9 @@ import { createLogger } from '../utils/logger';
 
 /**
  * Sync operation type
+ * ACTIVATE: Direct activation call to /packs/activate (handles create-and-activate)
  */
-export type SyncOperation = 'CREATE' | 'UPDATE' | 'DELETE';
+export type SyncOperation = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE';
 
 /**
  * Sync queue item entity
@@ -360,6 +361,41 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     stmt.run(...ids);
 
     log.info('Failed items reset for retry', { count: ids.length });
+  }
+
+  /**
+   * Delete all pending (unsynced) items for a store
+   * USE WITH CAUTION: This will permanently remove items from the queue
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Optional entity type filter
+   * @returns Number of items deleted
+   */
+  deletePending(storeId: string, entityType?: string): number {
+    let stmt;
+    let result;
+
+    if (entityType) {
+      stmt = this.db.prepare(`
+        DELETE FROM sync_queue
+        WHERE store_id = ? AND synced = 0 AND entity_type = ?
+      `);
+      result = stmt.run(storeId, entityType);
+    } else {
+      stmt = this.db.prepare(`
+        DELETE FROM sync_queue
+        WHERE store_id = ? AND synced = 0
+      `);
+      result = stmt.run(storeId);
+    }
+
+    log.warn('Pending sync items deleted', {
+      storeId,
+      entityType: entityType || 'all',
+      count: result.changes,
+    });
+
+    return result.changes;
   }
 
   /**

@@ -57,8 +57,14 @@ const DB_FILENAME = 'nuvana.db';
 const DEFAULT_MEMORY_LIMIT_KB = 64 * 1024; // 64MB
 
 /**
+ * Check if running in development mode
+ * In development, database encryption is disabled for easier debugging
+ */
+const isDevelopment = process.env.NODE_ENV === 'development';
+
+/**
  * SQLCipher configuration
- * DB-007: Strong encryption settings
+ * DB-007: Strong encryption settings (production only)
  */
 const SQLCIPHER_CONFIG = {
   cipher: 'sqlcipher',
@@ -147,7 +153,13 @@ export function initializeDatabase(options: DatabaseOptions = {}): Database.Data
     return dbInstance;
   }
 
-  log.info('Initializing encrypted database');
+  // Development mode: skip encryption for easier debugging
+  if (isDevelopment) {
+    log.info('Initializing database WITHOUT encryption (development mode)');
+    return initializeDevelopmentDatabase(options);
+  }
+
+  log.info('Initializing encrypted database (production mode)');
 
   // Step 1: Verify encryption availability
   // SEC-007: Require OS-level key protection
@@ -237,6 +249,76 @@ export function initializeDatabase(options: DatabaseOptions = {}): Database.Data
   log.info('Database initialized successfully', {
     path: finalDbPath,
     encrypted: true,
+  });
+
+  return dbInstance;
+}
+
+/**
+ * Initialize database WITHOUT encryption (development mode only)
+ * This allows easier debugging and database inspection during development.
+ *
+ * WARNING: This should NEVER be used in production!
+ *
+ * @param options - Optional database configuration
+ * @returns Initialized database instance (unencrypted)
+ */
+function initializeDevelopmentDatabase(options: DatabaseOptions = {}): Database.Database {
+  // Step 1: Resolve database path
+  const finalDbPath = options.dbPath || getDbPath();
+
+  // Ensure parent directory exists
+  const dbDir = path.dirname(finalDbPath);
+  if (!fs.existsSync(dbDir)) {
+    fs.mkdirSync(dbDir, { recursive: true });
+    log.debug('Database directory created', { path: dbDir });
+  }
+
+  // Step 2: Open database (no encryption)
+  try {
+    dbInstance = new Database(finalDbPath, {
+      verbose: options.verbose
+        ? (message?: unknown) =>
+            log.debug('SQL executed', { sql: String(message).substring(0, 200) })
+        : undefined,
+    });
+
+    log.debug('Database file opened (unencrypted)', { path: finalDbPath });
+  } catch (error) {
+    log.error('Failed to open database file', {
+      path: finalDbPath,
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    throw new Error(
+      `Failed to open database: ${error instanceof Error ? error.message : 'Unknown error'}`
+    );
+  }
+
+  // Step 3: Verify database is accessible
+  try {
+    dbInstance.exec('SELECT count(*) FROM sqlite_master');
+    log.debug('Database access verified');
+  } catch (error) {
+    dbInstance.close();
+    dbInstance = null;
+    log.error('Database access verification failed', {
+      error: error instanceof Error ? error.message : 'Unknown error',
+    });
+    throw new Error(
+      'Database access verification failed. The database may be corrupted.'
+    );
+  }
+
+  // Step 4: Apply performance optimizations
+  applyPerformancePragmas(dbInstance, options);
+
+  // Update stored path
+  dbPath = finalDbPath;
+
+  log.warn('⚠️ Database initialized WITHOUT encryption - DEVELOPMENT MODE ONLY');
+  log.info('Database initialized successfully', {
+    path: finalDbPath,
+    encrypted: false,
   });
 
   return dbInstance;
@@ -339,11 +421,21 @@ export function getDatabaseHealth(): DatabaseHealth {
 
   return {
     isOpen: true,
-    isEncrypted: true,
+    isEncrypted: !isDevelopment, // Encrypted in production, unencrypted in development
     tableCount: tableCountResult.count,
     sizeBytes,
     path: currentPath,
   };
+}
+
+/**
+ * Check if database encryption is enabled
+ * Returns true in production, false in development mode
+ *
+ * @returns true if database is encrypted
+ */
+export function isDatabaseEncrypted(): boolean {
+  return !isDevelopment;
 }
 
 /**

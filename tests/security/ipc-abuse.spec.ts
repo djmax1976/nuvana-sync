@@ -207,7 +207,7 @@ describe('IPC Security', () => {
         };
 
         // Valid enum values
-        const validStatuses = ['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED'];
+        const validStatuses = ['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED'];
         expect(validStatuses).toContain(validFilters.status);
 
         // Valid UUID format
@@ -226,7 +226,7 @@ describe('IPC Security', () => {
           { $ne: null },
         ];
 
-        const validStatuses = ['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED'];
+        const validStatuses = ['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED'];
 
         invalidStatuses.forEach((status) => {
           expect(validStatuses).not.toContain(status);

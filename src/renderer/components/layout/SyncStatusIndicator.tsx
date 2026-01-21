@@ -253,10 +253,11 @@ function getIndicatorState(status: SyncStatusData | null): IndicatorState {
 }
 
 /**
- * Format relative time from ISO string
+ * Format last sync time as compact date and time
  * SEC-004: No user input, safe string formatting
+ * Returns format: "MM/DD HH:MM" for same year, "MM/DD/YY HH:MM" for different year
  */
-function formatRelativeTime(isoString: string | null): string {
+function formatLastSyncTime(isoString: string | null): string {
   if (!isoString) return 'Never';
 
   const date = new Date(isoString);
@@ -264,16 +265,25 @@ function formatRelativeTime(isoString: string | null): string {
   if (isNaN(date.getTime())) return 'Unknown';
 
   const now = new Date();
-  const diffMs = now.getTime() - date.getTime();
-  const diffSec = Math.floor(diffMs / 1000);
-  const diffMin = Math.floor(diffSec / 60);
-  const diffHr = Math.floor(diffMin / 60);
+  const isCurrentYear = date.getFullYear() === now.getFullYear();
 
-  if (diffSec < 60) return 'Just now';
-  if (diffMin < 60) return `${diffMin}m ago`;
-  if (diffHr < 24) return `${diffHr}h ago`;
+  // Format time as HH:MM (24-hour format for compactness)
+  const hours = date.getHours().toString().padStart(2, '0');
+  const minutes = date.getMinutes().toString().padStart(2, '0');
+  const timeStr = `${hours}:${minutes}`;
 
-  return date.toLocaleDateString();
+  // Format date compactly
+  const month = (date.getMonth() + 1).toString().padStart(2, '0');
+  const day = date.getDate().toString().padStart(2, '0');
+
+  if (isCurrentYear) {
+    // Same year: "MM/DD HH:MM"
+    return `${month}/${day} ${timeStr}`;
+  } else {
+    // Different year: "MM/DD/YY HH:MM"
+    const year = date.getFullYear().toString().slice(-2);
+    return `${month}/${day}/${year} ${timeStr}`;
+  }
 }
 
 // ============================================================================
@@ -382,7 +392,7 @@ const TooltipDetails = memo(function TooltipDetails({
         <div className="text-xs space-y-1 border-t pt-2">
           <div className="flex justify-between">
             <span className="text-muted-foreground">Last sync:</span>
-            <span>{formatRelativeTime(status.lastSyncAt)}</span>
+            <span>{formatLastSyncTime(status.lastSyncAt)}</span>
           </div>
           {/* Show synced today count */}
           {(status.syncedTodayCount ?? 0) > 0 && (

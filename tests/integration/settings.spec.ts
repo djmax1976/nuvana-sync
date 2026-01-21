@@ -203,14 +203,14 @@ describe('Settings Integration', () => {
     });
 
     itComplex('should create and delete bins correctly', async () => {
+      // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       const mockBin = {
         bin_id: 'bin-001',
         store_id: 'store-123',
-        bin_number: 1,
-        label: 'Test Bin',
-        status: 'ACTIVE' as const,
+        display_order: 1,
+        name: 'Test Bin',
+        is_active: 1,
         deleted_at: null,
-        cloud_bin_id: null,
         synced_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -230,7 +230,7 @@ describe('Settings Integration', () => {
 
       vi.doMock('../../src/main/dal/lottery-bins.dal', () => ({
         lotteryBinsDAL: {
-          getNextBinNumber: vi.fn(() => 1),
+          getNextDisplayOrder: vi.fn(() => 1),
           create: vi.fn(() => mockBin),
           findById: vi.fn(() => mockBin),
           getPackCount: vi.fn(() => 0),
@@ -252,7 +252,7 @@ describe('Settings Integration', () => {
       const createResult = service.createBin({ name: 'Test Bin' });
 
       expect(createResult.success).toBe(true);
-      expect(createResult.bin?.label).toBe('Test Bin');
+      expect(createResult.bin?.name).toBe('Test Bin');
 
       // Delete bin (should succeed with no packs)
       const deleteResult = service.deleteBin('bin-001');
@@ -261,14 +261,14 @@ describe('Settings Integration', () => {
     });
 
     itComplex('should prevent deletion of bin with active packs', async () => {
+      // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       const mockBin = {
         bin_id: 'bin-001',
         store_id: 'store-123',
-        bin_number: 1,
-        label: 'Test Bin',
-        status: 'ACTIVE' as const,
+        display_order: 1,
+        name: 'Test Bin',
+        is_active: 1,
         deleted_at: null,
-        cloud_bin_id: null,
         synced_at: null,
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -359,13 +359,13 @@ describe('Settings Integration', () => {
 
       vi.doMock('../../src/main/dal/lottery-bins.dal', () => ({
         lotteryBinsDAL: {
-          getNextBinNumber: vi.fn(() => 1),
+          getNextDisplayOrder: vi.fn(() => 1),
           create: vi.fn(() => ({
             bin_id: 'bin-001',
             store_id: 'store-123',
-            bin_number: 1,
-            label: 'Test Bin',
-            status: 'ACTIVE',
+            display_order: 1,
+            name: 'Test Bin',
+            is_active: 1,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
           })),
@@ -387,8 +387,8 @@ describe('Settings Integration', () => {
 
       // Bin should be created successfully
       expect(result.success).toBe(true);
-      expect(result.bin?.label).toBe('Test Bin');
-      expect(result.bin?.bin_number).toBe(1);
+      expect(result.bin?.name).toBe('Test Bin');
+      expect(result.bin?.display_order).toBe(1);
 
       // Sync queue should NOT be called - bins are pull-only entities
       // Cloud is authoritative for bins; local changes are for offline operation only
@@ -424,12 +424,14 @@ describe('Settings Integration', () => {
       expect(() => service.updateLocal({ syncIntervalSeconds: 120 })).not.toThrow();
     });
 
-    it('should require HTTPS for cloud endpoint', async () => {
+    it('should require HTTPS for API URL (except localhost)', async () => {
       const { SettingsService } = await import('../../src/main/services/settings.service');
       const service = new SettingsService();
 
-      expect(() => service.setCloudEndpoint('http://insecure.example.com')).toThrow(/HTTPS/);
-      expect(() => service.setCloudEndpoint('https://secure.example.com')).not.toThrow();
+      expect(() => service.setApiUrl('http://insecure.example.com')).toThrow(/HTTPS/);
+      expect(() => service.setApiUrl('https://secure.example.com')).not.toThrow();
+      // Localhost should be allowed with HTTP for development
+      expect(() => service.setApiUrl('http://localhost:3001')).not.toThrow();
     });
   });
 });

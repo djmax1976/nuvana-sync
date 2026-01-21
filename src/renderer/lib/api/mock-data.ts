@@ -441,12 +441,16 @@ export interface MockLotteryGame {
   updated_at: string;
 }
 
+/**
+ * Mock lottery bin (cloud-aligned schema v039)
+ */
 export interface MockLotteryBin {
   bin_id: string;
   store_id: string;
-  bin_number: number;
-  label: string | null;
-  status: 'ACTIVE' | 'INACTIVE';
+  name: string;
+  location: string | null;
+  display_order: number;
+  is_active: boolean;
   created_at: string;
   updated_at: string;
   pack_id?: string | null;
@@ -461,12 +465,12 @@ export interface MockLotteryPack {
   pack_number: string;
   opening_serial: string | null;
   closing_serial: string | null;
-  status: 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+  status: 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
   store_id: string;
   bin_id: string | null;
   received_at: string;
   activated_at: string | null;
-  settled_at: string | null;
+  depleted_at: string | null;
   returned_at: string | null;
   game?: {
     game_id: string;
@@ -477,8 +481,8 @@ export interface MockLotteryPack {
   };
   bin?: {
     bin_id: string;
-    bin_number: number;
-    label: string | null;
+    name: string;
+    display_order: number;
   } | null;
 }
 
@@ -543,9 +547,10 @@ const mockLotteryGames: MockLotteryGame[] = [
 const mockLotteryBins: MockLotteryBin[] = Array.from({ length: 10 }, (_, i) => ({
   bin_id: `bin-${i + 1}`,
   store_id: 'store-1',
-  bin_number: i + 1,
-  label: `Bin ${i + 1}`,
-  status: 'ACTIVE' as const,
+  name: `Bin ${i + 1}`,
+  location: null,
+  display_order: i + 1,
+  is_active: true,
   created_at: new Date().toISOString(),
   updated_at: new Date().toISOString(),
   pack_id: i < 5 ? `pack-${i + 1}` : null,
@@ -557,7 +562,7 @@ const mockLotteryBins: MockLotteryBin[] = Array.from({ length: 10 }, (_, i) => (
 const mockLotteryPacks: MockLotteryPack[] = Array.from({ length: 15 }, (_, i) => {
   const gameIndex = i % mockLotteryGames.length;
   const game = mockLotteryGames[gameIndex];
-  const status = i < 5 ? 'ACTIVATED' : i < 10 ? 'RECEIVED' : 'SETTLED';
+  const status = i < 5 ? 'ACTIVE' : i < 10 ? 'RECEIVED' : 'DEPLETED';
   const binId = i < 5 ? `bin-${i + 1}` : null;
 
   return {
@@ -565,15 +570,15 @@ const mockLotteryPacks: MockLotteryPack[] = Array.from({ length: 15 }, (_, i) =>
     game_id: game.game_id,
     pack_number: `PKG${(1234567 + i).toString()}`,
     opening_serial: status !== 'RECEIVED' ? '000' : null,
-    closing_serial: status === 'SETTLED' ? '299' : null,
-    status: status as 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED',
+    closing_serial: status === 'DEPLETED' ? '299' : null,
+    status: status as 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED',
     store_id: 'store-1',
     bin_id: binId,
     received_at: new Date(Date.now() - (15 - i) * 86400000).toISOString(),
     activated_at:
       status !== 'RECEIVED' ? new Date(Date.now() - (10 - i) * 86400000).toISOString() : null,
-    settled_at:
-      status === 'SETTLED' ? new Date(Date.now() - (5 - i) * 86400000).toISOString() : null,
+    depleted_at:
+      status === 'DEPLETED' ? new Date(Date.now() - (5 - i) * 86400000).toISOString() : null,
     returned_at: null,
     game: {
       game_id: game.game_id,
@@ -585,8 +590,8 @@ const mockLotteryPacks: MockLotteryPack[] = Array.from({ length: 15 }, (_, i) =>
     bin: binId
       ? {
           bin_id: binId,
-          bin_number: i + 1,
-          label: `Bin ${i + 1}`,
+          name: `Bin ${i + 1}`,
+          display_order: i + 1,
         }
       : null,
   };

@@ -15,7 +15,7 @@ import {
   LayoutDashboard,
   Clock,
   Ticket,
-  Gamepad2,
+  Package,
   Plug,
   Monitor,
   Users,
@@ -116,7 +116,7 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
           <span>Lottery</span>
         </Link>
 
-        {/* Lottery Games Inventory Link */}
+        {/* Lottery Inventory Link */}
         <Link
           to="/lottery/games"
           data-testid="lottery-games-link"
@@ -128,8 +128,8 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
               : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
           )}
         >
-          <Gamepad2 className="h-4 w-4" />
-          <span>Games Inventory</span>
+          <Package className="h-4 w-4" />
+          <span>Inventory</span>
         </Link>
 
         {/* POS Integration Link */}

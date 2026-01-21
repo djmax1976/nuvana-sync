@@ -394,16 +394,22 @@ describe('SettingsService', () => {
     });
   });
 
-  describe('setCloudEndpoint', () => {
-    it('should reject non-HTTPS endpoints', () => {
+  describe('setApiUrl', () => {
+    it('should reject non-HTTPS endpoints (except localhost)', () => {
       expect(() => {
-        settingsService.setCloudEndpoint('http://api.example.com');
+        settingsService.setApiUrl('http://api.example.com');
       }).toThrow(/HTTPS/);
     });
 
     it('should accept HTTPS endpoints', () => {
       expect(() => {
-        settingsService.setCloudEndpoint('https://api.example.com');
+        settingsService.setApiUrl('https://api.example.com');
+      }).not.toThrow();
+    });
+
+    it('should accept HTTP for localhost (development)', () => {
+      expect(() => {
+        settingsService.setApiUrl('http://localhost:3001');
       }).not.toThrow();
     });
   });

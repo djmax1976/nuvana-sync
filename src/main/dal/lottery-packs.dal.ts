@@ -2,7 +2,7 @@
  * Lottery Packs Data Access Layer
  *
  * CRUD operations for lottery pack lifecycle management.
- * Manages pack states: RECEIVED -> ACTIVATED -> SETTLED or RETURNED
+ * Manages pack states: RECEIVED -> ACTIVE -> DEPLETED or RETURNED
  *
  * @module main/dal/lottery-packs
  * @security SEC-006: All queries use prepared statements
@@ -19,35 +19,58 @@ import { createLogger } from '../utils/logger';
 /**
  * Lottery pack status lifecycle
  * RECEIVED: Pack received from distributor, not yet in use
- * ACTIVATED: Pack is active in a bin, being sold
- * SETTLED: Pack finished during day close, sales recorded
+ * ACTIVE: Pack is active in a bin, being sold
+ * DEPLETED: Pack finished (sold out), sales recorded
  * RETURNED: Pack returned to distributor
  */
-export type LotteryPackStatus = 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+export type LotteryPackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
 /**
  * Lottery pack entity
+ * v029 API Alignment: Uses current_bin_id and tickets_sold_count
+ * v038 API Alignment: Added serial_override_approved_at and mark_sold_approved_at
  */
 export interface LotteryPack extends StoreEntity {
   pack_id: string;
   store_id: string;
   game_id: string;
   pack_number: string;
-  bin_id: string | null;
+  /** v029: Renamed from bin_id for API alignment */
+  current_bin_id: string | null;
   status: LotteryPackStatus;
   received_at: string | null;
   received_by: string | null;
   activated_at: string | null;
-  settled_at: string | null;
+  activated_by: string | null;
+  activated_shift_id: string | null;
+  depleted_at: string | null;
+  depleted_by: string | null;
+  depleted_shift_id: string | null;
   returned_at: string | null;
+  returned_by: string | null;
+  returned_shift_id: string | null;
   opening_serial: string | null;
   closing_serial: string | null;
-  tickets_sold: number;
+  /** v029: Renamed from tickets_sold for API alignment */
+  tickets_sold_count: number;
   sales_amount: number;
+  /** v029: Serial override approval tracking */
+  serial_override_approved_by: string | null;
+  /** v038: Timestamp when serial override was approved */
+  serial_override_approved_at: string | null;
+  serial_override_reason: string | null;
+  /** v029: Mark sold approval tracking */
+  mark_sold_approved_by: string | null;
+  /** v038: Timestamp when mark sold was approved */
+  mark_sold_approved_at: string | null;
+  mark_sold_reason: string | null;
   cloud_pack_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
+  depletion_reason: string | null;
+  return_reason: string | null;
+  return_notes: string | null;
 }
 
 /**
@@ -66,39 +89,62 @@ export interface ReceivePackData {
 /**
  * Pack activation data
  * DB-006: Requires store_id for tenant isolation validation
+ *
+ * v019 Schema Alignment: Added activated_shift_id for shift-level audit trail
+ * - Required for cashiers (business logic enforced in handler)
+ * - Optional for managers (may activate without active shift)
  */
 export interface ActivatePackData {
   store_id: string;
-  bin_id: string;
+  /** v029: Renamed from bin_id for API alignment */
+  current_bin_id: string;
   opening_serial: string;
   activated_by?: string;
+  /** Shift ID during which pack was activated (v019 schema alignment) */
+  activated_shift_id?: string | null;
 }
 
 /**
- * Pack settle data (day close)
+ * Pack settle data (day close / depletion)
  * DB-006: Requires store_id for tenant isolation validation
+ *
+ * v019 Schema Alignment: Added shift tracking for depletion operations
  */
 export interface SettlePackData {
   store_id: string;
   closing_serial: string;
-  tickets_sold: number;
+  /** v029: Renamed from tickets_sold for API alignment */
+  tickets_sold_count: number;
   sales_amount: number;
+  /** User who depleted the pack (v019 schema alignment) */
+  depleted_by?: string | null;
+  /** Shift ID during which pack was depleted (v019 schema alignment) */
+  depleted_shift_id?: string | null;
+  /** Reason for depletion: SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET */
+  depletion_reason?: string | null;
 }
 
 /**
  * Pack return data
  * DB-006: Requires store_id for tenant isolation validation
+ *
+ * v019 Schema Alignment: Added shift tracking for return operations
  */
 export interface ReturnPackData {
   store_id: string;
   closing_serial?: string;
-  tickets_sold?: number;
+  /** v029: Renamed from tickets_sold for API alignment */
+  tickets_sold_count?: number;
   sales_amount?: number;
   return_reason?: string;
+  /** User who returned the pack (v019 schema alignment) */
+  returned_by?: string | null;
+  /** Shift ID during which pack was returned (v019 schema alignment) */
+  returned_shift_id?: string | null;
 }
 
 /**
- * Pack with game and bin information
+ * Pack with game and bin information (cloud-aligned v039)
  */
 export interface PackWithDetails extends LotteryPack {
   game_code: string | null;
@@ -106,8 +152,10 @@ export interface PackWithDetails extends LotteryPack {
   game_price: number | null;
   game_tickets_per_pack: number | null;
   game_status: string | null;
-  bin_number: number | null;
-  bin_label: string | null;
+  /** Cloud-aligned: bin name (replaces bin_label) */
+  bin_name: string | null;
+  /** Cloud-aligned: bin display order (replaces bin_number) */
+  bin_display_order: number | null;
 }
 
 /**
@@ -116,7 +164,8 @@ export interface PackWithDetails extends LotteryPack {
 export interface PackFilterOptions {
   status?: LotteryPackStatus;
   game_id?: string;
-  bin_id?: string;
+  /** v029: Renamed from bin_id for API alignment */
+  current_bin_id?: string;
   /** Search by pack_number or game name (case-insensitive) */
   search?: string;
 }
@@ -148,7 +197,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     'status',
     'received_at',
     'activated_at',
-    'settled_at',
+    'depleted_at',
   ]);
 
   // ==========================================================================
@@ -223,7 +272,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     log.debug('Starting pack activation', {
       packId,
       storeId: data.store_id,
-      binId: data.bin_id,
+      currentBinId: data.current_bin_id,
       openingSerial: data.opening_serial,
     });
 
@@ -233,7 +282,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       found: !!pack,
       packStatus: pack?.status,
       packStoreId: pack?.store_id,
-      packBinId: pack?.bin_id,
+      packCurrentBinId: pack?.current_bin_id,
     });
 
     if (!pack) {
@@ -250,23 +299,27 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     // SEC-006: Parameterized UPDATE with store_id constraint
     // DB-006: Include store_id in WHERE clause for tenant isolation
-    // SEC-010: AUTHZ - Store activated_by for audit trail
+    // SEC-010: AUTHZ - Store activated_by and activated_shift_id for audit trail
+    // v019 Schema Alignment: Now includes activated_shift_id
+    // v029 API Alignment: Uses current_bin_id
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
-        bin_id = ?,
-        status = 'ACTIVATED',
+        current_bin_id = ?,
+        status = 'ACTIVE',
         activated_at = ?,
         opening_serial = ?,
         activated_by = ?,
+        activated_shift_id = ?,
         updated_at = ?
       WHERE pack_id = ? AND store_id = ? AND status = 'RECEIVED'
     `);
 
     const result = stmt.run(
-      data.bin_id,
+      data.current_bin_id,
       now,
       data.opening_serial,
       data.activated_by || null,
+      data.activated_shift_id || null,
       now,
       packId,
       data.store_id
@@ -288,7 +341,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     log.debug('After activation - pack state', {
       packId: updated?.pack_id,
       status: updated?.status,
-      binId: updated?.bin_id,
+      currentBinId: updated?.current_bin_id,
       storeId: updated?.store_id,
       openingSerial: updated?.opening_serial,
     });
@@ -300,10 +353,13 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
-   * Settle a pack (close during day close)
-   * Validates pack is in ACTIVATED status and belongs to specified store
+   * Settle a pack (close during day close / manual depletion)
+   * Validates pack is in ACTIVE status and belongs to specified store
    * SEC-006: Parameterized UPDATE with store_id in WHERE clause
    * DB-006: Tenant isolation - pack must belong to store_id
+   * SEC-010: AUTHZ - Store depleted_by and depleted_shift_id for audit trail
+   *
+   * v019 Schema Alignment: Now stores depletion context (shift, user, reason)
    *
    * @param packId - Pack ID to settle
    * @param data - Settlement data including store_id for tenant isolation
@@ -317,9 +373,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Pack not found: ${packId}`);
     }
 
-    if (pack.status !== 'ACTIVATED') {
+    if (pack.status !== 'ACTIVE') {
       throw new Error(
-        `Cannot settle pack with status ${pack.status}. Pack must be in ACTIVATED status.`
+        `Cannot settle pack with status ${pack.status}. Pack must be in ACTIVE status.`
       );
     }
 
@@ -327,22 +383,31 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     // SEC-006: Parameterized UPDATE with store_id constraint
     // DB-006: Include store_id in WHERE clause for tenant isolation
+    // SEC-010: AUTHZ - Store depleted_by and depleted_shift_id for audit trail
+    // v019 Schema Alignment: Now includes depletion context
+    // v029 API Alignment: Uses tickets_sold_count
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
-        status = 'SETTLED',
-        settled_at = ?,
+        status = 'DEPLETED',
+        depleted_at = ?,
         closing_serial = ?,
-        tickets_sold = ?,
+        tickets_sold_count = ?,
         sales_amount = ?,
+        depleted_by = ?,
+        depleted_shift_id = ?,
+        depletion_reason = ?,
         updated_at = ?
-      WHERE pack_id = ? AND store_id = ? AND status = 'ACTIVATED'
+      WHERE pack_id = ? AND store_id = ? AND status = 'ACTIVE'
     `);
 
     const result = stmt.run(
       now,
       data.closing_serial,
-      data.tickets_sold,
+      data.tickets_sold_count,
       data.sales_amount,
+      data.depleted_by || null,
+      data.depleted_shift_id || null,
+      data.depletion_reason || null,
       now,
       packId,
       data.store_id
@@ -358,7 +423,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       packId,
       storeId: data.store_id,
       closingSerial: data.closing_serial,
-      ticketsSold: data.tickets_sold,
+      ticketsSoldCount: data.tickets_sold_count,
       salesAmount: data.sales_amount,
     });
 
@@ -371,9 +436,12 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Return a pack to distributor
-   * Can return from RECEIVED or ACTIVATED status
+   * Can return from RECEIVED or ACTIVE status
    * SEC-006: Parameterized UPDATE with store_id in WHERE clause
    * DB-006: Tenant isolation - pack must belong to store_id
+   * SEC-010: AUTHZ - Store returned_by and returned_shift_id for audit trail
+   *
+   * v019 Schema Alignment: Now stores return context (shift, user)
    *
    * @param packId - Pack ID to return
    * @param data - Return data including store_id for tenant isolation
@@ -387,9 +455,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Pack not found: ${packId}`);
     }
 
-    if (pack.status !== 'RECEIVED' && pack.status !== 'ACTIVATED') {
+    if (pack.status !== 'RECEIVED' && pack.status !== 'ACTIVE') {
       throw new Error(
-        `Cannot return pack with status ${pack.status}. Pack must be in RECEIVED or ACTIVATED status.`
+        `Cannot return pack with status ${pack.status}. Pack must be in RECEIVED or ACTIVE status.`
       );
     }
 
@@ -397,22 +465,29 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     // SEC-006: Parameterized UPDATE with store_id constraint
     // DB-006: Include store_id in WHERE clause for tenant isolation
+    // SEC-010: AUTHZ - Store returned_by and returned_shift_id for audit trail
+    // v019 Schema Alignment: Now includes return context
+    // v029 API Alignment: Uses tickets_sold_count
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
         status = 'RETURNED',
         returned_at = ?,
         closing_serial = COALESCE(?, closing_serial),
-        tickets_sold = COALESCE(?, tickets_sold),
+        tickets_sold_count = COALESCE(?, tickets_sold_count),
         sales_amount = COALESCE(?, sales_amount),
+        returned_by = ?,
+        returned_shift_id = ?,
         updated_at = ?
-      WHERE pack_id = ? AND store_id = ? AND status IN ('RECEIVED', 'ACTIVATED')
+      WHERE pack_id = ? AND store_id = ? AND status IN ('RECEIVED', 'ACTIVE')
     `);
 
     const result = stmt.run(
       now,
       data.closing_serial || null,
-      data.tickets_sold ?? null,
+      data.tickets_sold_count ?? null,
       data.sales_amount ?? null,
+      data.returned_by || null,
+      data.returned_shift_id || null,
       now,
       packId,
       data.store_id
@@ -429,6 +504,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       storeId: data.store_id,
       previousStatus: pack.status,
       closingSerial: data.closing_serial,
+      returnedBy: data.returned_by,
+      returnedShiftId: data.returned_shift_id,
     });
 
     const updated = this.findByIdForStore(data.store_id, packId);
@@ -479,9 +556,10 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       conditions.push('game_id = ?');
       params.push(filters.game_id);
     }
-    if (filters.bin_id) {
-      conditions.push('bin_id = ?');
-      params.push(filters.bin_id);
+    // v029 API Alignment: Uses current_bin_id
+    if (filters.current_bin_id) {
+      conditions.push('current_bin_id = ?');
+      params.push(filters.current_bin_id);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -497,17 +575,18 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   /**
    * Find the active pack in a specific bin
    * SEC-006: Parameterized query
+   * v029 API Alignment: Uses current_bin_id
    *
-   * @param binId - Bin identifier
+   * @param currentBinId - Bin identifier
    * @returns Active pack or undefined
    */
-  findActiveInBin(binId: string): LotteryPack | undefined {
+  findActiveInBin(currentBinId: string): LotteryPack | undefined {
     const stmt = this.db.prepare(`
       SELECT * FROM lottery_packs
-      WHERE bin_id = ? AND status = 'ACTIVATED'
+      WHERE current_bin_id = ? AND status = 'ACTIVE'
       LIMIT 1
     `);
-    return stmt.get(binId) as LotteryPack | undefined;
+    return stmt.get(currentBinId) as LotteryPack | undefined;
   }
 
   /**
@@ -542,6 +621,28 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
+   * Update the cloud_pack_id after successful sync
+   * SEC-006: Parameterized UPDATE
+   *
+   * @param packId - Local pack identifier
+   * @param cloudPackId - Cloud pack identifier returned from API
+   * @returns true if updated
+   */
+  updateCloudPackId(packId: string, cloudPackId: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE lottery_packs SET cloud_pack_id = ?, updated_at = ?
+      WHERE pack_id = ?
+    `);
+    const result = stmt.run(cloudPackId, this.now(), packId);
+
+    if (result.changes > 0) {
+      log.debug('Updated cloud_pack_id', { packId, cloudPackId });
+    }
+
+    return result.changes > 0;
+  }
+
+  /**
    * Get pack with game and bin details
    * SEC-006: Parameterized query with JOINs
    *
@@ -549,17 +650,18 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * @returns Pack with details or undefined
    */
   getPackWithDetails(packId: string): PackWithDetails | undefined {
+    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
         g.game_code,
         g.name as game_name,
         g.price as game_price,
-        b.bin_number,
-        b.label as bin_label
+        b.name as bin_name,
+        b.display_order as bin_display_order
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
-      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
       WHERE p.pack_id = ?
     `);
     return stmt.get(packId) as PackWithDetails | undefined;
@@ -585,9 +687,10 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       conditions.push('p.game_id = ?');
       params.push(filters.game_id);
     }
-    if (filters.bin_id) {
-      conditions.push('p.bin_id = ?');
-      params.push(filters.bin_id);
+    // v029 API Alignment: Uses current_bin_id
+    if (filters.current_bin_id) {
+      conditions.push('p.current_bin_id = ?');
+      params.push(filters.current_bin_id);
     }
     // SEC-006: Search uses parameterized LIKE query to prevent SQL injection
     // Searches pack_number (exact prefix match) or game name (case-insensitive contains)
@@ -601,6 +704,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const whereClause = conditions.join(' AND ');
 
+    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -609,11 +713,11 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         g.price as game_price,
         g.tickets_per_pack as game_tickets_per_pack,
         g.status as game_status,
-        b.bin_number,
-        b.label as bin_label
+        b.name as bin_name,
+        b.display_order as bin_display_order
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
-      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
       WHERE ${whereClause}
       ORDER BY p.updated_at DESC
     `);
@@ -628,7 +732,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * @returns Array of activated packs with details
    */
   getActivatedPacksForDayClose(storeId: string): PackWithDetails[] {
-    return this.findPacksWithDetails(storeId, { status: 'ACTIVATED' });
+    return this.findPacksWithDetails(storeId, { status: 'ACTIVE' });
   }
 
   /**
@@ -663,6 +767,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     // SEC-006: Fully parameterized query
     // DB-006: store_id enforces tenant isolation
     // Performance: Uses indexed columns (store_id, activated_at) with bounded result set
+    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -671,11 +776,11 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         g.price as game_price,
         g.tickets_per_pack as game_tickets_per_pack,
         g.status as game_status,
-        b.bin_number,
-        b.label as bin_label
+        b.name as bin_name,
+        b.display_order as bin_display_order
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
-      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
       WHERE p.store_id = ?
         AND p.activated_at IS NOT NULL
         AND p.activated_at >= ?
@@ -704,6 +809,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const sinceDatetime = `${sinceDate}T00:00:00`;
 
+    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -712,16 +818,16 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         g.price as game_price,
         g.tickets_per_pack as game_tickets_per_pack,
         g.status as game_status,
-        b.bin_number,
-        b.label as bin_label
+        b.name as bin_name,
+        b.display_order as bin_display_order
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
-      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
       WHERE p.store_id = ?
-        AND p.status = 'SETTLED'
-        AND p.settled_at IS NOT NULL
-        AND p.settled_at >= ?
-      ORDER BY p.settled_at DESC
+        AND p.status = 'DEPLETED'
+        AND p.depleted_at IS NOT NULL
+        AND p.depleted_at >= ?
+      ORDER BY p.depleted_at DESC
     `);
 
     return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
@@ -746,6 +852,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const sinceDatetime = `${sinceDate}T00:00:00`;
 
+    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -754,11 +861,11 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         g.price as game_price,
         g.tickets_per_pack as game_tickets_per_pack,
         g.status as game_status,
-        b.bin_number,
-        b.label as bin_label
+        b.name as bin_name,
+        b.display_order as bin_display_order
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
-      LEFT JOIN lottery_bins b ON p.bin_id = b.bin_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
       WHERE p.store_id = ?
         AND p.status = 'RETURNED'
         AND p.returned_at IS NOT NULL
@@ -824,36 +931,36 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Move pack to a different bin
-   * Only for ACTIVATED packs
+   * Only for ACTIVE packs
    * SEC-006: Parameterized UPDATE
    *
    * @param packId - Pack ID
    * @param newBinId - New bin ID
    * @returns Updated pack or throws error
    */
-  moveToBin(packId: string, newBinId: string): LotteryPack {
+  moveToBin(packId: string, newCurrentBinId: string): LotteryPack {
     const pack = this.findById(packId);
 
     if (!pack) {
       throw new Error(`Pack not found: ${packId}`);
     }
 
-    if (pack.status !== 'ACTIVATED') {
-      throw new Error(`Cannot move pack with status ${pack.status}. Pack must be ACTIVATED.`);
+    if (pack.status !== 'ACTIVE') {
+      throw new Error(`Cannot move pack with status ${pack.status}. Pack must be ACTIVE.`);
     }
-
+    // v029 API Alignment: Uses current_bin_id
     const stmt = this.db.prepare(`
-      UPDATE lottery_packs SET bin_id = ?, updated_at = ?
-      WHERE pack_id = ? AND status = 'ACTIVATED'
+      UPDATE lottery_packs SET current_bin_id = ?, updated_at = ?
+      WHERE pack_id = ? AND status = 'ACTIVE'
     `);
 
-    const result = stmt.run(newBinId, this.now(), packId);
+    const result = stmt.run(newCurrentBinId, this.now(), packId);
 
     if (result.changes === 0) {
       throw new Error('Failed to move pack');
     }
 
-    log.info('Lottery pack moved', { packId, newBinId });
+    log.info('Lottery pack moved', { packId, newCurrentBinId });
 
     const updated = this.findById(packId);
     if (!updated) {
@@ -864,7 +971,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Update opening serial (correction)
-   * Only for ACTIVATED packs
+   * Only for ACTIVE packs
    * SEC-006: Parameterized UPDATE
    *
    * @param packId - Pack ID
@@ -878,8 +985,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Pack not found: ${packId}`);
     }
 
-    if (pack.status !== 'ACTIVATED') {
-      throw new Error('Can only update opening serial on activated packs');
+    if (pack.status !== 'ACTIVE') {
+      throw new Error('Can only update opening serial on ACTIVE packs');
     }
 
     const stmt = this.db.prepare(`
@@ -927,6 +1034,456 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       | undefined;
   }
 
+  // ==========================================================================
+  // Cloud Sync Operations
+  // ==========================================================================
+
+  /**
+   * Upsert a pack from cloud data (pull operation)
+   *
+   * Enterprise-grade implementation for cloud sync:
+   * - Matches by cloud_pack_id (primary) or pack_number+game_id (fallback)
+   * - Updates existing records with cloud data
+   * - Creates new records for unknown packs
+   * - Validates store_id for tenant isolation
+   *
+   * Field names match cloud API exactly per replica_end_points.md:
+   * - current_bin_id: UUID of bin pack is currently in
+   * - tickets_sold_count: Total tickets sold
+   *
+   * @security SEC-006: Parameterized queries prevent SQL injection
+   * @security DB-006: Store-scoped operations for tenant isolation
+   *
+   * @param data - Cloud pack data with all fields matching API schema
+   * @param storeId - Store ID for tenant isolation validation
+   * @returns Created or updated pack
+   */
+  upsertFromCloud(
+    data: {
+      cloud_pack_id: string;
+      store_id: string;
+      game_id: string;
+      pack_number: string;
+      status: LotteryPackStatus;
+      /** Current bin UUID - matches API field name per replica_end_points.md */
+      current_bin_id?: string | null;
+      opening_serial?: string | null;
+      closing_serial?: string | null;
+      /** Serial range from cloud API per replica_end_points.md */
+      serial_start?: string | null;
+      serial_end?: string | null;
+      /** Total tickets sold - matches API field name per replica_end_points.md */
+      tickets_sold_count?: number | null;
+      /** Timestamp of last ticket sold - matches API field name per replica_end_points.md */
+      last_sold_at?: string | null;
+      sales_amount?: number | null;
+      received_at?: string | null;
+      received_by?: string | null;
+      activated_at?: string | null;
+      activated_by?: string | null;
+      activated_shift_id?: string | null;
+      depleted_at?: string | null;
+      depleted_by?: string | null;
+      depleted_shift_id?: string | null;
+      depletion_reason?: string | null;
+      returned_at?: string | null;
+      returned_by?: string | null;
+      returned_shift_id?: string | null;
+      return_reason?: string | null;
+      return_notes?: string | null;
+      last_sold_serial?: string | null;
+      tickets_sold_on_return?: number | null;
+      return_sales_amount?: number | null;
+      /** Serial override approval fields (API v029 + v038 alignment) */
+      serial_override_approved_by?: string | null;
+      serial_override_reason?: string | null;
+      serial_override_approved_at?: string | null;
+      mark_sold_approved_by?: string | null;
+      mark_sold_reason?: string | null;
+      mark_sold_approved_at?: string | null;
+      created_at?: string;
+      updated_at?: string;
+    },
+    storeId: string
+  ): LotteryPack {
+    // DB-006: Validate tenant isolation
+    if (data.store_id !== storeId) {
+      throw new Error('Store ID mismatch - tenant isolation violation');
+    }
+
+    const now = this.now();
+
+    // First try to find by cloud_pack_id
+    let existing = this.findByCloudId(data.cloud_pack_id);
+
+    // Fallback: find by pack_number + game_id in same store
+    if (!existing) {
+      existing = this.findByPackNumber(storeId, data.game_id, data.pack_number);
+    }
+
+    if (existing) {
+      // DB-006: Verify existing pack belongs to this store
+      if (existing.store_id !== storeId) {
+        throw new Error('Pack belongs to different store - tenant isolation violation');
+      }
+
+      // Update existing pack with cloud data
+      // SEC-006: Parameterized UPDATE - all values bound, no string concatenation
+      // Field names match cloud API exactly per replica_end_points.md
+      const stmt = this.db.prepare(`
+        UPDATE lottery_packs SET
+          cloud_pack_id = ?,
+          status = ?,
+          current_bin_id = COALESCE(?, current_bin_id),
+          opening_serial = COALESCE(?, opening_serial),
+          closing_serial = COALESCE(?, closing_serial),
+          serial_start = COALESCE(?, serial_start),
+          serial_end = COALESCE(?, serial_end),
+          tickets_sold_count = COALESCE(?, tickets_sold_count),
+          last_sold_at = COALESCE(?, last_sold_at),
+          sales_amount = COALESCE(?, sales_amount),
+          received_at = COALESCE(?, received_at),
+          received_by = COALESCE(?, received_by),
+          activated_at = COALESCE(?, activated_at),
+          activated_by = COALESCE(?, activated_by),
+          activated_shift_id = COALESCE(?, activated_shift_id),
+          depleted_at = COALESCE(?, depleted_at),
+          depleted_by = COALESCE(?, depleted_by),
+          depleted_shift_id = COALESCE(?, depleted_shift_id),
+          depletion_reason = COALESCE(?, depletion_reason),
+          returned_at = COALESCE(?, returned_at),
+          returned_by = COALESCE(?, returned_by),
+          returned_shift_id = COALESCE(?, returned_shift_id),
+          return_reason = COALESCE(?, return_reason),
+          return_notes = COALESCE(?, return_notes),
+          last_sold_serial = COALESCE(?, last_sold_serial),
+          tickets_sold_on_return = COALESCE(?, tickets_sold_on_return),
+          return_sales_amount = COALESCE(?, return_sales_amount),
+          serial_override_approved_by = COALESCE(?, serial_override_approved_by),
+          serial_override_reason = COALESCE(?, serial_override_reason),
+          serial_override_approved_at = COALESCE(?, serial_override_approved_at),
+          mark_sold_approved_by = COALESCE(?, mark_sold_approved_by),
+          mark_sold_reason = COALESCE(?, mark_sold_reason),
+          mark_sold_approved_at = COALESCE(?, mark_sold_approved_at),
+          synced_at = ?,
+          updated_at = ?
+        WHERE pack_id = ? AND store_id = ?
+      `);
+
+      stmt.run(
+        data.cloud_pack_id,
+        data.status,
+        data.current_bin_id ?? null,
+        data.opening_serial ?? null,
+        data.closing_serial ?? null,
+        data.serial_start ?? null,
+        data.serial_end ?? null,
+        data.tickets_sold_count ?? null,
+        data.last_sold_at ?? null,
+        data.sales_amount ?? null,
+        data.received_at ?? null,
+        data.received_by ?? null,
+        data.activated_at ?? null,
+        data.activated_by ?? null,
+        data.activated_shift_id ?? null,
+        data.depleted_at ?? null,
+        data.depleted_by ?? null,
+        data.depleted_shift_id ?? null,
+        data.depletion_reason ?? null,
+        data.returned_at ?? null,
+        data.returned_by ?? null,
+        data.returned_shift_id ?? null,
+        data.return_reason ?? null,
+        data.return_notes ?? null,
+        data.last_sold_serial ?? null,
+        data.tickets_sold_on_return ?? null,
+        data.return_sales_amount ?? null,
+        data.serial_override_approved_by ?? null,
+        data.serial_override_reason ?? null,
+        data.serial_override_approved_at ?? null,
+        data.mark_sold_approved_by ?? null,
+        data.mark_sold_reason ?? null,
+        data.mark_sold_approved_at ?? null,
+        now,
+        now,
+        existing.pack_id,
+        storeId
+      );
+
+      log.debug('Pack updated from cloud', {
+        packId: existing.pack_id,
+        cloudPackId: data.cloud_pack_id,
+        status: data.status,
+      });
+
+      const updated = this.findById(existing.pack_id);
+      if (!updated) {
+        throw new Error(`Failed to retrieve updated pack: ${existing.pack_id}`);
+      }
+      return updated;
+    } else {
+      // Create new pack from cloud data
+      const packId = this.generateId();
+
+      // SEC-006: Parameterized INSERT - all values bound, no string concatenation
+      // Field names match cloud API exactly per replica_end_points.md
+      const stmt = this.db.prepare(`
+        INSERT INTO lottery_packs (
+          pack_id, store_id, game_id, pack_number, status,
+          cloud_pack_id, current_bin_id, opening_serial, closing_serial,
+          serial_start, serial_end, tickets_sold_count, last_sold_at, sales_amount,
+          received_at, received_by,
+          activated_at, activated_by, activated_shift_id,
+          depleted_at, depleted_by, depleted_shift_id, depletion_reason,
+          returned_at, returned_by, returned_shift_id,
+          return_reason, return_notes,
+          last_sold_serial, tickets_sold_on_return, return_sales_amount,
+          serial_override_approved_by, serial_override_reason, serial_override_approved_at,
+          mark_sold_approved_by, mark_sold_reason, mark_sold_approved_at,
+          synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      `);
+
+      stmt.run(
+        packId,
+        storeId,
+        data.game_id,
+        data.pack_number,
+        data.status,
+        data.cloud_pack_id,
+        data.current_bin_id ?? null,
+        data.opening_serial ?? null,
+        data.closing_serial ?? null,
+        data.serial_start ?? null,
+        data.serial_end ?? null,
+        data.tickets_sold_count ?? null,
+        data.last_sold_at ?? null,
+        data.sales_amount ?? null,
+        data.received_at ?? null,
+        data.received_by ?? null,
+        data.activated_at ?? null,
+        data.activated_by ?? null,
+        data.activated_shift_id ?? null,
+        data.depleted_at ?? null,
+        data.depleted_by ?? null,
+        data.depleted_shift_id ?? null,
+        data.depletion_reason ?? null,
+        data.returned_at ?? null,
+        data.returned_by ?? null,
+        data.returned_shift_id ?? null,
+        data.return_reason ?? null,
+        data.return_notes ?? null,
+        data.last_sold_serial ?? null,
+        data.tickets_sold_on_return ?? null,
+        data.return_sales_amount ?? null,
+        data.serial_override_approved_by ?? null,
+        data.serial_override_reason ?? null,
+        data.serial_override_approved_at ?? null,
+        data.mark_sold_approved_by ?? null,
+        data.mark_sold_reason ?? null,
+        data.mark_sold_approved_at ?? null,
+        now,
+        data.created_at ?? now,
+        now
+      );
+
+      log.info('Pack created from cloud', {
+        packId,
+        cloudPackId: data.cloud_pack_id,
+        packNumber: data.pack_number,
+        status: data.status,
+      });
+
+      const created = this.findById(packId);
+      if (!created) {
+        throw new Error(`Failed to retrieve created pack: ${packId}`);
+      }
+      return created;
+    }
+  }
+
+  /**
+   * Batch upsert packs from cloud (optimized for bulk sync)
+   *
+   * Uses SQLite transaction for atomicity and performance.
+   * Each pack is validated for tenant isolation before upsert.
+   *
+   * @security SEC-006: Parameterized queries prevent SQL injection
+   * @security DB-006: Store-scoped operations for tenant isolation
+   *
+   * @param packs - Array of cloud pack data matching API schema per replica_end_points.md
+   * @param storeId - Store ID for tenant isolation validation
+   * @returns Result with counts and any errors
+   */
+  batchUpsertFromCloud(
+    packs: Array<{
+      cloud_pack_id: string;
+      store_id: string;
+      game_id: string;
+      pack_number: string;
+      status: LotteryPackStatus;
+      /** Current bin UUID - matches API field name per replica_end_points.md */
+      current_bin_id?: string | null;
+      opening_serial?: string | null;
+      closing_serial?: string | null;
+      /** Serial range from cloud API per replica_end_points.md */
+      serial_start?: string | null;
+      serial_end?: string | null;
+      /** Total tickets sold - matches API field name per replica_end_points.md */
+      tickets_sold_count?: number | null;
+      /** Timestamp of last ticket sold - matches API field name per replica_end_points.md */
+      last_sold_at?: string | null;
+      sales_amount?: number | null;
+      received_at?: string | null;
+      received_by?: string | null;
+      activated_at?: string | null;
+      activated_by?: string | null;
+      activated_shift_id?: string | null;
+      depleted_at?: string | null;
+      depleted_by?: string | null;
+      depleted_shift_id?: string | null;
+      depletion_reason?: string | null;
+      returned_at?: string | null;
+      returned_by?: string | null;
+      returned_shift_id?: string | null;
+      return_reason?: string | null;
+      return_notes?: string | null;
+      last_sold_serial?: string | null;
+      tickets_sold_on_return?: number | null;
+      return_sales_amount?: number | null;
+      /** Serial override approval fields (API v029 + v038 alignment) */
+      serial_override_approved_by?: string | null;
+      serial_override_reason?: string | null;
+      serial_override_approved_at?: string | null;
+      mark_sold_approved_by?: string | null;
+      mark_sold_reason?: string | null;
+      mark_sold_approved_at?: string | null;
+      created_at?: string;
+      updated_at?: string;
+    }>,
+    storeId: string
+  ): { created: number; updated: number; errors: string[]; missingGames: string[] } {
+    const result = { created: 0, updated: 0, errors: [] as string[], missingGames: [] as string[] };
+
+    if (packs.length === 0) {
+      return result;
+    }
+
+    // Pre-check: Collect all unique game_ids from packs
+    const gameIds = [...new Set(packs.map((p) => p.game_id))];
+
+    // Check which games exist locally
+    const existingGamesStmt = this.db.prepare(`
+      SELECT game_id FROM lottery_games WHERE game_id IN (${gameIds.map(() => '?').join(',')})
+    `);
+    const existingGames = new Set(
+      (existingGamesStmt.all(...gameIds) as { game_id: string }[]).map((g) => g.game_id)
+    );
+
+    // Log missing games for debugging
+    const missingGameIds = gameIds.filter((id) => !existingGames.has(id));
+    if (missingGameIds.length > 0) {
+      log.warn('Pack sync: Some game_ids not found in local database', {
+        missingGameIds,
+        totalGameIds: gameIds.length,
+        existingGameIds: [...existingGames],
+      });
+      result.missingGames = missingGameIds;
+    }
+
+    // Use transaction for atomicity and performance
+    const transaction = this.db.transaction(() => {
+      for (const pack of packs) {
+        try {
+          // DB-006: Validate tenant isolation
+          if (pack.store_id !== storeId) {
+            result.errors.push(`Pack ${pack.pack_number}: store_id mismatch`);
+            continue;
+          }
+
+          // Check if game exists locally before attempting upsert
+          if (!existingGames.has(pack.game_id)) {
+            result.errors.push(`Pack ${pack.pack_number}: game_id ${pack.game_id} not found locally (needs game sync)`);
+            log.error('Pack upsert skipped - game not found', {
+              packNumber: pack.pack_number,
+              cloudPackId: pack.cloud_pack_id,
+              gameId: pack.game_id,
+            });
+            continue;
+          }
+
+          const existing = this.findByCloudId(pack.cloud_pack_id);
+          this.upsertFromCloud(pack, storeId);
+
+          if (existing) {
+            result.updated++;
+          } else {
+            result.created++;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          const errorDetail = `Pack ${pack.pack_number}: ${message}`;
+          result.errors.push(errorDetail);
+          log.error('Pack upsert failed', {
+            packNumber: pack.pack_number,
+            cloudPackId: pack.cloud_pack_id,
+            gameId: pack.game_id,
+            error: message,
+          });
+        }
+      }
+    });
+
+    transaction();
+
+    log.info('Batch pack upsert completed', {
+      total: packs.length,
+      created: result.created,
+      updated: result.updated,
+      errors: result.errors.length,
+      errorDetails: result.errors,
+      missingGames: result.missingGames,
+    });
+
+    return result;
+  }
+
+  /**
+   * Find multiple packs by their cloud IDs
+   *
+   * @security SEC-006: Parameterized query
+   * @param cloudIds - Array of cloud pack IDs
+   * @returns Map of cloud_pack_id to LotteryPack
+   */
+  findByCloudIds(cloudIds: string[]): Map<string, LotteryPack> {
+    const result = new Map<string, LotteryPack>();
+
+    if (cloudIds.length === 0) {
+      return result;
+    }
+
+    // SEC-006: Use parameterized placeholders
+    const placeholders = cloudIds.map(() => '?').join(',');
+    const stmt = this.db.prepare(`
+      SELECT * FROM lottery_packs
+      WHERE cloud_pack_id IN (${placeholders})
+    `);
+
+    const packs = stmt.all(...cloudIds) as LotteryPack[];
+
+    for (const pack of packs) {
+      if (pack.cloud_pack_id) {
+        result.set(pack.cloud_pack_id, pack);
+      }
+    }
+
+    return result;
+  }
+
+  // ==========================================================================
+  // Statistics Operations
+  // ==========================================================================
+
   /**
    * Count packs by status for a store
    * DB-006: Store-scoped query
@@ -946,8 +1503,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const counts: Record<LotteryPackStatus, number> = {
       RECEIVED: 0,
-      ACTIVATED: 0,
-      SETTLED: 0,
+      ACTIVE: 0,
+      DEPLETED: 0,
       RETURNED: 0,
     };
 

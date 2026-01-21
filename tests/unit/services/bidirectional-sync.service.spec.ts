@@ -9,7 +9,7 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 // Hoist mock functions so they're available when vi.mock factory runs
 const {
   mockPullBins,
-  mockPullGames,
+  mockPullLotteryGames,
   mockPushBins,
   mockPushGames,
   mockBinsFindAllByStore,
@@ -20,7 +20,7 @@ const {
   mockBinsSoftDelete,
   mockBinsBatchSoftDeleteNotInCloudIds,
   mockGamesFindAllByStore,
-  mockGamesFindByCloudId,
+  mockGamesFindById,
   mockGamesUpsertFromCloud,
   mockGetLastPullAt,
   mockSetLastPullAt,
@@ -28,7 +28,7 @@ const {
   mockGetConfiguredStore,
 } = vi.hoisted(() => ({
   mockPullBins: vi.fn(),
-  mockPullGames: vi.fn(),
+  mockPullLotteryGames: vi.fn(),
   mockPushBins: vi.fn(),
   mockPushGames: vi.fn(),
   mockBinsFindAllByStore: vi.fn(),
@@ -39,7 +39,7 @@ const {
   mockBinsSoftDelete: vi.fn(),
   mockBinsBatchSoftDeleteNotInCloudIds: vi.fn(),
   mockGamesFindAllByStore: vi.fn(),
-  mockGamesFindByCloudId: vi.fn(),
+  mockGamesFindById: vi.fn(),
   mockGamesUpsertFromCloud: vi.fn(),
   mockGetLastPullAt: vi.fn(),
   mockSetLastPullAt: vi.fn(),
@@ -51,7 +51,7 @@ const {
 vi.mock('../../../src/main/services/cloud-api.service', () => ({
   cloudApiService: {
     pullBins: mockPullBins,
-    pullGames: mockPullGames,
+    pullLotteryGames: mockPullLotteryGames,
     pushBins: mockPushBins,
     pushGames: mockPushGames,
   },
@@ -73,7 +73,7 @@ vi.mock('../../../src/main/dal/lottery-bins.dal', () => ({
 vi.mock('../../../src/main/dal/lottery-games.dal', () => ({
   lotteryGamesDAL: {
     findAllByStore: mockGamesFindAllByStore,
-    findByCloudId: mockGamesFindByCloudId,
+    findById: mockGamesFindById,
     upsertFromCloud: mockGamesUpsertFromCloud,
   },
 }));
@@ -133,8 +133,9 @@ describe('BidirectionalSyncService', () => {
           {
             bin_id: 'cloud-bin-1',
             store_id: 'store-123',
-            bin_number: 1,
-            status: 'ACTIVE',
+            name: 'Bin 1',
+            display_order: 1,
+            is_active: true,
             updated_at: '2024-01-01T00:00:00Z',
           },
         ],
@@ -164,8 +165,9 @@ describe('BidirectionalSyncService', () => {
         {
           bin_id: 'local-bin-1',
           store_id: 'store-123',
-          bin_number: 1,
-          status: 'ACTIVE',
+          name: 'Bin 1',
+          display_order: 1,
+          is_active: 1,
           updated_at: '2024-01-02T00:00:00Z', // After last pull
         },
       ]);
@@ -188,16 +190,17 @@ describe('BidirectionalSyncService', () => {
           {
             bin_id: 'cloud-bin-1',
             store_id: 'store-123',
-            bin_number: 1,
-            status: 'ACTIVE',
+            name: 'Bin 1',
+            display_order: 1,
+            is_active: true,
             updated_at: '2024-01-01T00:00:00Z',
           },
         ],
       });
       // Even if local bin exists and is "newer", cloud should overwrite
+      // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       mockBinsFindByCloudId.mockReturnValue({
-        bin_id: 'local-bin-1',
-        cloud_bin_id: 'cloud-bin-1',
+        bin_id: 'cloud-bin-1',  // bin_id is now the cloud's UUID
         updated_at: '2024-01-02T00:00:00Z', // Local is "newer" but doesn't matter
       });
       // Mock batch upsert to return success result
@@ -224,21 +227,22 @@ describe('BidirectionalSyncService', () => {
           {
             bin_id: 'cloud-bin-1',
             store_id: 'store-123',
-            bin_number: 1,
-            status: 'ACTIVE',
+            name: 'Bin 1',
+            display_order: 1,
+            is_active: true,
             updated_at: '2024-01-02T00:00:00Z',
             deleted_at: '2024-01-02T00:00:00Z',
           },
         ],
       });
       // Mock findByCloudIds to return a Map with the existing bin
+      // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       mockBinsFindByCloudIds.mockReturnValue(
         new Map([
           [
             'cloud-bin-1',
             {
-              bin_id: 'local-bin-1',
-              cloud_bin_id: 'cloud-bin-1',
+              bin_id: 'cloud-bin-1',  // bin_id is now the cloud's UUID
               updated_at: '2024-01-01T00:00:00Z',
             },
           ],
@@ -275,7 +279,7 @@ describe('BidirectionalSyncService', () => {
     it('should pull games from cloud and apply locally', async () => {
       mockGetLastPullAt.mockReturnValue(null);
       mockGamesFindAllByStore.mockReturnValue([]);
-      mockPullGames.mockResolvedValue({
+      mockPullLotteryGames.mockResolvedValue({
         games: [
           {
             game_id: 'cloud-game-1',
@@ -288,7 +292,7 @@ describe('BidirectionalSyncService', () => {
           },
         ],
       });
-      mockGamesFindByCloudId.mockReturnValue(undefined);
+      mockGamesFindById.mockReturnValue(undefined);
 
       const result = await service.syncGames();
 
@@ -314,7 +318,7 @@ describe('BidirectionalSyncService', () => {
       mockPushGames.mockResolvedValue({
         results: [{ game_id: 'local-game-1', status: 'synced' }],
       });
-      mockPullGames.mockResolvedValue({ games: [] });
+      mockPullLotteryGames.mockResolvedValue({ games: [] });
 
       const result = await service.syncGames();
 
@@ -329,14 +333,14 @@ describe('BidirectionalSyncService', () => {
       mockBinsFindAllByStore.mockReturnValue([]);
       mockGamesFindAllByStore.mockReturnValue([]);
       mockPullBins.mockResolvedValue({ bins: [] });
-      mockPullGames.mockResolvedValue({ games: [] });
+      mockPullLotteryGames.mockResolvedValue({ games: [] });
 
       const result = await service.syncAll();
 
       expect(result).toHaveProperty('bins');
       expect(result).toHaveProperty('games');
       expect(mockPullBins).toHaveBeenCalled();
-      expect(mockPullGames).toHaveBeenCalled();
+      expect(mockPullLotteryGames).toHaveBeenCalled();
     });
   });
 
@@ -346,7 +350,7 @@ describe('BidirectionalSyncService', () => {
       mockBinsFindAllByStore.mockReturnValue([]);
       mockGamesFindAllByStore.mockReturnValue([]);
       mockPullBins.mockResolvedValue({ bins: [] });
-      mockPullGames.mockResolvedValue({ games: [] });
+      mockPullLotteryGames.mockResolvedValue({ games: [] });
 
       await service.forceFullSync();
 

@@ -231,7 +231,7 @@ export function useDeletePack() {
 
 /**
  * Hook to fetch active packs by store
- * Convenience hook that filters by ACTIVATED status
+ * Convenience hook that filters by ACTIVE status
  * @param storeId - Store UUID (required for RLS enforcement)
  * @param options - Query options (enabled, etc.)
  * @returns TanStack Query result with active packs data
@@ -240,7 +240,7 @@ export function useActivePacksByStore(
   storeId: string | null | undefined,
   options?: { enabled?: boolean }
 ) {
-  return useLotteryPacks(storeId, { status: 'ACTIVATED' }, options);
+  return useLotteryPacks(storeId, { status: 'ACTIVE' }, options);
 }
 
 /**

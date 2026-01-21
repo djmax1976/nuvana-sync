@@ -32,7 +32,7 @@ export type GameScopeType = 'STATE' | 'STORE' | 'GLOBAL';
  * Lottery pack status enum
  * SEC-014: INPUT_VALIDATION - Strict enum constraint for pack status
  */
-export type LotteryPackStatus = 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+export type LotteryPackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
 /**
  * Lottery game status enum
@@ -55,7 +55,7 @@ export interface GamePackCounts {
   total: number;
   received: number;
   active: number;
-  settled: number;
+  depleted: number;
   returned: number;
 }
 
@@ -86,6 +86,11 @@ export interface GameListFilters {
   status?: LotteryGameStatus;
   /** Search by game name or code (min 2 chars) */
   search?: string;
+  /**
+   * When true, only returns games that have at least one pack in inventory.
+   * Used by inventory views to hide catalog games with no store inventory.
+   */
+  inventoryOnly?: boolean;
 }
 
 /**
@@ -149,7 +154,7 @@ export interface LotteryPackResponse {
   bin_id: string | null;
   received_at: string; // ISO 8601
   activated_at: string | null; // ISO 8601
-  settled_at: string | null; // ISO 8601
+  depleted_at: string | null; // ISO 8601
   returned_at: string | null; // ISO 8601
   // Extended fields from joins (optional, populated by handler)
   game?: {
@@ -162,8 +167,8 @@ export interface LotteryPackResponse {
   };
   bin?: {
     bin_id: string;
-    bin_number: number;
-    label: string | null;
+    name: string;
+    display_order: number;
   } | null;
   // Calculated field (optional)
   tickets_remaining?: number;
@@ -226,7 +231,7 @@ export interface ActivatePackResponse {
   pack_id: string;
   game_id: string;
   pack_number: string;
-  status: 'ACTIVATED';
+  status: 'ACTIVE';
   activated_at: string;
   bin_id: string;
   opening_serial: string;
@@ -236,8 +241,8 @@ export interface ActivatePackResponse {
   };
   bin: {
     bin_id: string;
-    bin_number: number;
-    label: string | null;
+    name: string;
+    display_order: number;
   };
 }
 
@@ -255,8 +260,8 @@ export interface DepletePackInput {
 export interface DepletePackResponse {
   pack_id: string;
   pack_number: string;
-  status: 'SETTLED';
-  settled_at: string;
+  status: 'DEPLETED';
+  depleted_at: string;
   closing_serial: string;
   tickets_sold: number;
   sales_amount: number;
@@ -439,14 +444,15 @@ export interface LotteryGameResponse {
 }
 
 /**
- * Lottery bin response from IPC
+ * Lottery bin response from IPC (cloud-aligned schema v039)
  */
 export interface LotteryBinResponse {
   bin_id: string;
   store_id: string;
-  bin_number: number;
-  label: string | null;
-  status: 'ACTIVE' | 'INACTIVE';
+  name: string;
+  location: string | null;
+  display_order: number;
+  is_active: number; // SQLite boolean: 1 = active, 0 = inactive
   created_at: string;
   updated_at: string;
   // With pack info
@@ -544,7 +550,7 @@ export interface ActivatedPackDay {
   game_price: number;
   bin_number: number;
   activated_at: string;
-  status: 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+  status: 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 }
 
 /**

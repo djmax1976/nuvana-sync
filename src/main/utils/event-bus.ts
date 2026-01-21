@@ -32,4 +32,11 @@ export const MainEvents = {
   FILE_WATCHER_PROCESS_EXISTING: 'file-watcher:process-existing',
   /** Emitted when a shift is closed via POS XML detection */
   SHIFT_CLOSED: 'shift:closed',
+  /**
+   * Emitted when initial setup wizard is completed.
+   * Triggers service initialization (sync engine, user sync, lottery sync, file watcher).
+   * This enables sync to start immediately after API key is configured during setup,
+   * without requiring an app restart.
+   */
+  SETUP_COMPLETED: 'setup:completed',
 } as const;

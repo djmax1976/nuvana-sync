@@ -206,6 +206,11 @@ if (!gotTheLock) {
             fileWatcher?.stop();
             log.info('Sync paused from tray');
           } else {
+            if (!isDatabaseReady()) {
+              log.warn('Cannot resume sync from tray: database not ready');
+              menuItem.checked = true; // Keep it paused
+              return;
+            }
             startFileWatcher();
             log.info('Sync resumed from tray');
           }
@@ -267,10 +272,10 @@ if (!gotTheLock) {
         });
       });
 
-    // Initial lottery data sync (bins and games)
+    // Initial lottery data sync (bins, games, and packs)
     // Always attempt sync - the cloud API will return data if lottery is enabled for this store
     // This ensures lottery starts working immediately when enabled in cloud without app restart
-    log.info('Performing initial lottery sync (bins and games)...');
+    log.info('Performing initial lottery sync (bins, games, and packs)...');
 
     bidirectionalSyncService
       .syncBins()
@@ -287,6 +292,19 @@ if (!gotTheLock) {
           pulled: gamesResult.pulled,
           pushed: gamesResult.pushed,
           errors: gamesResult.errors.length,
+        });
+        return bidirectionalSyncService.syncPacks();
+      })
+      .then((packsResult) => {
+        log.info('Initial packs sync completed', {
+          received: {
+            pulled: packsResult.received.pulled,
+            errors: packsResult.received.errors.length,
+          },
+          activated: {
+            pulled: packsResult.activated.pulled,
+            errors: packsResult.activated.errors.length,
+          },
         });
       })
       .catch((error) => {
@@ -317,6 +335,8 @@ if (!gotTheLock) {
             const game = lotteryGamesDAL.findById(pack.game_id);
             if (!game) continue;
 
+            // v029 API Alignment: Map DAL field names (current_bin_id, tickets_sold_count)
+            // to API field names (bin_id, tickets_sold)
             syncQueueDAL.enqueue({
               store_id: currentStoreId,
               entity_type: 'pack',
@@ -329,16 +349,16 @@ if (!gotTheLock) {
                 game_code: game.game_code,
                 pack_number: pack.pack_number,
                 status: pack.status,
-                bin_id: pack.bin_id,
+                bin_id: pack.current_bin_id, // v029: Map current_bin_id to API's bin_id
                 opening_serial: pack.opening_serial,
                 closing_serial: pack.closing_serial,
-                tickets_sold: pack.tickets_sold,
+                tickets_sold: pack.tickets_sold_count, // v029: Map tickets_sold_count to API's tickets_sold
                 sales_amount: pack.sales_amount,
                 received_at: pack.received_at,
                 received_by: pack.received_by,
                 activated_at: pack.activated_at,
                 activated_by: null,
-                settled_at: pack.settled_at,
+                depleted_at: pack.depleted_at,
                 returned_at: pack.returned_at,
               },
             });
@@ -398,7 +418,7 @@ if (!gotTheLock) {
     }
 
     lotterySyncInterval = setInterval(() => {
-      log.debug('Running periodic lottery sync (bins and games)...');
+      log.debug('Running periodic lottery sync (bins, games, and packs)...');
       bidirectionalSyncService
         .syncBins()
         .then((binsResult) => {
@@ -424,6 +444,24 @@ if (!gotTheLock) {
             mainWindow?.webContents.send('sync:gamesUpdated', gamesResult);
           } else {
             log.debug('Periodic games sync completed - no changes');
+          }
+          return bidirectionalSyncService.syncPacks();
+        })
+        .then((packsResult) => {
+          const receivedChanges =
+            packsResult.received.pulled > 0 || packsResult.received.errors.length > 0;
+          const activatedChanges =
+            packsResult.activated.pulled > 0 || packsResult.activated.errors.length > 0;
+
+          if (receivedChanges || activatedChanges) {
+            log.info('Periodic packs sync completed', {
+              received: { pulled: packsResult.received.pulled },
+              activated: { pulled: packsResult.activated.pulled },
+            });
+            // Notify renderer of pack changes
+            mainWindow?.webContents.send('sync:packsUpdated', packsResult);
+          } else {
+            log.debug('Periodic packs sync completed - no changes');
           }
         })
         .catch((error) => {
@@ -454,6 +492,13 @@ if (!gotTheLock) {
 
   const startFileWatcher = (): void => {
     const config = settingsService.getConfig();
+
+    // CRITICAL: Database must be ready before file watcher starts
+    // File processing requires database access for deduplication checks
+    if (!isDatabaseReady()) {
+      log.warn('File watcher not started: database not ready');
+      return;
+    }
 
     // watchPath is optional - some POS systems connect via API, not file watcher
     if (!config.watchPath) {
@@ -503,6 +548,12 @@ if (!gotTheLock) {
   eventBus.on(MainEvents.FILE_WATCHER_RESTART, async () => {
     log.info('File watcher restart requested via eventBus');
 
+    // Check database is ready before restarting file watcher
+    if (!isDatabaseReady()) {
+      log.warn('File watcher restart skipped: database not ready');
+      return;
+    }
+
     fileWatcher?.stop();
     startFileWatcher();
 
@@ -544,6 +595,92 @@ if (!gotTheLock) {
   });
 
   /**
+   * Handle setup completion event - initialize all services
+   *
+   * This event is emitted by settings:completeSetup IPC handler after the setup
+   * wizard completes. It triggers the same service initialization that occurs
+   * during normal app startup, enabling sync to work immediately without restart.
+   *
+   * Services started:
+   * - Sync engine (pushes local data to cloud)
+   * - User sync scheduler (pulls users from cloud every 60s)
+   * - Lottery sync scheduler (pulls bins/games from cloud every 5m)
+   * - File watcher (if watchPath configured - for NA XML stores only)
+   *
+   * @security LM-001: Structured logging with service initialization details
+   * @security API-003: Error handling prevents service initialization failures from crashing app
+   */
+  eventBus.on(MainEvents.SETUP_COMPLETED, () => {
+    log.info('Setup completed event received - initializing services');
+
+    // Verify prerequisites before starting services
+    if (!isDatabaseReady()) {
+      log.error('Cannot initialize services after setup: database not ready');
+      return;
+    }
+
+    if (!settingsService.hasApiKey()) {
+      log.error('Cannot initialize services after setup: API key not configured');
+      return;
+    }
+
+    // Track which services were started for logging
+    const servicesStarted: string[] = [];
+
+    // 1. Start sync engine (required for all stores - pushes queue items to cloud)
+    try {
+      syncEngineService.setCloudApiService(cloudApiService);
+      syncEngineService.start();
+      servicesStarted.push('syncEngine');
+      log.info('Sync engine started after setup completion');
+    } catch (error) {
+      log.error('Failed to start sync engine after setup', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // 2. Start user sync scheduler (required - pulls users from cloud)
+    try {
+      startUserSync();
+      servicesStarted.push('userSync');
+      log.info('User sync scheduler started after setup completion');
+    } catch (error) {
+      log.error('Failed to start user sync after setup', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+
+    // 3. Start file watcher (optional - only for NA XML stores with watchPath configured)
+    const config = settingsService.getConfig();
+    if (config.watchPath) {
+      try {
+        startFileWatcher();
+        servicesStarted.push('fileWatcher');
+        log.info('File watcher started after setup completion', {
+          watchPath: config.watchPath,
+        });
+      } catch (error) {
+        log.error('Failed to start file watcher after setup', {
+          error: error instanceof Error ? error.message : String(error),
+          watchPath: config.watchPath,
+        });
+      }
+    } else {
+      log.info('File watcher not started: no watchPath configured (API-based POS mode)');
+    }
+
+    // 4. Notify renderer that services are now running
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.webContents.send('sync:statusChanged', syncEngineService.getStatus());
+    }
+
+    log.info('Service initialization after setup completed', {
+      servicesStarted,
+      totalStarted: servicesStarted.length,
+    });
+  });
+
+  /**
    * SEC-014: Validate IPC input before processing
    */
   const setupIpcHandlers = (): void => {
@@ -582,9 +719,13 @@ if (!gotTheLock) {
       try {
         settingsService.saveConfig(validation.data);
 
-        // Restart file watcher with new config
+        // Restart file watcher with new config (only if database is ready)
         fileWatcher?.stop();
-        startFileWatcher();
+        if (isDatabaseReady()) {
+          startFileWatcher();
+        } else {
+          log.warn('File watcher not restarted after config save: database not ready');
+        }
 
         log.info('Config saved successfully');
         return { success: true };
@@ -683,6 +824,10 @@ if (!gotTheLock) {
         log.info('Sync paused');
         return { paused: true };
       } else {
+        if (!isDatabaseReady()) {
+          log.warn('Cannot resume sync: database not ready');
+          return { paused: true, error: 'Database not ready' };
+        }
         startFileWatcher();
         log.info('Sync resumed');
         return { paused: false };
@@ -811,6 +956,23 @@ if (!gotTheLock) {
       };
     });
 
+    // Add app restart IPC handler
+    // SEC-017: Used after FULL_RESET to properly re-bootstrap database
+    ipcMain.handle('app:restart', async () => {
+      log.info('App restart requested via IPC');
+
+      // Small delay to allow log to flush and IPC response to be sent
+      await new Promise((resolve) => setTimeout(resolve, 100));
+
+      // Use relaunch to restart the app completely
+      // This ensures database bootstrap runs on fresh start
+      app.relaunch();
+      app.exit(0);
+
+      // Return value won't reach renderer since app exits, but satisfies TypeScript
+      return { success: true };
+    });
+
     // ========================================================================
     // Step 3: Initialize IPC handlers
     // These must be registered regardless of database state so setup wizard works
@@ -895,12 +1057,16 @@ if (!gotTheLock) {
     }
 
     // Start file watcher if configured (watchPath is optional for API-based POS)
+    // CRITICAL: Database must be ready before file watcher starts to avoid
+    // "Database not initialized" errors during file processing
     const config = settingsService.getConfig();
 
-    if (config.watchPath && hasApiKey) {
+    if (config.watchPath && hasApiKey && isDatabaseReady()) {
       startFileWatcher();
     } else if (!config.watchPath) {
       log.info('File watcher not started: no watchPath (API-based POS mode)');
+    } else if (!isDatabaseReady()) {
+      log.warn('File watcher not started: database not ready');
     } else {
       log.info('Skipping file watcher start: API key not configured');
     }

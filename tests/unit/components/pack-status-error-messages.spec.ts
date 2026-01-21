@@ -22,7 +22,7 @@
 // Type Definitions (mirror production types)
 // ============================================================================
 
-type LotteryPackStatus = 'RECEIVED' | 'ACTIVATED' | 'SETTLED' | 'RETURNED';
+type LotteryPackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
 interface PackStatusErrorMessage {
   title: string;
@@ -49,14 +49,14 @@ function getPackStatusErrorMessage(
   const gameInfo = gameName ? ` (${gameName})` : '';
 
   switch (status) {
-    case 'ACTIVATED':
+    case 'ACTIVE':
       return {
         title: 'Pack is already active',
         description: binLabel
           ? `Pack #${packNumber}${gameInfo} is currently active in ${binLabel}. A pack can only be activated once.`
           : `Pack #${packNumber}${gameInfo} is already activated. A pack can only be activated once.`,
       };
-    case 'SETTLED':
+    case 'DEPLETED':
       return {
         title: 'Pack has been sold/depleted',
         description: `Pack #${packNumber}${gameInfo} was previously activated and has been depleted. It cannot be activated again.`,
@@ -91,7 +91,7 @@ describe('getPackStatusErrorMessage', () => {
   // ==========================================================================
   describe('ACTIVATED status (pack currently in use)', () => {
     it('should return correct message with bin label when pack is active in a specific bin', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', 'Bin 1');
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toBe(
@@ -100,7 +100,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should return correct message without bin label when bin is not provided', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', null);
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', null);
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toBe(
@@ -109,7 +109,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should return correct message when bin label is undefined', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', undefined);
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', undefined);
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toBe(
@@ -118,7 +118,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should return correct message without game name when not provided', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', undefined, 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', undefined, 'Bin 1');
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toBe(
@@ -127,7 +127,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should return correct message with only pack number (minimal info)', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', undefined, null);
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', undefined, null);
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toBe(
@@ -138,7 +138,7 @@ describe('getPackStatusErrorMessage', () => {
     // Enterprise: Test with realistic game names and bin labels
     it('should handle game names with special characters', () => {
       const result = getPackStatusErrorMessage(
-        'ACTIVATED',
+        'ACTIVE',
         '0103230',
         '$100 Million Cash',
         'Register 3'
@@ -151,13 +151,13 @@ describe('getPackStatusErrorMessage', () => {
 
     it('should handle long game names', () => {
       const longGameName = 'Super Lucky Winner Triple Jackpot Deluxe Edition';
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', longGameName, 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', longGameName, 'Bin 1');
 
       expect(result.description).toContain(longGameName);
     });
 
     it('should handle numeric bin labels', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', '1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', '1');
 
       expect(result.description).toContain('currently active in 1');
     });
@@ -168,7 +168,7 @@ describe('getPackStatusErrorMessage', () => {
   // ==========================================================================
   describe('SETTLED status (pack was sold out)', () => {
     it('should return correct message with game name', () => {
-      const result = getPackStatusErrorMessage('SETTLED', '0103230', 'Lucky 7s', null);
+      const result = getPackStatusErrorMessage('DEPLETED', '0103230', 'Lucky 7s', null);
 
       expect(result.title).toBe('Pack has been sold/depleted');
       expect(result.description).toBe(
@@ -177,7 +177,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should return correct message without game name', () => {
-      const result = getPackStatusErrorMessage('SETTLED', '0103230', undefined, null);
+      const result = getPackStatusErrorMessage('DEPLETED', '0103230', undefined, null);
 
       expect(result.title).toBe('Pack has been sold/depleted');
       expect(result.description).toBe(
@@ -187,7 +187,7 @@ describe('getPackStatusErrorMessage', () => {
 
     // Business logic: Settled packs should never have bin info since they're removed
     it('should not include bin info even if provided (settled packs are removed from bins)', () => {
-      const result = getPackStatusErrorMessage('SETTLED', '0103230', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('DEPLETED', '0103230', 'Lucky 7s', 'Bin 1');
 
       // The description should NOT mention the bin for settled packs
       expect(result.description).not.toContain('Bin 1');
@@ -285,25 +285,25 @@ describe('getPackStatusErrorMessage', () => {
   // ==========================================================================
   describe('Pack number formats', () => {
     it('should handle standard 7-digit pack numbers', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', 'Bin 1');
 
       expect(result.description).toContain('Pack #0103230');
     });
 
     it('should handle pack numbers with leading zeros', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0000001', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0000001', 'Lucky 7s', 'Bin 1');
 
       expect(result.description).toContain('Pack #0000001');
     });
 
     it('should handle short pack numbers', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '123', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '123', 'Lucky 7s', 'Bin 1');
 
       expect(result.description).toContain('Pack #123');
     });
 
     it('should handle empty pack number gracefully', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '', 'Lucky 7s', 'Bin 1');
 
       expect(result.description).toContain('Pack #');
     });
@@ -314,13 +314,13 @@ describe('getPackStatusErrorMessage', () => {
   // ==========================================================================
   describe('Message clarity and user experience', () => {
     it('should always include "pack can only be activated once" for ACTIVATED status', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', 'Bin 1');
 
       expect(result.description).toContain('A pack can only be activated once.');
     });
 
     it('should always include "cannot be activated again" for SETTLED status', () => {
-      const result = getPackStatusErrorMessage('SETTLED', '0103230', 'Lucky 7s', null);
+      const result = getPackStatusErrorMessage('DEPLETED', '0103230', 'Lucky 7s', null);
 
       expect(result.description).toContain('It cannot be activated again.');
     });
@@ -332,8 +332,8 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should have distinct titles for different statuses', () => {
-      const activatedTitle = getPackStatusErrorMessage('ACTIVATED', '001', undefined, null).title;
-      const settledTitle = getPackStatusErrorMessage('SETTLED', '001', undefined, null).title;
+      const activatedTitle = getPackStatusErrorMessage('ACTIVE', '001', undefined, null).title;
+      const settledTitle = getPackStatusErrorMessage('DEPLETED', '001', undefined, null).title;
       const returnedTitle = getPackStatusErrorMessage('RETURNED', '001', undefined, null).title;
 
       expect(activatedTitle).not.toBe(settledTitle);
@@ -347,7 +347,7 @@ describe('getPackStatusErrorMessage', () => {
   // ==========================================================================
   describe('Return value structure', () => {
     it('should always return an object with title and description properties', () => {
-      const statuses: LotteryPackStatus[] = ['RECEIVED', 'ACTIVATED', 'SETTLED', 'RETURNED'];
+      const statuses: LotteryPackStatus[] = ['RECEIVED', 'ACTIVE', 'DEPLETED', 'RETURNED'];
 
       for (const status of statuses) {
         const result = getPackStatusErrorMessage(status, '0103230', 'Lucky 7s', null);
@@ -362,14 +362,14 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('should never return undefined or null for title', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '', undefined, undefined);
+      const result = getPackStatusErrorMessage('ACTIVE', '', undefined, undefined);
 
       expect(result.title).not.toBeUndefined();
       expect(result.title).not.toBeNull();
     });
 
     it('should never return undefined or null for description', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '', undefined, undefined);
+      const result = getPackStatusErrorMessage('ACTIVE', '', undefined, undefined);
 
       expect(result.description).not.toBeUndefined();
       expect(result.description).not.toBeNull();
@@ -382,7 +382,7 @@ describe('getPackStatusErrorMessage', () => {
   describe('Real-world scenarios', () => {
     it('Scenario: User scans pack already active in Bin 1 for game 1835', () => {
       // This is the original bug scenario from the user report
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Game 1835', 'Bin 1');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Game 1835', 'Bin 1');
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toContain('Bin 1');
@@ -391,7 +391,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('Scenario: User scans pack that was sold out yesterday', () => {
-      const result = getPackStatusErrorMessage('SETTLED', '0500123', 'Mega Millions', null);
+      const result = getPackStatusErrorMessage('DEPLETED', '0500123', 'Mega Millions', null);
 
       expect(result.title).toBe('Pack has been sold/depleted');
       expect(result.description).toContain('Mega Millions');
@@ -406,7 +406,7 @@ describe('getPackStatusErrorMessage', () => {
     });
 
     it('Scenario: User scans pack from another register that is still active', () => {
-      const result = getPackStatusErrorMessage('ACTIVATED', '0103230', 'Lucky 7s', 'Register 3');
+      const result = getPackStatusErrorMessage('ACTIVE', '0103230', 'Lucky 7s', 'Register 3');
 
       expect(result.title).toBe('Pack is already active');
       expect(result.description).toContain('Register 3');
@@ -445,7 +445,7 @@ describe('checkPackExists Response Handling', () => {
         pack: {
           pack_id: 'pack-uuid-123',
           pack_number: '0103230',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           game: { game_code: '1835', name: 'Lucky 7s' },
           bin: { bin_id: 'bin-uuid-1', bin_number: 1, label: 'Bin 1' },
         },
@@ -469,7 +469,7 @@ describe('checkPackExists Response Handling', () => {
         pack: {
           pack_id: 'pack-uuid-456',
           pack_number: '0200001',
-          status: 'SETTLED',
+          status: 'DEPLETED',
           game: { game_code: '2001', name: 'Cash Blast' },
           bin: null,
         },
@@ -515,7 +515,7 @@ describe('checkPackExists Response Handling', () => {
         pack: {
           pack_id: 'pack-uuid-000',
           pack_number: '0000001',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           // game is undefined
           bin: { bin_id: 'bin-uuid-1', bin_number: 1, label: 'Bin 1' },
         },
@@ -539,7 +539,7 @@ describe('checkPackExists Response Handling', () => {
         pack: {
           pack_id: 'pack-uuid-111',
           pack_number: '0111111',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           game: { game_code: '1001', name: 'Test Game' },
           bin: { bin_id: 'bin-uuid-2', bin_number: 2, label: null },
         },

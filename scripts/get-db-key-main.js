@@ -24,7 +24,7 @@ app.on('ready', async () => {
       process.exit(1);
     }
 
-    const store = new Store({ name: 'nuvana-config' });
+    const store = new Store({ name: 'nuvana' });
     const storedData = store.get('encryptedDbKey');
 
     if (!storedData || !Array.isArray(storedData)) {

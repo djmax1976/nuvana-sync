@@ -251,19 +251,19 @@ class IPCClient {
           pack_id: (params as { pack_id: string }).pack_id,
           game_id: 'game-1',
           pack_number: 'PKG1234567',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           activated_at: new Date().toISOString(),
           bin_id: (params as { bin_id: string }).bin_id,
           opening_serial: (params as { opening_serial: string }).opening_serial,
           game: { game_id: 'game-1', name: 'Lucky 7s' },
-          bin: { bin_id: (params as { bin_id: string }).bin_id, bin_number: 1, label: 'Bin 1' },
+          bin: { bin_id: (params as { bin_id: string }).bin_id, name: 'Bin 1', display_order: 1 },
         } as T;
       case 'lottery:depletePack':
         return {
           pack_id: (params as { pack_id: string }).pack_id,
           pack_number: 'PKG1234567',
-          status: 'SETTLED',
-          settled_at: new Date().toISOString(),
+          status: 'DEPLETED',
+          depleted_at: new Date().toISOString(),
           closing_serial: (params as { closing_serial: string }).closing_serial,
           tickets_sold: 150,
           sales_amount: 150,
@@ -304,12 +304,12 @@ class IPCClient {
           pack_number: 'PKG1234567',
           opening_serial: '000',
           closing_serial: null,
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           store_id: 'store-1',
           bin_id: 'bin-1',
           received_at: new Date().toISOString(),
           activated_at: new Date().toISOString(),
-          settled_at: null,
+          depleted_at: null,
           returned_at: null,
           game: {
             game_id: 'game-1',
@@ -318,7 +318,7 @@ class IPCClient {
             price: 1,
             tickets_per_pack: 300,
           },
-          bin: { bin_id: 'bin-1', bin_number: 1, label: 'Bin 1' },
+          bin: { bin_id: 'bin-1', name: 'Bin 1', display_order: 1 },
           tickets_sold: 150,
           sales_amount: 150,
         } as T;
@@ -327,7 +327,7 @@ class IPCClient {
           pack_id: (params as { pack_id: string }).pack_id,
           game_id: 'game-1',
           pack_number: (params as { pack_number?: string }).pack_number || 'PKG1234567',
-          status: (params as { status?: string }).status || 'ACTIVATED',
+          status: (params as { status?: string }).status || 'ACTIVE',
           store_id: 'store-1',
         } as T;
       case 'lottery:deletePack':
@@ -337,12 +337,12 @@ class IPCClient {
           pack_id: (params as { pack_id: string }).pack_id,
           game_id: 'game-1',
           pack_number: 'PKG1234567',
-          status: 'ACTIVATED',
+          status: 'ACTIVE',
           activated_at: new Date().toISOString(),
           bin_id: (params as { bin_id: string }).bin_id,
           opening_serial: (params as { opening_serial: string }).opening_serial,
           game: { game_id: 'game-1', name: 'Lucky 7s' },
-          bin: { bin_id: (params as { bin_id: string }).bin_id, bin_number: 1, label: 'Bin 1' },
+          bin: { bin_id: (params as { bin_id: string }).bin_id, name: 'Bin 1', display_order: 1 },
         } as T;
       case 'lottery:getVariances':
         return [] as T;

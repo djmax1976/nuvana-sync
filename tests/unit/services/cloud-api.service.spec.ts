@@ -620,8 +620,9 @@ describe('CloudApiService', () => {
             {
               bin_id: 'bin-1',
               store_id: 'store-123',
-              bin_number: 1,
-              status: 'ACTIVE',
+              name: 'Bin 1',
+              display_order: 1,
+              is_active: true,
               updated_at: '2024-01-01T00:00:00Z',
             },
           ],
@@ -1022,12 +1023,18 @@ describe('CloudApiService', () => {
     });
 
     describe('pushPackActivate', () => {
+      // Standard activation without mark-sold (most common case)
       const mockActivation = {
         pack_id: 'pack-123',
         store_id: 'store-456',
         bin_id: 'bin-001',
         opening_serial: '001',
-        activated_at: '2025-01-15T11:00:00Z',
+        game_code: '1234',
+        pack_number: '0012345',
+        serial_start: '000',
+        serial_end: '299',
+        activated_at: '2025-01-15T11:00:00Z', // Required per API spec
+        received_at: '2025-01-14T08:00:00Z', // Required per API spec
         activated_by: 'user-002',
       };
 
@@ -1043,12 +1050,45 @@ describe('CloudApiService', () => {
         const activateCall = calls[1];
         expect(activateCall[0]).toContain('/api/v1/sync/lottery/packs/activate');
 
-        // Verify the request body
+        // Verify the request body includes all required fields per API spec
         const body = JSON.parse(activateCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
         expect(body.bin_id).toBe('bin-001');
-        // opening_serial is sent as integer (parsed from string)
-        expect(body.opening_serial).toBe(1);
+        expect(body.game_code).toBe('1234');
+        expect(body.pack_number).toBe('0012345');
+        expect(body.serial_start).toBe('000');
+        expect(body.serial_end).toBe('299');
+        expect(body.activated_at).toBe('2025-01-15T11:00:00Z');
+        expect(body.received_at).toBe('2025-01-14T08:00:00Z');
+        // opening_serial is sent as string (API expects string, not integer)
+        // String('001') preserves '001', doesn't strip leading zeros
+        expect(body.opening_serial).toBe('001');
+        // mark_sold fields should NOT be included for standard activation
+        expect(body.mark_sold_reason).toBeUndefined();
+        expect(body.mark_sold_tickets).toBeUndefined();
+      });
+
+      it('should include mark_sold fields only when pack was mark-sold at activation', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const markSoldActivation = {
+          ...mockActivation,
+          mark_sold_tickets: 300, // Full pack sold at activation
+          mark_sold_reason: 'Full pack sold',
+          mark_sold_approved_by: 'manager-001',
+        };
+
+        const result = await service.pushPackActivate(markSoldActivation);
+
+        expect(result.success).toBe(true);
+
+        // Verify mark_sold fields are included when mark_sold_tickets > 0
+        const calls = mockFetch.mock.calls;
+        const activateCall = calls[1];
+        const body = JSON.parse(activateCall[1].body as string);
+        expect(body.mark_sold_tickets).toBe(300);
+        expect(body.mark_sold_reason).toBe('Full pack sold');
+        expect(body.mark_sold_approved_by).toBe('manager-001');
       });
     });
 
@@ -1059,7 +1099,7 @@ describe('CloudApiService', () => {
         closing_serial: '300',
         tickets_sold: 300,
         sales_amount: 150.0,
-        settled_at: '2025-01-16T18:00:00Z',
+        depleted_at: '2025-01-16T18:00:00Z',
       };
 
       it('should push pack depletion to cloud successfully', async () => {
@@ -1075,10 +1115,10 @@ describe('CloudApiService', () => {
         expect(depleteCall[0]).toContain('/api/v1/sync/lottery/packs/deplete');
 
         // Verify the request body
-        // API uses `final_serial` (integer), not `closing_serial` (string)
+        // API uses `final_serial` (string), not `closing_serial` (integer)
         const body = JSON.parse(depleteCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
-        expect(body.final_serial).toBe(300);
+        expect(body.final_serial).toBe('300');
         expect(body.depletion_reason).toBe('SOLD_OUT');
       });
     });
@@ -1107,10 +1147,10 @@ describe('CloudApiService', () => {
         expect(returnCall[0]).toContain('/api/v1/sync/lottery/packs/return');
 
         // Verify the request body
-        // API uses `last_sold_serial` (integer), not `closing_serial` (string)
+        // API uses `last_sold_serial` (string), not `closing_serial` (integer)
         const body = JSON.parse(returnCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
-        expect(body.last_sold_serial).toBe(150);
+        expect(body.last_sold_serial).toBe('150');
         expect(body.return_reason).toBe('Defective pack');
       });
 
@@ -1128,11 +1168,11 @@ describe('CloudApiService', () => {
         expect(result.success).toBe(true);
 
         // Verify default values are sent for optional fields
-        // API uses `last_sold_serial`, `tickets_sold_on_return`, and `return_reason`
+        // API uses `last_sold_serial` (string), `tickets_sold_on_return`, and `return_reason`
         const calls = mockFetch.mock.calls;
         const returnCall = calls[1];
         const body = JSON.parse(returnCall[1].body as string);
-        expect(body.last_sold_serial).toBe(0);
+        expect(body.last_sold_serial).toBe('0');
         expect(body.tickets_sold_on_return).toBe(0);
         expect(body.return_reason).toBe('OTHER');
       });
@@ -1811,16 +1851,16 @@ describe('CloudApiService', () => {
           game_code: '1234',
           pack_number: 'PKG001',
           status: 'RECEIVED',
-          bin_id: null,
+          current_bin_id: null,
           opening_serial: null,
           closing_serial: null,
-          tickets_sold: null,
+          tickets_sold_count: 0,
           sales_amount: null,
           received_at: '2024-01-15T10:00:00Z',
           received_by: 'user-1',
           activated_at: null,
           activated_by: null,
-          settled_at: null,
+          depleted_at: null,
           returned_at: null,
           return_reason: null,
           cloud_pack_id: 'cloud-pack-1',
@@ -1834,16 +1874,16 @@ describe('CloudApiService', () => {
           game_code: '5678',
           pack_number: 'PKG002',
           status: 'RECEIVED',
-          bin_id: null,
+          current_bin_id: null,
           opening_serial: null,
           closing_serial: null,
-          tickets_sold: null,
+          tickets_sold_count: 0,
           sales_amount: null,
           received_at: '2024-01-15T11:00:00Z',
           received_by: 'user-2',
           activated_at: null,
           activated_by: null,
-          settled_at: null,
+          depleted_at: null,
           returned_at: null,
           return_reason: null,
           cloud_pack_id: 'cloud-pack-2',
@@ -1914,17 +1954,17 @@ describe('CloudApiService', () => {
           game_id: 'game-1',
           game_code: '1234',
           pack_number: 'PKG001',
-          status: 'ACTIVATED',
-          bin_id: 'bin-1',
+          status: 'ACTIVE',
+          current_bin_id: 'bin-1',
           opening_serial: '001',
           closing_serial: null,
-          tickets_sold: null,
+          tickets_sold_count: 0,
           sales_amount: null,
           received_at: '2024-01-15T10:00:00Z',
           received_by: 'user-1',
           activated_at: '2024-01-15T12:00:00Z',
           activated_by: 'user-1',
-          settled_at: null,
+          depleted_at: null,
           returned_at: null,
           return_reason: null,
           cloud_pack_id: 'cloud-pack-1',
@@ -1939,8 +1979,8 @@ describe('CloudApiService', () => {
         const result = await service.pullActivatedPacks();
 
         expect(result.packs).toHaveLength(1);
-        expect(result.packs[0].status).toBe('ACTIVATED');
-        expect(result.packs[0].bin_id).toBe('bin-1');
+        expect(result.packs[0].status).toBe('ACTIVE');
+        expect(result.packs[0].current_bin_id).toBe('bin-1');
         expect(result.packs[0].opening_serial).toBe('001');
       });
 
@@ -1965,16 +2005,16 @@ describe('CloudApiService', () => {
           game_code: '1234',
           pack_number: 'PKG001',
           status: 'RETURNED',
-          bin_id: null,
+          current_bin_id: null,
           opening_serial: null,
           closing_serial: null,
-          tickets_sold: 0,
+          tickets_sold_count: 0,
           sales_amount: 0,
           received_at: '2024-01-15T10:00:00Z',
           received_by: 'user-1',
           activated_at: null,
           activated_by: null,
-          settled_at: null,
+          depleted_at: null,
           returned_at: '2024-01-16T09:00:00Z',
           return_reason: 'Damaged packaging',
           cloud_pack_id: 'cloud-pack-1',
@@ -2003,16 +2043,16 @@ describe('CloudApiService', () => {
           game_code: '1234',
           pack_number: 'PKG001',
           status: 'DEPLETED',
-          bin_id: 'bin-1',
+          current_bin_id: 'bin-1',
           opening_serial: '001',
           closing_serial: '300',
-          tickets_sold: 300,
+          tickets_sold_count: 300,
           sales_amount: 1500,
           received_at: '2024-01-15T10:00:00Z',
           received_by: 'user-1',
           activated_at: '2024-01-15T12:00:00Z',
           activated_by: 'user-1',
-          settled_at: '2024-01-20T18:00:00Z',
+          depleted_at: '2024-01-20T18:00:00Z',
           returned_at: null,
           return_reason: null,
           cloud_pack_id: 'cloud-pack-1',
@@ -2028,7 +2068,7 @@ describe('CloudApiService', () => {
 
         expect(result.packs).toHaveLength(1);
         expect(result.packs[0].status).toBe('DEPLETED');
-        expect(result.packs[0].tickets_sold).toBe(300);
+        expect(result.packs[0].tickets_sold_count).toBe(300);
         expect(result.packs[0].sales_amount).toBe(1500);
       });
     });

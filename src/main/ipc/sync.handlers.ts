@@ -30,6 +30,7 @@ import { userSyncService } from '../services/user-sync.service';
 import { bidirectionalSyncService } from '../services/bidirectional-sync.service';
 import { settingsService } from '../services/settings.service';
 import { cloudApiService } from '../services/cloud-api.service';
+import { getDatabase } from '../services/database.service';
 import { BrowserWindow, ipcMain, app } from 'electron';
 import { createLogger } from '../utils/logger';
 import { eventBus, MainEvents } from '../utils/event-bus';
@@ -379,6 +380,23 @@ registerHandler(
     log.info('User sync triggered (setup/resync)');
 
     try {
+      // Ensure store is synced to database before user sync
+      // This handles the race condition where API key validation saved store info
+      // to config but database wasn't ready yet
+      if (!storesDAL.isConfigured()) {
+        log.info('Store not in database, attempting to sync from config');
+        const synced = settingsService.syncStoreToDatabase();
+        if (!synced) {
+          log.warn('Could not sync store to database - database may not be ready');
+          return createSuccessResponse({
+            success: false,
+            synced: 0,
+            error: 'Database not ready. Please wait for initialization to complete.',
+          });
+        }
+        log.info('Store synced to database from config');
+      }
+
       const result = await userSyncService.syncUsers();
       return createSuccessResponse(result);
     } catch (error) {
@@ -411,6 +429,20 @@ registerHandler(
     log.info('Bins sync triggered during setup');
 
     try {
+      // Ensure store is synced to database before bins sync
+      if (!storesDAL.isConfigured()) {
+        log.info('Store not in database, attempting to sync from config');
+        const synced = settingsService.syncStoreToDatabase();
+        if (!synced) {
+          log.warn('Could not sync store to database - database may not be ready');
+          return createSuccessResponse({
+            success: false,
+            error: 'Database not ready. Please wait for initialization to complete.',
+          });
+        }
+        log.info('Store synced to database from config');
+      }
+
       const result = await bidirectionalSyncService.syncBins();
       return createSuccessResponse(result);
     } catch (error) {
@@ -500,6 +532,20 @@ registerHandler(
     log.info('Games sync triggered during setup');
 
     try {
+      // Ensure store is synced to database before games sync
+      if (!storesDAL.isConfigured()) {
+        log.info('Store not in database, attempting to sync from config');
+        const synced = settingsService.syncStoreToDatabase();
+        if (!synced) {
+          log.warn('Could not sync store to database - database may not be ready');
+          return createSuccessResponse({
+            success: false,
+            error: 'Database not ready. Please wait for initialization to complete.',
+          });
+        }
+        log.info('Store synced to database from config');
+      }
+
       const result = await bidirectionalSyncService.syncGames();
       return createSuccessResponse(result);
     } catch (error) {
@@ -612,6 +658,39 @@ registerHandler(
 );
 
 /**
+ * Clear all pending pack sync items from queue
+ * Use this to remove stuck items that keep failing
+ */
+registerHandler(
+  'sync:clearPendingPacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const beforeCount = syncQueueDAL.getPendingCount(store.store_id);
+    const deletedCount = syncQueueDAL.deletePending(store.store_id, 'pack');
+    const afterCount = syncQueueDAL.getPendingCount(store.store_id);
+
+    log.warn('Cleared pending pack sync items', {
+      storeId: store.store_id,
+      beforeCount,
+      deletedCount,
+      afterCount,
+    });
+
+    return createSuccessResponse({
+      message: `Deleted ${deletedCount} pending pack sync items`,
+      beforeCount,
+      deletedCount,
+      afterCount,
+    });
+  },
+  { description: 'Clear all pending pack sync items from queue' }
+);
+
+/**
  * Backfill packs that are in RECEIVED status but not in sync queue
  * This handles packs that were received before the sync code was added
  */
@@ -666,6 +745,8 @@ registerHandler(
       }
 
       // Enqueue the pack with CREATE operation
+      // v029 API Alignment: Map DAL field names (current_bin_id, tickets_sold_count)
+      // to API field names (bin_id, tickets_sold)
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
@@ -678,16 +759,16 @@ registerHandler(
           game_code: game.game_code,
           pack_number: pack.pack_number,
           status: pack.status,
-          bin_id: pack.bin_id,
+          bin_id: pack.current_bin_id, // v029: Map current_bin_id to API's bin_id
           opening_serial: pack.opening_serial,
           closing_serial: pack.closing_serial,
-          tickets_sold: pack.tickets_sold,
+          tickets_sold: pack.tickets_sold_count, // v029: Map tickets_sold_count to API's tickets_sold
           sales_amount: pack.sales_amount,
           received_at: pack.received_at,
           received_by: pack.received_by,
           activated_at: pack.activated_at,
           activated_by: null,
-          settled_at: pack.settled_at,
+          depleted_at: pack.depleted_at,
           returned_at: pack.returned_at,
         },
       });
@@ -711,6 +792,165 @@ registerHandler(
     });
   },
   { description: 'Backfill packs in RECEIVED status that are not in sync queue' }
+);
+
+/**
+ * Resync ACTIVE packs to cloud
+ * Use this to re-send pack data with corrected payload format
+ *
+ * Strategy: Use ACTIVATE operation directly which calls POST /api/v1/sync/lottery/packs/activate
+ * Per API spec, the activate endpoint handles:
+ * 1. Pack doesn't exist: Create it and activate
+ * 2. Pack exists with RECEIVED status: Activate it
+ * 3. Pack already ACTIVE in same bin: Idempotent success
+ *
+ * This avoids the cloud_pack_id dependency issue with CREATE+UPDATE approach.
+ *
+ * API-001: Includes all required fields: game_code, pack_number, serial_start, serial_end, mark_sold_reason
+ */
+registerHandler(
+  'sync:resyncActivePacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+
+    // Get all packs in ACTIVE status
+    const activePacks = lotteryPacksDAL.findByStatus(storeId, 'ACTIVE');
+
+    if (activePacks.length === 0) {
+      return createSuccessResponse({
+        message: 'No packs in ACTIVE status to resync',
+        enqueuedCount: 0,
+      });
+    }
+
+    let enqueuedCount = 0;
+    let skippedCount = 0;
+
+    for (const pack of activePacks) {
+      // Get game to get game_code and tickets_per_pack
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        log.warn('Skipping pack resync: game not found', {
+          packId: pack.pack_id,
+          gameId: pack.game_id,
+        });
+        skippedCount++;
+        continue;
+      }
+
+      // Calculate serial_start and serial_end (required by activate API)
+      const serialStart = '000';
+      const serialEnd = game.tickets_per_pack
+        ? String(game.tickets_per_pack - 1).padStart(3, '0')
+        : '299'; // Default to 299 (300 tickets)
+
+      // Enqueue ACTIVATE operation - this goes directly to the activate endpoint
+      // which can create-and-activate in one call (per API spec)
+      // v029 API Alignment: Map DAL field names (current_bin_id, tickets_sold_count)
+      // to API field names (bin_id, tickets_sold)
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'ACTIVATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          game_code: game.game_code,
+          pack_number: pack.pack_number,
+          status: 'ACTIVE',
+          bin_id: pack.current_bin_id, // v029: Map current_bin_id to API's bin_id
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count, // v029: Map tickets_sold_count to API's tickets_sold
+          sales_amount: pack.sales_amount,
+          received_at: pack.received_at || pack.created_at,
+          received_by: pack.received_by,
+          activated_at: pack.activated_at,
+          activated_by: pack.activated_by,
+          shift_id: pack.activated_shift_id,
+          depleted_at: pack.depleted_at,
+          returned_at: pack.returned_at,
+          // Required by activate API
+          serial_start: serialStart,
+          serial_end: serialEnd,
+        },
+      });
+      enqueuedCount++;
+    }
+
+    log.info('Resyncing ACTIVE packs to cloud', {
+      storeId,
+      totalActive: activePacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+
+    return createSuccessResponse({
+      message: `Queued ${enqueuedCount} ACTIVE packs for resync via activate endpoint`,
+      totalActive: activePacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+  },
+  { description: 'Resync ACTIVE packs to cloud with corrected payload format' }
+);
+
+/**
+ * DEBUG: Fix missing timestamps on active packs
+ * Sets received_at to 1 hour before now, activated_at to now
+ */
+registerHandler(
+  'sync:debugFixPackTimestamps',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const db = getDatabase();
+    const activatedAt = new Date();
+    const receivedAt = new Date(activatedAt.getTime() - 60 * 60 * 1000); // 1 hour before
+
+    // Update all ACTIVE packs - received 1 hour ago, activated now
+    const result = db.prepare(`
+      UPDATE lottery_packs
+      SET
+        received_at = COALESCE(received_at, ?),
+        activated_at = COALESCE(activated_at, ?)
+      WHERE store_id = ?
+        AND status = 'ACTIVE'
+        AND (received_at IS NULL OR activated_at IS NULL)
+    `).run(receivedAt.toISOString(), activatedAt.toISOString(), store.store_id);
+
+    log.info('Fixed missing pack timestamps', {
+      storeId: store.store_id,
+      updatedCount: result.changes,
+      receivedAt: receivedAt.toISOString(),
+      activatedAt: activatedAt.toISOString(),
+    });
+
+    // Get updated packs
+    const packs = db.prepare(`
+      SELECT pack_id, pack_number, status, received_at, activated_at, created_at
+      FROM lottery_packs
+      WHERE store_id = ? AND status = 'ACTIVE'
+    `).all(store.store_id);
+
+    return createSuccessResponse({
+      message: `Fixed ${result.changes} packs with missing timestamps`,
+      receivedAt: receivedAt.toISOString(),
+      activatedAt: activatedAt.toISOString(),
+      packs,
+    });
+  },
+  { description: 'DEBUG: Fix missing timestamps on active packs' }
 );
 
 // ============================================================================
@@ -953,6 +1193,202 @@ registerHandler(
     });
   },
   { description: 'Debug database dump' }
+);
+
+/**
+ * Debug: Dump sync queue state for troubleshooting
+ * Shows both pending and failed items with parsed payloads
+ */
+registerHandler(
+  'sync:debugQueueState',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // Get all pending items (not just retryable)
+    const pendingItems = syncQueueDAL.getUnsyncedByStore(store.store_id, 50);
+    const failedItems = syncQueueDAL.getFailedItems(store.store_id, 50);
+    const stats = syncQueueDAL.getStats(store.store_id);
+
+    // Parse payloads and check for issues
+    const analyzeItem = (item: typeof pendingItems[0]) => {
+      try {
+        const payload = JSON.parse(item.payload);
+        // Check for missing required fields based on entity type and operation
+        const issues: string[] = [];
+
+        if (item.entity_type === 'pack') {
+          if (!payload.game_id) issues.push('missing game_id');
+          if (!payload.store_id) issues.push('missing store_id');
+          if (!payload.pack_id) issues.push('missing pack_id');
+
+          if (item.operation === 'UPDATE') {
+            if (payload.status === 'ACTIVE') {
+              if (!payload.bin_id) issues.push('ACTIVE: missing bin_id');
+              if (!payload.opening_serial) issues.push('ACTIVE: missing opening_serial');
+              if (!payload.activated_at) issues.push('ACTIVE: missing activated_at');
+            } else if (payload.status === 'DEPLETED') {
+              if (!payload.closing_serial) issues.push('DEPLETED: missing closing_serial');
+              if (!payload.depleted_at) issues.push('DEPLETED: missing depleted_at');
+            } else if (payload.status === 'RETURNED') {
+              if (!payload.returned_at) issues.push('RETURNED: missing returned_at');
+            }
+          }
+
+          // Check if game exists
+          if (payload.game_id) {
+            const game = lotteryGamesDAL.findById(payload.game_id);
+            if (!game) issues.push(`game not found: ${payload.game_id}`);
+          }
+        }
+
+        return {
+          id: item.id,
+          entity_type: item.entity_type,
+          entity_id: item.entity_id,
+          operation: item.operation,
+          status: payload.status,
+          sync_attempts: item.sync_attempts,
+          max_attempts: item.max_attempts,
+          last_sync_error: item.last_sync_error,
+          last_attempt_at: item.last_attempt_at,
+          created_at: item.created_at,
+          issues,
+          payload_summary: {
+            pack_id: payload.pack_id,
+            game_id: payload.game_id,
+            game_code: payload.game_code,
+            status: payload.status,
+            bin_id: payload.bin_id,
+            opening_serial: payload.opening_serial,
+            closing_serial: payload.closing_serial,
+            activated_at: payload.activated_at,
+            depleted_at: payload.depleted_at,
+            returned_at: payload.returned_at,
+            shift_id: payload.shift_id,
+            depleted_shift_id: payload.depleted_shift_id,
+            returned_shift_id: payload.returned_shift_id,
+          },
+        };
+      } catch (e) {
+        return {
+          id: item.id,
+          entity_type: item.entity_type,
+          entity_id: item.entity_id,
+          operation: item.operation,
+          sync_attempts: item.sync_attempts,
+          last_sync_error: item.last_sync_error,
+          issues: [`Failed to parse payload: ${e instanceof Error ? e.message : String(e)}`],
+          raw_payload: item.payload.substring(0, 500),
+        };
+      }
+    };
+
+    const analyzedPending = pendingItems.map(analyzeItem);
+    const analyzedFailed = failedItems.map(analyzeItem);
+
+    log.info('SYNC QUEUE DEBUG DUMP', {
+      stats,
+      pendingCount: pendingItems.length,
+      failedCount: failedItems.length,
+      pending: analyzedPending,
+      failed: analyzedFailed,
+    });
+
+    return createSuccessResponse({
+      stats,
+      pending: analyzedPending,
+      failed: analyzedFailed,
+    });
+  },
+  { description: 'Debug sync queue state' }
+);
+
+/**
+ * DEBUG: Get recently synced items with full payload data
+ * Shows exactly what data was sent to the cloud
+ */
+registerHandler(
+  'sync:debugGetSyncedItems',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const params = input as { limit?: number; entityType?: string } | undefined;
+    const limit = Math.min(params?.limit || 50, 200);
+    const entityType = params?.entityType;
+
+    // Query synced items directly from the database
+    const db = syncQueueDAL['db'];
+    let query = `
+      SELECT id, entity_type, entity_id, operation, payload, synced_at, created_at
+      FROM sync_queue
+      WHERE store_id = ? AND synced = 1
+    `;
+    const queryParams: (string | number)[] = [store.store_id];
+
+    if (entityType) {
+      query += ` AND entity_type = ?`;
+      queryParams.push(entityType);
+    }
+
+    query += ` ORDER BY synced_at DESC LIMIT ?`;
+    queryParams.push(limit);
+
+    const stmt = db.prepare(query);
+    const items = stmt.all(...queryParams) as Array<{
+      id: string;
+      entity_type: string;
+      entity_id: string;
+      operation: string;
+      payload: string;
+      synced_at: string;
+      created_at: string;
+    }>;
+
+    // Parse payloads and format for display
+    const formattedItems = items.map((item) => {
+      try {
+        const payload = JSON.parse(item.payload);
+        return {
+          id: item.id,
+          entity_type: item.entity_type,
+          entity_id: item.entity_id,
+          operation: item.operation,
+          synced_at: item.synced_at,
+          created_at: item.created_at,
+          payload: payload,
+        };
+      } catch {
+        return {
+          id: item.id,
+          entity_type: item.entity_type,
+          entity_id: item.entity_id,
+          operation: item.operation,
+          synced_at: item.synced_at,
+          created_at: item.created_at,
+          payload_raw: item.payload,
+          parse_error: true,
+        };
+      }
+    });
+
+    log.info('DEBUG: Retrieved synced items', {
+      storeId: store.store_id,
+      count: formattedItems.length,
+      entityType: entityType || 'all',
+    });
+
+    return createSuccessResponse({
+      count: formattedItems.length,
+      items: formattedItems,
+    });
+  },
+  { description: 'DEBUG: Get recently synced items with payloads' }
 );
 
 /**

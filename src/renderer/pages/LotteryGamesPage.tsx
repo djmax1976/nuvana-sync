@@ -105,8 +105,13 @@ export default function LotteryGamesPage() {
   }, []);
 
   // Build query input
+  // inventoryOnly=true ensures we only show games that have packs in store inventory
+  // This matches the cloud inventory view behavior
   const queryInput = useMemo(() => {
-    const filters: GameListFilters = {};
+    const filters: GameListFilters = {
+      // Only show games with at least one pack in inventory
+      inventoryOnly: true,
+    };
     if (statusFilter) filters.status = statusFilter;
     if (debouncedSearch) filters.search = debouncedSearch;
 
@@ -208,7 +213,7 @@ export default function LotteryGamesPage() {
       {/* Header */}
       <div className="flex items-center justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-foreground">Lottery Games</h1>
+          <h1 className="text-2xl font-bold text-foreground">Inventory</h1>
           <p className="text-muted-foreground text-sm mt-1">
             View all lottery games and their pack inventory
           </p>
@@ -318,7 +323,7 @@ export default function LotteryGamesPage() {
                       Active
                     </th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider">
-                      Settled
+                      Depleted
                     </th>
                     <th className="px-6 py-3 text-center text-xs font-medium text-muted-foreground uppercase tracking-wider">
                       Returned
@@ -514,7 +519,7 @@ function GameRowExpandable({
           <PackCountBadge count={game.pack_counts.active} variant="active" />
         </td>
         <td className="px-6 py-4 whitespace-nowrap text-center">
-          <PackCountBadge count={game.pack_counts.settled} variant="settled" />
+          <PackCountBadge count={game.pack_counts.depleted} variant="depleted" />
         </td>
         <td className="px-6 py-4 whitespace-nowrap text-center">
           <PackCountBadge count={game.pack_counts.returned} variant="returned" />
@@ -576,7 +581,7 @@ function GameRowExpandable({
           {packs &&
             packs.map((pack) => {
               // SEC-010: AUTHZ - Only ACTIVATED and RECEIVED packs can be returned
-              const canReturn = pack.status === 'ACTIVATED' || pack.status === 'RECEIVED';
+              const canReturn = pack.status === 'ACTIVE' || pack.status === 'RECEIVED';
 
               return (
                 <tr
@@ -623,8 +628,8 @@ function GameRowExpandable({
                         Returned {pack.returned_at ? formatDate(pack.returned_at) : ''}
                       </span>
                     )}
-                    {pack.status === 'SETTLED' && (
-                      <span className="text-xs text-muted-foreground">Settled</span>
+                    {pack.status === 'DEPLETED' && (
+                      <span className="text-xs text-muted-foreground">Depleted</span>
                     )}
                   </td>
                   <td></td>
@@ -664,7 +669,7 @@ function StatusBadge({ status }: StatusBadgeProps) {
 
 interface PackCountBadgeProps {
   count: number;
-  variant: 'received' | 'active' | 'settled' | 'returned';
+  variant: 'received' | 'active' | 'depleted' | 'returned';
 }
 
 function PackCountBadge({ count, variant }: PackCountBadgeProps) {
@@ -675,7 +680,7 @@ function PackCountBadge({ count, variant }: PackCountBadgeProps) {
   const colors: Record<typeof variant, string> = {
     received: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
     active: 'bg-green-500/10 text-green-600 dark:text-green-400',
-    settled: 'bg-muted text-muted-foreground',
+    depleted: 'bg-muted text-muted-foreground',
     returned: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
   };
 
@@ -701,8 +706,8 @@ interface PackStatusBadgeProps {
 function PackStatusBadge({ status }: PackStatusBadgeProps) {
   const colors: Record<LotteryPackResponse['status'], string> = {
     RECEIVED: 'bg-blue-500/10 text-blue-600 dark:text-blue-400',
-    ACTIVATED: 'bg-green-500/10 text-green-600 dark:text-green-400',
-    SETTLED: 'bg-muted text-muted-foreground',
+    ACTIVE: 'bg-green-500/10 text-green-600 dark:text-green-400',
+    DEPLETED: 'bg-muted text-muted-foreground',
     RETURNED: 'bg-orange-500/10 text-orange-600 dark:text-orange-400',
   };
 
