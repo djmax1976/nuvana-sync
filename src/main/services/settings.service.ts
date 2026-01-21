@@ -18,7 +18,7 @@ import Store from 'electron-store';
 import { z } from 'zod';
 import { storesDAL } from '../dal/stores.dal';
 import { usersDAL } from '../dal/users.dal';
-import { cloudApiService, ValidateApiKeyResponse, type InitialManager } from './cloud-api.service';
+import { cloudApiService, ValidateApiKeyResponse } from './cloud-api.service';
 import { createLogger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
@@ -1417,7 +1417,6 @@ export class SettingsService {
    */
   deleteSettingsFile(): string | null {
     const configPath = this.configStore.path;
-    const fs = require('fs');
 
     if (fs.existsSync(configPath)) {
       // Clear store first to release any handles

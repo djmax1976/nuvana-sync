@@ -31,7 +31,7 @@ import { bidirectionalSyncService } from '../services/bidirectional-sync.service
 import { settingsService } from '../services/settings.service';
 import { cloudApiService } from '../services/cloud-api.service';
 import { getDatabase } from '../services/database.service';
-import { BrowserWindow, ipcMain, app } from 'electron';
+import { BrowserWindow } from 'electron';
 import { createLogger } from '../utils/logger';
 import { eventBus, MainEvents } from '../utils/event-bus';
 

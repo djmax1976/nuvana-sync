@@ -18,7 +18,7 @@ import Store from 'electron-store';
 import { z } from 'zod';
 import { createLogger } from '../utils/logger';
 import { licenseService, LicenseApiResponseSchema } from './license.service';
-import type { SyncQueueItem } from '../dal/sync-queue.dal';
+// SyncQueueItem type available from sync-queue.dal if needed
 
 // ============================================================================
 // Types
@@ -711,7 +711,7 @@ const ValidateApiKeyResponseSchema = z.object({
   initialManager: InitialManagerSchema.optional(),
 });
 
-const BatchSyncResponseSchema = z.object({
+const _BatchSyncResponseSchema = z.object({
   success: z.boolean(),
   results: z.array(
     z.object({

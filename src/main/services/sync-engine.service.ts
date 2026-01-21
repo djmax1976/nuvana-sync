@@ -895,7 +895,7 @@ export class SyncEngineService {
                 gameCode
               ) {
                 // Get serial_start and serial_end from payload or calculate from game
-                let serialStart = payload.serial_start || '000';
+                const serialStart = payload.serial_start || '000';
                 let serialEnd = payload.serial_end;
 
                 // If serial_end not in payload, look up game to calculate it
@@ -1023,7 +1023,7 @@ export class SyncEngineService {
           // This bypasses the cloud_pack_id requirement since we send pack_id directly
 
           // Get serial_start and serial_end from payload or calculate from game
-          let serialStart = payload.serial_start || '000';
+          const serialStart = payload.serial_start || '000';
           let serialEnd = payload.serial_end;
 
           if (!serialEnd) {

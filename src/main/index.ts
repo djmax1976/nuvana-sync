@@ -81,7 +81,7 @@ if (!gotTheLock) {
   let mainWindow: BrowserWindow | null = null;
   let tray: Tray | null = null;
   let fileWatcher: FileWatcherService | null = null;
-  let syncService: SyncService | null = null;
+  let _syncService: SyncService | null = null;
   // Auto-updater service - dynamically imported to avoid electron-updater initialization issues
   let autoUpdaterService: {
     setMainWindow: (w: BrowserWindow) => void;
@@ -135,7 +135,7 @@ if (!gotTheLock) {
           event.preventDefault();
           log.warn('Blocked navigation to external URL', { url: parsedUrl.href });
         }
-      } catch (error) {
+      } catch {
         event.preventDefault();
         log.warn('Blocked navigation to invalid URL', { url });
       }
@@ -516,7 +516,7 @@ if (!gotTheLock) {
 
     // Local-first: FileWatcherService now uses ParserService internally
     // SyncService is kept for cloud sync operations
-    syncService = new SyncService(config);
+    _syncService = new SyncService(config);
     fileWatcher = new FileWatcherService(config, config.storeId);
 
     fileWatcher.on('file-detected', (filePath: string) => {
