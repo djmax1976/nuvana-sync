@@ -136,7 +136,7 @@ export class BidirectionalSyncService {
       // v039 cloud-aligned schema: uses name, location, display_order, is_active
       if (activeBins.length > 0) {
         const binData = activeBins.map((cloudBin) => ({
-          bin_id: cloudBin.bin_id,  // Use cloud's bin_id directly as PK
+          bin_id: cloudBin.bin_id, // Use cloud's bin_id directly as PK
           store_id: storeId, // DB-006: Always use configured store ID
           name: cloudBin.name,
           location: cloudBin.location,
@@ -765,9 +765,8 @@ export class BidirectionalSyncService {
       return_notes: cloudPack.return_notes,
       last_sold_serial: cloudPack.last_sold_serial,
       tickets_sold_on_return: cloudPack.tickets_sold_on_return,
-      return_sales_amount: cloudPack.return_sales_amount !== null
-        ? Number(cloudPack.return_sales_amount)
-        : null,
+      return_sales_amount:
+        cloudPack.return_sales_amount !== null ? Number(cloudPack.return_sales_amount) : null,
       // Serial override approval fields (API v029 + v038 alignment)
       serial_override_approved_by: cloudPack.serial_override_approved_by,
       serial_override_reason: cloudPack.serial_override_reason,

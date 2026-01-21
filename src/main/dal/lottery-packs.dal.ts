@@ -1403,7 +1403,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
           // Check if game exists locally before attempting upsert
           if (!existingGames.has(pack.game_id)) {
-            result.errors.push(`Pack ${pack.pack_number}: game_id ${pack.game_id} not found locally (needs game sync)`);
+            result.errors.push(
+              `Pack ${pack.pack_number}: game_id ${pack.game_id} not found locally (needs game sync)`
+            );
             log.error('Pack upsert skipped - game not found', {
               packNumber: pack.pack_number,
               cloudPackId: pack.cloud_pack_id,

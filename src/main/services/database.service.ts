@@ -304,9 +304,7 @@ function initializeDevelopmentDatabase(options: DatabaseOptions = {}): Database.
     log.error('Database access verification failed', {
       error: error instanceof Error ? error.message : 'Unknown error',
     });
-    throw new Error(
-      'Database access verification failed. The database may be corrupted.'
-    );
+    throw new Error('Database access verification failed. The database may be corrupted.');
   }
 
   // Step 4: Apply performance optimizations

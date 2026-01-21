@@ -801,11 +801,8 @@ registerHandler(
       });
 
       // Step 2: Clear local data based on reset type
-      const {
-        getDatabase,
-        closeDatabase,
-        getDbPath,
-      } = await import('../services/database.service');
+      const { getDatabase, closeDatabase, getDbPath } =
+        await import('../services/database.service');
       const fs = await import('fs');
 
       let tablesCleared = 0;

@@ -821,7 +821,8 @@ export class SyncEngineService {
           } catch (receiveError) {
             // Check if this is a duplicate pack error (HTTP 409)
             // This means the pack is already in the cloud - treat as success
-            const errorMessage = receiveError instanceof Error ? receiveError.message : String(receiveError);
+            const errorMessage =
+              receiveError instanceof Error ? receiveError.message : String(receiveError);
             if (errorMessage.includes('409') || errorMessage.includes('DUPLICATE_PACK')) {
               log.info('Pack already exists in cloud, marking as synced', {
                 packId: payload.pack_id,
@@ -836,7 +837,8 @@ export class SyncEngineService {
                 const jsonMatch = errorMessage.match(/\{.*\}/);
                 if (jsonMatch) {
                   const errorData = JSON.parse(jsonMatch[0]);
-                  cloudPackId = errorData.cloud_pack_id || errorData.pack_id || errorData.data?.pack_id;
+                  cloudPackId =
+                    errorData.cloud_pack_id || errorData.pack_id || errorData.data?.pack_id;
                 }
               } catch {
                 // Ignore JSON parse errors
@@ -885,7 +887,13 @@ export class SyncEngineService {
               // API spec REQUIRED: pack_id, bin_id, opening_serial, game_code, pack_number,
               //                    serial_start, serial_end, activated_at, received_at
               // API spec OPTIONAL (only if mark-sold at activation): mark_sold_tickets, mark_sold_reason, mark_sold_approved_by
-              if (payload.bin_id && payload.opening_serial && payload.activated_at && payload.received_at && gameCode) {
+              if (
+                payload.bin_id &&
+                payload.opening_serial &&
+                payload.activated_at &&
+                payload.received_at &&
+                gameCode
+              ) {
                 // Get serial_start and serial_end from payload or calculate from game
                 let serialStart = payload.serial_start || '000';
                 let serialEnd = payload.serial_end;
@@ -1028,7 +1036,13 @@ export class SyncEngineService {
           }
 
           // Required: bin_id, opening_serial, gameCode, activated_at, received_at
-          if (payload.bin_id && payload.opening_serial && gameCode && payload.activated_at && payload.received_at) {
+          if (
+            payload.bin_id &&
+            payload.opening_serial &&
+            gameCode &&
+            payload.activated_at &&
+            payload.received_at
+          ) {
             try {
               const activateResponse = await cloudApiService.pushPackActivate({
                 pack_id: payload.pack_id,
@@ -1051,7 +1065,8 @@ export class SyncEngineService {
                 error: activateResponse.success ? undefined : 'Activation failed',
               });
             } catch (activateError) {
-              const errorMsg = activateError instanceof Error ? activateError.message : String(activateError);
+              const errorMsg =
+                activateError instanceof Error ? activateError.message : String(activateError);
               log.error('Failed to activate pack', {
                 packId: payload.pack_id,
                 error: errorMsg,

@@ -2376,8 +2376,12 @@ export class CloudApiService {
         } else if ('records' in rawResponse) {
           const rawRecords = (rawResponse.records || []) as Record<string, unknown>[];
           records = rawRecords.map(mapCloudBin);
-          totalCount = (rawResponse.total_count ?? rawResponse.totalCount ?? records.length) as number;
-          currentSequence = (rawResponse.current_sequence ?? rawResponse.currentSequence ?? 0) as number;
+          totalCount = (rawResponse.total_count ??
+            rawResponse.totalCount ??
+            records.length) as number;
+          currentSequence = (rawResponse.current_sequence ??
+            rawResponse.currentSequence ??
+            0) as number;
           serverTime = (rawResponse.server_time ?? rawResponse.serverTime ?? '') as string;
           pageHasMore = (rawResponse.has_more ?? rawResponse.hasMore ?? false) as boolean;
           pageCursor = (rawResponse.next_cursor ?? rawResponse.nextCursor ?? null) as string | null;
@@ -2404,7 +2408,10 @@ export class CloudApiService {
       }
 
       if (pageCount >= MAX_PAGES) {
-        log.warn('Bins pagination hit safety limit', { maxPages: MAX_PAGES, totalFetched: allBins.length });
+        log.warn('Bins pagination hit safety limit', {
+          maxPages: MAX_PAGES,
+          totalFetched: allBins.length,
+        });
       }
 
       // SEC-017: Audit log
@@ -4407,7 +4414,12 @@ export class CloudApiService {
         closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
         tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
         last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
-        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        sales_amount:
+          r.salesAmount !== undefined
+            ? Number(r.salesAmount)
+            : r.sales_amount !== undefined
+              ? Number(r.sales_amount)
+              : null,
         received_at: (r.receivedAt || r.received_at || null) as string | null,
         received_by: (r.receivedBy || r.received_by || null) as string | null,
         activated_at: (r.activatedAt || r.activated_at || null) as string | null,
@@ -4423,14 +4435,34 @@ export class CloudApiService {
         return_reason: (r.returnReason || r.return_reason || null) as string | null,
         return_notes: (r.returnNotes || r.return_notes || null) as string | null,
         last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
-        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
-        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
-        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
-        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
-        serial_override_approved_at: (r.serialOverrideApprovedAt || r.serial_override_approved_at || null) as string | null,
-        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        tickets_sold_on_return:
+          r.ticketsSoldOnReturn !== undefined
+            ? Number(r.ticketsSoldOnReturn)
+            : r.tickets_sold_on_return !== undefined
+              ? Number(r.tickets_sold_on_return)
+              : null,
+        return_sales_amount:
+          r.returnSalesAmount !== undefined
+            ? Number(r.returnSalesAmount)
+            : r.return_sales_amount !== undefined
+              ? Number(r.return_sales_amount)
+              : null,
+        serial_override_approved_by: (r.serialOverrideApprovedBy ||
+          r.serial_override_approved_by ||
+          null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as
+          | string
+          | null,
+        serial_override_approved_at: (r.serialOverrideApprovedAt ||
+          r.serial_override_approved_at ||
+          null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as
+          | string
+          | null,
         mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
-        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as string | null,
+        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as
+          | string
+          | null,
         sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
         updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
         created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
@@ -4555,7 +4587,12 @@ export class CloudApiService {
         closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
         tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
         last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
-        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        sales_amount:
+          r.salesAmount !== undefined
+            ? Number(r.salesAmount)
+            : r.sales_amount !== undefined
+              ? Number(r.sales_amount)
+              : null,
         received_at: (r.receivedAt || r.received_at || null) as string | null,
         received_by: (r.receivedBy || r.received_by || null) as string | null,
         activated_at: (r.activatedAt || r.activated_at || null) as string | null,
@@ -4571,14 +4608,34 @@ export class CloudApiService {
         return_reason: (r.returnReason || r.return_reason || null) as string | null,
         return_notes: (r.returnNotes || r.return_notes || null) as string | null,
         last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
-        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
-        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
-        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
-        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
-        serial_override_approved_at: (r.serialOverrideApprovedAt || r.serial_override_approved_at || null) as string | null,
-        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        tickets_sold_on_return:
+          r.ticketsSoldOnReturn !== undefined
+            ? Number(r.ticketsSoldOnReturn)
+            : r.tickets_sold_on_return !== undefined
+              ? Number(r.tickets_sold_on_return)
+              : null,
+        return_sales_amount:
+          r.returnSalesAmount !== undefined
+            ? Number(r.returnSalesAmount)
+            : r.return_sales_amount !== undefined
+              ? Number(r.return_sales_amount)
+              : null,
+        serial_override_approved_by: (r.serialOverrideApprovedBy ||
+          r.serial_override_approved_by ||
+          null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as
+          | string
+          | null,
+        serial_override_approved_at: (r.serialOverrideApprovedAt ||
+          r.serial_override_approved_at ||
+          null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as
+          | string
+          | null,
         mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
-        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as string | null,
+        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as
+          | string
+          | null,
         sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
         updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
         created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
@@ -4703,7 +4760,12 @@ export class CloudApiService {
         closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
         tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
         last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
-        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        sales_amount:
+          r.salesAmount !== undefined
+            ? Number(r.salesAmount)
+            : r.sales_amount !== undefined
+              ? Number(r.sales_amount)
+              : null,
         received_at: (r.receivedAt || r.received_at || null) as string | null,
         received_by: (r.receivedBy || r.received_by || null) as string | null,
         activated_at: (r.activatedAt || r.activated_at || null) as string | null,
@@ -4719,14 +4781,34 @@ export class CloudApiService {
         return_reason: (r.returnReason || r.return_reason || null) as string | null,
         return_notes: (r.returnNotes || r.return_notes || null) as string | null,
         last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
-        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
-        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
-        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
-        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
-        serial_override_approved_at: (r.serialOverrideApprovedAt || r.serial_override_approved_at || null) as string | null,
-        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        tickets_sold_on_return:
+          r.ticketsSoldOnReturn !== undefined
+            ? Number(r.ticketsSoldOnReturn)
+            : r.tickets_sold_on_return !== undefined
+              ? Number(r.tickets_sold_on_return)
+              : null,
+        return_sales_amount:
+          r.returnSalesAmount !== undefined
+            ? Number(r.returnSalesAmount)
+            : r.return_sales_amount !== undefined
+              ? Number(r.return_sales_amount)
+              : null,
+        serial_override_approved_by: (r.serialOverrideApprovedBy ||
+          r.serial_override_approved_by ||
+          null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as
+          | string
+          | null,
+        serial_override_approved_at: (r.serialOverrideApprovedAt ||
+          r.serial_override_approved_at ||
+          null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as
+          | string
+          | null,
         mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
-        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as string | null,
+        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as
+          | string
+          | null,
         sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
         updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
         created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,
@@ -4851,7 +4933,12 @@ export class CloudApiService {
         closing_serial: (r.closingSerial || r.closing_serial || null) as string | null,
         tickets_sold_count: Number(r.ticketsSoldCount ?? r.tickets_sold_count ?? 0),
         last_sold_at: (r.lastSoldAt || r.last_sold_at || null) as string | null,
-        sales_amount: r.salesAmount !== undefined ? Number(r.salesAmount) : (r.sales_amount !== undefined ? Number(r.sales_amount) : null),
+        sales_amount:
+          r.salesAmount !== undefined
+            ? Number(r.salesAmount)
+            : r.sales_amount !== undefined
+              ? Number(r.sales_amount)
+              : null,
         received_at: (r.receivedAt || r.received_at || null) as string | null,
         received_by: (r.receivedBy || r.received_by || null) as string | null,
         activated_at: (r.activatedAt || r.activated_at || null) as string | null,
@@ -4867,14 +4954,34 @@ export class CloudApiService {
         return_reason: (r.returnReason || r.return_reason || null) as string | null,
         return_notes: (r.returnNotes || r.return_notes || null) as string | null,
         last_sold_serial: (r.lastSoldSerial || r.last_sold_serial || null) as string | null,
-        tickets_sold_on_return: r.ticketsSoldOnReturn !== undefined ? Number(r.ticketsSoldOnReturn) : (r.tickets_sold_on_return !== undefined ? Number(r.tickets_sold_on_return) : null),
-        return_sales_amount: r.returnSalesAmount !== undefined ? Number(r.returnSalesAmount) : (r.return_sales_amount !== undefined ? Number(r.return_sales_amount) : null),
-        serial_override_approved_by: (r.serialOverrideApprovedBy || r.serial_override_approved_by || null) as string | null,
-        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as string | null,
-        serial_override_approved_at: (r.serialOverrideApprovedAt || r.serial_override_approved_at || null) as string | null,
-        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as string | null,
+        tickets_sold_on_return:
+          r.ticketsSoldOnReturn !== undefined
+            ? Number(r.ticketsSoldOnReturn)
+            : r.tickets_sold_on_return !== undefined
+              ? Number(r.tickets_sold_on_return)
+              : null,
+        return_sales_amount:
+          r.returnSalesAmount !== undefined
+            ? Number(r.returnSalesAmount)
+            : r.return_sales_amount !== undefined
+              ? Number(r.return_sales_amount)
+              : null,
+        serial_override_approved_by: (r.serialOverrideApprovedBy ||
+          r.serial_override_approved_by ||
+          null) as string | null,
+        serial_override_reason: (r.serialOverrideReason || r.serial_override_reason || null) as
+          | string
+          | null,
+        serial_override_approved_at: (r.serialOverrideApprovedAt ||
+          r.serial_override_approved_at ||
+          null) as string | null,
+        mark_sold_approved_by: (r.markSoldApprovedBy || r.mark_sold_approved_by || null) as
+          | string
+          | null,
         mark_sold_reason: (r.markSoldReason || r.mark_sold_reason || null) as string | null,
-        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as string | null,
+        mark_sold_approved_at: (r.markSoldApprovedAt || r.mark_sold_approved_at || null) as
+          | string
+          | null,
         sync_sequence: Number(r.syncSequence ?? r.sync_sequence ?? 0),
         updated_at: (r.updatedAt || r.updated_at || new Date().toISOString()) as string,
         created_at: (r.createdAt || r.created_at || new Date().toISOString()) as string,

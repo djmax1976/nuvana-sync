@@ -189,15 +189,15 @@ interface PackSyncPayload {
   depleted_at: string | null;
   returned_at: string | null;
   // Serial range fields (required by activate API)
-  serial_start: string;              // Starting serial number (e.g., "000")
-  serial_end: string;                // Ending serial number (e.g., "299" for 300-ticket pack)
+  serial_start: string; // Starting serial number (e.g., "000")
+  serial_end: string; // Ending serial number (e.g., "299" for 300-ticket pack)
   // Shift tracking fields (v019 schema alignment)
-  shift_id: string | null;           // Activation shift context
-  depleted_shift_id: string | null;  // Depletion shift context
-  depleted_by: string | null;        // User who depleted the pack
-  returned_shift_id: string | null;  // Return shift context
-  returned_by: string | null;        // User who returned the pack
-  depletion_reason: string | null;   // Reason for depletion (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
+  shift_id: string | null; // Activation shift context
+  depleted_shift_id: string | null; // Depletion shift context
+  depleted_by: string | null; // User who depleted the pack
+  returned_shift_id: string | null; // Return shift context
+  returned_by: string | null; // User who returned the pack
+  depletion_reason: string | null; // Reason for depletion (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
 }
 
 /**
@@ -266,9 +266,7 @@ function buildPackSyncPayload(
   // serial_start is always "000" (packs start at ticket 0)
   // serial_end = tickets_per_pack - 1, padded to 3 digits (e.g., 300 tickets → "299")
   const serialStart = '000';
-  const serialEnd = ticketsPerPack
-    ? String(ticketsPerPack - 1).padStart(3, '0')
-    : '299'; // Default to 299 (300 tickets)
+  const serialEnd = ticketsPerPack ? String(ticketsPerPack - 1).padStart(3, '0') : '299'; // Default to 299 (300 tickets)
 
   // v029 API Alignment: Map DAL field names to API field names
   return {

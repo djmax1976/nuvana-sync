@@ -412,7 +412,7 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
     `);
 
     stmt.run(
-      data.bin_id,  // Use cloud's bin_id directly as PK
+      data.bin_id, // Use cloud's bin_id directly as PK
       data.store_id,
       data.name,
       data.location || null,
@@ -567,7 +567,7 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
           } else {
             // Create new bin using cloud's bin_id directly as PK
             insertStmt.run(
-              binData.bin_id,  // Cloud's UUID as bin_id
+              binData.bin_id, // Cloud's UUID as bin_id
               binData.store_id,
               binData.name,
               binData.location || null,
@@ -648,9 +648,7 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
     const allBins = allBinsStmt.all(storeId) as Array<{ bin_id: string }>;
 
     // Find bins to delete (in local but not in cloud response)
-    const toDelete = allBins
-      .filter((b) => !activeBinIds.has(b.bin_id))
-      .map((b) => b.bin_id);
+    const toDelete = allBins.filter((b) => !activeBinIds.has(b.bin_id)).map((b) => b.bin_id);
 
     if (toDelete.length === 0) {
       return 0;

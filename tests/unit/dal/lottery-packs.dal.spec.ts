@@ -271,11 +271,15 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           pack_number: 'PKG-DEPLETED-001',
         });
 
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
         dal.settle(pack.pack_id, {
           store_id: 'store-1',
           closing_serial: '100',
-          tickets_sold_count:100,
+          tickets_sold_count: 100,
           sales_amount: 100,
         });
 
@@ -314,7 +318,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         });
 
         // Activate with specific opening serial
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '050' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '050',
+        });
 
         // Attempt duplicate activation with different serial - should fail
         try {
@@ -344,7 +352,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         });
 
         // First activation
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         // SQL UPDATE with WHERE status='RECEIVED' should affect 0 rows
         // and throw "Failed to activate pack - status may have changed"
@@ -366,12 +378,16 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const settledPack = dal.settle(pack.pack_id, {
         store_id: 'store-1',
         closing_serial: '150',
-        tickets_sold_count:150,
+        tickets_sold_count: 150,
         sales_amount: 150,
       });
 
@@ -387,7 +403,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const sales = dal.calculateSales(pack.pack_id, '150');
 
@@ -409,7 +429,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         dal.settle(pack.pack_id, {
           store_id: 'store-1',
           closing_serial: '150',
-          tickets_sold_count:150,
+          tickets_sold_count: 150,
           sales_amount: 150,
         })
       ).toThrow();
@@ -423,7 +443,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const returnedPack = dal.returnPack(pack.pack_id, {
         store_id: 'store-1',
@@ -458,11 +482,15 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
       dal.settle(pack.pack_id, {
         store_id: 'store-1',
         closing_serial: '299',
-        tickets_sold_count:299,
+        tickets_sold_count: 299,
         sales_amount: 299,
       });
 
@@ -501,7 +529,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG0000002',
       });
-      dal.activate(pack2.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack2.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const receivedPacks = dal.findByStatus('store-1', 'RECEIVED');
       const activatedPacks = dal.findByStatus('store-1', 'ACTIVE');
@@ -520,7 +552,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const found = dal.findActiveInBin('bin-1');
 
@@ -581,12 +617,20 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         pack_number: 'PKG0000003',
       });
 
-      dal.activate(pack2.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
-      dal.activate(pack3.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack2.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+      dal.activate(pack3.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
       dal.settle(pack3.pack_id, {
         store_id: 'store-1',
         closing_serial: '299',
-        tickets_sold_count:299,
+        tickets_sold_count: 299,
         sales_amount: 299,
       });
 
@@ -612,7 +656,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const moved = dal.moveToBin(pack.pack_id, 'bin-2');
 
@@ -627,7 +675,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         game_id: 'game-1',
         pack_number: 'PKG1234567',
       });
-      dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
 
       const updated = dal.updateOpeningSerial(pack.pack_id, '050');
 
@@ -665,7 +717,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         const results = dal.findPacksWithDetails('store-1', { status: 'ACTIVE' });
 
@@ -969,7 +1025,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         const found = dal.findByPackNumberOnly('store-1', '0103230');
 
@@ -984,11 +1044,15 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
         dal.settle(pack.pack_id, {
           store_id: 'store-1',
           closing_serial: '299',
-          tickets_sold_count:299,
+          tickets_sold_count: 299,
           sales_amount: 299,
         });
 
@@ -1075,7 +1139,11 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
 
         // Scenario: User scans the same pack trying to activate it again
         // The search for RECEIVED packs returns nothing
@@ -1100,11 +1168,15 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.activate(pack.pack_id, { store_id: 'store-1', current_bin_id: 'bin-1', opening_serial: '000' });
+        dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
         dal.settle(pack.pack_id, {
           store_id: 'store-1',
           closing_serial: '299',
-          tickets_sold_count:299,
+          tickets_sold_count: 299,
           sales_amount: 299,
         });
 

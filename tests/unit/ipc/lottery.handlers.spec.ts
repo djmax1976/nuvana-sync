@@ -2260,9 +2260,7 @@ describe('Lottery IPC Handlers', () => {
       ): PackSyncPayload {
         // Calculate serial_start and serial_end
         const serialStart = '000';
-        const serialEnd = ticketsPerPack
-          ? String(ticketsPerPack - 1).padStart(3, '0')
-          : '299';
+        const serialEnd = ticketsPerPack ? String(ticketsPerPack - 1).padStart(3, '0') : '299';
 
         return {
           pack_id: pack.pack_id,
@@ -2392,7 +2390,11 @@ describe('Lottery IPC Handlers', () => {
         expect(payload150.serial_end).toBe('149');
 
         // Test with null (should default to 299)
-        const payloadNull = buildPackSyncPayload(mockReceivedPack, mockReceivedPack.game_code, null);
+        const payloadNull = buildPackSyncPayload(
+          mockReceivedPack,
+          mockReceivedPack.game_code,
+          null
+        );
         expect(payloadNull.serial_start).toBe('000');
         expect(payloadNull.serial_end).toBe('299');
       });

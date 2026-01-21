@@ -919,7 +919,9 @@ registerHandler(
     const receivedAt = new Date(activatedAt.getTime() - 60 * 60 * 1000); // 1 hour before
 
     // Update all ACTIVE packs - received 1 hour ago, activated now
-    const result = db.prepare(`
+    const result = db
+      .prepare(
+        `
       UPDATE lottery_packs
       SET
         received_at = COALESCE(received_at, ?),
@@ -927,7 +929,9 @@ registerHandler(
       WHERE store_id = ?
         AND status = 'ACTIVE'
         AND (received_at IS NULL OR activated_at IS NULL)
-    `).run(receivedAt.toISOString(), activatedAt.toISOString(), store.store_id);
+    `
+      )
+      .run(receivedAt.toISOString(), activatedAt.toISOString(), store.store_id);
 
     log.info('Fixed missing pack timestamps', {
       storeId: store.store_id,
@@ -937,11 +941,15 @@ registerHandler(
     });
 
     // Get updated packs
-    const packs = db.prepare(`
+    const packs = db
+      .prepare(
+        `
       SELECT pack_id, pack_number, status, received_at, activated_at, created_at
       FROM lottery_packs
       WHERE store_id = ? AND status = 'ACTIVE'
-    `).all(store.store_id);
+    `
+      )
+      .all(store.store_id);
 
     return createSuccessResponse({
       message: `Fixed ${result.changes} packs with missing timestamps`,
@@ -1213,7 +1221,7 @@ registerHandler(
     const stats = syncQueueDAL.getStats(store.store_id);
 
     // Parse payloads and check for issues
-    const analyzeItem = (item: typeof pendingItems[0]) => {
+    const analyzeItem = (item: (typeof pendingItems)[0]) => {
       try {
         const payload = JSON.parse(item.payload);
         // Check for missing required fields based on entity type and operation

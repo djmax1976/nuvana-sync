@@ -200,7 +200,7 @@ describe('BidirectionalSyncService', () => {
       // Even if local bin exists and is "newer", cloud should overwrite
       // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       mockBinsFindByCloudId.mockReturnValue({
-        bin_id: 'cloud-bin-1',  // bin_id is now the cloud's UUID
+        bin_id: 'cloud-bin-1', // bin_id is now the cloud's UUID
         updated_at: '2024-01-02T00:00:00Z', // Local is "newer" but doesn't matter
       });
       // Mock batch upsert to return success result
@@ -242,7 +242,7 @@ describe('BidirectionalSyncService', () => {
           [
             'cloud-bin-1',
             {
-              bin_id: 'cloud-bin-1',  // bin_id is now the cloud's UUID
+              bin_id: 'cloud-bin-1', // bin_id is now the cloud's UUID
               updated_at: '2024-01-01T00:00:00Z',
             },
           ],

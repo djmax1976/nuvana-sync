@@ -91,9 +91,7 @@ describe('Pack Sync Security Tests', () => {
       ticketsPerPack: number | null = 300
     ): PackSyncPayload {
       const serialStart = '000';
-      const serialEnd = ticketsPerPack
-        ? String(ticketsPerPack - 1).padStart(3, '0')
-        : '299';
+      const serialEnd = ticketsPerPack ? String(ticketsPerPack - 1).padStart(3, '0') : '299';
 
       return {
         pack_id: pack.pack_id,
