@@ -106,13 +106,36 @@ test.describe('Setup Wizard', () => {
       const nextButton = window.locator('[data-testid="setup-next-button"]');
       await nextButton.click();
 
-      // Click toggle
-      const toggleButton = window.locator('[data-testid="toggle-api-key-visibility"]');
-      await toggleButton.click();
+      // Click the advanced options toggle (not the password visibility toggle)
+      const advancedToggle = window.locator('[data-testid="toggle-advanced-options"]');
+      await advancedToggle.click();
 
-      // API URL input should appear
+      // API URL input should appear when advanced options are expanded
       const apiUrlInput = window.locator('input[placeholder*="api.nuvanaapp.com"]');
       await expect(apiUrlInput).toBeVisible();
+    });
+
+    test('should toggle API key visibility when eye icon is clicked', async ({ window }) => {
+      // Navigate to API key step
+      const nextButton = window.locator('[data-testid="setup-next-button"]');
+      await nextButton.click();
+
+      // API key input should initially be password type (hidden)
+      const apiKeyInput = window.locator('[data-testid="api-key-input"]');
+      await expect(apiKeyInput).toHaveAttribute('type', 'password');
+
+      // Click the visibility toggle (Eye icon)
+      const visibilityToggle = window.locator('[data-testid="toggle-api-key-visibility"]');
+      await visibilityToggle.click();
+
+      // API key input should now be text type (visible)
+      await expect(apiKeyInput).toHaveAttribute('type', 'text');
+
+      // Click again to hide
+      await visibilityToggle.click();
+
+      // Should be password type again
+      await expect(apiKeyInput).toHaveAttribute('type', 'password');
     });
   });
 
