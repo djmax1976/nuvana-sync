@@ -259,6 +259,7 @@ describe('Pack Sync Security Tests', () => {
       });
 
       // Verify store_id was passed to the query
+      // Parameters: id, store_id, entity_type, entity_id, operation, payload, priority, max_attempts, created_at, sync_direction
       expect(mockRun).toHaveBeenCalledWith(
         expect.any(String),
         'store-123', // store_id
@@ -268,7 +269,8 @@ describe('Pack Sync Security Tests', () => {
         expect.any(String),
         expect.any(Number),
         expect.any(Number),
-        expect.any(String)
+        expect.any(String),
+        'PUSH' // sync_direction (default)
       );
     });
   });
