@@ -51,6 +51,10 @@ describe('SyncQueueDAL', () => {
         last_attempt_at: null,
         created_at: '2024-01-01T00:00:00.000Z',
         synced_at: null,
+        sync_direction: 'PUSH',
+        api_endpoint: null,
+        http_status: null,
+        response_body: null,
       };
 
       mockPrepare
@@ -115,6 +119,10 @@ describe('SyncQueueDAL', () => {
           last_attempt_at: null,
           created_at: '2024-01-01T00:00:00.000Z',
           synced_at: null,
+          sync_direction: 'PUSH',
+          api_endpoint: null,
+          http_status: null,
+          response_body: null,
         },
       ];
 
@@ -290,6 +298,39 @@ describe('SyncQueueDAL', () => {
         syncedToday: 50,
         oldestPending: '2024-01-01T00:00:00Z',
       });
+    });
+  });
+
+  describe('deleteAll', () => {
+    it('should delete all sync queue records and return count', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 150 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteAll();
+
+      expect(result).toBe(150);
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM sync_queue');
+      expect(mockRun).toHaveBeenCalledWith();
+    });
+
+    it('should return 0 when queue is empty', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteAll();
+
+      expect(result).toBe(0);
+    });
+
+    it('should use static query with no user input for security', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deleteAll();
+
+      // Verify static query with no parameters (SEC-006 compliant)
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM sync_queue');
+      expect(mockRun).toHaveBeenCalledWith();
     });
   });
 });

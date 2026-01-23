@@ -249,6 +249,58 @@ export class StoresDAL extends BaseDAL<Store> {
 
     return this.create(data);
   }
+
+  /**
+   * Delete a specific store by ID
+   * CASCADE: Automatically deletes related users, sync_queue records via FK constraints
+   * SEC-006: Parameterized DELETE
+   * SEC-017: Only called during authorized FULL_RESET operations
+   *
+   * @param storeId - Store ID to delete
+   * @returns true if store was deleted, false if not found
+   */
+  deleteStore(storeId: string): boolean {
+    // SEC-006: Parameterized DELETE query
+    const stmt = this.db.prepare('DELETE FROM stores WHERE store_id = ?');
+    const result = stmt.run(storeId);
+
+    if (result.changes > 0) {
+      log.info('Store deleted', {
+        storeId,
+        cascadeTriggered: true,
+        affectedTables: ['users', 'sync_queue'],
+      });
+      return true;
+    }
+
+    log.warn('Store not found for deletion', { storeId });
+    return false;
+  }
+
+  /**
+   * Delete all stores (for FULL_RESET)
+   * CASCADE: Automatically deletes ALL related users, sync_queue records via FK constraints
+   * SEC-006: Static DELETE with no user input (safe pattern)
+   * SEC-017: Only called during authorized FULL_RESET operations
+   *
+   * WARNING: This is a destructive operation that removes ALL store data.
+   * Ensure caller has proper authorization before invoking.
+   *
+   * @returns Number of stores deleted
+   */
+  deleteAllStores(): number {
+    // SEC-006: Static query with no user input - safe pattern
+    const stmt = this.db.prepare('DELETE FROM stores');
+    const result = stmt.run();
+
+    log.warn('All stores deleted for FULL_RESET', {
+      deletedCount: result.changes,
+      cascadeTriggered: true,
+      affectedTables: ['users', 'sync_queue'],
+    });
+
+    return result.changes;
+  }
 }
 
 // ============================================================================

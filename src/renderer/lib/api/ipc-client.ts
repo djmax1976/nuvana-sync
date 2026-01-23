@@ -472,6 +472,155 @@ class IPCClient {
       case 'employees:reactivate':
         return { success: true, message: 'Employee reactivated successfully' } as T;
 
+      // Sync Activity (Dev Monitor)
+      case 'sync:getActivity':
+        return {
+          queued: [
+            {
+              id: 'queue-1',
+              entity_type: 'pack',
+              entity_id: 'pack-123',
+              operation: 'ACTIVATE',
+              status: 'queued',
+              sync_attempts: 0,
+              max_attempts: 5,
+              last_sync_error: null,
+              last_attempt_at: null,
+              created_at: new Date(Date.now() - 60000).toISOString(),
+              synced_at: null,
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/activate',
+              http_status: null,
+              response_body: null,
+              summary: { pack_number: 'PKG0001234', game_code: '1001', status: 'ACTIVE' },
+            },
+            {
+              id: 'queue-2',
+              entity_type: 'pack',
+              entity_id: 'pack-456',
+              operation: 'UPDATE',
+              status: 'failed',
+              sync_attempts: 5,
+              max_attempts: 5,
+              last_sync_error: '404 GAME_NOT_FOUND - Game code 1868 not found in cloud',
+              last_attempt_at: new Date(Date.now() - 30000).toISOString(),
+              created_at: new Date(Date.now() - 120000).toISOString(),
+              synced_at: null,
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/deplete',
+              http_status: 404,
+              response_body: '{"code":"GAME_NOT_FOUND","message":"Game code 1868 not found"}',
+              summary: { pack_number: 'PKG0005678', game_code: '2002', status: 'DEPLETED' },
+            },
+          ],
+          recentlySynced: [
+            {
+              id: 'synced-1',
+              entity_type: 'pack',
+              entity_id: 'pack-789',
+              operation: 'CREATE',
+              status: 'synced',
+              sync_attempts: 1,
+              max_attempts: 5,
+              last_sync_error: null,
+              last_attempt_at: new Date(Date.now() - 240000).toISOString(),
+              created_at: new Date(Date.now() - 300000).toISOString(),
+              synced_at: new Date(Date.now() - 240000).toISOString(),
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/receive',
+              http_status: 200,
+              response_body: null,
+              summary: { pack_number: 'PKG0009012', game_code: '3003', status: 'RECEIVED' },
+            },
+          ],
+          stats: {
+            pendingCount: 2,
+            failedCount: 1,
+            syncedTodayCount: 15,
+          },
+        } as T;
+      case 'sync:getActivityPaginated':
+        return {
+          items: [
+            {
+              id: 'queue-1',
+              entity_type: 'pack',
+              entity_id: 'pack-123',
+              operation: 'ACTIVATE',
+              status: 'queued',
+              sync_attempts: 0,
+              max_attempts: 5,
+              last_sync_error: null,
+              last_attempt_at: null,
+              created_at: new Date(Date.now() - 60000).toISOString(),
+              synced_at: null,
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/activate',
+              http_status: null,
+              response_body: null,
+              summary: { pack_number: 'PKG0001234', game_code: '1001', status: 'ACTIVE' },
+            },
+            {
+              id: 'queue-2',
+              entity_type: 'pack',
+              entity_id: 'pack-456',
+              operation: 'UPDATE',
+              status: 'failed',
+              sync_attempts: 5,
+              max_attempts: 5,
+              last_sync_error: '404 GAME_NOT_FOUND - Game code 1868 not found in cloud',
+              last_attempt_at: new Date(Date.now() - 30000).toISOString(),
+              created_at: new Date(Date.now() - 120000).toISOString(),
+              synced_at: null,
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/deplete',
+              http_status: 404,
+              response_body: '{"code":"GAME_NOT_FOUND","message":"Game code 1868 not found"}',
+              summary: { pack_number: 'PKG0005678', game_code: '2002', status: 'DEPLETED' },
+            },
+            {
+              id: 'synced-1',
+              entity_type: 'pack',
+              entity_id: 'pack-789',
+              operation: 'CREATE',
+              status: 'synced',
+              sync_attempts: 1,
+              max_attempts: 5,
+              last_sync_error: null,
+              last_attempt_at: new Date(Date.now() - 240000).toISOString(),
+              created_at: new Date(Date.now() - 300000).toISOString(),
+              synced_at: new Date(Date.now() - 240000).toISOString(),
+              sync_direction: 'PUSH',
+              api_endpoint: '/api/v1/sync/lottery/packs/receive',
+              http_status: 200,
+              response_body: null,
+              summary: { pack_number: 'PKG0009012', game_code: '3003', status: 'RECEIVED' },
+            },
+          ],
+          total: 3,
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+          stats: {
+            pending: 1,
+            failed: 1,
+            syncedToday: 15,
+            syncedTotal: 150,
+            oldestPending: new Date(Date.now() - 120000).toISOString(),
+            newestSync: new Date(Date.now() - 240000).toISOString(),
+            byEntityType: [{ entity_type: 'pack', pending: 1, failed: 1, synced: 1 }],
+            byOperation: [
+              { operation: 'CREATE', pending: 0, failed: 0, synced: 1 },
+              { operation: 'UPDATE', pending: 0, failed: 1, synced: 0 },
+              { operation: 'ACTIVATE', pending: 1, failed: 0, synced: 0 },
+            ],
+          },
+        } as T;
+      case 'sync:retryItem':
+        return { success: true, retriedId: (params as { id: string }).id } as T;
+      case 'sync:deleteItem':
+        return { success: true, deletedId: (params as { id: string }).id } as T;
+
       default:
         console.warn(`[MockIPC] Unknown channel: ${channel}`);
         return {} as T;
@@ -715,6 +864,19 @@ export const syncAPI = {
     ipcClient.invoke<{ clearedCount: number }>('sync:clearProcessedFiles', params),
   reprocessXmlFiles: (params?: ReprocessXmlFilesParams) =>
     ipcClient.invoke<ReprocessXmlFilesResponse>('sync:reprocessXmlFiles', params),
+  /** Get sync activity for dev monitor panel */
+  getActivity: (params?: SyncActivityParams) =>
+    ipcClient.invoke<SyncActivityResponse>('sync:getActivity', params),
+  /** Get paginated sync activity for full Sync Monitor page */
+  getActivityPaginated: (params?: SyncActivityPaginatedParams) =>
+    ipcClient.invoke<SyncActivityPaginatedResponse>('sync:getActivityPaginated', params),
+  /** Retry a specific failed sync item */
+  retryItem: (id: string) => ipcClient.invoke<SyncRetryItemResponse>('sync:retryItem', { id }),
+  /** Delete a specific sync item from the queue */
+  deleteItem: (id: string) => ipcClient.invoke<SyncDeleteItemResponse>('sync:deleteItem', { id }),
+  /** Force sync games from cloud (bypasses rate limit) */
+  syncGames: () =>
+    ipcClient.invoke<{ pulled: number; conflicts: number; errors: string[] }>('sync:syncGames'),
 };
 
 // ============================================================================
@@ -1058,6 +1220,99 @@ export interface ReprocessXmlFilesParams {
 export interface ReprocessXmlFilesResponse {
   clearedCount: number;
   message: string;
+}
+
+// Sync Activity Types (Development/Debug Feature)
+export type SyncOperation = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE';
+export type SyncDirection = 'PUSH' | 'PULL';
+
+/**
+ * Sync activity item for UI display
+ * API-008: Only safe, non-sensitive fields exposed
+ * v040: Added API context fields for troubleshooting
+ */
+export interface SyncActivityItem {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  operation: SyncOperation;
+  status: 'queued' | 'failed' | 'synced';
+  sync_attempts: number;
+  max_attempts: number;
+  last_sync_error: string | null;
+  last_attempt_at: string | null;
+  created_at: string;
+  synced_at: string | null;
+  /** v040: Sync direction - PUSH to cloud or PULL from cloud */
+  sync_direction: SyncDirection;
+  /** v040: API endpoint that was called */
+  api_endpoint: string | null;
+  /** v040: HTTP response status code */
+  http_status: number | null;
+  /** v040: Truncated response body for error diagnosis */
+  response_body: string | null;
+  /** Parsed summary from payload - only safe display fields */
+  summary: {
+    pack_number?: string;
+    game_code?: string;
+    status?: string;
+  } | null;
+}
+
+export interface SyncActivityParams {
+  queuedLimit?: number;
+  syncedLimit?: number;
+}
+
+export interface SyncActivityResponse {
+  queued: SyncActivityItem[];
+  recentlySynced: SyncActivityItem[];
+  stats: {
+    pendingCount: number;
+    failedCount: number;
+    syncedTodayCount: number;
+  };
+}
+
+// Paginated Sync Activity Types (Full Sync Monitor Page)
+export type SyncStatusFilter = 'all' | 'queued' | 'failed' | 'synced';
+
+export interface SyncActivityPaginatedParams {
+  status?: SyncStatusFilter;
+  entityType?: string;
+  operation?: SyncOperation;
+  limit?: number;
+  offset?: number;
+}
+
+export interface SyncDetailedStats {
+  pending: number;
+  failed: number;
+  syncedToday: number;
+  syncedTotal: number;
+  oldestPending: string | null;
+  newestSync: string | null;
+  byEntityType: Array<{ entity_type: string; pending: number; failed: number; synced: number }>;
+  byOperation: Array<{ operation: string; pending: number; failed: number; synced: number }>;
+}
+
+export interface SyncActivityPaginatedResponse {
+  items: SyncActivityItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+  stats: SyncDetailedStats;
+}
+
+export interface SyncRetryItemResponse {
+  success: boolean;
+  retriedId: string;
+}
+
+export interface SyncDeleteItemResponse {
+  success: boolean;
+  deletedId: string;
 }
 
 // Terminal/Register Types

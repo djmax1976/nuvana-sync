@@ -23,6 +23,11 @@ import { createLogger } from '../utils/logger';
 export type SyncOperation = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE';
 
 /**
+ * Sync direction - whether data is being sent to or received from cloud
+ */
+export type SyncDirection = 'PUSH' | 'PULL';
+
+/**
  * Sync queue item entity
  */
 export interface SyncQueueItem extends StoreEntity {
@@ -40,6 +45,11 @@ export interface SyncQueueItem extends StoreEntity {
   last_attempt_at: string | null;
   created_at: string;
   synced_at: string | null;
+  // API call context fields (v040 migration)
+  sync_direction: SyncDirection;
+  api_endpoint: string | null;
+  http_status: number | null;
+  response_body: string | null;
 }
 
 /**
@@ -52,6 +62,16 @@ export interface CreateSyncQueueItemData {
   operation: SyncOperation;
   payload: object;
   priority?: number;
+  sync_direction?: SyncDirection;
+}
+
+/**
+ * API call context for updating sync items with response details
+ */
+export interface SyncApiContext {
+  api_endpoint: string;
+  http_status: number;
+  response_body?: string;
 }
 
 /**
@@ -60,6 +80,76 @@ export interface CreateSyncQueueItemData {
 export interface SyncBatch {
   items: SyncQueueItem[];
   totalPending: number;
+}
+
+/**
+ * Sync activity item for UI display (Development/Debug Feature)
+ * API-008: Only safe, non-sensitive fields exposed
+ */
+export interface SyncActivityItem {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  operation: SyncOperation;
+  status: 'queued' | 'failed' | 'synced';
+  sync_attempts: number;
+  max_attempts: number;
+  last_sync_error: string | null;
+  last_attempt_at: string | null;
+  created_at: string;
+  synced_at: string | null;
+  /** Sync direction - PUSH to cloud or PULL from cloud */
+  sync_direction: SyncDirection;
+  /** API endpoint that was called */
+  api_endpoint: string | null;
+  /** HTTP response status code */
+  http_status: number | null;
+  /** Truncated response body for error diagnosis */
+  response_body: string | null;
+  /** Parsed summary from payload - only safe display fields */
+  summary: {
+    pack_number?: string;
+    game_code?: string;
+    status?: string;
+  } | null;
+}
+
+/**
+ * Sync activity list filter parameters for paginated queries
+ * API-001: All parameters validated and bounded in implementation
+ */
+export interface SyncActivityListParams {
+  status?: 'all' | 'queued' | 'failed' | 'synced';
+  entityType?: string;
+  operation?: SyncOperation;
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Paginated sync activity response
+ * API-008: Only safe display fields returned
+ */
+export interface SyncActivityListResponse {
+  items: SyncActivityItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/**
+ * Detailed sync statistics including breakdowns
+ */
+export interface SyncDetailedStats {
+  pending: number;
+  failed: number;
+  syncedToday: number;
+  syncedTotal: number;
+  oldestPending: string | null;
+  newestSync: string | null;
+  byEntityType: Array<{ entity_type: string; pending: number; failed: number; synced: number }>;
+  byOperation: Array<{ operation: string; pending: number; failed: number; synced: number }>;
 }
 
 // ============================================================================
@@ -108,7 +198,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
   /**
    * Enqueue a new item for sync
-   * SEC-006: Parameterized INSERT
+   * SEC-006: Parameterized INSERT with validated direction
    *
    * @param data - Item to enqueue
    * @returns Created queue item
@@ -117,12 +207,19 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const id = this.generateId();
     const now = this.now();
 
+    // SEC-006: Validate sync_direction against allowlist
+    const ALLOWED_DIRECTIONS: SyncDirection[] = ['PUSH', 'PULL'];
+    const direction: SyncDirection =
+      data.sync_direction && ALLOWED_DIRECTIONS.includes(data.sync_direction)
+        ? data.sync_direction
+        : 'PUSH';
+
     const stmt = this.db.prepare(`
       INSERT INTO sync_queue (
         id, store_id, entity_type, entity_id, operation,
         payload, priority, synced, sync_attempts, max_attempts,
-        created_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?)
+        created_at, sync_direction
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
     `);
 
     stmt.run(
@@ -134,7 +231,8 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       JSON.stringify(data.payload),
       data.priority || 0,
       DEFAULT_MAX_ATTEMPTS,
-      now
+      now,
+      direction
     );
 
     log.debug('Sync item enqueued', {
@@ -142,6 +240,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       entityType: data.entity_type,
       entityId: data.entity_id,
       operation: data.operation,
+      direction,
     });
 
     const created = this.findById(id);
@@ -209,24 +308,46 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
-   * Mark an item as successfully synced
+   * Mark an item as successfully synced with optional API context
    * SEC-006: Parameterized UPDATE
+   * API-008: Response body truncated for storage safety
    *
    * @param id - Queue item ID
+   * @param apiContext - Optional API call context for troubleshooting
    */
-  markSynced(id: string): void {
+  markSynced(id: string, apiContext?: SyncApiContext): void {
     const now = this.now();
+
+    // API-008: Truncate response body to avoid storing excessive data
+    const truncatedResponseBody = apiContext?.response_body
+      ? apiContext.response_body.substring(0, 500)
+      : null;
 
     const stmt = this.db.prepare(`
       UPDATE sync_queue SET
         synced = 1,
-        synced_at = ?
+        synced_at = ?,
+        last_attempt_at = ?,
+        api_endpoint = COALESCE(?, api_endpoint),
+        http_status = COALESCE(?, http_status),
+        response_body = COALESCE(?, response_body)
       WHERE id = ?
     `);
 
-    stmt.run(now, id);
+    stmt.run(
+      now,
+      now,
+      apiContext?.api_endpoint || null,
+      apiContext?.http_status || null,
+      truncatedResponseBody,
+      id
+    );
 
-    log.debug('Sync item marked as synced', { id });
+    log.debug('Sync item marked as synced', {
+      id,
+      apiEndpoint: apiContext?.api_endpoint,
+      httpStatus: apiContext?.http_status,
+    });
   }
 
   /**
@@ -254,26 +375,48 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
-   * Increment attempt count and record error
+   * Increment attempt count and record error with API context
    * SEC-006: Parameterized UPDATE
+   * API-008: Response body truncated to 500 chars for storage safety
    *
    * @param id - Queue item ID
    * @param error - Error message
+   * @param apiContext - Optional API call context for troubleshooting
    */
-  incrementAttempts(id: string, error: string): void {
+  incrementAttempts(id: string, error: string, apiContext?: SyncApiContext): void {
     const now = this.now();
+
+    // API-008: Truncate response body to avoid storing excessive data
+    const truncatedResponseBody = apiContext?.response_body
+      ? apiContext.response_body.substring(0, 500)
+      : null;
 
     const stmt = this.db.prepare(`
       UPDATE sync_queue SET
         sync_attempts = sync_attempts + 1,
         last_sync_error = ?,
-        last_attempt_at = ?
+        last_attempt_at = ?,
+        api_endpoint = COALESCE(?, api_endpoint),
+        http_status = COALESCE(?, http_status),
+        response_body = COALESCE(?, response_body)
       WHERE id = ?
     `);
 
-    stmt.run(error, now, id);
+    stmt.run(
+      error,
+      now,
+      apiContext?.api_endpoint || null,
+      apiContext?.http_status || null,
+      truncatedResponseBody,
+      id
+    );
 
-    log.debug('Sync attempt incremented', { id, error });
+    log.debug('Sync attempt incremented', {
+      id,
+      error,
+      apiEndpoint: apiContext?.api_endpoint,
+      httpStatus: apiContext?.http_status,
+    });
   }
 
   /**
@@ -445,6 +588,29 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Delete a specific sync queue item by ID
+   * SEC-006: Parameterized DELETE
+   *
+   * @param id - Queue item ID
+   * @returns true if item was deleted, false if not found
+   */
+  deleteById(id: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE id = ?
+    `);
+
+    const result = stmt.run(id);
+
+    if (result.changes > 0) {
+      log.info('Sync queue item deleted', { id });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
    * Check if an entity has pending sync
    *
    * @param entityType - Entity type
@@ -553,6 +719,414 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     });
 
     return result.changes;
+  }
+
+  /**
+   * Delete ALL sync queue records (for FULL_RESET)
+   * SEC-006: Static DELETE with no user input (safe pattern)
+   * SEC-017: Only called during authorized FULL_RESET operations
+   *
+   * WARNING: This is a destructive operation that removes ALL sync queue data.
+   * This serves as a safety net for FULL_RESET in case CASCADE deletion
+   * from stores table does not trigger properly.
+   *
+   * @returns Number of records deleted
+   */
+  deleteAll(): number {
+    // SEC-006: Static query with no user input - safe pattern
+    const stmt = this.db.prepare('DELETE FROM sync_queue');
+    const result = stmt.run();
+
+    log.warn('All sync queue records deleted for FULL_RESET', {
+      deletedCount: result.changes,
+    });
+
+    return result.changes;
+  }
+
+  // ==========================================================================
+  // Sync Activity Monitor Methods (Development/Debug Feature)
+  // ==========================================================================
+
+  /**
+   * Get queued items for sync activity monitor
+   * Shows items currently waiting to be synced (pending + failed)
+   *
+   * SEC-006: Parameterized query
+   * DB-006: Store-scoped query
+   * API-008: Returns only safe display fields, no sensitive payload data
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param limit - Maximum items to return (bounded to 50)
+   * @returns Array of sync activity items
+   */
+  getQueuedItemsForActivity(storeId: string, limit: number = 20): SyncActivityItem[] {
+    const safeLimit = Math.min(Math.max(1, limit), 50);
+
+    const stmt = this.db.prepare(`
+      SELECT id, entity_type, entity_id, operation, payload,
+             sync_attempts, max_attempts, last_sync_error, last_attempt_at,
+             created_at, synced_at, sync_direction, api_endpoint, http_status, response_body
+      FROM sync_queue
+      WHERE store_id = ? AND synced = 0
+      ORDER BY priority DESC, created_at DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(storeId, safeLimit) as Array<{
+      id: string;
+      entity_type: string;
+      entity_id: string;
+      operation: SyncOperation;
+      payload: string;
+      sync_attempts: number;
+      max_attempts: number;
+      last_sync_error: string | null;
+      last_attempt_at: string | null;
+      created_at: string;
+      synced_at: string | null;
+      sync_direction: SyncDirection;
+      api_endpoint: string | null;
+      http_status: number | null;
+      response_body: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      operation: row.operation,
+      status: (row.sync_attempts >= row.max_attempts ? 'failed' : 'queued') as 'failed' | 'queued',
+      sync_attempts: row.sync_attempts,
+      max_attempts: row.max_attempts,
+      last_sync_error: row.last_sync_error ? row.last_sync_error.substring(0, 100) : null,
+      last_attempt_at: row.last_attempt_at,
+      created_at: row.created_at,
+      synced_at: row.synced_at,
+      sync_direction: row.sync_direction || 'PUSH',
+      api_endpoint: row.api_endpoint,
+      http_status: row.http_status,
+      response_body: row.response_body,
+      summary: this.extractPayloadSummary(row.payload),
+    }));
+  }
+
+  /**
+   * Get recently synced items for sync activity monitor
+   * Shows last N items that completed sync successfully
+   *
+   * SEC-006: Parameterized query
+   * DB-006: Store-scoped query
+   * API-008: Returns only safe display fields
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param limit - Maximum items to return (bounded to 10)
+   * @returns Array of recently synced items
+   */
+  getRecentlySyncedForActivity(storeId: string, limit: number = 10): SyncActivityItem[] {
+    const safeLimit = Math.min(Math.max(1, limit), 10);
+
+    const stmt = this.db.prepare(`
+      SELECT id, entity_type, entity_id, operation, payload,
+             sync_attempts, max_attempts, last_sync_error, last_attempt_at,
+             created_at, synced_at, sync_direction, api_endpoint, http_status, response_body
+      FROM sync_queue
+      WHERE store_id = ? AND synced = 1
+      ORDER BY synced_at DESC
+      LIMIT ?
+    `);
+
+    const rows = stmt.all(storeId, safeLimit) as Array<{
+      id: string;
+      entity_type: string;
+      entity_id: string;
+      operation: SyncOperation;
+      payload: string;
+      sync_attempts: number;
+      max_attempts: number;
+      last_sync_error: string | null;
+      last_attempt_at: string | null;
+      created_at: string;
+      synced_at: string | null;
+      sync_direction: SyncDirection;
+      api_endpoint: string | null;
+      http_status: number | null;
+      response_body: string | null;
+    }>;
+
+    return rows.map((row) => ({
+      id: row.id,
+      entity_type: row.entity_type,
+      entity_id: row.entity_id,
+      operation: row.operation,
+      status: 'synced' as const,
+      sync_attempts: row.sync_attempts,
+      max_attempts: row.max_attempts,
+      last_sync_error: null, // Synced items don't need error display
+      last_attempt_at: row.last_attempt_at,
+      created_at: row.created_at,
+      synced_at: row.synced_at,
+      sync_direction: row.sync_direction || 'PUSH',
+      api_endpoint: row.api_endpoint,
+      http_status: row.http_status,
+      response_body: row.response_body,
+      summary: this.extractPayloadSummary(row.payload),
+    }));
+  }
+
+  /**
+   * Extract safe summary fields from payload for UI display
+   * API-008: Only whitelisted fields extracted, no sensitive data exposed
+   *
+   * @param payload - JSON payload string
+   * @returns Safe summary object or null on parse failure
+   */
+  private extractPayloadSummary(
+    payload: string
+  ): { pack_number?: string; game_code?: string; status?: string } | null {
+    try {
+      const parsed = JSON.parse(payload);
+
+      // API-008: Only extract safe display fields
+      return {
+        pack_number: typeof parsed.pack_number === 'string' ? parsed.pack_number : undefined,
+        game_code: typeof parsed.game_code === 'string' ? parsed.game_code : undefined,
+        status: typeof parsed.status === 'string' ? parsed.status : undefined,
+      };
+    } catch {
+      // Log parse failure but don't expose internal error
+      log.debug('Failed to parse payload for activity summary', {
+        payloadLength: payload.length,
+      });
+      return null;
+    }
+  }
+
+  // ==========================================================================
+  // Sync Monitor Page Methods (Full Page with Pagination)
+  // ==========================================================================
+
+  /**
+   * Get paginated sync activity items for the full Sync Monitor page
+   * Supports filtering by status, entity type, and operation
+   *
+   * SEC-006: Parameterized queries with validated identifiers
+   * DB-006: Store-scoped queries for tenant isolation
+   * API-001: Input validation with bounds checking
+   * API-008: Only safe display fields returned, no sensitive payload data
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param params - Filter and pagination parameters
+   * @returns Paginated sync activity items
+   */
+  getActivityPaginated(
+    storeId: string,
+    params: SyncActivityListParams = {}
+  ): SyncActivityListResponse {
+    // API-001: Validate and bound pagination parameters
+    const limit = Math.min(Math.max(1, params.limit || 50), 100);
+    const offset = Math.max(0, params.offset || 0);
+    const status = params.status || 'all';
+
+    // SEC-006: Validate entity type against allowlist to prevent injection
+    const ALLOWED_ENTITY_TYPES = ['pack', 'game', 'bin', 'shift', 'user'];
+    const entityType =
+      params.entityType && ALLOWED_ENTITY_TYPES.includes(params.entityType)
+        ? params.entityType
+        : undefined;
+
+    // SEC-006: Validate operation against allowlist
+    const ALLOWED_OPERATIONS: SyncOperation[] = ['CREATE', 'UPDATE', 'DELETE', 'ACTIVATE'];
+    const operation =
+      params.operation && ALLOWED_OPERATIONS.includes(params.operation)
+        ? params.operation
+        : undefined;
+
+    // Build WHERE clause based on filters
+    const conditions: string[] = ['store_id = ?'];
+    const queryParams: (string | number)[] = [storeId];
+
+    // Status filter
+    if (status === 'queued') {
+      conditions.push('synced = 0 AND sync_attempts < max_attempts');
+    } else if (status === 'failed') {
+      conditions.push('synced = 0 AND sync_attempts >= max_attempts');
+    } else if (status === 'synced') {
+      conditions.push('synced = 1');
+    }
+    // 'all' has no additional condition
+
+    // Entity type filter
+    if (entityType) {
+      conditions.push('entity_type = ?');
+      queryParams.push(entityType);
+    }
+
+    // Operation filter
+    if (operation) {
+      conditions.push('operation = ?');
+      queryParams.push(operation);
+    }
+
+    const whereClause = conditions.join(' AND ');
+
+    // SEC-006: Parameterized count query
+    const countStmt = this.db.prepare(`
+      SELECT COUNT(*) as total FROM sync_queue WHERE ${whereClause}
+    `);
+    const countResult = countStmt.get(...queryParams) as { total: number };
+    const total = countResult.total;
+
+    // SEC-006: Parameterized data query with pagination
+    // Includes API context fields for troubleshooting (v040 migration)
+    const dataStmt = this.db.prepare(`
+      SELECT id, entity_type, entity_id, operation, payload,
+             sync_attempts, max_attempts, last_sync_error,
+             last_attempt_at, created_at, synced_at, synced,
+             sync_direction, api_endpoint, http_status, response_body
+      FROM sync_queue
+      WHERE ${whereClause}
+      ORDER BY
+        CASE WHEN synced = 0 THEN 0 ELSE 1 END,
+        CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 0 ELSE 1 END,
+        created_at DESC
+      LIMIT ? OFFSET ?
+    `);
+
+    const rows = dataStmt.all(...queryParams, limit, offset) as Array<{
+      id: string;
+      entity_type: string;
+      entity_id: string;
+      operation: SyncOperation;
+      payload: string;
+      sync_attempts: number;
+      max_attempts: number;
+      last_sync_error: string | null;
+      last_attempt_at: string | null;
+      created_at: string;
+      synced_at: string | null;
+      synced: number;
+      sync_direction: SyncDirection;
+      api_endpoint: string | null;
+      http_status: number | null;
+      response_body: string | null;
+    }>;
+
+    // API-008: Transform to safe display format
+    const items: SyncActivityItem[] = rows.map((row) => {
+      let itemStatus: 'queued' | 'failed' | 'synced';
+      if (row.synced === 1) {
+        itemStatus = 'synced';
+      } else if (row.sync_attempts >= row.max_attempts) {
+        itemStatus = 'failed';
+      } else {
+        itemStatus = 'queued';
+      }
+
+      return {
+        id: row.id,
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
+        operation: row.operation,
+        status: itemStatus,
+        sync_attempts: row.sync_attempts,
+        max_attempts: row.max_attempts,
+        last_sync_error: row.last_sync_error ? row.last_sync_error.substring(0, 200) : null,
+        last_attempt_at: row.last_attempt_at,
+        created_at: row.created_at,
+        synced_at: row.synced_at,
+        // API context fields (v040)
+        sync_direction: row.sync_direction || 'PUSH',
+        api_endpoint: row.api_endpoint,
+        http_status: row.http_status,
+        response_body: row.response_body,
+        summary: this.extractPayloadSummary(row.payload),
+      };
+    });
+
+    return {
+      items,
+      total,
+      limit,
+      offset,
+      hasMore: offset + items.length < total,
+    };
+  }
+
+  /**
+   * Get detailed sync statistics for the Sync Monitor page
+   * Includes breakdown by entity type and operation
+   *
+   * SEC-006: Parameterized queries
+   * DB-006: Store-scoped queries
+   *
+   * @param storeId - Store identifier
+   * @returns Detailed sync statistics
+   */
+  getDetailedStats(storeId: string): SyncDetailedStats {
+    const basicStats = this.getStats(storeId);
+
+    // Total synced count
+    const syncedTotalStmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM sync_queue
+      WHERE store_id = ? AND synced = 1
+    `);
+    const syncedTotalResult = syncedTotalStmt.get(storeId) as { count: number };
+
+    // Newest sync timestamp
+    const newestSyncStmt = this.db.prepare(`
+      SELECT synced_at FROM sync_queue
+      WHERE store_id = ? AND synced = 1
+      ORDER BY synced_at DESC
+      LIMIT 1
+    `);
+    const newestSyncResult = newestSyncStmt.get(storeId) as { synced_at: string } | undefined;
+
+    // Breakdown by entity type
+    const byEntityTypeStmt = this.db.prepare(`
+      SELECT
+        entity_type,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
+      FROM sync_queue
+      WHERE store_id = ?
+      GROUP BY entity_type
+      ORDER BY entity_type
+    `);
+    const byEntityType = byEntityTypeStmt.all(storeId) as Array<{
+      entity_type: string;
+      pending: number;
+      failed: number;
+      synced: number;
+    }>;
+
+    // Breakdown by operation
+    const byOperationStmt = this.db.prepare(`
+      SELECT
+        operation,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
+      FROM sync_queue
+      WHERE store_id = ?
+      GROUP BY operation
+      ORDER BY operation
+    `);
+    const byOperation = byOperationStmt.all(storeId) as Array<{
+      operation: string;
+      pending: number;
+      failed: number;
+      synced: number;
+    }>;
+
+    return {
+      ...basicStats,
+      syncedTotal: syncedTotalResult.count,
+      newestSync: newestSyncResult?.synced_at || null,
+      byEntityType,
+      byOperation,
+    };
   }
 
   /**

@@ -21,6 +21,7 @@ import {
   Users,
   CalendarClock,
   Receipt,
+  RefreshCw,
 } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
@@ -57,6 +58,7 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const isShiftsActive = pathname === '/shifts' || pathname.startsWith('/shifts/');
   const isTransactionsActive = pathname === '/transactions';
   const isEmployeesActive = pathname === '/employees';
+  const isSyncActive = pathname === '/sync';
 
   return (
     <div
@@ -210,6 +212,22 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
         >
           <Users className="h-5 w-5" />
           <span>Employees</span>
+        </Link>
+
+        {/* Sync Monitor Link */}
+        <Link
+          to="/sync"
+          data-testid="sync-link"
+          onClick={() => onNavigate?.()}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            isSyncActive
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          )}
+        >
+          <RefreshCw className="h-5 w-5" />
+          <span>Sync Monitor</span>
         </Link>
       </nav>
 

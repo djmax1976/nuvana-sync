@@ -2623,12 +2623,17 @@ export class CloudApiService {
    * Requires a sync session (like all sync endpoints).
    * Games are state-scoped, so state_id is the primary filter.
    *
+   * Sync behavior:
+   * - Delta sync (since provided): Returns all games changed since timestamp, including INACTIVE
+   * - Full sync (since not provided): Requires include_inactive=true to get all game statuses
+   *
    * @param stateId - State ID for scoping (games are state-level)
-   * @param since - Optional timestamp for delta sync
-   * @returns Cloud games response
+   * @param since - Optional ISO timestamp for delta sync (from sync_timestamps table)
+   * @returns Cloud games response containing all games (active and inactive)
    */
   async pullLotteryGames(stateId: string | null, since?: string): Promise<CloudGamesResponse> {
-    log.debug('Pulling lottery games from cloud', { stateId, since: since || 'full' });
+    const syncMode = since ? 'delta' : 'full';
+    log.debug('Pulling lottery games from cloud', { stateId, since: since || 'none', syncMode });
 
     // Start a sync session (required by API)
     const session = await this.startSyncSession();
@@ -2645,7 +2650,12 @@ export class CloudApiService {
         params.set('state_id', stateId);
       }
       if (since) {
+        // Delta sync: API returns all changed games (including INACTIVE) since timestamp
         params.set('since', since);
+      } else {
+        // Full sync: Must explicitly request inactive games to receive all statuses
+        // Without this, API only returns ACTIVE games and local DB never learns about INACTIVE
+        params.set('include_inactive', 'true');
       }
 
       const path = `/api/v1/sync/lottery/games?${params.toString()}`;

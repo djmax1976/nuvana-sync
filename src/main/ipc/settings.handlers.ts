@@ -29,6 +29,8 @@ import {
   runMigrations,
 } from '../services/migration.service';
 import { eventBus, MainEvents } from '../utils/event-bus';
+import { storesDAL } from '../dal/stores.dal';
+import { syncQueueDAL } from '../dal/sync-queue.dal';
 
 // ============================================================================
 // Logger
@@ -811,10 +813,43 @@ registerHandler(
       let databaseDeleted = false;
 
       if (resetType === 'FULL_RESET') {
-        // For FULL_RESET: Delete the entire database file
+        // Step 2a: Clear all data from database BEFORE deletion (belt-and-suspenders safety net)
+        // This ensures data is cleared even if file deletion fails or CASCADE doesn't trigger
+        try {
+          const db = getDatabase();
+          if (db) {
+            // SEC-006: Use DAL methods with parameterized queries (no SQL injection risk)
+            // Explicitly clear sync_queue first (in case CASCADE fails)
+            const syncQueueDeleted = syncQueueDAL.deleteAll();
+            log.info('Sync queue cleared before database deletion', {
+              deletedCount: syncQueueDeleted,
+              auditReferenceId,
+            });
+
+            // Delete all stores (triggers CASCADE to users table via FK constraint)
+            const storesDeleted = storesDAL.deleteAllStores();
+            log.info('Stores cleared before database deletion', {
+              deletedCount: storesDeleted,
+              cascadeTriggered: true,
+              affectedTables: ['users', 'sync_queue'],
+              auditReferenceId,
+            });
+
+            tablesCleared = syncQueueDeleted + storesDeleted;
+            clearedTables.push('sync_queue', 'stores');
+          }
+        } catch (clearError) {
+          // API-003: Log error server-side but proceed with file deletion
+          log.warn('Pre-deletion table clearing failed, proceeding with file deletion', {
+            error: clearError instanceof Error ? clearError.message : 'Unknown error',
+            auditReferenceId,
+          });
+        }
+
+        // Step 2b: Close database and delete file
         try {
           const dbPath = getDbPath();
-          log.info('Deleting database file for FULL_RESET', { dbPath });
+          log.info('Deleting database file for FULL_RESET', { dbPath, auditReferenceId });
 
           // Close database connection first
           closeDatabase();
@@ -823,10 +858,10 @@ registerHandler(
           if (fs.existsSync(dbPath)) {
             fs.unlinkSync(dbPath);
             databaseDeleted = true;
-            log.info('Database file deleted', { dbPath });
+            log.info('Database file deleted', { dbPath, auditReferenceId });
           }
 
-          // Also delete WAL and SHM files if they exist
+          // Also delete WAL and SHM files if they exist (SQLite journal files)
           const walPath = dbPath + '-wal';
           const shmPath = dbPath + '-shm';
           if (fs.existsSync(walPath)) {
@@ -838,8 +873,10 @@ registerHandler(
             log.debug('SHM file deleted');
           }
         } catch (dbDeleteError) {
+          // API-003: Log detailed error server-side
           log.error('Failed to delete database file', {
             error: dbDeleteError instanceof Error ? dbDeleteError.message : 'Unknown error',
+            auditReferenceId,
           });
           failedTables.push('DATABASE_FILE');
         }
@@ -886,39 +923,53 @@ registerHandler(
         });
       }
 
-      // Step 3: Delete or clear settings file
+      // Step 3: Delete or clear config files
       let settingsDeleted = false;
+      let licenseDeleted = false;
+
       if (resetType === 'FULL_RESET') {
-        // For FULL_RESET: Delete the nuvana.json file completely
+        // For FULL_RESET: Delete ALL config files (nuvana.json AND nuvana-license.json)
+        // SEC-017: Complete clean slate for new store configuration
         try {
-          const deletedPath = settingsService.deleteSettingsFile();
-          settingsDeleted = deletedPath !== null;
-          log.info('Settings file deleted for FULL_RESET', { deletedPath, auditReferenceId });
-        } catch (settingsError) {
-          log.warn('Failed to delete settings file', {
-            error: settingsError instanceof Error ? settingsError.message : 'Unknown error',
+          const configResult = settingsService.deleteAllConfigFiles();
+          settingsDeleted = configResult.settingsDeleted !== null;
+          licenseDeleted = configResult.licenseDeleted !== null;
+
+          log.info('All config files deleted for FULL_RESET', {
+            settingsDeleted: configResult.settingsDeleted,
+            licenseDeleted: configResult.licenseDeleted,
+            auditReferenceId,
+          });
+        } catch (configError) {
+          // API-003: Log error server-side with sanitized client response
+          log.warn('Failed to delete config files', {
+            error: configError instanceof Error ? configError.message : 'Unknown error',
+            auditReferenceId,
           });
         }
       } else if (deleteSettings) {
-        // For other reset types with deleteSettings flag: just clear the store
+        // For other reset types with deleteSettings flag: just clear the store (no file deletion)
         try {
           settingsService.resetAll();
           settingsDeleted = true;
           log.info('Settings cleared', { auditReferenceId });
         } catch (settingsError) {
+          // API-003: Log error server-side
           log.warn('Failed to reset settings', {
             error: settingsError instanceof Error ? settingsError.message : 'Unknown error',
+            auditReferenceId,
           });
         }
       }
 
-      // SEC-017: Final audit log
+      // SEC-017: Final audit log with comprehensive state
       log.info('Store reset completed', {
         auditReferenceId,
         resetType,
         databaseDeleted,
         tablesCleared,
         settingsDeleted,
+        licenseDeleted,
         resyncRequired,
         performedBy: {
           userId: cloudAuth.userId,
@@ -934,6 +985,7 @@ registerHandler(
         clearedTables,
         failedTables,
         settingsDeleted,
+        licenseDeleted,
         resyncRequired,
         serverTime: resetResponse.data.serverTime,
       });

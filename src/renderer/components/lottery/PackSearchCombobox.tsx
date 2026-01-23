@@ -41,7 +41,7 @@ import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 import { Check, ChevronsUpDown, Loader2, Package } from 'lucide-react';
 import { useLotteryPacks, usePackSearch } from '@/hooks/useLottery';
-import type { LotteryPackResponse, LotteryPackStatus } from '@/lib/api/lottery';
+import type { LotteryPackResponse, LotteryPackStatus, LotteryGameStatus } from '@/lib/api/lottery';
 import { checkPackExists } from '@/lib/api/lottery';
 import { isValidSerialNumber, parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 
@@ -58,6 +58,8 @@ const SCAN_VALIDATION_TIMEOUT_MS = 400;
 
 /**
  * Pack option for selection
+ * SEC-014: INPUT_VALIDATION - Includes game_status for client-side validation
+ * FE-002: FORM_VALIDATION - Mirrors backend game status check
  */
 export interface PackSearchOption {
   pack_id: string;
@@ -67,6 +69,12 @@ export interface PackSearchOption {
   game_price: number | null;
   serial_start: string;
   serial_end: string;
+  /**
+   * Game status for client-side validation
+   * SEC-014: Used to validate only ACTIVE games can have packs activated
+   * Mirrors backend validation in lottery:activatePack handler
+   */
+  game_status: LotteryGameStatus | null;
 }
 
 /**
@@ -116,6 +124,9 @@ export interface PackSearchComboboxHandle {
 /**
  * Map API response to PackSearchOption format
  * Memoized at module level to ensure stable reference
+ *
+ * SEC-014: INPUT_VALIDATION - Maps game_status for client-side validation
+ * FE-002: FORM_VALIDATION - Enables mirroring backend game status checks
  */
 function mapPackToOption(pack: LotteryPackResponse): PackSearchOption {
   return {
@@ -126,6 +137,9 @@ function mapPackToOption(pack: LotteryPackResponse): PackSearchOption {
     game_price: pack.game?.price || null,
     serial_start: pack.opening_serial || '',
     serial_end: pack.closing_serial || '',
+    // SEC-014: Map game status for client-side validation
+    // Null if game data not available (defensive - should always be present)
+    game_status: pack.game?.status ?? null,
   };
 }
 
@@ -171,6 +185,62 @@ function getPackStatusErrorMessage(
         description: `Pack #${packNumber}${gameInfo} has status "${status}" and cannot be activated.`,
       };
   }
+}
+
+/**
+ * Get user-friendly error message based on game status
+ * SEC-014: INPUT_VALIDATION - Validates game status before allowing pack selection
+ * FE-002: FORM_VALIDATION - Mirrors backend game status validation
+ *
+ * Business Rule: Only packs for ACTIVE games can be activated.
+ * Games that are INACTIVE or DISCONTINUED should block pack activation.
+ *
+ * @param gameStatus - The game's current status
+ * @param gameName - Game name for display
+ * @param packNumber - Pack number for display
+ * @returns Error message object with title and description
+ */
+function getGameStatusErrorMessage(
+  gameStatus: LotteryGameStatus | null,
+  gameName: string,
+  packNumber: string
+): { title: string; description: string } {
+  switch (gameStatus) {
+    case 'INACTIVE':
+      return {
+        title: 'Game is inactive',
+        description: `Cannot activate Pack #${packNumber}. Game "${gameName}" is currently INACTIVE. Only packs for ACTIVE games can be activated.`,
+      };
+    case 'DISCONTINUED':
+      return {
+        title: 'Game has been discontinued',
+        description: `Cannot activate Pack #${packNumber}. Game "${gameName}" has been DISCONTINUED and is no longer available.`,
+      };
+    case null:
+      // Defensive: game status not available - block activation for safety
+      return {
+        title: 'Game status unavailable',
+        description: `Cannot verify game status for Pack #${packNumber}. Please try again or contact support.`,
+      };
+    default:
+      // ACTIVE status should not trigger this function
+      return {
+        title: 'Activation blocked',
+        description: `Pack #${packNumber} cannot be activated at this time.`,
+      };
+  }
+}
+
+/**
+ * Check if a pack's game is eligible for activation
+ * SEC-014: INPUT_VALIDATION - Allowlist validation for game status
+ *
+ * @param gameStatus - The game's current status
+ * @returns true if game is ACTIVE and pack can be activated
+ */
+function isGameActiveForActivation(gameStatus: LotteryGameStatus | null): boolean {
+  // SEC-014: Strict allowlist - only ACTIVE status is allowed
+  return gameStatus === 'ACTIVE';
 }
 
 /**
@@ -453,7 +523,28 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
 
     const handleSelectPack = useCallback(
       (pack: PackSearchOption) => {
-        // Notify parent of selection
+        // ========================================================================
+        // SEC-014: INPUT_VALIDATION - Validate game status before selection
+        // FE-002: FORM_VALIDATION - Mirror backend game status validation
+        // Business Rule: Only ACTIVE games can have packs activated
+        // ========================================================================
+        if (!isGameActiveForActivation(pack.game_status)) {
+          const errorMsg = getGameStatusErrorMessage(
+            pack.game_status,
+            pack.game_name,
+            pack.pack_number
+          );
+          toast({
+            title: errorMsg.title,
+            description: errorMsg.description,
+            variant: 'destructive',
+          });
+          // Clear and refocus for next scan
+          clearAndRefocus();
+          return;
+        }
+
+        // Notify parent of selection (only for ACTIVE games)
         onPackSelect(pack);
         // Clear search query
         onSearchQueryChange('');
@@ -465,7 +556,7 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
         // Close dropdown
         setIsOpen(false);
       },
-      [onPackSelect, onSearchQueryChange]
+      [onPackSelect, onSearchQueryChange, toast, clearAndRefocus]
     );
 
     const handleKeyDown = useCallback(

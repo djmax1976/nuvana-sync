@@ -16,13 +16,17 @@
  */
 
 import { BrowserWindow } from 'electron';
-import { syncQueueDAL, type SyncQueueItem } from '../dal/sync-queue.dal';
+import { syncQueueDAL, type SyncQueueItem, type SyncApiContext } from '../dal/sync-queue.dal';
 import { syncLogDAL } from '../dal/sync-log.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { lotteryPacksDAL } from '../dal/lottery-packs.dal';
 import { createLogger } from '../utils/logger';
 import { cloudApiService } from './cloud-api.service';
+import {
+  bidirectionalSyncService,
+  type BidirectionalSyncResult,
+} from './bidirectional-sync.service';
 
 // ============================================================================
 // Types
@@ -98,7 +102,8 @@ export interface SyncResult {
 }
 
 /**
- * Batch result from cloud API
+ * Batch result from cloud API with API context for troubleshooting
+ * v040: Added apiContext for Sync Monitor display
  */
 export interface BatchSyncResponse {
   success: boolean;
@@ -107,6 +112,8 @@ export interface BatchSyncResponse {
     cloudId?: string;
     status: 'synced' | 'failed';
     error?: string;
+    /** API call context for troubleshooting (v040) */
+    apiContext?: SyncApiContext;
   }>;
 }
 
@@ -161,6 +168,19 @@ const HEARTBEAT_TIMEOUT_MS = 10000;
 /** IPC channel for status updates */
 const SYNC_STATUS_CHANNEL = 'sync:statusChanged';
 
+/**
+ * Default reference data sync interval in milliseconds (5 minutes)
+ * Reference data (games, bins) changes infrequently, so sync less often than push queue
+ * API-002: Rate limiting - avoid excessive API calls for reference data
+ */
+const DEFAULT_REFERENCE_DATA_SYNC_INTERVAL_MS = 5 * 60 * 1000;
+
+/**
+ * Minimum reference data sync interval (1 minute)
+ * Prevents excessive polling even if misconfigured
+ */
+const MIN_REFERENCE_DATA_SYNC_INTERVAL_MS = 60 * 1000;
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -204,6 +224,15 @@ export class SyncEngineService {
   /** Recent sync errors for display (capped at 5) */
   private recentSyncErrors: Array<{ entityType: string; error: string; timestamp: string }> = [];
 
+  /**
+   * Reference data sync state tracking
+   * Tracks when games/bins were last synced from cloud to local
+   * API-002: Rate limiting - separate interval from push queue sync
+   */
+  private lastReferenceDataSyncAt: Date | null = null;
+  private referenceDataSyncIntervalMs = DEFAULT_REFERENCE_DATA_SYNC_INTERVAL_MS;
+  private isReferenceDataSyncing = false;
+
   /** Cloud API service (injected for testability) */
   private cloudApiService: ICloudApiService | null = null;
 
@@ -224,7 +253,11 @@ export class SyncEngineService {
    *
    * @param intervalMs - Optional custom sync interval
    */
-  start(intervalMs?: number, heartbeatIntervalMs?: number): void {
+  start(
+    intervalMs?: number,
+    heartbeatIntervalMs?: number,
+    referenceDataSyncIntervalMs?: number
+  ): void {
     if (this.intervalId) {
       log.warn('Sync engine already running');
       return;
@@ -246,9 +279,20 @@ export class SyncEngineService {
       );
     }
 
-    log.info(
-      `Starting sync engine (sync interval: ${this.syncIntervalMs / 1000}s, heartbeat interval: ${this.heartbeatIntervalMs / 1000}s)`
-    );
+    // Validate and set reference data sync interval
+    // API-002: Rate limiting - enforce minimum interval to prevent API abuse
+    if (referenceDataSyncIntervalMs) {
+      this.referenceDataSyncIntervalMs = Math.max(
+        MIN_REFERENCE_DATA_SYNC_INTERVAL_MS,
+        referenceDataSyncIntervalMs
+      );
+    }
+
+    log.info('Starting sync engine', {
+      syncIntervalSec: this.syncIntervalMs / 1000,
+      heartbeatIntervalSec: this.heartbeatIntervalMs / 1000,
+      referenceDataSyncIntervalSec: this.referenceDataSyncIntervalMs / 1000,
+    });
 
     // Clean up any stale running syncs from previous session
     this.cleanupStaleRunning();
@@ -313,6 +357,79 @@ export class SyncEngineService {
       return;
     }
     await this.runSync();
+  }
+
+  /**
+   * Trigger an immediate reference data sync (manual trigger)
+   *
+   * Forces immediate sync of reference data (games, bins) from cloud,
+   * bypassing the normal interval check. Useful when:
+   * - User knows cloud data has changed
+   * - Troubleshooting sync issues
+   * - Initial data refresh after reconnection
+   *
+   * @security API-003: Errors are logged and returned, not thrown
+   * @security LM-001: Structured logging with operation metrics
+   *
+   * @returns BidirectionalSyncResult with sync metrics, or null if sync was skipped
+   */
+  async triggerReferenceDataSync(): Promise<BidirectionalSyncResult | null> {
+    if (this.isReferenceDataSyncing) {
+      log.info('Reference data sync already in progress, skipping manual trigger');
+      return null;
+    }
+
+    if (!this.isOnline) {
+      log.info('Reference data sync skipped: offline');
+      return null;
+    }
+
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      log.warn('Reference data sync skipped: store not configured');
+      return null;
+    }
+
+    log.info('Manual reference data sync triggered');
+
+    this.isReferenceDataSyncing = true;
+    const startTime = Date.now();
+
+    try {
+      const result = await this.syncGamesFromCloud();
+
+      // Update last sync timestamp
+      this.lastReferenceDataSyncAt = new Date();
+
+      const elapsedMs = Date.now() - startTime;
+      log.info('Manual reference data sync completed', {
+        elapsedMs,
+        pulled: result.pulled,
+        conflicts: result.conflicts,
+        errors: result.errors.length,
+      });
+
+      return result;
+    } catch (error: unknown) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const elapsedMs = Date.now() - startTime;
+
+      log.error('Manual reference data sync failed', {
+        elapsedMs,
+        error: errorMessage,
+      });
+
+      // Return error result instead of throwing
+      // API-003: Centralized error handling - don't propagate internal errors
+      return {
+        pushed: 0,
+        pulled: 0,
+        conflicts: 0,
+        errors: [this.sanitizeErrorMessage(errorMessage)],
+      };
+    } finally {
+      this.isReferenceDataSyncing = false;
+    }
   }
 
   /**
@@ -389,7 +506,15 @@ export class SyncEngineService {
 
   /**
    * Run a sync cycle
-   * Processes push queue and handles results
+   * Processes push queue and pulls reference data from cloud
+   *
+   * Enterprise-grade sync cycle:
+   * 1. Process push queue (local → cloud)
+   * 2. Pull reference data (cloud → local) at configured interval
+   *
+   * @security API-002: Rate limiting via separate intervals for push/pull
+   * @security API-003: Centralized error handling with sanitized responses
+   * @security DB-006: Store-scoped operations for tenant isolation
    */
   private async runSync(): Promise<void> {
     if (this.isRunning) {
@@ -452,6 +577,11 @@ export class SyncEngineService {
         succeeded: result.succeeded,
         failed: result.failed,
       });
+
+      // Pull reference data from cloud (games, bins) at configured interval
+      // API-002: Rate limiting - separate interval from push queue
+      // Runs independently of push success to ensure local data stays fresh
+      await this.syncReferenceDataIfDue();
     } catch (error: unknown) {
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
@@ -476,6 +606,95 @@ export class SyncEngineService {
       this.currentProgress = null; // Clear progress when sync completes
       this.notifyStatusChange();
     }
+  }
+
+  /**
+   * Sync reference data from cloud if the configured interval has elapsed
+   *
+   * Reference data includes:
+   * - Lottery games (status changes like ACTIVE → INACTIVE)
+   * - Lottery bins (bin assignments and configuration)
+   *
+   * Enterprise-grade implementation:
+   * - API-002: Rate limiting via configurable interval (default 5 minutes)
+   * - API-003: Errors are logged but do not fail the main sync cycle
+   * - LM-001: Structured logging with timing and result metrics
+   * - DB-006: Store-scoped operations via bidirectionalSyncService
+   *
+   * @security Reference data sync failures are isolated from push queue processing
+   */
+  private async syncReferenceDataIfDue(): Promise<void> {
+    // Check if reference data sync is due
+    const now = Date.now();
+    const lastSync = this.lastReferenceDataSyncAt?.getTime() ?? 0;
+    const timeSinceLastSync = now - lastSync;
+
+    // API-002: Rate limiting - only sync if interval has elapsed
+    if (timeSinceLastSync < this.referenceDataSyncIntervalMs) {
+      log.debug('Reference data sync skipped: interval not elapsed', {
+        timeSinceLastSyncMs: timeSinceLastSync,
+        intervalMs: this.referenceDataSyncIntervalMs,
+        nextSyncInMs: this.referenceDataSyncIntervalMs - timeSinceLastSync,
+      });
+      return;
+    }
+
+    // Prevent concurrent reference data syncs
+    if (this.isReferenceDataSyncing) {
+      log.debug('Reference data sync skipped: already in progress');
+      return;
+    }
+
+    this.isReferenceDataSyncing = true;
+    const startTime = Date.now();
+
+    try {
+      log.info('Starting reference data sync (cloud → local)');
+
+      // Sync games from cloud
+      // This pulls any game status changes (e.g., ACTIVE → INACTIVE)
+      const gamesResult = await this.syncGamesFromCloud();
+
+      // Update last sync timestamp on success
+      this.lastReferenceDataSyncAt = new Date();
+
+      const elapsedMs = Date.now() - startTime;
+      log.info('Reference data sync completed', {
+        elapsedMs,
+        gamesPulled: gamesResult.pulled,
+        gamesConflicts: gamesResult.conflicts,
+        gamesErrors: gamesResult.errors.length,
+      });
+    } catch (error: unknown) {
+      // API-003: Log error but do not propagate to main sync cycle
+      // Reference data sync failure should not block push queue processing
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const elapsedMs = Date.now() - startTime;
+
+      log.error('Reference data sync failed', {
+        elapsedMs,
+        error: errorMessage,
+      });
+
+      // Do not update lastReferenceDataSyncAt - will retry on next cycle
+    } finally {
+      this.isReferenceDataSyncing = false;
+    }
+  }
+
+  /**
+   * Sync lottery games from cloud to local database
+   *
+   * Delegates to bidirectionalSyncService.syncGames() which implements:
+   * - Delta sync using 'since' timestamp (only changed games)
+   * - Last-write-wins conflict resolution
+   * - Proper tenant isolation via store_id scoping
+   *
+   * @returns BidirectionalSyncResult with sync metrics
+   * @throws Error if sync fails completely (partial failures return in result.errors)
+   */
+  private async syncGamesFromCloud(): Promise<BidirectionalSyncResult> {
+    return bidirectionalSyncService.syncGames();
   }
 
   /**
@@ -558,12 +777,14 @@ export class SyncEngineService {
           const result = response.results.find((r) => r.id === item.id);
 
           if (result?.status === 'synced') {
-            syncQueueDAL.markSynced(item.id);
+            // v040: Pass API context for troubleshooting display
+            syncQueueDAL.markSynced(item.id, result.apiContext);
             succeeded++;
             this.currentProgress.succeededItems = succeeded;
           } else {
             const error = result?.error || 'Unknown error';
-            syncQueueDAL.incrementAttempts(item.id, error);
+            // v040: Pass API context for troubleshooting display
+            syncQueueDAL.incrementAttempts(item.id, error, result?.apiContext);
             failed++;
             this.currentProgress.failedItems = failed;
             // Track error for display
@@ -582,9 +803,17 @@ export class SyncEngineService {
         // Track batch-level error
         this.addRecentError(entityType, sanitizedError);
 
-        // Mark all items in batch as failed
+        // v040: Extract HTTP status from error message if available
+        const httpStatus = this.extractHttpStatusFromError(errorMessage);
+        const batchApiContext: SyncApiContext = {
+          api_endpoint: this.getEndpointForEntityType(entityType),
+          http_status: httpStatus,
+          response_body: errorMessage.substring(0, 500),
+        };
+
+        // Mark all items in batch as failed with API context
         for (const item of batchItems) {
-          syncQueueDAL.incrementAttempts(item.id, errorMessage);
+          syncQueueDAL.incrementAttempts(item.id, errorMessage, batchApiContext);
           failed++;
           this.currentProgress.failedItems = failed;
           this.currentProgress.completedItems = succeeded + failed;
@@ -817,6 +1046,10 @@ export class SyncEngineService {
               id: item.id, // Use queue item ID, not entity_id (supports multiple items per entity)
               cloudId: response.cloud_pack_id,
               status: response.success ? 'synced' : 'failed',
+              apiContext: {
+                api_endpoint: '/api/v1/sync/lottery/packs/receive',
+                http_status: response.success ? 200 : 500,
+              },
             });
           } catch (receiveError) {
             // Check if this is a duplicate pack error (HTTP 409)
@@ -857,6 +1090,11 @@ export class SyncEngineService {
                 id: item.id, // Use queue item ID, not entity_id
                 cloudId: cloudPackId,
                 status: 'synced',
+                apiContext: {
+                  api_endpoint: '/api/v1/sync/lottery/packs/receive',
+                  http_status: 409,
+                  response_body: 'DUPLICATE_PACK - Pack already exists in cloud',
+                },
               });
             } else {
               throw receiveError; // Re-throw for non-duplicate errors
@@ -1111,10 +1349,17 @@ export class SyncEngineService {
           operation: item.operation,
           error: errorMessage,
         });
+        // v040: Extract HTTP status from error and include API context
+        const httpStatus = this.extractHttpStatusFromError(errorMessage);
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
+          apiContext: {
+            api_endpoint: '/api/v1/sync/lottery/packs',
+            http_status: httpStatus,
+            response_body: errorMessage.substring(0, 500),
+          },
         });
       }
     }
@@ -1481,6 +1726,44 @@ export class SyncEngineService {
     if (store) {
       this.pendingCount = syncQueueDAL.getPendingCount(store.store_id);
     }
+  }
+
+  /**
+   * Extract HTTP status code from error message
+   * v040: Parses error messages for status codes like "404", "409 DUPLICATE_PACK", etc.
+   *
+   * @param message - Error message that may contain HTTP status
+   * @returns HTTP status code or 0 if not found
+   */
+  private extractHttpStatusFromError(message: string): number {
+    // Look for common HTTP status patterns in error messages
+    const statusMatch = message.match(/\b(4\d{2}|5\d{2})\b/);
+    if (statusMatch) {
+      return parseInt(statusMatch[1], 10);
+    }
+    // Check for common error keywords
+    if (message.includes('ECONNREFUSED') || message.includes('ENETUNREACH')) return 0;
+    if (message.includes('timeout') || message.includes('ETIMEDOUT')) return 408;
+    return 0;
+  }
+
+  /**
+   * Get API endpoint path for an entity type
+   * v040: Maps entity types to their API endpoints for troubleshooting display
+   *
+   * @param entityType - Entity type being synced
+   * @returns API endpoint path
+   */
+  private getEndpointForEntityType(entityType: string): string {
+    const endpointMap: Record<string, string> = {
+      pack: '/api/v1/sync/lottery/packs',
+      shift_opening: '/api/v1/sync/shifts/openings',
+      shift_closing: '/api/v1/sync/shifts/closings',
+      day_close: '/api/v1/sync/day-close',
+      variance_approval: '/api/v1/sync/variances/approve',
+      employee: '/api/v1/sync/employees',
+    };
+    return endpointMap[entityType] || `/api/v1/sync/${entityType}`;
   }
 
   /**

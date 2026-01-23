@@ -139,6 +139,10 @@ export interface CloudGameData {
   pack_value: number;
   tickets_per_pack?: number;
   status?: LotteryGameStatus;
+  /** Cloud's updated_at timestamp - preserved to enable correct conflict resolution */
+  updated_at?: string;
+  /** Cloud's created_at timestamp - preserved for data integrity */
+  created_at?: string;
 }
 
 // ============================================================================
@@ -356,8 +360,8 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
         data.pack_value,
         data.tickets_per_pack || null,
         data.status || 'ACTIVE',
-        now,
-        now,
+        now, // synced_at = current time (when we synced)
+        data.updated_at || now, // updated_at = preserve cloud's timestamp for conflict resolution
         data.game_id
       );
 
@@ -387,9 +391,9 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
       data.pack_value,
       data.tickets_per_pack || null,
       data.status || 'ACTIVE',
-      now,
-      now,
-      now
+      now, // synced_at = current time (when we synced)
+      data.created_at || now, // created_at = preserve cloud's timestamp
+      data.updated_at || now // updated_at = preserve cloud's timestamp for conflict resolution
     );
 
     log.info('Lottery game created from cloud', { gameId: data.game_id });

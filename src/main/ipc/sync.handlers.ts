@@ -100,6 +100,146 @@ registerHandler(
   { requiresAuth: true, description: 'Get sync statistics' }
 );
 
+/**
+ * Get sync activity for development monitor
+ * Returns queued items and recently synced items for the activity panel
+ *
+ * Development/Debug feature - no auth required for convenience
+ *
+ * @security SEC-006: Uses parameterized DAL queries
+ * @security DB-006: Store-scoped queries
+ * @security API-008: Only safe display fields returned, no sensitive payload data
+ * @security API-001: Input validated with bounds checking
+ */
+registerHandler(
+  'sync:getActivity',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // API-001: Validate and bound input parameters
+    const params = input as { queuedLimit?: number; syncedLimit?: number } | undefined;
+    const queuedLimit = Math.min(Math.max(1, params?.queuedLimit || 20), 50);
+    const syncedLimit = Math.min(Math.max(1, params?.syncedLimit || 10), 10);
+
+    // SEC-006, DB-006: DAL methods use parameterized, store-scoped queries
+    const queuedItems = syncQueueDAL.getQueuedItemsForActivity(store.store_id, queuedLimit);
+    const recentlySynced = syncQueueDAL.getRecentlySyncedForActivity(store.store_id, syncedLimit);
+    const stats = syncQueueDAL.getStats(store.store_id);
+
+    return createSuccessResponse({
+      queued: queuedItems,
+      recentlySynced,
+      stats: {
+        pendingCount: stats.pending,
+        failedCount: stats.failed,
+        syncedTodayCount: stats.syncedToday,
+      },
+    });
+  },
+  { requiresAuth: false, description: 'Get sync activity for dev monitor' }
+);
+
+/**
+ * Get paginated sync activity for the full Sync Monitor page
+ * Returns items with filtering, pagination, and detailed statistics
+ *
+ * @security SEC-006: Uses parameterized DAL queries
+ * @security DB-006: Store-scoped queries for tenant isolation
+ * @security API-008: Only safe display fields returned, no sensitive payload data
+ * @security API-001: Input validated with bounds checking and allowlists
+ */
+registerHandler(
+  'sync:getActivityPaginated',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // API-001: Validate input parameters
+    const params = input as
+      | {
+          status?: 'all' | 'queued' | 'failed' | 'synced';
+          entityType?: string;
+          operation?: string;
+          limit?: number;
+          offset?: number;
+        }
+      | undefined;
+
+    // SEC-006, DB-006: DAL methods use parameterized, store-scoped queries
+    const activityData = syncQueueDAL.getActivityPaginated(store.store_id, {
+      status: params?.status,
+      entityType: params?.entityType,
+      operation: params?.operation as 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | undefined,
+      limit: params?.limit,
+      offset: params?.offset,
+    });
+
+    const detailedStats = syncQueueDAL.getDetailedStats(store.store_id);
+
+    return createSuccessResponse({
+      ...activityData,
+      stats: detailedStats,
+    });
+  },
+  { requiresAuth: false, description: 'Get paginated sync activity for monitor page' }
+);
+
+/**
+ * Retry a specific failed sync item
+ * Resets the attempt count to allow immediate retry
+ *
+ * @security SEC-006: Uses parameterized queries
+ * @security API-001: Input validation
+ */
+registerHandler(
+  'sync:retryItem',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    syncQueueDAL.retryFailed([params.id]);
+
+    log.info('Retry triggered for sync item', { id: params.id });
+
+    return createSuccessResponse({ success: true, retriedId: params.id });
+  },
+  { requiresAuth: false, description: 'Retry a specific sync item' }
+);
+
+/**
+ * Delete a specific sync item from the queue
+ * Use with caution - permanently removes the item
+ *
+ * @security SEC-006: Uses parameterized queries
+ * @security API-001: Input validation
+ */
+registerHandler(
+  'sync:deleteItem',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    // Use the base DAL's delete method
+    const deleted = syncQueueDAL.deleteById(params.id);
+
+    if (deleted) {
+      log.warn('Sync item deleted from queue', { id: params.id });
+    }
+
+    return createSuccessResponse({ success: deleted, deletedId: params.id });
+  },
+  { requiresAuth: false, description: 'Delete a specific sync item' }
+);
+
 // ============================================================================
 // Manual Sync Handlers (MANAGER+)
 // ============================================================================
@@ -154,7 +294,7 @@ registerHandler(
 
 /**
  * Sync games bidirectionally
- * Requires MANAGER role
+ * No auth required - matches sync:triggerNow behavior for manual refresh
  */
 registerHandler(
   'sync:syncGames',
@@ -165,7 +305,7 @@ registerHandler(
 
     return createSuccessResponse(result);
   },
-  { requiresAuth: true, requiredRole: 'shift_manager', description: 'Sync games with cloud' }
+  { requiresAuth: false, description: 'Sync games with cloud (manual trigger)' }
 );
 
 /**
@@ -182,6 +322,34 @@ registerHandler(
     return createSuccessResponse(result);
   },
   { requiresAuth: true, requiredRole: 'store_manager', description: 'Force full sync' }
+);
+
+/**
+ * Trigger immediate reference data sync (games, bins) from cloud
+ * Bypasses the normal 5-minute interval check
+ * Requires MANAGER role
+ */
+registerHandler(
+  'sync:triggerReferenceDataSync',
+  async () => {
+    log.info('Manual reference data sync triggered via IPC');
+
+    const result = await syncEngineService.triggerReferenceDataSync();
+
+    if (result === null) {
+      return createErrorResponse(
+        IPCErrorCodes.CONFLICT,
+        'Reference data sync skipped (already in progress, offline, or store not configured)'
+      );
+    }
+
+    return createSuccessResponse(result);
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'shift_manager',
+    description: 'Sync reference data from cloud',
+  }
 );
 
 // ============================================================================

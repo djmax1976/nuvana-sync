@@ -71,6 +71,10 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:clearPendingPacks',
   'sync:backfillReceivedPacks',
   'sync:resyncActivePacks',
+  'sync:getActivity', // Sync activity monitor panel
+  'sync:getActivityPaginated', // Full sync monitor page
+  'sync:retryItem', // Retry individual sync item
+  'sync:deleteItem', // Delete individual sync item
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',

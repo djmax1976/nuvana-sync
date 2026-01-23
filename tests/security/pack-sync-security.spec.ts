@@ -239,6 +239,10 @@ describe('Pack Sync Security Tests', () => {
         last_attempt_at: null,
         created_at: '2024-01-01T00:00:00.000Z',
         synced_at: null,
+        sync_direction: 'PUSH',
+        api_endpoint: null,
+        http_status: null,
+        response_body: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -303,6 +307,10 @@ describe('Pack Sync Security Tests', () => {
           last_attempt_at: null,
           created_at: '2024-01-01T00:00:00.000Z',
           synced_at: null,
+          sync_direction: 'PUSH',
+          api_endpoint: null,
+          http_status: null,
+          response_body: null,
         };
 
         const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -351,6 +359,10 @@ describe('Pack Sync Security Tests', () => {
         last_attempt_at: null,
         created_at: '2024-01-01T00:00:00.000Z',
         synced_at: null,
+        sync_direction: 'PUSH',
+        api_endpoint: null,
+        http_status: null,
+        response_body: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -524,6 +536,10 @@ describe('Pack Sync Security Tests', () => {
         last_attempt_at: null,
         created_at: '2024-01-01T00:00:00.000Z',
         synced_at: null,
+        sync_direction: 'PUSH',
+        api_endpoint: null,
+        http_status: null,
+        response_body: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -558,6 +574,10 @@ describe('Pack Sync Security Tests', () => {
         last_attempt_at: null,
         created_at: '2024-01-01T00:00:00.000Z',
         synced_at: null,
+        sync_direction: 'PUSH',
+        api_endpoint: null,
+        http_status: null,
+        response_body: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });

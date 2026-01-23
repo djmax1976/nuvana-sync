@@ -24,6 +24,7 @@ import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { lotteryPacksDAL, type LotteryPackStatus } from '../dal/lottery-packs.dal';
 import { syncTimestampsDAL } from '../dal/sync-timestamps.dal';
+import { syncQueueDAL, type SyncApiContext } from '../dal/sync-queue.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { createLogger } from '../utils/logger';
 
@@ -106,6 +107,18 @@ export class BidirectionalSyncService {
     const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'bins');
 
     log.info('Starting bins sync (pull-only)', { storeId, lastPull: lastPull || 'full' });
+
+    // Create PULL queue entry for sync monitor tracking
+    const pullQueueItem = syncQueueDAL.enqueue({
+      store_id: storeId,
+      entity_type: 'bin',
+      entity_id: `pull-${Date.now()}`,
+      operation: 'UPDATE',
+      payload: { action: 'pull_bins', timestamp: new Date().toISOString(), lastPull },
+      sync_direction: 'PULL',
+    });
+
+    const apiEndpoint = '/api/v1/sync/lottery/bins';
 
     try {
       // Pull bins from cloud (no push - bins are cloud-managed)
@@ -203,11 +216,32 @@ export class BidirectionalSyncService {
         errors: result.errors.length,
       });
 
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pulled: result.pulled,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       result.errors.push(`Pull failed: ${message}`);
       log.error('Bins sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
       return result;
     }
   }
@@ -240,6 +274,18 @@ export class BidirectionalSyncService {
     const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'games');
 
     log.info('Starting games sync', { storeId, stateId, lastPull: lastPull || 'full' });
+
+    // Create PULL queue entry for sync monitor tracking
+    const pullQueueItem = syncQueueDAL.enqueue({
+      store_id: storeId,
+      entity_type: 'game',
+      entity_id: `pull-${Date.now()}`,
+      operation: 'UPDATE',
+      payload: { action: 'pull_games', timestamp: new Date().toISOString(), lastPull, stateId },
+      sync_direction: 'PULL',
+    });
+
+    const apiEndpoint = '/api/v1/sync/lottery/games';
 
     try {
       // Step 1: Get local changes since last pull
@@ -308,6 +354,7 @@ export class BidirectionalSyncService {
 
             if (shouldUpdate) {
               // Upsert from cloud - use game_id directly (no cloud_game_id)
+              // Preserve cloud's timestamps for correct conflict resolution
               lotteryGamesDAL.upsertFromCloud({
                 game_id: cloudGame.game_id,
                 store_id: storeId,
@@ -317,6 +364,7 @@ export class BidirectionalSyncService {
                 pack_value: cloudGame.pack_value,
                 tickets_per_pack: cloudGame.tickets_per_pack,
                 status: cloudGame.status,
+                updated_at: cloudGame.updated_at,
               });
               result.pulled++;
             }
@@ -347,10 +395,33 @@ export class BidirectionalSyncService {
         errors: result.errors.length,
       });
 
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pushed: result.pushed,
+          pulled: result.pulled,
+          conflicts: result.conflicts,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       log.error('Games sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
       throw error;
     }
   }
@@ -395,6 +466,18 @@ export class BidirectionalSyncService {
       storeId,
       lastPull: lastPull || 'full',
     });
+
+    // Create PULL queue entry for sync monitor tracking
+    const pullQueueItem = syncQueueDAL.enqueue({
+      store_id: storeId,
+      entity_type: 'pack',
+      entity_id: `pull-received-${Date.now()}`,
+      operation: 'UPDATE',
+      payload: { action: 'pull_received_packs', timestamp: new Date().toISOString(), lastPull },
+      sync_direction: 'PULL',
+    });
+
+    const apiEndpoint = '/api/v1/sync/lottery/packs/received';
 
     try {
       // Pull received packs from cloud with pagination
@@ -489,11 +572,33 @@ export class BidirectionalSyncService {
         errors: result.errors.length,
       });
 
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pulled: result.pulled,
+          pages: pageCount,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       result.errors.push(`Pull received packs failed: ${message}`);
       log.error('Received packs sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
       return result;
     }
   }
@@ -531,6 +636,18 @@ export class BidirectionalSyncService {
       storeId,
       lastPull: lastPull || 'full',
     });
+
+    // Create PULL queue entry for sync monitor tracking
+    const pullQueueItem = syncQueueDAL.enqueue({
+      store_id: storeId,
+      entity_type: 'pack',
+      entity_id: `pull-activated-${Date.now()}`,
+      operation: 'UPDATE',
+      payload: { action: 'pull_activated_packs', timestamp: new Date().toISOString(), lastPull },
+      sync_direction: 'PULL',
+    });
+
+    const apiEndpoint = '/api/v1/sync/lottery/packs/activated';
 
     try {
       // Pull activated packs from cloud with pagination
@@ -625,11 +742,33 @@ export class BidirectionalSyncService {
         errors: result.errors.length,
       });
 
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pulled: result.pulled,
+          pages: pageCount,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       result.errors.push(`Pull activated packs failed: ${message}`);
       log.error('Activated packs sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
       return result;
     }
   }
@@ -854,6 +993,37 @@ export class BidirectionalSyncService {
     syncTimestampsDAL.reset(store.store_id, 'packs_activated');
 
     return this.syncAll();
+  }
+
+  /**
+   * Extract HTTP status code from error message
+   * Looks for common patterns like "404", "500", "timeout", etc.
+   *
+   * @param message - Error message to parse
+   * @returns HTTP status code or 0 if not found
+   */
+  private extractHttpStatusFromError(message: string): number {
+    // Look for explicit HTTP status codes
+    const statusMatch = message.match(/\b(4\d{2}|5\d{2})\b/);
+    if (statusMatch) {
+      return parseInt(statusMatch[1], 10);
+    }
+
+    // Map common error patterns to status codes
+    if (message.includes('timeout') || message.includes('ETIMEDOUT')) {
+      return 408; // Request Timeout
+    }
+    if (message.includes('ECONNREFUSED') || message.includes('ENOTFOUND')) {
+      return 503; // Service Unavailable
+    }
+    if (message.includes('unauthorized') || message.includes('Unauthorized')) {
+      return 401;
+    }
+    if (message.includes('forbidden') || message.includes('Forbidden')) {
+      return 403;
+    }
+
+    return 0; // Unknown
   }
 }
 

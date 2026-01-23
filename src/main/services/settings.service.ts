@@ -19,6 +19,7 @@ import { z } from 'zod';
 import { storesDAL } from '../dal/stores.dal';
 import { usersDAL } from '../dal/users.dal';
 import { cloudApiService, ValidateApiKeyResponse } from './cloud-api.service';
+import { licenseService } from './license.service';
 import { createLogger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
@@ -1228,7 +1229,7 @@ export class SettingsService {
         cloudUserId: userId,
       });
       // Clear config store data since user is already in database
-      this.clearInitialManagerFromConfig();
+      this.clearInitialManager();
       return false;
     }
 
@@ -1250,7 +1251,7 @@ export class SettingsService {
       });
 
       // Clear config store data after successful sync
-      this.clearInitialManagerFromConfig();
+      this.clearInitialManager();
 
       return true;
     } catch (error) {
@@ -1264,14 +1265,19 @@ export class SettingsService {
 
   /**
    * Clear initial manager data from config store
-   * Called after successful sync to database
+   *
+   * Used when store changes to prevent old user syncing, or after
+   * successful sync to database.
+   *
+   * @security SEC-017: May be called during authorized FULL_RESET
+   * @security LM-001: Structured logging for audit trail
    */
-  private clearInitialManagerFromConfig(): void {
+  clearInitialManager(): void {
     this.configStore.delete('initialManager.userId');
     this.configStore.delete('initialManager.name');
     this.configStore.delete('initialManager.role');
     this.configStore.delete('initialManager.pinHash');
-    log.debug('Initial manager cleared from config store');
+    log.info('Initial manager cleared from config');
   }
 
   /**
@@ -1429,6 +1435,57 @@ export class SettingsService {
 
     log.debug('Settings file does not exist, nothing to delete', { path: configPath });
     return null;
+  }
+
+  /**
+   * Delete ALL config files (for FULL_RESET)
+   *
+   * This method deletes both configuration files:
+   * - nuvana.json (settings file)
+   * - nuvana-license.json (license file)
+   *
+   * Both files will be recreated on next app startup when the user
+   * enters their API key and validates their license.
+   *
+   * @security SEC-017: Only called during authorized FULL_RESET operations
+   * @security LM-001: Structured logging for audit trail
+   * @security API-003: Centralized error handling with sanitized responses
+   *
+   * @returns Object with paths of deleted files (null if file didn't exist)
+   */
+  deleteAllConfigFiles(): { settingsDeleted: string | null; licenseDeleted: string | null } {
+    const result: { settingsDeleted: string | null; licenseDeleted: string | null } = {
+      settingsDeleted: null,
+      licenseDeleted: null,
+    };
+
+    // Delete settings file (nuvana.json)
+    try {
+      result.settingsDeleted = this.deleteSettingsFile();
+    } catch (error) {
+      // API-003: Log error server-side, continue with license deletion
+      log.error('Failed to delete settings file during FULL_RESET', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+
+    // Delete license file (nuvana-license.json)
+    try {
+      result.licenseDeleted = licenseService.deleteLicenseFile();
+    } catch (error) {
+      // API-003: Log error server-side
+      log.error('Failed to delete license file during FULL_RESET', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+    }
+
+    log.warn('All config files deleted for FULL_RESET', {
+      settingsDeleted: result.settingsDeleted !== null,
+      licenseDeleted: result.licenseDeleted !== null,
+      operation: 'FULL_RESET',
+    });
+
+    return result;
   }
 }
 

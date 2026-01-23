@@ -40,6 +40,9 @@ const ShiftEndPage = lazy(() => import('./pages/ShiftEndPage'));
 const DayClosePage = lazy(() => import('./pages/DayClosePage'));
 const TerminalShiftPage = lazy(() => import('./pages/TerminalShiftPage'));
 
+// Sync Monitor page
+const SyncMonitorPage = lazy(() => import('./pages/SyncMonitorPage'));
+
 // Setup wizard (not lazy - needed immediately)
 import SetupWizard from './pages/SetupWizard';
 
@@ -179,6 +182,14 @@ const router = createHashRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <SettingsPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'sync',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <SyncMonitorPage />
           </Suspense>
         ),
       },

@@ -98,37 +98,52 @@ export function ResetStoreDialog({
   cloudAuthUser,
   onResetComplete,
 }: ResetStoreDialogProps) {
-  const [selectedType, setSelectedType] = useState<ResetType>('SYNC_STATE');
+  // SEC-014: No pre-selection - user must explicitly choose a reset type
+  const [selectedType, setSelectedType] = useState<ResetType | null>(null);
   const [deleteSettings, setDeleteSettings] = useState(false);
   const [reason, setReason] = useState('');
   const [confirmationText, setConfirmationText] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [isResetting, setIsResetting] = useState(false);
+  const [hasAttemptedSubmit, setHasAttemptedSubmit] = useState(false);
   const confirmInputRef = useRef<HTMLInputElement>(null);
 
-  // Reset state when dialog opens
+  // Reset state when dialog opens - SEC-014: No pre-selection for security-critical actions
   useEffect(() => {
     if (open) {
-      setSelectedType('SYNC_STATE');
+      setSelectedType(null); // User must explicitly select a reset type
       setDeleteSettings(false);
       setReason('');
       setConfirmationText('');
       setError(null);
       setIsResetting(false);
+      setHasAttemptedSubmit(false);
     }
   }, [open]);
 
-  // Auto-check delete settings for FULL_RESET
+  // Auto-check delete settings for FULL_RESET (only when explicitly selected)
   useEffect(() => {
     if (selectedType === 'FULL_RESET') {
       setDeleteSettings(true);
+    } else if (selectedType !== null) {
+      // Only reset deleteSettings if user explicitly chose a non-FULL_RESET option
+      // Don't reset on null to preserve user preference during form edits
     }
   }, [selectedType]);
 
   const isConfirmationValid = confirmationText.toUpperCase() === CONFIRMATION_WORD;
   const isReasonValid = reason.trim().length > 0;
+  const isResetTypeSelected = selectedType !== null;
 
   const handleReset = async () => {
+    setHasAttemptedSubmit(true);
+
+    // SEC-014: Validate mandatory reset type selection
+    if (!isResetTypeSelected) {
+      setError('Please select a reset type before proceeding');
+      return;
+    }
+
     if (!isReasonValid) {
       setError('Please provide a reason for the reset');
       return;
@@ -145,9 +160,11 @@ export function ResetStoreDialog({
 
     try {
       // Build request payload with mandatory reason
+      // selectedType is guaranteed to be non-null by the validation above
+      const resetType = selectedType as ResetType;
       const requestPayload = {
-        resetType: selectedType,
-        deleteSettings: selectedType === 'FULL_RESET' ? true : deleteSettings,
+        resetType,
+        deleteSettings: resetType === 'FULL_RESET' ? true : deleteSettings,
         cloudAuth: {
           email: cloudAuthUser.email,
           userId: cloudAuthUser.userId,
@@ -212,53 +229,69 @@ export function ResetStoreDialog({
         </DialogHeader>
 
         <div className="space-y-4">
-          {/* Reset Type Selection */}
+          {/* Reset Type Selection - Mandatory */}
           <div className="space-y-2">
-            <label className="text-sm font-medium">Select reset type:</label>
-            <div className="space-y-2">
+            <label className="text-sm font-medium">
+              Select reset type <span className="text-destructive">*</span>:
+            </label>
+            {/* Show validation error when user attempts submit without selection */}
+            {hasAttemptedSubmit && !isResetTypeSelected && (
+              <p className="text-xs text-destructive">You must select a reset type to continue</p>
+            )}
+            <div
+              className={`space-y-2 ${hasAttemptedSubmit && !isResetTypeSelected ? 'ring-2 ring-destructive/50 rounded-lg p-2' : ''}`}
+            >
               {RESET_OPTIONS.map((option) => (
-                <button
+                <label
                   key={option.value}
-                  type="button"
-                  onClick={() => setSelectedType(option.value)}
-                  disabled={isResetting}
-                  className={`w-full p-3 rounded-lg border-2 text-left transition-all ${
+                  htmlFor={`reset-type-${option.value}`}
+                  className={`flex items-start gap-3 p-3 rounded-lg border-2 cursor-pointer transition-all ${
                     selectedType === option.value
                       ? getSelectedSeverityColor(option.severity)
                       : `${getSeverityColor(option.severity)} hover:bg-accent/50`
-                  } ${isResetting ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer'}`}
+                  } ${isResetting ? 'opacity-50 cursor-not-allowed' : ''}`}
                 >
-                  <div className="flex items-start gap-3">
-                    <div
-                      className={`mt-0.5 ${
-                        option.severity === 'high'
-                          ? 'text-red-500'
-                          : option.severity === 'medium'
-                            ? 'text-amber-500'
-                            : 'text-blue-500'
-                      }`}
-                    >
-                      {option.icon}
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="font-medium">{option.label}</span>
-                        {selectedType === option.value && (
-                          <span className="text-xs bg-primary text-primary-foreground px-1.5 py-0.5 rounded">
-                            Selected
-                          </span>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
-                    </div>
+                  {/* Checkbox input - mandatory selection */}
+                  <input
+                    type="checkbox"
+                    id={`reset-type-${option.value}`}
+                    name="reset-type"
+                    checked={selectedType === option.value}
+                    onChange={() => setSelectedType(option.value)}
+                    disabled={isResetting}
+                    className={`mt-1 h-5 w-5 rounded border-2 focus:ring-2 focus:ring-offset-1 ${
+                      option.severity === 'high'
+                        ? 'text-red-500 border-red-400 focus:ring-red-500'
+                        : option.severity === 'medium'
+                          ? 'text-amber-500 border-amber-400 focus:ring-amber-500'
+                          : 'text-blue-500 border-blue-400 focus:ring-blue-500'
+                    }`}
+                    aria-required="true"
+                  />
+                  <div
+                    className={`mt-0.5 ${
+                      option.severity === 'high'
+                        ? 'text-red-500'
+                        : option.severity === 'medium'
+                          ? 'text-amber-500'
+                          : 'text-blue-500'
+                    }`}
+                  >
+                    {option.icon}
                   </div>
-                </button>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2">
+                      <span className="font-medium">{option.label}</span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mt-0.5">{option.description}</p>
+                  </div>
+                </label>
               ))}
             </div>
           </div>
 
-          {/* Delete Settings Checkbox - only show for non-FULL_RESET */}
-          {selectedType !== 'FULL_RESET' && (
+          {/* Delete Settings Checkbox - only show when a non-FULL_RESET type is selected */}
+          {selectedType !== null && selectedType !== 'FULL_RESET' && (
             <div className="flex items-center gap-2">
               <input
                 type="checkbox"
@@ -338,7 +371,9 @@ export function ResetStoreDialog({
               type="button"
               variant="destructive"
               onClick={handleReset}
-              disabled={isResetting || !isConfirmationValid || !isReasonValid}
+              disabled={
+                isResetting || !isResetTypeSelected || !isConfirmationValid || !isReasonValid
+              }
             >
               {isResetting ? (
                 <>

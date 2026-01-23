@@ -47,3 +47,12 @@ export {
   useDateRangeReport,
   useInvalidateReports,
 } from './useReports';
+
+// Sync Activity hooks
+export {
+  syncActivityKeys,
+  useSyncActivity,
+  useRetrySyncItem,
+  useDeleteSyncItem,
+  useInvalidateSyncActivity,
+} from './useSyncActivity';

@@ -245,4 +245,73 @@ describe('StoresDAL', () => {
       expect(result.name).toBe('New Name');
     });
   });
+
+  describe('deleteStore', () => {
+    it('should delete store and return true when store exists', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteStore('store-123');
+
+      expect(result).toBe(true);
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM stores WHERE store_id = ?');
+      expect(mockRun).toHaveBeenCalledWith('store-123');
+    });
+
+    it('should return false when store does not exist', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteStore('nonexistent-store');
+
+      expect(result).toBe(false);
+      expect(mockRun).toHaveBeenCalledWith('nonexistent-store');
+    });
+
+    it('should use parameterized query for SQL injection prevention', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Attempt to pass malicious input
+      dal.deleteStore("'; DROP TABLE stores; --");
+
+      // Verify the query uses parameterized statement (? placeholder)
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM stores WHERE store_id = ?');
+      // The malicious string is passed as a parameter, not concatenated
+      expect(mockRun).toHaveBeenCalledWith("'; DROP TABLE stores; --");
+    });
+  });
+
+  describe('deleteAllStores', () => {
+    it('should delete all stores and return count', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 3 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteAllStores();
+
+      expect(result).toBe(3);
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM stores');
+      expect(mockRun).toHaveBeenCalledWith();
+    });
+
+    it('should return 0 when no stores exist', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deleteAllStores();
+
+      expect(result).toBe(0);
+    });
+
+    it('should use static query with no user input', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deleteAllStores();
+
+      // Verify static query with no parameters
+      expect(mockPrepare).toHaveBeenCalledWith('DELETE FROM stores');
+      expect(mockRun).toHaveBeenCalledWith();
+    });
+  });
 });

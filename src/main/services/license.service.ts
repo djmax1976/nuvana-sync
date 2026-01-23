@@ -16,6 +16,7 @@ import { safeStorage } from 'electron';
 import Store from 'electron-store';
 import { createHash, createHmac, timingSafeEqual } from 'crypto';
 import { z } from 'zod';
+import fs from 'fs';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -639,6 +640,56 @@ export class LicenseService {
     this.licenseData = null;
     this.store.delete(LICENSE_STORE_KEY);
     this.notifyStatusChange();
+  }
+
+  /**
+   * Delete the license file completely (for FULL_RESET)
+   *
+   * This method permanently removes the nuvana-license.json file from disk.
+   * The file will be recreated on next app startup when license is validated.
+   *
+   * @security SEC-017: Only called during authorized FULL_RESET operations
+   * @security LM-001: Structured logging for audit trail
+   * @security API-003: Centralized error handling with sanitized responses
+   *
+   * @returns Path to deleted file, or null if file did not exist
+   */
+  deleteLicenseFile(): string | null {
+    const licensePath = this.store.path;
+
+    try {
+      if (fs.existsSync(licensePath)) {
+        // Clear store first to release any file handles
+        this.store.clear();
+        this.licenseData = null;
+
+        // Delete the file from disk
+        fs.unlinkSync(licensePath);
+
+        log.warn('License file deleted for FULL_RESET', {
+          path: licensePath,
+          operation: 'FULL_RESET',
+        });
+
+        // Notify listeners of state change
+        this.notifyStatusChange();
+
+        return licensePath;
+      }
+
+      log.debug('License file does not exist, nothing to delete', {
+        path: licensePath,
+      });
+      return null;
+    } catch (error) {
+      // API-003: Log server-side with sanitized client response
+      log.error('Failed to delete license file', {
+        path: licensePath,
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      // Re-throw to allow caller to handle
+      throw error;
+    }
   }
 
   // ==========================================================================

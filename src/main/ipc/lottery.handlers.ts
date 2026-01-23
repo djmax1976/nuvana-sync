@@ -1263,6 +1263,69 @@ registerHandler(
         hasOpenShift: Boolean(openShift),
       });
 
+      // ========================================================================
+      // Game Status Validation (SEC-014: INPUT_VALIDATION, DB-006: TENANT_ISOLATION)
+      // ========================================================================
+      // Business Rule: Packs can only be activated for games with ACTIVE status.
+      // Games that are INACTIVE or DISCONTINUED should not allow new pack activations.
+      //
+      // DB-006: Use findByIdForStore() for tenant isolation - validates game belongs to store
+      // SEC-014: Validate game status against allowlist before business logic executes
+      // ========================================================================
+
+      // First, get the pack to retrieve its game_id (DB-006: store-scoped lookup)
+      log.debug('Looking up pack for game status validation', {
+        packId: pack_id,
+        storeId,
+      });
+      const packForGameCheck = lotteryPacksDAL.findByIdForStore(storeId, pack_id);
+      log.debug('Pack lookup result for game validation', {
+        packId: pack_id,
+        found: !!packForGameCheck,
+        packStatus: packForGameCheck?.status,
+        gameId: packForGameCheck?.game_id,
+      });
+      if (!packForGameCheck) {
+        log.warn('Pack not found for game status validation', {
+          packId: pack_id,
+          storeId,
+        });
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Pack not found');
+      }
+
+      // DB-006: Validate game exists AND belongs to this store (tenant isolation)
+      const game = lotteryGamesDAL.findByIdForStore(storeId, packForGameCheck.game_id);
+      if (!game) {
+        log.error('Game not found for pack', {
+          packId: pack_id,
+          gameId: packForGameCheck.game_id,
+          storeId,
+        });
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game not found for this pack');
+      }
+
+      // SEC-014: Validate game status is in allowlist for activation
+      if (game.status !== 'ACTIVE') {
+        log.warn('Pack activation rejected: game is not active', {
+          packId: pack_id,
+          gameId: game.game_id,
+          gameName: game.name,
+          gameStatus: game.status,
+          storeId,
+          userId: activated_by,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          `Cannot activate pack: Game "${game.name}" is ${game.status}. Only packs for ACTIVE games can be activated.`
+        );
+      }
+
+      log.debug('Game status validation passed', {
+        gameId: game.game_id,
+        gameName: game.name,
+        gameStatus: game.status,
+      });
+
       // DB-006: Pass store_id for tenant isolation validation
       // v029 API Alignment: Map bin_id to current_bin_id for DAL
       log.debug('Calling DAL.activate', {
@@ -1281,16 +1344,6 @@ registerHandler(
         activated_shift_id: shift_id,
       });
       log.debug('Pack activated successfully', { pack_id: pack.pack_id });
-
-      // Look up game to get game_code for sync payload
-      const game = lotteryGamesDAL.findById(pack.game_id);
-      if (!game) {
-        log.error('Game not found for pack during sync', {
-          packId: pack.pack_id,
-          gameId: pack.game_id,
-        });
-        throw new Error('Game not found for pack');
-      }
 
       // SYNC-001: Enqueue pack activation for cloud synchronization
       // DB-006: TENANT_ISOLATION - store_id included in sync payload

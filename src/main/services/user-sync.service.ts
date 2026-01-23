@@ -20,7 +20,7 @@
 import { cloudApiService, type CloudUser, type StoreRole } from './cloud-api.service';
 import { usersDAL, type CloudUserData, type User } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
-import { syncQueueDAL, type SyncQueueItem } from '../dal/sync-queue.dal';
+import { syncQueueDAL, type SyncQueueItem, type SyncApiContext } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -105,6 +105,18 @@ export class UserSyncService {
     const storeId = store.store_id;
 
     log.info('Starting user sync', { storeId });
+
+    // Create PULL queue entry for sync monitor tracking
+    const pullQueueItem = syncQueueDAL.enqueue({
+      store_id: storeId,
+      entity_type: 'user',
+      entity_id: `pull-${Date.now()}`,
+      operation: 'UPDATE',
+      payload: { action: 'pull_users', timestamp: new Date().toISOString() },
+      sync_direction: 'PULL',
+    });
+
+    const apiEndpoint = '/api/v1/sync/users';
 
     try {
       // Step 1: Pull users from cloud (unified endpoint with proper roles)
@@ -214,10 +226,34 @@ export class UserSyncService {
         errors: result.errors.length,
       });
 
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pulled: result.synced,
+          created: result.created,
+          updated: result.updated,
+          deactivated: result.deactivated,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       log.error('User sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
       throw error;
     }
   }
@@ -449,6 +485,37 @@ export class UserSyncService {
     // Get all pending items and filter for employees
     const batch = syncQueueDAL.getBatch(store.store_id, 500);
     return batch.items.filter((item) => item.entity_type === 'employee').length;
+  }
+
+  /**
+   * Extract HTTP status code from error message
+   * Looks for common patterns like "404", "500", "timeout", etc.
+   *
+   * @param message - Error message to parse
+   * @returns HTTP status code or 0 if not found
+   */
+  private extractHttpStatusFromError(message: string): number {
+    // Look for explicit HTTP status codes
+    const statusMatch = message.match(/\b(4\d{2}|5\d{2})\b/);
+    if (statusMatch) {
+      return parseInt(statusMatch[1], 10);
+    }
+
+    // Map common error patterns to status codes
+    if (message.includes('timeout') || message.includes('ETIMEDOUT')) {
+      return 408; // Request Timeout
+    }
+    if (message.includes('ECONNREFUSED') || message.includes('ENOTFOUND')) {
+      return 503; // Service Unavailable
+    }
+    if (message.includes('unauthorized') || message.includes('Unauthorized')) {
+      return 401;
+    }
+    if (message.includes('forbidden') || message.includes('Forbidden')) {
+      return 403;
+    }
+
+    return 0; // Unknown
   }
 }
 
