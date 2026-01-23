@@ -437,7 +437,7 @@ describe('FULL_RESET Integration Tests', () => {
 
       vi.doMock('../../src/main/dal/users.dal', () => ({
         usersDAL: {
-          getCountByStore: mockUsersCount,
+          countByStore: mockUsersCount,
           isDatabaseReady: vi.fn().mockReturnValue(true),
         },
       }));
@@ -446,13 +446,13 @@ describe('FULL_RESET Integration Tests', () => {
       const { usersDAL } = await import('../../src/main/dal/users.dal');
 
       // Before deletion: 5 users exist
-      expect(usersDAL.getCountByStore(TEST_STORE_ID)).toBe(5);
+      expect(usersDAL.countByStore(TEST_STORE_ID)).toBe(5);
 
       // Execute CASCADE delete
       storesDAL.deleteAllStores();
 
       // After deletion: 0 users (CASCADE triggered)
-      expect(usersDAL.getCountByStore(TEST_STORE_ID)).toBe(0);
+      expect(usersDAL.countByStore(TEST_STORE_ID)).toBe(0);
     });
   });
 
