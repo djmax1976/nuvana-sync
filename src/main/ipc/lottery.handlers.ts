@@ -1097,6 +1097,29 @@ registerHandler(
             continue;
           }
 
+          // ========================================================================
+          // SEC-014: INPUT_VALIDATION - Game Status Validation
+          // ========================================================================
+          // Business Rule: Packs can only be received for games with ACTIVE status.
+          // Games that are INACTIVE or DISCONTINUED cannot accept new pack inventory.
+          // This prevents operational errors and maintains data integrity.
+          // ========================================================================
+          if (game.status !== 'ACTIVE') {
+            log.warn('Pack reception rejected: game is not active', {
+              serial,
+              gameCode: game_code,
+              gameId: game.game_id,
+              gameName: game.name,
+              gameStatus: game.status,
+              storeId,
+            });
+            errors.push({
+              serial,
+              error: `Cannot receive pack: Game "${game.name}" is ${game.status}. Only packs for ACTIVE games can be received.`,
+            });
+            continue;
+          }
+
           // Check if pack already exists
           const existingPack = lotteryPacksDAL.findByPackNumber(storeId, game.game_id, pack_number);
           if (existingPack) {
@@ -2045,6 +2068,7 @@ registerHandler(
               price: localGame.price,
               pack_value: localGame.pack_value,
               tickets_per_pack: localGame.tickets_per_pack,
+              status: localGame.status,
             },
           });
         }
@@ -2076,6 +2100,7 @@ registerHandler(
               price: localGame.price,
               pack_value: localGame.pack_value,
               tickets_per_pack: localGame.tickets_per_pack,
+              status: localGame.status,
             },
           });
         }

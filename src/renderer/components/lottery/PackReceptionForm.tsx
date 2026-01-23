@@ -348,7 +348,7 @@ export function PackReceptionForm({
                 price: cloudGame.price,
                 pack_value: cloudGame.pack_value,
                 tickets_per_pack: cloudGame.tickets_per_pack ?? 0,
-                status: 'ACTIVE',
+                status: cloudGame.status,
                 store_id: storeId,
                 created_at: new Date().toISOString(),
                 updated_at: new Date().toISOString(),
@@ -364,7 +364,19 @@ export function PackReceptionForm({
         }
 
         if (game) {
-          // Game exists (from cache or cloud lookup) - add pack to list immediately
+          // SEC-014: Validate game status before allowing pack reception
+          // Business Rule: Packs can only be received for ACTIVE games
+          // Backend is authoritative, but frontend provides immediate UX feedback
+          if (game.status !== 'ACTIVE') {
+            toast({
+              title: 'Game is not active',
+              description: `Cannot receive pack: Game "${game.name}" is ${game.status}. Only packs for ACTIVE games can be received.`,
+              variant: 'destructive',
+            });
+            clearInputAndFocus();
+            return;
+          }
+          // Game exists and is ACTIVE - add pack to list
           addPackToList(serial, parsed, game, scanMetrics);
         } else {
           // Game not found anywhere - show modal to create it

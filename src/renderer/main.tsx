@@ -7,6 +7,10 @@
  * @module renderer/main
  */
 
+// Suppress known Recharts 3.x bug warning (must be first import)
+// See: https://github.com/recharts/recharts/issues/6716
+import './lib/suppress-recharts-warning';
+
 import React from 'react';
 import ReactDOM from 'react-dom/client';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';

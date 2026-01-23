@@ -1096,6 +1096,7 @@ export async function createGame(data: CreateGameInput): Promise<ApiResponse<Lot
 
 /**
  * Game lookup result from cloud-first lookup
+ * SEC-014: Includes status for frontend validation before pack operations
  */
 export interface GameLookupResult {
   found: boolean;
@@ -1107,6 +1108,8 @@ export interface GameLookupResult {
     price: number;
     pack_value: number;
     tickets_per_pack: number | null;
+    /** Game status - frontend should validate ACTIVE before pack reception */
+    status: LotteryGameStatus;
   } | null;
 }
 
