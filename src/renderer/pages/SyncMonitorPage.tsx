@@ -160,8 +160,7 @@ export default function SyncMonitorPage() {
 
   const handleSyncGames = useCallback(async () => {
     try {
-      const result = await syncAPI.syncGames();
-      console.log('Games sync completed:', result);
+      await syncAPI.syncGames();
       // Wait a bit then refresh to see new status
       setTimeout(() => invalidateAll(), 1000);
     } catch (error) {
