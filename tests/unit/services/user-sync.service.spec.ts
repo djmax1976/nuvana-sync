@@ -39,6 +39,26 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
   },
 }));
 
+// Mock sync queue DAL (used by UserSyncService for PULL tracking)
+vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
+  syncQueueDAL: {
+    enqueue: vi.fn().mockReturnValue({
+      id: 'mock-queue-id',
+      store_id: 'store-123',
+      entity_type: 'user_sync',
+      entity_id: 'user-sync-batch',
+      operation: 'PULL',
+      payload: '{}',
+      synced: 0,
+      sync_attempts: 0,
+      created_at: new Date().toISOString(),
+    }),
+    markSynced: vi.fn(),
+    incrementAttempts: vi.fn(),
+    getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
+  },
+}));
+
 // Mock database
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -49,6 +69,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
     }),
     transaction: vi.fn((fn) => () => fn()),
   })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 import { UserSyncService } from '../../../src/main/services/user-sync.service';

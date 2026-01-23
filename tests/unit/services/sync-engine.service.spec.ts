@@ -63,6 +63,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
     prepare: mockPrepare,
     transaction: vi.fn((fn: () => unknown) => () => fn()),
   })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 // Mock DALs
@@ -330,7 +331,9 @@ describe('SyncEngineService', () => {
       await vi.advanceTimersByTimeAsync(100);
 
       // Employee items are marked as synced (employees are pull-only from cloud)
-      expect(mockMarkSynced).toHaveBeenCalledWith('queue-1');
+      // markSynced now accepts optional apiContext as second parameter
+      expect(mockMarkSynced).toHaveBeenCalled();
+      expect(mockMarkSynced.mock.calls[0][0]).toBe('queue-1');
       expect(mockCompleteSync).toHaveBeenCalled();
     });
 

@@ -96,7 +96,8 @@ describe('SyncQueueDAL', () => {
         '{"complex":{"nested":"data"}}', // JSON serialized
         expect.any(Number), // priority
         expect.any(Number), // max_attempts
-        expect.any(String) // created_at
+        expect.any(String), // created_at
+        'PUSH' // sync_direction (default)
       );
     });
   });
@@ -167,7 +168,35 @@ describe('SyncQueueDAL', () => {
 
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('UPDATE sync_queue SET'));
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('synced = 1'));
-      expect(mockRun).toHaveBeenCalledWith(expect.any(String), 'item-123');
+      // markSynced now includes: synced_at, last_attempt_at, api_endpoint, http_status, response_body, id
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String), // synced_at
+        expect.any(String), // last_attempt_at
+        null, // api_endpoint (no apiContext provided)
+        null, // http_status
+        null, // response_body
+        'item-123' // id
+      );
+    });
+
+    it('should include API context when provided', () => {
+      const mockRun = vi.fn();
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.markSynced('item-123', {
+        api_endpoint: '/api/sync',
+        http_status: 200,
+        response_body: '{"success":true}',
+      });
+
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String), // synced_at
+        expect.any(String), // last_attempt_at
+        '/api/sync', // api_endpoint
+        200, // http_status
+        '{"success":true}', // response_body
+        'item-123' // id
+      );
     });
   });
 
@@ -198,10 +227,34 @@ describe('SyncQueueDAL', () => {
       expect(mockPrepare).toHaveBeenCalledWith(
         expect.stringContaining('sync_attempts = sync_attempts + 1')
       );
+      // incrementAttempts now includes: error, last_attempt_at, api_endpoint, http_status, response_body, id
       expect(mockRun).toHaveBeenCalledWith(
-        'Connection timeout',
+        'Connection timeout', // error
         expect.any(String), // last_attempt_at
-        'item-123'
+        null, // api_endpoint (no apiContext provided)
+        null, // http_status
+        null, // response_body
+        'item-123' // id
+      );
+    });
+
+    it('should include API context when provided', () => {
+      const mockRun = vi.fn();
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.incrementAttempts('item-123', 'API error', {
+        api_endpoint: '/api/sync',
+        http_status: 500,
+        response_body: '{"error":"Internal server error"}',
+      });
+
+      expect(mockRun).toHaveBeenCalledWith(
+        'API error', // error
+        expect.any(String), // last_attempt_at
+        '/api/sync', // api_endpoint
+        500, // http_status
+        '{"error":"Internal server error"}', // response_body
+        'item-123' // id
       );
     });
   });

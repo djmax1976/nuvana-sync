@@ -92,6 +92,26 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
   },
 }));
 
+// Mock sync queue DAL (used by BidirectionalSyncService for PULL tracking)
+vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
+  syncQueueDAL: {
+    enqueue: vi.fn().mockReturnValue({
+      id: 'mock-queue-id',
+      store_id: 'store-123',
+      entity_type: 'bin_sync',
+      entity_id: 'bin-sync-batch',
+      operation: 'PULL',
+      payload: '{}',
+      synced: 0,
+      sync_attempts: 0,
+      created_at: new Date().toISOString(),
+    }),
+    markSynced: vi.fn(),
+    incrementAttempts: vi.fn(),
+    getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
+  },
+}));
+
 // Mock database
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -102,6 +122,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
     }),
     transaction: vi.fn((fn: () => unknown) => () => fn()),
   })),
+  isDatabaseInitialized: vi.fn(() => true),
 }));
 
 import { BidirectionalSyncService } from '../../../src/main/services/bidirectional-sync.service';
