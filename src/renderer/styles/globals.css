@@ -2,29 +2,623 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================================
+   DESIGN SYSTEM - Enterprise Design Tokens
+   Based on modern admin dashboard aesthetics
+   ============================================================================ */
+
+@layer base {
+  :root {
+    /* ========================================================================
+       COLOR PALETTE - Light Mode
+       ======================================================================== */
+
+    /* Background Colors */
+    --background: 220 14% 96%;           /* #F1F5F9 - Main app background (light grey) */
+    --background-subtle: 210 20% 98%;    /* #F8FAFC - Subtle background variation */
+
+    /* Foreground/Text Colors */
+    --foreground: 222 47% 11%;           /* #1E293B - Primary text (slate-800) */
+    --foreground-muted: 215 16% 47%;     /* #64748B - Secondary text (slate-500) */
+
+    /* Card Colors - Clean white cards */
+    --card: 0 0% 100%;                   /* #FFFFFF - Card background */
+    --card-foreground: 222 47% 11%;      /* #1E293B - Card text */
+    --card-hover: 210 20% 98%;           /* #F8FAFC - Card hover state */
+
+    /* Popover/Dropdown */
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
+
+    /* Primary Brand Color - Blue */
+    --primary: 217 91% 60%;              /* #3B82F6 - Primary blue (blue-500) */
+    --primary-hover: 217 91% 55%;        /* Darker on hover */
+    --primary-foreground: 0 0% 100%;     /* White text on primary */
+    --primary-light: 214 95% 93%;        /* #DBEAFE - Light blue tint (blue-100) */
+    --primary-muted: 214 32% 91%;        /* Muted blue for subtle backgrounds */
+
+    /* Secondary Colors */
+    --secondary: 210 40% 96%;            /* #F1F5F9 - Secondary backgrounds */
+    --secondary-foreground: 222 47% 11%;
+
+    /* Muted/Subtle Elements */
+    --muted: 210 40% 96%;
+    --muted-foreground: 215 16% 47%;
+
+    /* Accent Color - For highlights */
+    --accent: 217 91% 60%;               /* Same as primary for consistency */
+    --accent-foreground: 0 0% 100%;
+    --accent-light: 214 95% 93%;
+
+    /* Semantic Colors - Status */
+    --success: 142 71% 45%;              /* #22C55E - Green (green-500) */
+    --success-foreground: 0 0% 100%;
+    --success-light: 138 76% 94%;        /* #DCFCE7 - Light green (green-100) */
+    --success-muted: 142 76% 36%;        /* Darker green for text */
+
+    --warning: 38 92% 50%;               /* #F59E0B - Amber (amber-500) */
+    --warning-foreground: 0 0% 100%;
+    --warning-light: 48 96% 89%;         /* #FEF3C7 - Light amber (amber-100) */
+    --warning-muted: 38 92% 40%;         /* Darker amber for text */
+
+    --destructive: 0 84% 60%;            /* #EF4444 - Red (red-500) */
+    --destructive-foreground: 0 0% 100%;
+    --destructive-light: 0 86% 94%;      /* #FEE2E2 - Light red (red-100) */
+    --destructive-muted: 0 84% 40%;      /* Darker red for text */
+
+    --info: 199 89% 48%;                 /* #0EA5E9 - Sky (sky-500) */
+    --info-foreground: 0 0% 100%;
+    --info-light: 201 94% 94%;           /* #E0F2FE - Light sky (sky-100) */
+    --info-muted: 199 89% 38%;           /* Darker sky for text */
+
+    /* Border Colors */
+    --border: 214 32% 91%;               /* #E2E8F0 - Default border (slate-200) */
+    --border-subtle: 220 13% 91%;        /* Subtle border variation */
+    --border-focus: 217 91% 60%;         /* Blue border on focus */
+
+    /* Input Elements */
+    --input: 214 32% 91%;
+    --input-focus: 217 91% 60%;
+
+    /* Ring (focus outline) */
+    --ring: 217 91% 60%;
+    --ring-offset: 0 0% 100%;
+
+    /* ========================================================================
+       LAYOUT TOKENS
+       ======================================================================== */
+    --radius: 0.5rem;                    /* 8px - Default border radius */
+    --radius-sm: 0.375rem;               /* 6px - Small elements */
+    --radius-lg: 0.75rem;                /* 12px - Cards, modals */
+    --radius-xl: 1rem;                   /* 16px - Large cards */
+    --radius-full: 9999px;               /* Pill shapes */
+
+    /* ========================================================================
+       SHADOW TOKENS
+       ======================================================================== */
+    --shadow-xs: 0 1px 2px 0 rgb(0 0 0 / 0.05);
+    --shadow-sm: 0 1px 3px 0 rgb(0 0 0 / 0.1), 0 1px 2px -1px rgb(0 0 0 / 0.1);
+    --shadow-md: 0 4px 6px -1px rgb(0 0 0 / 0.1), 0 2px 4px -2px rgb(0 0 0 / 0.1);
+    --shadow-lg: 0 10px 15px -3px rgb(0 0 0 / 0.1), 0 4px 6px -4px rgb(0 0 0 / 0.1);
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.04), 0 1px 2px 0 rgb(0 0 0 / 0.02);
+    --shadow-card-hover: 0 4px 12px 0 rgb(0 0 0 / 0.08);
+
+    /* ========================================================================
+       SIDEBAR TOKENS
+       ======================================================================== */
+    --sidebar-bg: 0 0% 100%;             /* White sidebar */
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-border: 214 32% 91%;
+    --sidebar-item-hover: 210 40% 96%;
+    --sidebar-item-active: 214 95% 93%;  /* Light blue for active item */
+    --sidebar-item-active-text: 217 91% 50%; /* Blue text for active */
+
+    /* ========================================================================
+       CHART COLORS
+       ======================================================================== */
+    --chart-1: 217 91% 60%;              /* Primary blue */
+    --chart-2: 142 71% 45%;              /* Green */
+    --chart-3: 38 92% 50%;               /* Amber */
+    --chart-4: 262 83% 58%;              /* Purple */
+    --chart-5: 199 89% 48%;              /* Sky */
+    --chart-6: 0 84% 60%;                /* Red */
+  }
+
+  /* ========================================================================
+     DARK MODE
+     ======================================================================== */
+  .dark {
+    /* Background Colors */
+    --background: 222 47% 11%;           /* #1E293B - Dark background */
+    --background-subtle: 217 33% 17%;    /* Subtle variation */
+
+    /* Foreground/Text Colors */
+    --foreground: 210 40% 98%;           /* #F8FAFC - Light text */
+    --foreground-muted: 215 20% 65%;     /* Muted text */
+
+    /* Card Colors */
+    --card: 217 33% 17%;                 /* #334155 - Card background */
+    --card-foreground: 210 40% 98%;
+    --card-hover: 217 33% 20%;
+
+    /* Popover/Dropdown */
+    --popover: 217 33% 17%;
+    --popover-foreground: 210 40% 98%;
+
+    /* Primary Brand Color - Blue (slightly lighter for dark mode) */
+    --primary: 217 91% 65%;              /* Brighter blue */
+    --primary-hover: 217 91% 70%;
+    --primary-foreground: 222 47% 11%;   /* Dark text on primary */
+    --primary-light: 217 33% 25%;        /* Dark mode light blue */
+    --primary-muted: 217 33% 25%;
+
+    /* Secondary Colors */
+    --secondary: 217 33% 17%;
+    --secondary-foreground: 210 40% 98%;
+
+    /* Muted/Subtle Elements */
+    --muted: 217 33% 17%;
+    --muted-foreground: 215 20% 65%;
+
+    /* Accent Color */
+    --accent: 217 91% 65%;
+    --accent-foreground: 222 47% 11%;
+    --accent-light: 217 33% 25%;
+
+    /* Semantic Colors - Status (adjusted for dark mode) */
+    --success: 142 71% 50%;
+    --success-foreground: 222 47% 11%;
+    --success-light: 142 50% 20%;
+    --success-muted: 142 71% 60%;
+
+    --warning: 38 92% 55%;
+    --warning-foreground: 222 47% 11%;
+    --warning-light: 38 50% 20%;
+    --warning-muted: 38 92% 65%;
+
+    --destructive: 0 84% 65%;
+    --destructive-foreground: 222 47% 11%;
+    --destructive-light: 0 50% 20%;
+    --destructive-muted: 0 84% 70%;
+
+    --info: 199 89% 55%;
+    --info-foreground: 222 47% 11%;
+    --info-light: 199 50% 20%;
+    --info-muted: 199 89% 65%;
+
+    /* Border Colors */
+    --border: 217 33% 25%;
+    --border-subtle: 217 33% 22%;
+    --border-focus: 217 91% 65%;
+
+    /* Input Elements */
+    --input: 217 33% 25%;
+    --input-focus: 217 91% 65%;
+
+    /* Ring (focus outline) */
+    --ring: 217 91% 65%;
+    --ring-offset: 222 47% 11%;
+
+    /* Sidebar */
+    --sidebar-bg: 217 33% 17%;
+    --sidebar-foreground: 210 40% 98%;
+    --sidebar-border: 217 33% 25%;
+    --sidebar-item-hover: 217 33% 20%;
+    --sidebar-item-active: 217 33% 25%;
+    --sidebar-item-active-text: 217 91% 70%;
+
+    /* Shadow (reduced for dark mode) */
+    --shadow-card: 0 1px 3px 0 rgb(0 0 0 / 0.2);
+    --shadow-card-hover: 0 4px 12px 0 rgb(0 0 0 / 0.3);
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+  }
+}
+
 body {
-  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
     Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
   margin: 0;
   padding: 0;
-  background-color: #f8fafc;
 }
 
-/* Custom scrollbar */
+/* ============================================================================
+   UTILITY CLASSES - Reusable Design System Classes
+   ============================================================================ */
+
+@layer components {
+  /* ========================================================================
+     DASHBOARD CARDS
+     Consistent card styling for dashboard widgets
+     ======================================================================== */
+
+  .dashboard-card {
+    @apply bg-card rounded-xl border border-border/50 shadow-[var(--shadow-card)]
+           transition-all duration-200 hover:shadow-[var(--shadow-card-hover)];
+  }
+
+  .dashboard-card-header {
+    @apply flex items-center justify-between p-4 pb-2;
+  }
+
+  .dashboard-card-title {
+    @apply text-sm font-medium text-muted-foreground;
+  }
+
+  .dashboard-card-value {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  .dashboard-card-content {
+    @apply p-4 pt-0;
+  }
+
+  /* ========================================================================
+     STAT CARDS
+     KPI/Stats display cards with icon and value
+     ======================================================================== */
+
+  .stat-card {
+    @apply dashboard-card p-4;
+  }
+
+  .stat-card-icon {
+    @apply w-10 h-10 rounded-lg flex items-center justify-center;
+  }
+
+  .stat-card-icon-primary {
+    @apply bg-primary-light text-primary;
+  }
+
+  .stat-card-icon-success {
+    @apply bg-success-light text-success;
+  }
+
+  .stat-card-icon-warning {
+    @apply bg-warning-light text-warning;
+  }
+
+  .stat-card-icon-destructive {
+    @apply bg-destructive-light text-destructive;
+  }
+
+  .stat-card-icon-info {
+    @apply bg-info-light text-info;
+  }
+
+  /* ========================================================================
+     SIDEBAR NAVIGATION
+     ======================================================================== */
+
+  .sidebar-nav-item {
+    @apply flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium
+           text-foreground/70 transition-all duration-150
+           hover:bg-[hsl(var(--sidebar-item-hover))] hover:text-foreground;
+  }
+
+  .sidebar-nav-item-active {
+    @apply bg-[hsl(var(--sidebar-item-active))] text-[hsl(var(--sidebar-item-active-text))]
+           hover:bg-[hsl(var(--sidebar-item-active))] hover:text-[hsl(var(--sidebar-item-active-text))];
+  }
+
+  .sidebar-nav-icon {
+    @apply w-5 h-5 shrink-0;
+  }
+
+  /* ========================================================================
+     DATA TABLES
+     ======================================================================== */
+
+  .data-table {
+    @apply w-full text-sm;
+  }
+
+  .data-table-header {
+    @apply bg-muted/50 border-b;
+  }
+
+  .data-table-header-cell {
+    @apply px-4 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wider;
+  }
+
+  .data-table-row {
+    @apply border-b border-border/50 transition-colors hover:bg-muted/30;
+  }
+
+  .data-table-cell {
+    @apply px-4 py-3 text-sm;
+  }
+
+  /* ========================================================================
+     BADGES & TAGS
+     ======================================================================== */
+
+  .status-badge {
+    @apply inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium;
+  }
+
+  .status-badge-success {
+    @apply bg-success-light text-success-muted;
+  }
+
+  .status-badge-warning {
+    @apply bg-warning-light text-warning-muted;
+  }
+
+  .status-badge-destructive {
+    @apply bg-destructive-light text-destructive-muted;
+  }
+
+  .status-badge-info {
+    @apply bg-info-light text-info-muted;
+  }
+
+  .status-badge-neutral {
+    @apply bg-muted text-muted-foreground;
+  }
+
+  /* ========================================================================
+     BUTTONS
+     ======================================================================== */
+
+  .btn-primary {
+    @apply bg-primary text-primary-foreground hover:bg-primary/90
+           shadow-sm transition-all duration-150;
+  }
+
+  .btn-secondary {
+    @apply bg-secondary text-secondary-foreground hover:bg-secondary/80
+           transition-all duration-150;
+  }
+
+  .btn-outline {
+    @apply border border-border bg-transparent hover:bg-accent
+           transition-all duration-150;
+  }
+
+  .btn-ghost {
+    @apply hover:bg-accent hover:text-accent-foreground
+           transition-all duration-150;
+  }
+
+  /* ========================================================================
+     FORM ELEMENTS
+     ======================================================================== */
+
+  .input-base {
+    @apply w-full rounded-lg border border-input bg-background px-3 py-2 text-sm
+           placeholder:text-muted-foreground
+           focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-1
+           disabled:cursor-not-allowed disabled:opacity-50
+           transition-all duration-150;
+  }
+
+  .input-error {
+    @apply border-destructive focus:ring-destructive;
+  }
+
+  .input-success {
+    @apply border-success focus:ring-success;
+  }
+
+  /* ========================================================================
+     PAGE HEADERS
+     ======================================================================== */
+
+  .page-header {
+    @apply mb-6;
+  }
+
+  .page-title {
+    @apply text-2xl font-bold tracking-tight;
+  }
+
+  .page-subtitle {
+    @apply text-muted-foreground mt-1;
+  }
+
+  /* ========================================================================
+     SECTION HEADERS
+     ======================================================================== */
+
+  .section-header {
+    @apply flex items-center justify-between mb-4;
+  }
+
+  .section-title {
+    @apply text-base font-semibold;
+  }
+
+  .section-subtitle {
+    @apply text-sm text-muted-foreground;
+  }
+
+  /* ========================================================================
+     AVATARS & USER ELEMENTS
+     ======================================================================== */
+
+  .avatar {
+    @apply relative inline-flex shrink-0 items-center justify-center
+           rounded-full bg-muted text-muted-foreground font-medium;
+  }
+
+  .avatar-sm {
+    @apply w-8 h-8 text-xs;
+  }
+
+  .avatar-md {
+    @apply w-10 h-10 text-sm;
+  }
+
+  .avatar-lg {
+    @apply w-12 h-12 text-base;
+  }
+
+  /* ========================================================================
+     ACTIVITY LISTS
+     ======================================================================== */
+
+  .activity-item {
+    @apply flex items-center gap-3 py-3 border-b border-border/50 last:border-0;
+  }
+
+  .activity-avatar {
+    @apply avatar avatar-sm bg-primary-light text-primary;
+  }
+
+  .activity-content {
+    @apply flex-1 min-w-0;
+  }
+
+  .activity-title {
+    @apply text-sm font-medium truncate;
+  }
+
+  .activity-meta {
+    @apply text-xs text-muted-foreground;
+  }
+
+  /* ========================================================================
+     PROGRESS & METRICS
+     ======================================================================== */
+
+  .metric-ring {
+    @apply relative inline-flex items-center justify-center;
+  }
+
+  .metric-ring-value {
+    @apply absolute text-lg font-bold;
+  }
+
+  .metric-ring-label {
+    @apply absolute text-xs text-muted-foreground mt-6;
+  }
+
+  /* ========================================================================
+     EMPTY STATES
+     ======================================================================== */
+
+  .empty-state {
+    @apply flex flex-col items-center justify-center py-12 text-center;
+  }
+
+  .empty-state-icon {
+    @apply w-12 h-12 text-muted-foreground/50 mb-4;
+  }
+
+  .empty-state-title {
+    @apply text-lg font-medium text-foreground;
+  }
+
+  .empty-state-description {
+    @apply text-sm text-muted-foreground mt-1 max-w-sm;
+  }
+
+  /* ========================================================================
+     LOADING STATES
+     ======================================================================== */
+
+  .skeleton {
+    @apply animate-pulse bg-muted rounded;
+  }
+
+  .skeleton-text {
+    @apply h-4 skeleton;
+  }
+
+  .skeleton-title {
+    @apply h-6 skeleton;
+  }
+
+  .skeleton-avatar {
+    @apply w-10 h-10 rounded-full skeleton;
+  }
+
+  .skeleton-card {
+    @apply w-full h-32 skeleton;
+  }
+}
+
+/* ============================================================================
+   CUSTOM SCROLLBAR
+   ============================================================================ */
+
 ::-webkit-scrollbar {
   width: 8px;
   height: 8px;
 }
 
 ::-webkit-scrollbar-track {
-  background: #f1f5f9;
+  background: hsl(var(--muted));
+  border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb {
-  background: #cbd5e1;
+  background: hsl(var(--border));
   border-radius: 4px;
 }
 
 ::-webkit-scrollbar-thumb:hover {
-  background: #94a3b8;
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+.dark ::-webkit-scrollbar-track {
+  background: hsl(var(--muted));
+}
+
+.dark ::-webkit-scrollbar-thumb {
+  background: hsl(var(--border));
+}
+
+.dark ::-webkit-scrollbar-thumb:hover {
+  background: hsl(var(--muted-foreground) / 0.5);
+}
+
+/* ============================================================================
+   TRANSITIONS & ANIMATIONS
+   ============================================================================ */
+
+@layer utilities {
+  .transition-base {
+    @apply transition-all duration-200 ease-in-out;
+  }
+
+  .transition-fast {
+    @apply transition-all duration-150 ease-in-out;
+  }
+
+  .transition-slow {
+    @apply transition-all duration-300 ease-in-out;
+  }
+
+  /* Focus ring utility */
+  .focus-ring {
+    @apply focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2;
+  }
+
+  /* Text truncation */
+  .text-truncate {
+    @apply truncate;
+  }
+
+  .text-truncate-2 {
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .text-truncate-3 {
+    display: -webkit-box;
+    -webkit-line-clamp: 3;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
 }

@@ -1,0 +1,139 @@
+name: E2E Tests
+
+# End-to-End testing for Electron application
+# Triggers only on PRs to main (solo developer workflow - no duplicate runs)
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      debug_enabled:
+        type: boolean
+        description: 'Run with debug logging'
+        required: false
+        default: false
+
+concurrency:
+  group: e2e-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  CI: true
+
+jobs:
+  # ============================================================================
+  # Build Application for E2E Testing
+  # ============================================================================
+  build-for-e2e:
+    name: Build for E2E
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Build application
+        run: npm run build
+
+      - name: Package application (unsigned for testing)
+        run: npm run build:win:unsigned
+
+      - name: Upload packaged app
+        uses: actions/upload-artifact@v4
+        with:
+          name: electron-app-e2e
+          path: release/win-unpacked/
+          retention-days: 1
+          compression-level: 1
+
+  # ============================================================================
+  # E2E Tests - Electron Application
+  # ============================================================================
+  e2e-tests:
+    name: E2E Tests
+    needs: build-for-e2e
+    runs-on: windows-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Cache node_modules
+        uses: actions/cache@v4
+        id: cache-node-modules
+        with:
+          path: node_modules
+          key: ${{ runner.os }}-node-modules-${{ hashFiles('package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-modules-
+
+      - name: Install dependencies
+        if: steps.cache-node-modules.outputs.cache-hit != 'true'
+        run: npm ci
+
+      - name: Download packaged app
+        uses: actions/download-artifact@v4
+        with:
+          name: electron-app-e2e
+          path: release/win-unpacked/
+
+      - name: Run E2E tests
+        run: npm run test:e2e
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/e2e-junit.xml
+          DEBUG: ${{ inputs.debug_enabled && 'pw:api' || '' }}
+
+      - name: Upload test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: e2e-test-results
+          path: |
+            test-results/
+            playwright-report/
+          retention-days: 7
+
+      - name: Upload screenshots on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-screenshots
+          path: test-results/e2e/**/*.png
+          retention-days: 7
+
+      - name: Upload videos on failure
+        uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: e2e-failure-videos
+          path: test-results/e2e/**/*.webm
+          retention-days: 7

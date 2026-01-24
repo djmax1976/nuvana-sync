@@ -65,6 +65,7 @@ tmp/
 temp/
 *.tmp
 *.temp
+tmpclaude-*
 
 # Claude Code
 .claude/
@@ -90,3 +91,6 @@ nul
 NULL
 NUL
 dashboard
+
+test-results/
+playwright-report/

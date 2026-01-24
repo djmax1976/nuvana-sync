@@ -8,13 +8,13 @@
  * @security LM-001: Structured logging with secret redaction
  */
 
-import { app } from "electron";
+import { app } from 'electron';
 
 // ============================================================================
 // Types
 // ============================================================================
 
-export type LogLevel = "debug" | "info" | "warn" | "error";
+export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
 
 export interface LogContext {
   /** Unique request/operation ID for tracing */
@@ -44,14 +44,14 @@ interface LogEntry {
  */
 const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
   // API keys
-  { pattern: /Bearer\s+[a-zA-Z0-9\-_\.]+/gi, replacement: "Bearer [REDACTED]" },
-  { pattern: /sk_[a-zA-Z0-9_\-\.]+/gi, replacement: "[REDACTED_API_KEY]" },
-  { pattern: /pk_[a-zA-Z0-9_\-\.]+/gi, replacement: "[REDACTED_API_KEY]" },
-  { pattern: /api[_-]?key["\s:=]+[a-zA-Z0-9\-_\.]+/gi, replacement: 'apiKey: "[REDACTED]"' },
+  { pattern: /Bearer\s+[a-zA-Z0-9\-_.]+/gi, replacement: 'Bearer [REDACTED]' },
+  { pattern: /sk_[a-zA-Z0-9_\-.]+/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /pk_[a-zA-Z0-9_\-.]+/gi, replacement: '[REDACTED_API_KEY]' },
+  { pattern: /api[_-]?key["\s:=]+[a-zA-Z0-9\-_.]+/gi, replacement: 'apiKey: "[REDACTED]"' },
   // Passwords
   { pattern: /password["\s:=]+[^\s",}]+/gi, replacement: 'password: "[REDACTED]"' },
   // Tokens
-  { pattern: /token["\s:=]+[a-zA-Z0-9\-_\.]+/gi, replacement: 'token: "[REDACTED]"' },
+  { pattern: /token["\s:=]+[a-zA-Z0-9\-_.]+/gi, replacement: 'token: "[REDACTED]"' },
   // Authorization headers
   { pattern: /Authorization["\s:=]+[^\s",}]+/gi, replacement: 'Authorization: "[REDACTED]"' },
 ];
@@ -60,16 +60,16 @@ const SECRET_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
  * Keys to redact from context objects
  */
 const SENSITIVE_KEYS = new Set([
-  "password",
-  "apiKey",
-  "apikey",
-  "api_key",
-  "secret",
-  "token",
-  "authorization",
-  "auth",
-  "credential",
-  "credentials",
+  'password',
+  'apiKey',
+  'apikey',
+  'api_key',
+  'secret',
+  'token',
+  'authorization',
+  'auth',
+  'credential',
+  'credentials',
 ]);
 
 // ============================================================================
@@ -88,10 +88,10 @@ class Logger {
     error: 3,
   };
 
-  constructor(serviceName: string = "nuvana-sync") {
+  constructor(serviceName: string = 'nuvana') {
     this.serviceName = serviceName;
-    this.version = app?.getVersion?.() || "1.0.0";
-    this.minLevel = process.env.NODE_ENV === "development" ? "debug" : "info";
+    this.version = app?.getVersion?.() || '1.0.0';
+    this.minLevel = process.env.NODE_ENV === 'development' ? 'debug' : 'info';
   }
 
   /**
@@ -117,17 +117,17 @@ class Logger {
    */
   private redactObject(obj: unknown, depth: number = 0): unknown {
     // Prevent infinite recursion
-    if (depth > 10) return "[MAX_DEPTH_EXCEEDED]";
+    if (depth > 10) return '[MAX_DEPTH_EXCEEDED]';
 
     if (obj === null || obj === undefined) {
       return obj;
     }
 
-    if (typeof obj === "string") {
+    if (typeof obj === 'string') {
       return this.redactString(obj);
     }
 
-    if (typeof obj === "number" || typeof obj === "boolean") {
+    if (typeof obj === 'number' || typeof obj === 'boolean') {
       return obj;
     }
 
@@ -147,11 +147,11 @@ class Logger {
       return obj.map((item) => this.redactObject(item, depth + 1));
     }
 
-    if (typeof obj === "object") {
+    if (typeof obj === 'object') {
       const result: Record<string, unknown> = {};
       for (const [key, value] of Object.entries(obj as Record<string, unknown>)) {
         if (SENSITIVE_KEYS.has(key.toLowerCase())) {
-          result[key] = "[REDACTED]";
+          result[key] = '[REDACTED]';
         } else {
           result[key] = this.redactObject(value, depth + 1);
         }
@@ -159,7 +159,7 @@ class Logger {
       return result;
     }
 
-    return "[UNKNOWN_TYPE]";
+    return '[UNKNOWN_TYPE]';
   }
 
   /**
@@ -182,28 +182,26 @@ class Logger {
 
     // Add redacted context
     if (context) {
-      const { service, ...rest } = context;
+      const { service: _service, ...rest } = context;
       if (Object.keys(rest).length > 0) {
         entry.context = this.redactObject(rest) as Record<string, unknown>;
       }
     }
 
     // Output as JSON for structured logging
-    const output = JSON.stringify(entry);
+    const output = JSON.stringify(entry) + '\n';
 
-    switch (level) {
-      case "debug":
-        console.debug(output);
-        break;
-      case "info":
-        console.info(output);
-        break;
-      case "warn":
-        console.warn(output);
-        break;
-      case "error":
-        console.error(output);
-        break;
+    // Use process.stdout/stderr.write directly to handle EPIPE errors properly
+    // The standard console methods can throw synchronously on broken pipes
+    try {
+      const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
+      if (stream && !stream.destroyed) {
+        stream.write(output, (err) => {
+          // Ignore write errors (EPIPE, etc.) - callback handles async errors
+        });
+      }
+    } catch {
+      // Silently ignore write errors (EPIPE, etc.)
     }
   }
 
@@ -211,28 +209,28 @@ class Logger {
    * Log debug message
    */
   debug(message: string, context?: LogContext): void {
-    this.log("debug", message, context);
+    this.log('debug', message, context);
   }
 
   /**
    * Log info message
    */
   info(message: string, context?: LogContext): void {
-    this.log("info", message, context);
+    this.log('info', message, context);
   }
 
   /**
    * Log warning message
    */
   warn(message: string, context?: LogContext): void {
-    this.log("warn", message, context);
+    this.log('warn', message, context);
   }
 
   /**
    * Log error message
    */
   error(message: string, context?: LogContext): void {
-    this.log("error", message, context);
+    this.log('error', message, context);
   }
 
   /**

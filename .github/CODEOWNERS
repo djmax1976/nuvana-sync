@@ -1,0 +1,25 @@
+# Code Owners - Requires approval from designated owners for PRs
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owners for everything
+* @djmax1976
+
+# CI/CD Configuration - requires extra review
+.github/ @djmax1976
+
+# Security-sensitive areas
+src/main/services/auth.service.ts @djmax1976
+src/main/services/key-manager.service.ts @djmax1976
+src/main/services/license.service.ts @djmax1976
+src/preload/ @djmax1976
+tests/security/ @djmax1976
+
+# Database and migrations
+src/main/dal/ @djmax1976
+src/main/services/migration.service.ts @djmax1976
+src/main/services/database*.ts @djmax1976
+
+# Build configuration
+electron-builder.config.js @djmax1976
+electron.vite.config.ts @djmax1976
+package.json @djmax1976

@@ -1,5 +1,5 @@
 /**
- * Sync Types for Nuvana Sync Desktop Application
+ * Sync Types for Nuvana Desktop Application
  *
  * Type definitions for sync operations and file processing.
  *
@@ -7,7 +7,7 @@
  * @security SEC-014: Strict input validation schemas
  */
 
-import { z } from "zod";
+import { z } from 'zod';
 
 // ============================================================================
 // Document Type Definitions
@@ -18,15 +18,15 @@ import { z } from "zod";
  * SEC-014: Strict allowlist for document types
  */
 export const NAXMLDocumentTypeSchema = z.enum([
-  "POSJournal",
-  "FuelGradeMovement",
-  "MiscellaneousSummaryMovement",
-  "FuelProductMovement",
-  "MerchandiseCodeMovement",
-  "TaxLevelMovement",
-  "ItemSalesMovement",
-  "TankProductMovement",
-  "Unknown",
+  'POSJournal',
+  'FuelGradeMovement',
+  'MiscellaneousSummaryMovement',
+  'FuelProductMovement',
+  'MerchandiseCodeMovement',
+  'TaxLevelMovement',
+  'ItemSalesMovement',
+  'TankProductMovement',
+  'Unknown',
 ]);
 
 export type NAXMLDocumentType = z.infer<typeof NAXMLDocumentTypeSchema>;
@@ -38,12 +38,7 @@ export type NAXMLDocumentType = z.infer<typeof NAXMLDocumentTypeSchema>;
 /**
  * File processing status
  */
-export const FileStatusSchema = z.enum([
-  "queued",
-  "processing",
-  "success",
-  "error",
-]);
+export const FileStatusSchema = z.enum(['queued', 'processing', 'success', 'error']);
 
 export type FileStatus = z.infer<typeof FileStatusSchema>;
 
@@ -84,9 +79,7 @@ export type SyncStats = z.infer<typeof SyncStatsSchema>;
 /**
  * SHA-256 hash validation (64 hex characters)
  */
-export const FileHashSchema = z
-  .string()
-  .regex(/^[a-f0-9]{64}$/i, "Invalid SHA-256 hash format");
+export const FileHashSchema = z.string().regex(/^[a-f0-9]{64}$/i, 'Invalid SHA-256 hash format');
 
 /**
  * Upload payload schema
@@ -97,9 +90,9 @@ export const UploadPayloadSchema = z.object({
   data: z.unknown(),
   fileName: z
     .string()
-    .min(1, "File name is required")
-    .max(255, "File name too long")
-    .regex(/^[\w\-. ]+\.xml$/i, "Invalid file name format"),
+    .min(1, 'File name is required')
+    .max(255, 'File name too long')
+    .regex(/^[\w\-. ]+\.xml$/i, 'Invalid file name format'),
   fileHash: FileHashSchema,
 });
 
@@ -141,11 +134,11 @@ export type TestConnectionResponse = z.infer<typeof TestConnectionResponseSchema
  * Sync status event types
  */
 export const SyncStatusEventTypeSchema = z.enum([
-  "file-detected",
-  "file-processed",
-  "file-error",
-  "watcher-ready",
-  "watcher-error",
+  'file-detected',
+  'file-processed',
+  'file-error',
+  'watcher-ready',
+  'watcher-error',
 ]);
 
 export type SyncStatusEventType = z.infer<typeof SyncStatusEventTypeSchema>;
@@ -184,4 +177,64 @@ export function validateFileRecord(data: unknown): FileRecord {
 
 export function validateSyncStats(data: unknown): SyncStats {
   return SyncStatsSchema.parse(data);
+}
+
+// ============================================================================
+// Sync Queue Entity Types
+// ============================================================================
+
+/**
+ * Valid sync entity types that have corresponding cloud API push endpoints
+ *
+ * API-001: VALIDATION - Whitelist of entity types with valid push endpoints
+ * API-008: OUTPUT_FILTERING - Only these types should be enqueued for sync
+ *
+ * Based on api.md specification (Section 4: PUSH DATA):
+ * - pack: /api/v1/sync/lottery/packs/receive, activate, deplete, return, move
+ * - shift_opening: /api/v1/sync/lottery/shift/open
+ * - shift_closing: /api/v1/sync/lottery/shift/close
+ * - day_close: /api/v1/sync/lottery/day/prepare-close, commit-close, cancel-close
+ * - variance_approval: /api/v1/sync/lottery/variances/approve
+ *
+ * Entity types WITHOUT push endpoints (pull-only or unsupported):
+ * - employee: Cloud-managed, pulled from cloud, never pushed
+ * - lottery_bin: Pulled from cloud via /api/v1/sync/lottery/bins
+ * - day_summary: Calculated server-side, no push endpoint
+ * - shift: No dedicated push endpoint (use shift_opening/shift_closing)
+ *
+ * @security SEC-014: Strict type validation prevents invalid entity types
+ */
+export const ValidSyncEntityTypeSchema = z.enum([
+  'pack',
+  'shift_opening',
+  'shift_closing',
+  'day_close',
+  'variance_approval',
+  'transaction',
+]);
+
+export type ValidSyncEntityType = z.infer<typeof ValidSyncEntityTypeSchema>;
+
+/**
+ * Array of valid sync entity types for runtime validation
+ * Used by sync-queue.dal.ts to validate entity types before enqueue
+ */
+export const VALID_SYNC_ENTITY_TYPES: readonly ValidSyncEntityType[] = [
+  'pack',
+  'shift_opening',
+  'shift_closing',
+  'day_close',
+  'variance_approval',
+  'transaction',
+] as const;
+
+/**
+ * Type guard to check if an entity type is valid for sync
+ * API-001: VALIDATION - Runtime check before enqueue
+ *
+ * @param entityType - Entity type to validate
+ * @returns true if entity type has a valid cloud API push endpoint
+ */
+export function isValidSyncEntityType(entityType: string): entityType is ValidSyncEntityType {
+  return VALID_SYNC_ENTITY_TYPES.includes(entityType as ValidSyncEntityType);
 }

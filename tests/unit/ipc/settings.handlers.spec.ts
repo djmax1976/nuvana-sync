@@ -1,0 +1,688 @@
+/**
+ * Settings IPC Handlers Unit Tests
+ *
+ * Tests for settings-related IPC handler functionality.
+ * Validates API-001: Input validation
+ * Validates API-004: Authentication for protected operations
+ *
+ * @module tests/unit/ipc/settings.handlers
+ */
+
+import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+
+// Mock electron modules
+vi.mock('electron', () => ({
+  dialog: {
+    showOpenDialog: vi.fn(),
+  },
+  ipcMain: {
+    handle: vi.fn(),
+  },
+  safeStorage: {
+    isEncryptionAvailable: vi.fn(() => true),
+    encryptString: vi.fn((str: string) => Buffer.from(str)),
+    decryptString: vi.fn((buf: Buffer) => buf.toString()),
+  },
+}));
+
+// Mock settingsService
+vi.mock('../../../src/main/services/settings.service', () => ({
+  settingsService: {
+    getAll: vi.fn(),
+    updateLocal: vi.fn(),
+    validateFolder: vi.fn(),
+    validateAndSaveApiKey: vi.fn(),
+    completeSetup: vi.fn(),
+    isSetupComplete: vi.fn(),
+    isConfigured: vi.fn(),
+    getConfigurationStatus: vi.fn(),
+    resetAll: vi.fn(),
+  },
+}));
+
+// Mock cloudApiService
+vi.mock('../../../src/main/services/cloud-api.service', () => ({
+  cloudApiService: {
+    healthCheck: vi.fn(),
+  },
+}));
+
+// Mock IPC registry
+vi.mock('../../../src/main/ipc/index', () => ({
+  registerHandler: vi.fn(),
+  createErrorResponse: vi.fn((code, message) => ({ error: code, message })),
+  createSuccessResponse: vi.fn((data) => ({ data })),
+  IPCErrorCodes: {
+    NOT_AUTHENTICATED: 'NOT_AUTHENTICATED',
+    FORBIDDEN: 'FORBIDDEN',
+    VALIDATION_ERROR: 'VALIDATION_ERROR',
+    INTERNAL_ERROR: 'INTERNAL_ERROR',
+    NOT_FOUND: 'NOT_FOUND',
+  },
+}));
+
+// Mock logger
+vi.mock('../../../src/main/utils/logger', () => ({
+  createLogger: vi.fn(() => ({
+    debug: vi.fn(),
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+  })),
+}));
+
+// Mock eventBus for SETUP_COMPLETED event emission
+vi.mock('../../../src/main/utils/event-bus', () => ({
+  eventBus: {
+    emit: vi.fn(),
+    on: vi.fn(),
+  },
+  MainEvents: {
+    FILE_WATCHER_RESTART: 'file-watcher:restart',
+    FILE_WATCHER_PROCESS_EXISTING: 'file-watcher:process-existing',
+    SHIFT_CLOSED: 'shift:closed',
+    SETUP_COMPLETED: 'setup:completed',
+  },
+}));
+
+import { dialog } from 'electron';
+import { settingsService } from '../../../src/main/services/settings.service';
+import { cloudApiService } from '../../../src/main/services/cloud-api.service';
+import {
+  registerHandler,
+  createErrorResponse,
+  createSuccessResponse,
+  IPCErrorCodes as _IPCErrorCodes,
+} from '../../../src/main/ipc/index';
+import { eventBus } from '../../../src/main/utils/event-bus';
+
+// Import handlers to trigger registration
+import '../../../src/main/ipc/settings.handlers';
+
+// Type for IPC handler results
+interface IPCResult {
+  data?: unknown;
+  error?: string;
+  message?: string;
+}
+
+// Type for IPC handlers - eslint-disable needed for test flexibility
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type IPCHandler = (...args: any[]) => Promise<IPCResult> | IPCResult;
+
+describe('Settings IPC Handlers', () => {
+  // Capture registered handlers
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handlers: Map<string, any> = new Map();
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+
+    // Capture handler registrations
+    vi.mocked(registerHandler).mockImplementation((channel, handler) => {
+      handlers.set(channel, handler);
+    });
+
+    // Re-import to trigger registrations
+    vi.resetModules();
+  });
+
+  afterEach(() => {
+    handlers.clear();
+  });
+
+  describe('Handler Registration', () => {
+    it('should register all settings handlers', async () => {
+      // Import fresh to trigger registrations
+      await import('../../../src/main/ipc/settings.handlers');
+
+      expect(registerHandler).toHaveBeenCalledWith(
+        'settings:get',
+        expect.any(Function),
+        expect.any(Object)
+      );
+
+      expect(registerHandler).toHaveBeenCalledWith(
+        'settings:update',
+        expect.any(Function),
+        expect.objectContaining({
+          requiresAuth: true,
+          requiredRole: 'shift_manager',
+        })
+      );
+
+      expect(registerHandler).toHaveBeenCalledWith(
+        'settings:validateApiKey',
+        expect.any(Function),
+        expect.any(Object)
+      );
+
+      expect(registerHandler).toHaveBeenCalledWith(
+        'settings:browseFolder',
+        expect.any(Function),
+        expect.any(Object)
+      );
+
+      expect(registerHandler).toHaveBeenCalledWith(
+        'settings:validateFolder',
+        expect.any(Function),
+        expect.any(Object)
+      );
+    });
+
+    it('should require shift_manager role for settings:update', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      expect(updateCall).toBeDefined();
+      expect(updateCall?.[2]).toEqual(
+        expect.objectContaining({
+          requiresAuth: true,
+          requiredRole: 'shift_manager',
+        })
+      );
+    });
+
+    it('should require store_manager role for settings:reset', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const resetCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:reset');
+
+      expect(resetCall).toBeDefined();
+      expect(resetCall?.[2]).toEqual(
+        expect.objectContaining({
+          requiresAuth: true,
+          requiredRole: 'store_manager',
+        })
+      );
+    });
+  });
+
+  describe('Input Validation', () => {
+    it('should validate API key input schema', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateApiKeyCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      expect(validateApiKeyCall).toBeDefined();
+
+      // Handler should be registered
+      const handler = validateApiKeyCall?.[1] as IPCHandler;
+      expect(handler).toBeDefined();
+    });
+
+    it('should validate folder path input', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateFolderCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateFolder');
+
+      expect(validateFolderCall).toBeDefined();
+    });
+
+    it('should validate local settings update input', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      expect(updateCall).toBeDefined();
+    });
+  });
+
+  describe('Service Integration', () => {
+    it('settings:get should call settingsService.getAll', async () => {
+      const mockSettings = {
+        storeId: 'store-123',
+        storeName: 'Test Store',
+      };
+      vi.mocked(settingsService.getAll).mockReturnValue(
+        mockSettings as unknown as ReturnType<typeof settingsService.getAll>
+      );
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(settingsService.getAll).toHaveBeenCalled();
+    });
+
+    it('settings:testConnection should call cloudApiService.healthCheck', async () => {
+      vi.mocked(cloudApiService.healthCheck).mockResolvedValue(true);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const testConnectionCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:testConnection');
+
+      const handler = testConnectionCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(cloudApiService.healthCheck).toHaveBeenCalled();
+    });
+
+    it('settings:browseFolder should open dialog', async () => {
+      vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+        canceled: false,
+        filePaths: ['C:\\NAXML\\Export'],
+      });
+      vi.mocked(settingsService.validateFolder).mockReturnValue({ valid: true });
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const browseCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:browseFolder');
+
+      const handler = browseCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(dialog.showOpenDialog).toHaveBeenCalledWith(
+        expect.objectContaining({
+          properties: ['openDirectory'],
+        })
+      );
+    });
+
+    it('settings:completeSetup should call settingsService.completeSetup', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const completeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:completeSetup');
+
+      const handler = completeCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(settingsService.completeSetup).toHaveBeenCalled();
+    });
+
+    it('settings:completeSetup should emit SETUP_COMPLETED event to trigger service initialization', async () => {
+      // Reset mock to track this specific test
+      vi.mocked(eventBus.emit).mockClear();
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const completeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:completeSetup');
+
+      const handler = completeCall?.[1] as IPCHandler;
+      await handler();
+
+      // Verify event is emitted to trigger service initialization
+      expect(eventBus.emit).toHaveBeenCalledWith('setup:completed');
+    });
+
+    it('settings:isSetupComplete should call settingsService.isSetupComplete', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(true);
+      vi.mocked(settingsService.getConfigurationStatus).mockReturnValue({
+        databaseReady: true,
+        hasStore: true,
+        hasApiKey: true,
+        setupComplete: true,
+        hasWatchFolder: true,
+      });
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const isCompleteCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:isSetupComplete');
+
+      const handler = isCompleteCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(settingsService.isSetupComplete).toHaveBeenCalled();
+    });
+  });
+
+  describe('Error Handling', () => {
+    it('should handle service errors gracefully', async () => {
+      vi.mocked(settingsService.updateLocal).mockImplementation(() => {
+        throw new Error('Validation failed');
+      });
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      const _result = await handler(null, { syncIntervalSeconds: 60 });
+
+      expect(createErrorResponse).toHaveBeenCalled();
+    });
+
+    it('should handle connection test failure', async () => {
+      vi.mocked(cloudApiService.healthCheck).mockRejectedValue(new Error('Network error'));
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const testConnectionCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:testConnection');
+
+      const handler = testConnectionCall?.[1] as IPCHandler;
+      const _result = await handler();
+
+      // Should return success response with online: false
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          online: false,
+        })
+      );
+    });
+
+    it('should handle canceled folder dialog', async () => {
+      vi.mocked(dialog.showOpenDialog).mockResolvedValue({
+        canceled: true,
+        filePaths: [],
+      });
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const browseCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:browseFolder');
+
+      const handler = browseCall?.[1] as IPCHandler;
+      const _result = await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith({ selected: false });
+    });
+  });
+
+  // ==========================================================================
+  // Business Day Cutoff Time IPC Handler Tests
+  // SEC-014: Input validation for HH:MM format
+  // ==========================================================================
+
+  describe('Business Day Cutoff Time Validation', () => {
+    it('BDCH-001: should accept valid cutoff time in settings:update', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+
+    it('BDCH-002: should accept cutoff time at midnight (00:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '00:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '00:00',
+        })
+      );
+    });
+
+    it('BDCH-003: should accept cutoff time at end of day (23:59)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '23:59' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '23:59',
+        })
+      );
+    });
+
+    it('BDCH-010: should reject invalid hour (25:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '25:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-011: should reject invalid minute (06:60)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:60' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-012: should reject single-digit hour format (6:00)', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '6:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-013: should reject 12-hour format with AM/PM', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00 AM' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-014: should reject empty string', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+
+    it('BDCH-015: should reject non-string input', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: 600 });
+
+      expect(createErrorResponse).toHaveBeenCalled();
+    });
+
+    it('BDCH-020: should allow cutoff time update without other settings', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '05:30' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith({
+        businessDayCutoffTime: '05:30',
+      });
+    });
+
+    it('BDCH-021: should allow cutoff time update combined with other settings', async () => {
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:update');
+
+      const handler = updateCall?.[1] as IPCHandler;
+      await handler(null, {
+        businessDayCutoffTime: '07:00',
+        syncIntervalSeconds: 120,
+      });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith({
+        businessDayCutoffTime: '07:00',
+        syncIntervalSeconds: 120,
+      });
+    });
+
+    it('BDCH-030: should include businessDayCutoffTime in settings:get response', async () => {
+      vi.mocked(settingsService.getAll).mockReturnValue({
+        storeId: 'store-123',
+        storeName: 'Test Store',
+        companyId: 'company-456',
+        companyName: 'Test Company',
+        timezone: 'America/New_York',
+        features: [],
+        xmlWatchFolder: '',
+        syncIntervalSeconds: 60,
+        businessDayCutoffTime: '06:00',
+        lottery: { enabled: false, binCount: 0 },
+        setupCompletedAt: null,
+      } as ReturnType<typeof settingsService.getAll>);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+  });
+
+  // ==========================================================================
+  // Business Day Cutoff - Setup Flow Tests
+  // ==========================================================================
+
+  describe('Business Day Cutoff - During Setup', () => {
+    it('BDCS-001: should accept cutoff time in settings:updateDuringSetup', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(false);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(settingsService.updateLocal).toHaveBeenCalledWith(
+        expect.objectContaining({
+          businessDayCutoffTime: '06:00',
+        })
+      );
+    });
+
+    it('BDCS-002: should reject cutoff time update via setup endpoint after setup complete', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(true);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: '06:00' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'FORBIDDEN',
+        expect.stringContaining('Setup already complete')
+      );
+    });
+
+    it('BDCS-003: should validate cutoff time format during setup', async () => {
+      vi.mocked(settingsService.isSetupComplete).mockReturnValue(false);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const updateDuringSetupCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:updateDuringSetup');
+
+      const handler = updateDuringSetupCall?.[1] as IPCHandler;
+      await handler(null, { businessDayCutoffTime: 'invalid' });
+
+      expect(createErrorResponse).toHaveBeenCalledWith(
+        'VALIDATION_ERROR',
+        expect.stringContaining('HH:MM format')
+      );
+    });
+  });
+});

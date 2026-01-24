@@ -1,0 +1,298 @@
+name: CI Pipeline
+
+# CI pipeline with strict quality gates
+# Triggers only on PRs to main (solo developer workflow - no duplicate runs)
+on:
+  pull_request:
+    branches:
+      - main
+  workflow_dispatch: # Manual trigger for testing
+
+# Cancel in-progress runs for the same PR/branch
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '20'
+  # Strict mode - no warnings allowed
+  CI: true
+
+jobs:
+  # ============================================================================
+  # Stage 1: Code Quality Gates (Fast Fail)
+  # ============================================================================
+  quality-gates:
+    name: Quality Gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # Full history for better analysis
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: TypeScript type checking (strict)
+        run: npm run typecheck
+
+      - name: Code formatting check (Prettier)
+        run: npm run format:check
+
+      - name: Linting with security rules (ESLint)
+        run: |
+          # Run lint and capture exit code
+          npm run lint 2>&1 | tee lint-output.txt
+          LINT_EXIT=${PIPESTATUS[0]}
+
+          # Count errors (not warnings)
+          ERROR_COUNT=$(grep -c "error" lint-output.txt || echo "0")
+
+          echo "Lint completed with exit code: $LINT_EXIT"
+          echo "Error count: $ERROR_COUNT"
+
+          # Fail on any errors
+          if [ "$LINT_EXIT" -ne 0 ]; then
+            echo "::error::Linting failed with errors"
+            exit 1
+          fi
+        shell: bash
+
+      - name: Check for console.log statements in production code
+        run: |
+          if grep -r "console\.log" src/main src/renderer --include="*.ts" --include="*.tsx" | grep -v "// eslint-disable" | grep -v ".spec.ts" | grep -v ".test.ts"; then
+            echo "::error::Found console.log statements in production code. Use proper logging instead."
+            exit 1
+          fi
+        shell: bash
+
+      - name: Check for TODO/FIXME in code
+        run: |
+          COUNT=$(grep -r "TODO\|FIXME" src --include="*.ts" --include="*.tsx" | wc -l)
+          echo "Found $COUNT TODO/FIXME comments"
+          if [ "$COUNT" -gt 50 ]; then
+            echo "::warning::High number of TODO/FIXME comments ($COUNT). Consider addressing technical debt."
+          fi
+        shell: bash
+        continue-on-error: true
+
+  # ============================================================================
+  # Stage 2: Unit Tests with Coverage
+  # ============================================================================
+  unit-tests:
+    name: Unit Tests
+    needs: quality-gates
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run unit tests with coverage
+        run: npm run test:coverage
+        env:
+          FORCE_COLOR: 1
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: coverage/
+          retention-days: 7
+
+      - name: Check coverage thresholds
+        run: |
+          # Extract coverage percentages from coverage-summary.json
+          if [ -f coverage/coverage-summary.json ]; then
+            LINES=$(jq '.total.lines.pct' coverage/coverage-summary.json)
+            BRANCHES=$(jq '.total.branches.pct' coverage/coverage-summary.json)
+            FUNCTIONS=$(jq '.total.functions.pct' coverage/coverage-summary.json)
+            STATEMENTS=$(jq '.total.statements.pct' coverage/coverage-summary.json)
+
+            echo "Coverage Report:"
+            echo "  Lines: $LINES%"
+            echo "  Branches: $BRANCHES%"
+            echo "  Functions: $FUNCTIONS%"
+            echo "  Statements: $STATEMENTS%"
+
+            # Minimum thresholds - aligned with vitest.config.ts
+            # Note: Many tests use heavy mocking patterns that validate schemas and logic
+            # but don't show as coverage on handler/service code
+            MIN_LINES=45
+            MIN_BRANCHES=35
+
+            if (( $(echo "$LINES < $MIN_LINES" | bc -l) )); then
+              echo "::error::Line coverage ($LINES%) is below minimum threshold ($MIN_LINES%)"
+              exit 1
+            fi
+            if (( $(echo "$BRANCHES < $MIN_BRANCHES" | bc -l) )); then
+              echo "::error::Branch coverage ($BRANCHES%) is below minimum threshold ($MIN_BRANCHES%)"
+              exit 1
+            fi
+          fi
+        shell: bash
+
+  # ============================================================================
+  # Stage 3: Integration Tests
+  # ============================================================================
+  integration-tests:
+    name: Integration Tests
+    needs: unit-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run integration tests
+        run: npm run test:integration
+        env:
+          FORCE_COLOR: 1
+
+      - name: Upload integration test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: integration-test-results
+          path: test-results/
+          retention-days: 7
+
+  # ============================================================================
+  # Stage 4: Build Validation (Windows - Required for Electron)
+  # ============================================================================
+  build:
+    name: Build Validation
+    needs: unit-tests
+    runs-on: windows-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build Electron app
+        run: npm run build
+
+      - name: Verify build artifacts
+        run: |
+          if (!(Test-Path "dist/main/index.js")) {
+            Write-Error "Main process build artifact missing"
+            exit 1
+          }
+          if (!(Test-Path "dist/preload/index.js")) {
+            Write-Error "Preload script build artifact missing"
+            exit 1
+          }
+          Write-Host "Build artifacts verified successfully"
+        shell: pwsh
+
+      - name: Upload build artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: build-artifacts
+          path: dist/
+          retention-days: 7
+
+  # ============================================================================
+  # Stage 5: Performance Tests
+  # ============================================================================
+  performance-tests:
+    name: Performance Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run performance benchmarks
+        run: npm run test:performance
+        env:
+          FORCE_COLOR: 1
+
+      - name: Upload performance results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-results
+          path: test-results/
+          retention-days: 7
+
+  # ============================================================================
+  # Final: Pipeline Status Check
+  # ============================================================================
+  pipeline-status:
+    name: Pipeline Status
+    needs: [quality-gates, unit-tests, integration-tests, build, performance-tests]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Check pipeline status
+        run: |
+          echo "Pipeline Results:"
+          echo "  Quality Gates: ${{ needs.quality-gates.result }}"
+          echo "  Unit Tests: ${{ needs.unit-tests.result }}"
+          echo "  Integration Tests: ${{ needs.integration-tests.result }}"
+          echo "  Build: ${{ needs.build.result }}"
+          echo "  Performance Tests: ${{ needs.performance-tests.result }}"
+
+          if [ "${{ needs.quality-gates.result }}" != "success" ] || \
+             [ "${{ needs.unit-tests.result }}" != "success" ] || \
+             [ "${{ needs.integration-tests.result }}" != "success" ] || \
+             [ "${{ needs.build.result }}" != "success" ] || \
+             [ "${{ needs.performance-tests.result }}" != "success" ]; then
+            echo "::error::One or more pipeline stages failed"
+            exit 1
+          fi
+
+          echo "All pipeline stages passed successfully!"
+        shell: bash

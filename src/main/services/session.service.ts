@@ -1,0 +1,414 @@
+/**
+ * Session Management Service
+ *
+ * Manages user sessions with activity-based timeout for the Electron app.
+ * Implements SEC-012 session timeout requirements (≤15 minutes inactivity + 8 hour absolute).
+ *
+ * @module main/services/session
+ * @security SEC-012: Session expires after 15 minutes of inactivity
+ * @security SEC-012: Absolute session lifetime of 8 hours enforced
+ * @security SEC-017: Audit logging for session lifecycle events
+ * @security FE-001: Session data stored in memory only, never in browser storage
+ */
+
+import { BrowserWindow } from 'electron';
+import { createLogger } from '../utils/logger';
+import { setCurrentUser, getCurrentUser, type SessionUser } from '../ipc/index';
+
+// ============================================================================
+// Types
+// ============================================================================
+
+/**
+ * Extended session information with timing metadata
+ */
+export interface SessionInfo {
+  /** User session data */
+  user: SessionUser;
+  /** When the session was created (ISO 8601) */
+  loginAt: string;
+  /** Last activity timestamp (ISO 8601) */
+  lastActivityAt: string;
+  /** Milliseconds until session expires */
+  timeoutIn: number;
+}
+
+// ============================================================================
+// Constants
+// ============================================================================
+
+/**
+ * SEC-012: Session timeout after 15 minutes of inactivity
+ * POS terminals require shorter timeouts due to shared access
+ */
+const SESSION_TIMEOUT_MS = 15 * 60 * 1000; // 15 minutes
+
+/**
+ * SEC-012: Absolute session lifetime (8 hours max)
+ * Forces re-authentication regardless of activity
+ * Enterprise requirement for shared POS terminals
+ */
+const SESSION_ABSOLUTE_LIFETIME_MS = 8 * 60 * 60 * 1000; // 8 hours
+
+/**
+ * Warning threshold before session expiry
+ * Used to notify user before session times out
+ */
+const SESSION_WARNING_MS = 2 * 60 * 1000; // 2 minutes before expiry
+
+// ============================================================================
+// Logger
+// ============================================================================
+
+const log = createLogger('session-service');
+
+// ============================================================================
+// Session State
+// ============================================================================
+
+/**
+ * Internal session state
+ * Using module-level singleton pattern matching ipc/index.ts
+ */
+interface SessionState {
+  loginAt: string;
+  lastActivityAt: string;
+}
+
+let sessionState: SessionState | null = null;
+let timeoutTimer: NodeJS.Timeout | null = null;
+let warningTimer: NodeJS.Timeout | null = null;
+
+// ============================================================================
+// Private Helpers
+// ============================================================================
+
+/**
+ * Clear all session timers
+ */
+function clearTimers(): void {
+  if (timeoutTimer) {
+    clearTimeout(timeoutTimer);
+    timeoutTimer = null;
+  }
+  if (warningTimer) {
+    clearTimeout(warningTimer);
+    warningTimer = null;
+  }
+}
+
+/**
+ * Emit session expired event to all renderer windows
+ */
+function emitSessionExpired(): void {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('auth:sessionExpired');
+    }
+  });
+  log.info('Session expired event emitted to renderer');
+}
+
+/**
+ * Emit session warning event to all renderer windows
+ */
+function emitSessionWarning(): void {
+  const windows = BrowserWindow.getAllWindows();
+  windows.forEach((window) => {
+    if (!window.isDestroyed()) {
+      window.webContents.send('auth:sessionWarning', {
+        expiresIn: SESSION_WARNING_MS,
+      });
+    }
+  });
+  log.debug('Session warning event emitted');
+}
+
+/**
+ * Schedule session timeout
+ * SEC-012: Enforces 15-minute inactivity timeout
+ */
+function scheduleTimeout(): void {
+  clearTimers();
+
+  // Schedule warning before timeout
+  const warningDelay = SESSION_TIMEOUT_MS - SESSION_WARNING_MS;
+  warningTimer = setTimeout(() => {
+    emitSessionWarning();
+  }, warningDelay);
+
+  // Schedule actual timeout
+  timeoutTimer = setTimeout(() => {
+    const user = getCurrentUser();
+    if (user) {
+      log.info('Session expired due to inactivity', {
+        userId: user.user_id,
+        username: user.username,
+        role: user.role,
+      });
+    }
+    destroySession();
+    emitSessionExpired();
+  }, SESSION_TIMEOUT_MS);
+}
+
+// ============================================================================
+// Public API
+// ============================================================================
+
+/**
+ * Create a new user session
+ * SEC-017: Logs session creation for audit trail
+ *
+ * @param user - User data for the session
+ * @returns Session information
+ */
+export function createSession(user: SessionUser): SessionInfo {
+  const now = new Date().toISOString();
+
+  // Store session state
+  sessionState = {
+    loginAt: now,
+    lastActivityAt: now,
+  };
+
+  // Set user in IPC module for handler access
+  setCurrentUser(user);
+
+  // Schedule timeout
+  scheduleTimeout();
+
+  log.info('Session created', {
+    userId: user.user_id,
+    username: user.username,
+    role: user.role,
+    storeId: user.store_id,
+  });
+
+  return {
+    user,
+    loginAt: now,
+    lastActivityAt: now,
+    timeoutIn: SESSION_TIMEOUT_MS,
+  };
+}
+
+/**
+ * Destroy current session
+ * SEC-017: Logs session destruction for audit trail
+ */
+export function destroySession(): void {
+  const user = getCurrentUser();
+
+  clearTimers();
+  sessionState = null;
+  setCurrentUser(null);
+
+  if (user) {
+    log.info('Session destroyed', {
+      userId: user.user_id,
+      username: user.username,
+    });
+  }
+}
+
+/**
+ * Get current session information
+ * Returns null if no session or session expired
+ * SEC-012: Enforces both inactivity timeout and absolute lifetime
+ *
+ * @returns Session info or null
+ */
+export function getSessionInfo(): SessionInfo | null {
+  const user = getCurrentUser();
+
+  // Debug logging for session state troubleshooting
+  log.debug('getSessionInfo called', {
+    hasUser: !!user,
+    hasSessionState: !!sessionState,
+    userId: user?.user_id,
+    sessionStateLoginAt: sessionState?.loginAt,
+    sessionStateLastActivity: sessionState?.lastActivityAt,
+  });
+
+  if (!user || !sessionState) {
+    log.debug('getSessionInfo returning null', {
+      reason: !user ? 'no user' : 'no sessionState',
+    });
+    return null;
+  }
+
+  const now = Date.now();
+
+  // SEC-012: Check absolute session lifetime first
+  const loginTime = new Date(sessionState.loginAt).getTime();
+  const sessionAge = now - loginTime;
+  if (sessionAge >= SESSION_ABSOLUTE_LIFETIME_MS) {
+    log.info('Session expired: Absolute lifetime exceeded', {
+      userId: user.user_id,
+      username: user.username,
+      sessionAgeMs: sessionAge,
+      maxLifetimeMs: SESSION_ABSOLUTE_LIFETIME_MS,
+    });
+    destroySession();
+    emitSessionExpired();
+    return null;
+  }
+
+  // Calculate time until inactivity expiry
+  const lastActivity = new Date(sessionState.lastActivityAt).getTime();
+  const inactivityElapsed = now - lastActivity;
+  const inactivityTimeoutIn = Math.max(0, SESSION_TIMEOUT_MS - inactivityElapsed);
+
+  // Calculate time until absolute lifetime expiry
+  const absoluteTimeoutIn = Math.max(0, SESSION_ABSOLUTE_LIFETIME_MS - sessionAge);
+
+  // Use the smaller of the two timeouts
+  const timeoutIn = Math.min(inactivityTimeoutIn, absoluteTimeoutIn);
+
+  // SEC-012: Check if session has expired due to inactivity
+  if (inactivityTimeoutIn === 0) {
+    log.info('Session expired: Inactivity timeout', {
+      userId: user.user_id,
+      username: user.username,
+    });
+    destroySession();
+    emitSessionExpired();
+    return null;
+  }
+
+  return {
+    user,
+    loginAt: sessionState.loginAt,
+    lastActivityAt: sessionState.lastActivityAt,
+    timeoutIn,
+  };
+}
+
+/**
+ * Get current user from session
+ * Convenience method that checks session validity
+ *
+ * @returns User or null if no valid session
+ */
+export function getSessionUser(): SessionUser | null {
+  const info = getSessionInfo();
+  return info?.user || null;
+}
+
+/**
+ * Update session activity timestamp
+ * Call this on authenticated IPC requests to keep session alive
+ * SEC-012: Resets inactivity timer
+ */
+export function updateActivity(): void {
+  if (!sessionState) {
+    return;
+  }
+
+  sessionState.lastActivityAt = new Date().toISOString();
+
+  // Reschedule timeout from now
+  scheduleTimeout();
+
+  log.debug('Session activity updated');
+}
+
+/**
+ * Check if session is expired
+ *
+ * @returns true if session is expired or doesn't exist
+ */
+export function isSessionExpired(): boolean {
+  const info = getSessionInfo();
+  return info === null;
+}
+
+/**
+ * Check if session exists
+ *
+ * @returns true if a valid session exists
+ */
+export function hasSession(): boolean {
+  return getSessionInfo() !== null;
+}
+
+/**
+ * Check if user has a valid session with minimum role for PIN-protected operations
+ * FE-001: Allows frontend to skip PIN re-entry if session is still valid
+ * SEC-010: Validates role before allowing bypass
+ *
+ * @param requiredRole - Minimum role required for the operation
+ * @returns Object with valid status and user info if valid
+ */
+export function hasValidSessionForRole(requiredRole: string): {
+  valid: boolean;
+  user?: { userId: string; name: string; role: string };
+  timeoutIn?: number;
+} {
+  const info = getSessionInfo();
+
+  // Debug: Log session state for troubleshooting
+  log.info('hasValidSessionForRole called', {
+    requiredRole,
+    hasSessionInfo: !!info,
+    sessionUser: info?.user?.user_id,
+    sessionRole: info?.user?.role,
+  });
+
+  if (!info) {
+    log.info('No valid session found for role check');
+    return { valid: false };
+  }
+
+  // Role hierarchy for comparison
+  const ROLE_HIERARCHY: Record<string, number> = {
+    cashier: 1,
+    shift_manager: 2,
+    store_manager: 3,
+  };
+
+  const userRoleLevel = ROLE_HIERARCHY[info.user.role] || 0;
+  const requiredRoleLevel = ROLE_HIERARCHY[requiredRole] || 0;
+
+  if (userRoleLevel < requiredRoleLevel) {
+    return { valid: false };
+  }
+
+  return {
+    valid: true,
+    user: {
+      userId: info.user.user_id,
+      name: info.user.username,
+      role: info.user.role,
+    },
+    timeoutIn: info.timeoutIn,
+  };
+}
+
+/**
+ * Get session timeout duration in milliseconds
+ * Useful for frontend to display remaining time
+ *
+ * @returns Timeout duration constant
+ */
+export function getSessionTimeoutMs(): number {
+  return SESSION_TIMEOUT_MS;
+}
+
+/**
+ * Force session expiration
+ * Used for testing or administrative logout
+ */
+export function forceExpireSession(): void {
+  const user = getCurrentUser();
+  if (user) {
+    log.info('Session force-expired', {
+      userId: user.user_id,
+      username: user.username,
+    });
+  }
+  destroySession();
+  emitSessionExpired();
+}

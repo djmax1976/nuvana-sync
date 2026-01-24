@@ -1,0 +1,397 @@
+name: Security Scanning
+
+# Comprehensive security scanning pipeline
+# Triggers only on PRs to main (solo developer workflow - no duplicate runs)
+# Also runs daily for continuous security monitoring
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Run daily at 2 AM UTC for continuous security monitoring
+    - cron: '0 2 * * *'
+  workflow_dispatch: # Manual trigger for testing
+
+concurrency:
+  group: security-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Default permissions for all jobs (jobs can override with more specific permissions)
+permissions:
+  contents: read
+  security-events: write
+  pull-requests: read
+
+env:
+  NODE_VERSION: '20'
+
+jobs:
+  # ============================================================================
+  # Semgrep SAST (Static Application Security Testing)
+  # ============================================================================
+  semgrep-sast:
+    name: Semgrep SAST Scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    permissions:
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Semgrep SAST
+        run: |
+          pip install semgrep
+          semgrep scan --config=auto --sarif --output=semgrep.sarif \
+            --config=p/javascript \
+            --config=p/typescript \
+            --config=p/nodejs \
+            --config=p/security-audit \
+            --config=p/secrets \
+            --config=p/owasp-top-ten \
+            .
+        continue-on-error: true
+
+      - name: Upload Semgrep SARIF
+        uses: github/codeql-action/upload-sarif@v3
+        if: always()
+        with:
+          sarif_file: semgrep.sarif
+        continue-on-error: true
+
+  # ============================================================================
+  # CodeQL Analysis (GitHub's SAST)
+  # ============================================================================
+  codeql:
+    name: CodeQL Analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    permissions:
+      actions: read
+      contents: read
+      security-events: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: javascript-typescript
+          queries: +security-extended,security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: '/language:javascript-typescript'
+        continue-on-error: true # Don't fail if code scanning is not enabled in repo settings
+
+  # ============================================================================
+  # Dependency Vulnerability Scanning
+  # ============================================================================
+  dependency-audit:
+    name: Dependency Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: NPM Audit (High/Critical)
+        run: |
+          npm audit --audit-level=high --json > npm-audit.json || true
+          cat npm-audit.json | jq '.metadata.vulnerabilities'
+
+          # Get vulnerability counts
+          HIGH=$(cat npm-audit.json | jq '.metadata.vulnerabilities.high // 0')
+          CRITICAL=$(cat npm-audit.json | jq '.metadata.vulnerabilities.critical // 0')
+
+          echo "High vulnerabilities: $HIGH"
+          echo "Critical vulnerabilities: $CRITICAL"
+
+          # Always fail on critical vulnerabilities
+          if [ "$CRITICAL" -gt 0 ]; then
+            echo "::error::Found $CRITICAL critical vulnerabilities"
+            cat npm-audit.json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "critical")'
+            exit 1
+          fi
+
+          # Check for high vulnerabilities, excluding known build-tool issues
+          # These are acceptable as they only affect build-time, not runtime
+          KNOWN_BUILD_TOOL_VULNS="electron-builder|@electron/rebuild|app-builder-lib|dmg-builder|tar|node-gyp"
+
+          # Filter out known build-tool vulnerabilities from high severity list
+          RUNTIME_HIGH=$(cat npm-audit.json | jq --arg pattern "$KNOWN_BUILD_TOOL_VULNS" '
+            .vulnerabilities | to_entries[] |
+            select(.value.severity == "high") |
+            select(.key | test($pattern) | not) |
+            .key
+          ' | wc -l)
+
+          echo "Runtime high vulnerabilities (excluding build tools): $RUNTIME_HIGH"
+
+          if [ "$RUNTIME_HIGH" -gt 0 ]; then
+            echo "::error::Found runtime high severity vulnerabilities"
+            cat npm-audit.json | jq --arg pattern "$KNOWN_BUILD_TOOL_VULNS" '
+              .vulnerabilities | to_entries[] |
+              select(.value.severity == "high") |
+              select(.key | test($pattern) | not)
+            '
+            exit 1
+          fi
+
+          if [ "$HIGH" -gt 0 ]; then
+            echo "::warning::Found $HIGH high severity vulnerabilities in build tools (acceptable for dev dependencies)"
+          fi
+
+      - name: Upload audit report
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: npm-audit-report
+          path: npm-audit.json
+          retention-days: 30
+
+  # ============================================================================
+  # Secret Scanning (GitLeaks)
+  # ============================================================================
+  secret-scan:
+    name: Secret Scanning
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: read
+      pull-requests: read
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run Gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+          GITLEAKS_CONFIG: .gitleaks.toml
+
+  # ============================================================================
+  # License Compliance Scanning
+  # ============================================================================
+  license-scan:
+    name: License Compliance
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install license-checker
+        run: npm install -g license-checker
+
+      - name: Check licenses
+        run: |
+          # Generate license report
+          license-checker --json --out licenses.json
+
+          # Check for problematic licenses
+          PROBLEMATIC_LICENSES="GPL-3.0|AGPL|SSPL|BUSL|Commons Clause"
+
+          if license-checker --summary | grep -E "$PROBLEMATIC_LICENSES"; then
+            echo "::warning::Found potentially problematic licenses. Review licenses.json"
+          fi
+
+          # Fail on unknown licenses (could be proprietary)
+          UNKNOWN=$(license-checker --unknown --json | jq 'length')
+          if [ "$UNKNOWN" -gt 0 ]; then
+            echo "::warning::Found $UNKNOWN packages with unknown licenses"
+            license-checker --unknown
+          fi
+
+      - name: Upload license report
+        uses: actions/upload-artifact@v4
+        with:
+          name: license-report
+          path: licenses.json
+          retention-days: 30
+
+  # ============================================================================
+  # SBOM Generation (Software Bill of Materials)
+  # ============================================================================
+  sbom:
+    name: Generate SBOM
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate CycloneDX SBOM
+        run: |
+          npx @cyclonedx/cyclonedx-npm --output-file sbom.json --output-format json
+          npx @cyclonedx/cyclonedx-npm --output-file sbom.xml --output-format xml
+
+      - name: Upload SBOM
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom
+          path: |
+            sbom.json
+            sbom.xml
+          retention-days: 90
+
+  # ============================================================================
+  # Electron-Specific Security Checks
+  # ============================================================================
+  electron-security:
+    name: Electron Security Audit
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Check Electron security best practices
+        run: |
+          echo "Checking Electron security configurations..."
+
+          # Check for nodeIntegration (should be false)
+          if grep -r "nodeIntegration.*true" src/main --include="*.ts"; then
+            echo "::error::nodeIntegration should be false for security"
+            exit 1
+          fi
+
+          # Check for contextIsolation (should be true)
+          if grep -r "contextIsolation.*false" src/main --include="*.ts"; then
+            echo "::error::contextIsolation should be true for security"
+            exit 1
+          fi
+
+          # Check for sandbox (should be true)
+          if grep -r "sandbox.*false" src/main --include="*.ts"; then
+            echo "::warning::sandbox should generally be true for security"
+          fi
+
+          # Check for webSecurity (should be true/not disabled)
+          if grep -r "webSecurity.*false" src/main --include="*.ts"; then
+            echo "::error::webSecurity should not be disabled"
+            exit 1
+          fi
+
+          # Check for allowRunningInsecureContent
+          if grep -r "allowRunningInsecureContent.*true" src/main --include="*.ts"; then
+            echo "::error::allowRunningInsecureContent should be false"
+            exit 1
+          fi
+
+          # Check for remote module (deprecated, security risk)
+          if grep -r "enableRemoteModule.*true" src/main --include="*.ts"; then
+            echo "::error::enableRemoteModule is deprecated and a security risk"
+            exit 1
+          fi
+
+          echo "Electron security checks passed!"
+        shell: bash
+
+      - name: Check preload script security
+        run: |
+          echo "Checking preload script security..."
+
+          # Ensure contextBridge is used
+          if ! grep -r "contextBridge" src/preload --include="*.ts"; then
+            echo "::error::Preload scripts should use contextBridge for secure IPC"
+            exit 1
+          fi
+
+          # Check for dangerous patterns in preload
+          if grep -r "require\s*(" src/preload --include="*.ts" | grep -v "electron"; then
+            echo "::warning::Direct require() in preload should be avoided"
+          fi
+
+          echo "Preload security checks passed!"
+        shell: bash
+
+  # ============================================================================
+  # Security Summary
+  # ============================================================================
+  security-summary:
+    name: Security Summary
+    needs:
+      [semgrep-sast, codeql, dependency-audit, secret-scan, license-scan, sbom, electron-security]
+    runs-on: ubuntu-latest
+    if: always()
+
+    steps:
+      - name: Security scan summary
+        run: |
+          echo "Security Scan Results:"
+          echo "  Semgrep SAST: ${{ needs.semgrep-sast.result }}"
+          echo "  CodeQL: ${{ needs.codeql.result }}"
+          echo "  Dependency Audit: ${{ needs.dependency-audit.result }}"
+          echo "  Secret Scan: ${{ needs.secret-scan.result }}"
+          echo "  License Compliance: ${{ needs.license-scan.result }}"
+          echo "  SBOM Generation: ${{ needs.sbom.result }}"
+          echo "  Electron Security: ${{ needs.electron-security.result }}"
+
+          # Fail if any critical security check failed
+          # Note: CodeQL is optional (may fail if code scanning not enabled in repo)
+          # Note: Secret scan uses .gitleaks.toml for false positive exclusions
+          if [ "${{ needs.dependency-audit.result }}" == "failure" ] || \
+             [ "${{ needs.electron-security.result }}" == "failure" ]; then
+            echo "::error::Critical security checks failed"
+            exit 1
+          fi
+
+          # Warn on secret scan failures (may have false positives)
+          if [ "${{ needs.secret-scan.result }}" == "failure" ]; then
+            echo "::warning::Secret scan reported findings - review gitleaks results"
+          fi
+
+          echo "Security scanning completed"
+        shell: bash

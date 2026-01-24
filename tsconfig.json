@@ -13,10 +13,12 @@
     "jsx": "react-jsx",
     "baseUrl": ".",
     "paths": {
+      "@/*": ["src/renderer/*"],
       "@shared/*": ["src/shared/*"],
       "@main/*": ["src/main/*"],
       "@renderer/*": ["src/renderer/*"]
-    }
+    },
+    "types": ["vitest/globals", "node", "vite/client"]
   },
   "include": ["src/**/*", "tests/**/*", "vitest.config.ts"],
   "exclude": ["node_modules", "dist", "release"]
