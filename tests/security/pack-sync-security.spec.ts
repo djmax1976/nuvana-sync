@@ -614,24 +614,27 @@ describe('Pack Sync Security Tests', () => {
     });
 
     it('SQ-U-006: getStats should include pack items in pending/failed counts', () => {
+      // getStats now uses getExclusiveCounts (single aggregated query) + oldest query
       mockPrepare
         .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 5 }), // pending
+          // getExclusiveCounts: single query with aggregations
+          get: vi.fn().mockReturnValue({
+            queued: 4, // sync_attempts < max_attempts
+            failed: 1, // sync_attempts >= max_attempts
+            total_pending: 5, // total unsynced
+            synced_today: 10,
+          }),
         })
         .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 1 }), // failed
-        })
-        .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 10 }), // synced today
-        })
-        .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ created_at: '2024-01-01T00:00:00Z' }), // oldest
+          // oldest pending query
+          get: vi.fn().mockReturnValue({ created_at: '2024-01-01T00:00:00Z' }),
         });
 
       const stats = dal.getStats('store-123');
 
       expect(stats).toEqual({
         pending: 5,
+        queued: 4,
         failed: 1,
         syncedToday: 10,
         oldestPending: '2024-01-01T00:00:00Z',

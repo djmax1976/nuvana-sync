@@ -327,17 +327,164 @@ describe('SyncQueueDAL', () => {
     });
   });
 
+  describe('getQueuedCount', () => {
+    it('should return count of items still retryable (sync_attempts < max_attempts)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ count: 15 }),
+      });
+
+      const result = dal.getQueuedCount('store-123');
+
+      expect(result).toBe(15);
+      // SEC-006: Verify parameterized query
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining(
+          'WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts'
+        )
+      );
+    });
+
+    it('should return 0 when no queued items exist', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ count: 0 }),
+      });
+
+      const result = dal.getQueuedCount('store-123');
+
+      expect(result).toBe(0);
+    });
+
+    // DB-006: Tenant isolation test
+    it('should be scoped to store_id for tenant isolation', () => {
+      const mockGet = vi.fn().mockReturnValue({ count: 5 });
+      mockPrepare.mockReturnValue({ get: mockGet });
+
+      dal.getQueuedCount('tenant-store-abc');
+
+      expect(mockGet).toHaveBeenCalledWith('tenant-store-abc');
+    });
+  });
+
+  describe('getExclusiveCounts', () => {
+    it('should return mutually exclusive counts in single query', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          queued: 74,
+          failed: 1,
+          total_pending: 75,
+          synced_today: 303,
+        }),
+      });
+
+      const result = dal.getExclusiveCounts('store-123');
+
+      expect(result).toEqual({
+        queued: 74,
+        failed: 1,
+        totalPending: 75,
+        syncedToday: 303,
+      });
+    });
+
+    it('should satisfy invariant: queued + failed = totalPending', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          queued: 74,
+          failed: 1,
+          total_pending: 75,
+          synced_today: 303,
+        }),
+      });
+
+      const result = dal.getExclusiveCounts('store-123');
+
+      // Enterprise invariant verification
+      expect(result.queued + result.failed).toBe(result.totalPending);
+    });
+
+    it('should handle null results gracefully (empty table)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          queued: null,
+          failed: null,
+          total_pending: null,
+          synced_today: null,
+        }),
+      });
+
+      const result = dal.getExclusiveCounts('store-123');
+
+      expect(result).toEqual({
+        queued: 0,
+        failed: 0,
+        totalPending: 0,
+        syncedToday: 0,
+      });
+    });
+
+    // SEC-006: SQL injection prevention test
+    it('should use parameterized query for security', () => {
+      const mockGet = vi.fn().mockReturnValue({
+        queued: 10,
+        failed: 2,
+        total_pending: 12,
+        synced_today: 50,
+      });
+      mockPrepare.mockReturnValue({ get: mockGet });
+
+      dal.getExclusiveCounts('store-123');
+
+      // Verify store_id is passed as parameter, not interpolated
+      expect(mockGet).toHaveBeenCalledWith('store-123');
+    });
+
+    // Performance: Single query optimization test
+    it('should use single optimized query (no N+1 pattern)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          queued: 10,
+          failed: 2,
+          total_pending: 12,
+          synced_today: 50,
+        }),
+      });
+
+      dal.getExclusiveCounts('store-123');
+
+      // Should only call prepare once (single query)
+      expect(mockPrepare).toHaveBeenCalledTimes(1);
+    });
+
+    // Edge case: Large numbers
+    it('should handle large counts correctly', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({
+          queued: 999999,
+          failed: 1,
+          total_pending: 1000000,
+          synced_today: 5000000,
+        }),
+      });
+
+      const result = dal.getExclusiveCounts('store-123');
+
+      expect(result.queued).toBe(999999);
+      expect(result.totalPending).toBe(1000000);
+      expect(result.queued + result.failed).toBe(result.totalPending);
+    });
+  });
+
   describe('getStats', () => {
-    it('should return comprehensive sync statistics', () => {
+    it('should return comprehensive sync statistics with mutually exclusive counts', () => {
+      // getStats now calls getExclusiveCounts internally
       mockPrepare
         .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 10 }), // pending
-        })
-        .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 2 }), // failed
-        })
-        .mockReturnValueOnce({
-          get: vi.fn().mockReturnValue({ count: 50 }), // synced today
+          get: vi.fn().mockReturnValue({
+            queued: 8,
+            failed: 2,
+            total_pending: 10,
+            synced_today: 50,
+          }), // getExclusiveCounts
         })
         .mockReturnValueOnce({
           get: vi.fn().mockReturnValue({ created_at: '2024-01-01T00:00:00Z' }), // oldest
@@ -346,11 +493,54 @@ describe('SyncQueueDAL', () => {
       const stats = dal.getStats('store-123');
 
       expect(stats).toEqual({
-        pending: 10,
-        failed: 2,
+        pending: 10, // Total unsynced (backward compatible)
+        queued: 8, // NEW: Items still retryable
+        failed: 2, // Items exceeded max retries
         syncedToday: 50,
         oldestPending: '2024-01-01T00:00:00Z',
       });
+    });
+
+    it('should satisfy invariant: queued + failed = pending', () => {
+      mockPrepare
+        .mockReturnValueOnce({
+          get: vi.fn().mockReturnValue({
+            queued: 74,
+            failed: 1,
+            total_pending: 75,
+            synced_today: 303,
+          }),
+        })
+        .mockReturnValueOnce({
+          get: vi.fn().mockReturnValue({ created_at: '2024-01-01T00:00:00Z' }),
+        });
+
+      const stats = dal.getStats('store-123');
+
+      // Enterprise invariant verification
+      expect(stats.queued + stats.failed).toBe(stats.pending);
+    });
+
+    it('should return null for oldestPending when queue is empty', () => {
+      mockPrepare
+        .mockReturnValueOnce({
+          get: vi.fn().mockReturnValue({
+            queued: 0,
+            failed: 0,
+            total_pending: 0,
+            synced_today: 100,
+          }),
+        })
+        .mockReturnValueOnce({
+          get: vi.fn().mockReturnValue(undefined), // No pending items
+        });
+
+      const stats = dal.getStats('store-123');
+
+      expect(stats.oldestPending).toBeNull();
+      expect(stats.pending).toBe(0);
+      expect(stats.queued).toBe(0);
+      expect(stats.failed).toBe(0);
     });
   });
 

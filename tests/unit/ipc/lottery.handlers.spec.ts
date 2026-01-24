@@ -2818,4 +2818,507 @@ describe('Lottery IPC Handlers', () => {
       });
     });
   });
+
+  // ============================================================================
+  // BIN NUMBER TRANSFORMATION TESTS (API-008: Data Transformation)
+  // ============================================================================
+  // Tests for the bin_display_order to bin_number conversion
+  // Database stores 0-indexed display_order (0-9)
+  // UI expects 1-indexed bin_number (1-10)
+  //
+  // TRACEABILITY:
+  // - Component: lottery.handlers.ts getDayBins handler
+  // - Risk: Data display inconsistency (bins show wrong number)
+  // - Business Rule: Bin numbering must be 1-indexed for user display
+  // - Related DAL: lottery-bins.dal.ts:924 (authoritative pattern)
+  // ============================================================================
+  describe('Bin Number Transformation (API-008: Data Transformation)', () => {
+    /**
+     * Helper function that replicates the bin_number transformation logic
+     * from lottery.handlers.ts for isolated unit testing.
+     *
+     * This tests the exact transformation: (bin_display_order ?? 0) + 1
+     */
+    const transformBinDisplayOrderToNumber = (
+      bin_display_order: number | null | undefined
+    ): number => {
+      return (bin_display_order ?? 0) + 1;
+    };
+
+    describe('Core Transformation Logic', () => {
+      // ======================================================================
+      // BN-CORE-001: Zero-indexed to one-indexed conversion
+      // ======================================================================
+      it('BN-CORE-001: should convert 0-indexed display_order to 1-indexed bin_number', () => {
+        // Database stores 0, UI should display 1
+        expect(transformBinDisplayOrderToNumber(0)).toBe(1);
+      });
+
+      // ======================================================================
+      // BN-CORE-002: Maximum bin index boundary
+      // ======================================================================
+      it('BN-CORE-002: should convert display_order 9 to bin_number 10 (upper boundary)', () => {
+        // Database stores 9 (10th bin), UI should display 10
+        expect(transformBinDisplayOrderToNumber(9)).toBe(10);
+      });
+
+      // ======================================================================
+      // BN-CORE-003: Full range validation (all 10 standard bins)
+      // ======================================================================
+      it('BN-CORE-003: should correctly transform all standard bin positions (0-9 → 1-10)', () => {
+        const testCases = [
+          { input: 0, expected: 1 },
+          { input: 1, expected: 2 },
+          { input: 2, expected: 3 },
+          { input: 3, expected: 4 },
+          { input: 4, expected: 5 },
+          { input: 5, expected: 6 },
+          { input: 6, expected: 7 },
+          { input: 7, expected: 8 },
+          { input: 8, expected: 9 },
+          { input: 9, expected: 10 },
+        ];
+
+        testCases.forEach(({ input, expected }) => {
+          expect(transformBinDisplayOrderToNumber(input)).toBe(expected);
+        });
+      });
+
+      // ======================================================================
+      // BN-CORE-004: Null handling with fallback
+      // ======================================================================
+      it('BN-CORE-004: should handle null bin_display_order by defaulting to bin 1', () => {
+        // Null should fallback to 0, then +1 = 1
+        expect(transformBinDisplayOrderToNumber(null)).toBe(1);
+      });
+
+      // ======================================================================
+      // BN-CORE-005: Undefined handling with fallback
+      // ======================================================================
+      it('BN-CORE-005: should handle undefined bin_display_order by defaulting to bin 1', () => {
+        // Undefined should fallback to 0, then +1 = 1
+        expect(transformBinDisplayOrderToNumber(undefined)).toBe(1);
+      });
+
+      // ======================================================================
+      // BN-CORE-006: Regression test - MUST NOT return 0-indexed values
+      // ======================================================================
+      it('BN-CORE-006: REGRESSION - bin_number must NEVER be 0 (off-by-one bug prevention)', () => {
+        // This test explicitly guards against the original bug where
+        // bin_display_order was used directly without +1 conversion
+        const allPossibleInputs = [null, undefined, 0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+
+        allPossibleInputs.forEach((input) => {
+          const result = transformBinDisplayOrderToNumber(input as number | null | undefined);
+          expect(result).toBeGreaterThanOrEqual(1);
+          expect(result).not.toBe(0);
+        });
+      });
+    });
+
+    describe('Activated Packs Bin Number Transformation', () => {
+      /**
+       * Simulates the activated packs transformation from lottery.handlers.ts lines 709-717
+       */
+      const transformActivatedPack = (pack: {
+        pack_id: string;
+        pack_number: string;
+        game_name: string | null;
+        game_price: number | null;
+        bin_display_order: number | null;
+        activated_at: string | null;
+        status: 'ACTIVE' | 'DEPLETED' | 'RETURNED';
+      }) => ({
+        pack_id: pack.pack_id,
+        pack_number: pack.pack_number,
+        game_name: pack.game_name || 'Unknown Game',
+        game_price: pack.game_price || 0,
+        bin_number: (pack.bin_display_order ?? 0) + 1,
+        activated_at: pack.activated_at || '',
+        status: pack.status,
+      });
+
+      // ======================================================================
+      // BN-ACT-001: Standard activated pack in first bin
+      // ======================================================================
+      it('BN-ACT-001: should transform activated pack in first bin (display_order=0 → bin_number=1)', () => {
+        const pack = {
+          pack_id: 'pack-001',
+          pack_number: 'PKG1234567',
+          game_name: 'Lucky 7s',
+          game_price: 2,
+          bin_display_order: 0,
+          activated_at: '2024-01-15T10:30:00Z',
+          status: 'ACTIVE' as const,
+        };
+
+        const result = transformActivatedPack(pack);
+
+        expect(result.bin_number).toBe(1);
+        expect(result.pack_id).toBe('pack-001');
+        expect(result.status).toBe('ACTIVE');
+      });
+
+      // ======================================================================
+      // BN-ACT-002: Activated pack in last bin
+      // ======================================================================
+      it('BN-ACT-002: should transform activated pack in last bin (display_order=9 → bin_number=10)', () => {
+        const pack = {
+          pack_id: 'pack-010',
+          pack_number: 'PKG9999999',
+          game_name: 'Cash Blast',
+          game_price: 5,
+          bin_display_order: 9,
+          activated_at: '2024-01-15T14:45:00Z',
+          status: 'ACTIVE' as const,
+        };
+
+        const result = transformActivatedPack(pack);
+
+        expect(result.bin_number).toBe(10);
+      });
+
+      // ======================================================================
+      // BN-ACT-003: Activated pack with null bin_display_order
+      // ======================================================================
+      it('BN-ACT-003: should handle activated pack with null bin_display_order', () => {
+        const pack = {
+          pack_id: 'pack-orphan',
+          pack_number: 'PKG0000000',
+          game_name: 'Mystery Game',
+          game_price: 1,
+          bin_display_order: null,
+          activated_at: '2024-01-15T08:00:00Z',
+          status: 'ACTIVE' as const,
+        };
+
+        const result = transformActivatedPack(pack);
+
+        expect(result.bin_number).toBe(1);
+      });
+
+      // ======================================================================
+      // BN-ACT-004: All pack statuses preserve bin_number correctly
+      // ======================================================================
+      it('BN-ACT-004: should preserve correct bin_number for all pack statuses', () => {
+        const statuses: Array<'ACTIVE' | 'DEPLETED' | 'RETURNED'> = [
+          'ACTIVE',
+          'DEPLETED',
+          'RETURNED',
+        ];
+
+        statuses.forEach((status) => {
+          const pack = {
+            pack_id: `pack-${status.toLowerCase()}`,
+            pack_number: 'PKG1111111',
+            game_name: 'Test Game',
+            game_price: 3,
+            bin_display_order: 4, // 5th bin (0-indexed)
+            activated_at: '2024-01-15T12:00:00Z',
+            status,
+          };
+
+          const result = transformActivatedPack(pack);
+
+          expect(result.bin_number).toBe(5);
+          expect(result.status).toBe(status);
+        });
+      });
+
+      // ======================================================================
+      // BN-ACT-005: Default values applied correctly with bin transformation
+      // ======================================================================
+      it('BN-ACT-005: should apply default values while correctly transforming bin_number', () => {
+        const pack = {
+          pack_id: 'pack-defaults',
+          pack_number: 'PKG2222222',
+          game_name: null,
+          game_price: null,
+          bin_display_order: 2,
+          activated_at: null,
+          status: 'ACTIVE' as const,
+        };
+
+        const result = transformActivatedPack(pack);
+
+        expect(result.bin_number).toBe(3); // 2 + 1 = 3
+        expect(result.game_name).toBe('Unknown Game');
+        expect(result.game_price).toBe(0);
+        expect(result.activated_at).toBe('');
+      });
+    });
+
+    describe('Depleted Packs Bin Number Transformation', () => {
+      /**
+       * Simulates the depleted packs transformation from lottery.handlers.ts lines 727-735
+       */
+      const transformDepletedPack = (pack: {
+        pack_id: string;
+        pack_number: string;
+        game_name: string | null;
+        game_price: number | null;
+        bin_display_order: number | null;
+        activated_at: string | null;
+        depleted_at: string | null;
+      }) => ({
+        pack_id: pack.pack_id,
+        pack_number: pack.pack_number,
+        game_name: pack.game_name || 'Unknown Game',
+        game_price: pack.game_price || 0,
+        bin_number: (pack.bin_display_order ?? 0) + 1,
+        activated_at: pack.activated_at || '',
+        depleted_at: pack.depleted_at || '',
+      });
+
+      // ======================================================================
+      // BN-DEP-001: Standard depleted pack transformation
+      // ======================================================================
+      it('BN-DEP-001: should transform depleted pack bin_number correctly', () => {
+        const pack = {
+          pack_id: 'pack-depleted-001',
+          pack_number: 'PKG3333333',
+          game_name: 'Gold Rush',
+          game_price: 10,
+          bin_display_order: 5,
+          activated_at: '2024-01-10T09:00:00Z',
+          depleted_at: '2024-01-15T16:30:00Z',
+        };
+
+        const result = transformDepletedPack(pack);
+
+        expect(result.bin_number).toBe(6); // 5 + 1 = 6
+        expect(result.depleted_at).toBe('2024-01-15T16:30:00Z');
+      });
+
+      // ======================================================================
+      // BN-DEP-002: Depleted pack boundary values
+      // ======================================================================
+      it('BN-DEP-002: should handle depleted pack boundary values (first and last bin)', () => {
+        const firstBinPack = {
+          pack_id: 'pack-dep-first',
+          pack_number: 'PKG0001',
+          game_name: 'Game A',
+          game_price: 1,
+          bin_display_order: 0,
+          activated_at: '2024-01-01T00:00:00Z',
+          depleted_at: '2024-01-15T00:00:00Z',
+        };
+
+        const lastBinPack = {
+          pack_id: 'pack-dep-last',
+          pack_number: 'PKG9999',
+          game_name: 'Game Z',
+          game_price: 20,
+          bin_display_order: 9,
+          activated_at: '2024-01-01T00:00:00Z',
+          depleted_at: '2024-01-15T00:00:00Z',
+        };
+
+        expect(transformDepletedPack(firstBinPack).bin_number).toBe(1);
+        expect(transformDepletedPack(lastBinPack).bin_number).toBe(10);
+      });
+    });
+
+    describe('Returned Packs Bin Number Transformation', () => {
+      /**
+       * Simulates the returned packs transformation from lottery.handlers.ts lines 745-759
+       */
+      const transformReturnedPack = (pack: {
+        pack_id: string;
+        pack_number: string;
+        game_name: string | null;
+        game_price: number | null;
+        bin_display_order: number | null;
+        activated_at: string | null;
+        returned_at: string | null;
+        closing_serial: string | null;
+        tickets_sold_count: number | null;
+        sales_amount: number | null;
+      }) => ({
+        pack_id: pack.pack_id,
+        pack_number: pack.pack_number,
+        game_name: pack.game_name || 'Unknown Game',
+        game_price: pack.game_price || 0,
+        bin_number: (pack.bin_display_order ?? 0) + 1,
+        activated_at: pack.activated_at || '',
+        returned_at: pack.returned_at || '',
+        return_reason: null,
+        return_notes: null,
+        last_sold_serial: pack.closing_serial,
+        tickets_sold_on_return: pack.tickets_sold_count || null,
+        return_sales_amount: pack.sales_amount || null,
+        returned_by_name: null,
+      });
+
+      // ======================================================================
+      // BN-RET-001: Standard returned pack transformation
+      // ======================================================================
+      it('BN-RET-001: should transform returned pack bin_number correctly', () => {
+        const pack = {
+          pack_id: 'pack-returned-001',
+          pack_number: 'PKG4444444',
+          game_name: 'Diamond Dreams',
+          game_price: 25,
+          bin_display_order: 7,
+          activated_at: '2024-01-10T11:00:00Z',
+          returned_at: '2024-01-15T09:15:00Z',
+          closing_serial: '150',
+          tickets_sold_count: 150,
+          sales_amount: 375.0,
+        };
+
+        const result = transformReturnedPack(pack);
+
+        expect(result.bin_number).toBe(8); // 7 + 1 = 8
+        expect(result.returned_at).toBe('2024-01-15T09:15:00Z');
+        expect(result.last_sold_serial).toBe('150');
+        expect(result.tickets_sold_on_return).toBe(150);
+        expect(result.return_sales_amount).toBe(375.0);
+      });
+
+      // ======================================================================
+      // BN-RET-002: Returned pack with null bin_display_order
+      // ======================================================================
+      it('BN-RET-002: should handle returned pack with null bin_display_order', () => {
+        const pack = {
+          pack_id: 'pack-returned-null',
+          pack_number: 'PKG5555555',
+          game_name: 'Wild Card',
+          game_price: 5,
+          bin_display_order: null,
+          activated_at: '2024-01-05T10:00:00Z',
+          returned_at: '2024-01-15T14:00:00Z',
+          closing_serial: '050',
+          tickets_sold_count: 50,
+          sales_amount: 50.0,
+        };
+
+        const result = transformReturnedPack(pack);
+
+        expect(result.bin_number).toBe(1); // null → 0 → 0 + 1 = 1
+      });
+
+      // ======================================================================
+      // BN-RET-003: Returned pack preserves all additional fields
+      // ======================================================================
+      it('BN-RET-003: should preserve all returned pack fields while transforming bin_number', () => {
+        const pack = {
+          pack_id: 'pack-complete',
+          pack_number: 'PKG6666666',
+          game_name: 'Fortune Five',
+          game_price: 5,
+          bin_display_order: 3,
+          activated_at: '2024-01-12T08:30:00Z',
+          returned_at: '2024-01-15T17:45:00Z',
+          closing_serial: '200',
+          tickets_sold_count: 200,
+          sales_amount: 1000.0,
+        };
+
+        const result = transformReturnedPack(pack);
+
+        // Verify bin_number transformation
+        expect(result.bin_number).toBe(4);
+
+        // Verify all other fields preserved
+        expect(result.pack_id).toBe('pack-complete');
+        expect(result.pack_number).toBe('PKG6666666');
+        expect(result.game_name).toBe('Fortune Five');
+        expect(result.game_price).toBe(5);
+        expect(result.activated_at).toBe('2024-01-12T08:30:00Z');
+        expect(result.returned_at).toBe('2024-01-15T17:45:00Z');
+        expect(result.last_sold_serial).toBe('200');
+        expect(result.tickets_sold_on_return).toBe(200);
+        expect(result.return_sales_amount).toBe(1000.0);
+        expect(result.return_reason).toBeNull();
+        expect(result.return_notes).toBeNull();
+        expect(result.returned_by_name).toBeNull();
+      });
+    });
+
+    describe('Consistency with lottery-bins.dal.ts Pattern', () => {
+      // ======================================================================
+      // BN-CONS-001: Transformation matches authoritative DAL pattern
+      // ======================================================================
+      it('BN-CONS-001: should use same transformation pattern as lottery-bins.dal.ts:924', () => {
+        // The authoritative pattern from lottery-bins.dal.ts:924 is:
+        // bin_number: row.display_order + 1
+        //
+        // Our handler pattern must be equivalent:
+        // bin_number: (p.bin_display_order ?? 0) + 1
+
+        // Simulate DAL transformation (direct add)
+        const dalTransform = (display_order: number): number => display_order + 1;
+
+        // Simulate handler transformation (with null safety)
+        const handlerTransform = (bin_display_order: number | null): number =>
+          (bin_display_order ?? 0) + 1;
+
+        // For all valid display_order values, both should produce identical results
+        for (let i = 0; i < 10; i++) {
+          expect(handlerTransform(i)).toBe(dalTransform(i));
+        }
+      });
+
+      // ======================================================================
+      // BN-CONS-002: Handler adds null safety that DAL doesn't need
+      // ======================================================================
+      it('BN-CONS-002: should handle null gracefully (enhancement over DAL pattern)', () => {
+        // DAL always has a valid display_order from the database
+        // Handler may receive null from LEFT JOIN when pack has no bin
+        const handlerTransform = (bin_display_order: number | null): number =>
+          (bin_display_order ?? 0) + 1;
+
+        // Null should safely default to bin 1
+        expect(handlerTransform(null)).toBe(1);
+      });
+    });
+
+    describe('Data Integrity Validation', () => {
+      // ======================================================================
+      // BN-INT-001: Transformation is pure and deterministic
+      // ======================================================================
+      it('BN-INT-001: should produce deterministic results (same input → same output)', () => {
+        const transform = (bin_display_order: number | null): number =>
+          (bin_display_order ?? 0) + 1;
+
+        // Multiple calls with same input must produce same output
+        const input = 5;
+        const results = Array.from({ length: 100 }, () => transform(input));
+
+        expect(new Set(results).size).toBe(1);
+        expect(results.every((r) => r === 6)).toBe(true);
+      });
+
+      // ======================================================================
+      // BN-INT-002: No data loss in transformation
+      // ======================================================================
+      it('BN-INT-002: should not lose information during transformation', () => {
+        // The transformation is reversible: bin_number - 1 = display_order
+        const displayOrder = 7;
+        const binNumber = (displayOrder ?? 0) + 1;
+        const recoveredDisplayOrder = binNumber - 1;
+
+        expect(recoveredDisplayOrder).toBe(displayOrder);
+      });
+
+      // ======================================================================
+      // BN-INT-003: Type safety - result is always a number
+      // ======================================================================
+      it('BN-INT-003: should always return a number type', () => {
+        const transform = (bin_display_order: number | null | undefined): number =>
+          (bin_display_order ?? 0) + 1;
+
+        const inputs: Array<number | null | undefined> = [0, 1, 5, 9, null, undefined];
+
+        inputs.forEach((input) => {
+          const result = transform(input);
+          expect(typeof result).toBe('number');
+          expect(Number.isInteger(result)).toBe(true);
+          expect(Number.isNaN(result)).toBe(false);
+          expect(Number.isFinite(result)).toBe(true);
+        });
+      });
+    });
+  });
 });

@@ -699,51 +699,6 @@ describe('Employee Sync Integration Tests', () => {
   });
 
   // ==========================================================================
-  // ES-I-010: Push to cloud flow validation
-  // ==========================================================================
-  describe('ES-I-010: Employee push to cloud flow', () => {
-    it('should process pending employee sync items', async () => {
-      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
-      const { cloudApiService } = await import('../../src/main/services/cloud-api.service');
-
-      // Enqueue employee
-      syncQueueDAL.enqueue({
-        store_id: TEST_STORE_ID,
-        entity_type: 'employee',
-        entity_id: 'user-push-test',
-        operation: 'CREATE',
-        payload: {
-          user_id: 'user-push-test',
-          store_id: TEST_STORE_ID,
-          role: 'cashier',
-          name: 'Push Test Employee',
-          active: true,
-        },
-      });
-
-      // Verify enqueue was called
-      expect(enqueueCallHistory.length).toBe(1);
-
-      // Simulate push flow
-      const employeesToPush = [
-        {
-          user_id: 'user-push-test',
-          store_id: TEST_STORE_ID,
-          cloud_user_id: null,
-          role: 'cashier' as const,
-          name: 'Push Test Employee',
-          active: true,
-        },
-      ];
-
-      const pushResult = await cloudApiService.pushEmployees(employeesToPush);
-
-      expect(pushResult.success).toBe(true);
-      expect(pushResult.results.length).toBeGreaterThan(0);
-    });
-  });
-
-  // ==========================================================================
   // ES-I-011: Audit trail for sync operations
   // ==========================================================================
   describe('ES-I-011: Audit trail support in sync payload (SEC-017)', () => {

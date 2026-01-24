@@ -21,7 +21,6 @@ import {
 } from './index';
 import { usersDAL, UsersDAL, type UserRole, type SafeUser, type User } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
-import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { getCurrentAuthUser, hasMinimumRole } from '../services/auth.service';
 import { createLogger } from '../utils/logger';
 
@@ -94,66 +93,6 @@ const ToggleStatusSchema = z.object({
 // ============================================================================
 // Helper Functions
 // ============================================================================
-
-/**
- * Build sync payload for employee operations
- * API-008: Output filtering - excludes internal fields (pin_hash, created_at, updated_at)
- * SEC-001: PIN hash excluded from sync payload for security
- *
- * @param user - User entity to build payload from
- * @returns Sanitized payload for sync queue
- */
-function buildEmployeeSyncPayload(user: User): Record<string, unknown> {
-  return {
-    user_id: user.user_id,
-    store_id: user.store_id,
-    cloud_user_id: user.cloud_user_id,
-    role: user.role,
-    name: user.name,
-    active: user.active === 1,
-    last_login_at: user.last_login_at,
-    synced_at: user.synced_at,
-  };
-}
-
-/**
- * Enqueue employee change to sync queue
- * DB-006: Store-scoped sync queue entry
- * SEC-017: Audit logging included via sync queue
- *
- * @param storeId - Store ID for tenant isolation
- * @param user - User entity
- * @param operation - Sync operation type (CREATE, UPDATE, DELETE)
- */
-function enqueueEmployeeSync(
-  storeId: string,
-  user: User,
-  operation: 'CREATE' | 'UPDATE' | 'DELETE'
-): void {
-  try {
-    syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'employee',
-      entity_id: user.user_id,
-      operation,
-      payload: buildEmployeeSyncPayload(user),
-    });
-
-    log.debug('Employee enqueued for sync', {
-      userId: user.user_id,
-      operation,
-      storeId,
-    });
-  } catch (error) {
-    // SEC-017: Log sync queue failure but don't fail the operation
-    // The primary operation succeeded; sync failure is recoverable
-    log.error('Failed to enqueue employee for sync', {
-      userId: user.user_id,
-      operation,
-      error: error instanceof Error ? error.message : 'Unknown error',
-    });
-  }
-}
 
 /**
  * Verify that the current user has permission to manage employees
@@ -285,10 +224,6 @@ registerHandler(
         createdBy: getCurrentAuthUser()?.userId,
       });
 
-      // Enqueue for cloud sync (local-only employees need to be pushed)
-      // DB-006: Store-scoped sync queue entry
-      enqueueEmployeeSync(storeResult.storeId, user, 'CREATE');
-
       return createSuccessResponse({
         employee: UsersDAL.toSafeUser(user),
       });
@@ -370,10 +305,6 @@ registerHandler(
         updatedBy: getCurrentAuthUser()?.userId,
       });
 
-      // Enqueue for cloud sync
-      // DB-006: Store-scoped sync queue entry
-      enqueueEmployeeSync(storeResult.storeId, updatedUser, 'UPDATE');
-
       return createSuccessResponse({
         employee: UsersDAL.toSafeUser(updatedUser),
       });
@@ -449,11 +380,6 @@ registerHandler(
         userId,
         updatedBy: getCurrentAuthUser()?.userId,
       });
-
-      // Enqueue for cloud sync
-      // SEC-001: PIN hash is NOT included in sync payload (buildEmployeeSyncPayload excludes it)
-      // DB-006: Store-scoped sync queue entry
-      enqueueEmployeeSync(storeResult.storeId, updatedUser, 'UPDATE');
 
       return createSuccessResponse({
         success: true,
@@ -536,14 +462,6 @@ registerHandler(
         deactivatedBy: currentUser?.userId,
       });
 
-      // Enqueue for cloud sync
-      // DB-006: Store-scoped sync queue entry
-      // Re-fetch user to get updated state for sync payload
-      const deactivatedUser = usersDAL.findById(userId);
-      if (deactivatedUser) {
-        enqueueEmployeeSync(storeResult.storeId, deactivatedUser, 'UPDATE');
-      }
-
       return createSuccessResponse({
         success: true,
         message: 'Employee deactivated successfully',
@@ -607,14 +525,6 @@ registerHandler(
         userId,
         reactivatedBy: getCurrentAuthUser()?.userId,
       });
-
-      // Enqueue for cloud sync
-      // DB-006: Store-scoped sync queue entry
-      // Re-fetch user to get updated state for sync payload
-      const reactivatedUser = usersDAL.findById(userId);
-      if (reactivatedUser) {
-        enqueueEmployeeSync(storeResult.storeId, reactivatedUser, 'UPDATE');
-      }
 
       return createSuccessResponse({
         success: true,

@@ -64,12 +64,18 @@ export interface SyncStatus {
   lastSyncAt: string | null;
   /** Status of last sync (success/partial/failed/null) */
   lastSyncStatus: 'success' | 'partial' | 'failed' | null;
-  /** Number of pending items in queue */
+  /** Total number of pending items (queued + failed) - for backward compatibility */
   pendingCount: number;
+  /** Number of queued items still retryable (sync_attempts < max_attempts) */
+  queuedCount: number;
   /** Number of items successfully synced today */
   syncedTodayCount: number;
-  /** Number of failed items (exceeded max retry attempts) */
+  /** Number of permanently failed items (exceeded max retry attempts) */
   failedCount: number;
+  /** Number of items currently in exponential backoff (waiting for retry delay) */
+  backoffCount: number;
+  /** Number of items ready to sync right now (not in backoff, not failed) */
+  retryableNowCount: number;
   /** Milliseconds until next scheduled sync */
   nextSyncIn: number;
   /** Whether cloud API is reachable */
@@ -453,13 +459,22 @@ export class SyncEngineService {
 
     // SEC-006: Get sync queue stats via parameterized DAL query
     // DB-006: TENANT_ISOLATION - Query is scoped to current store
+    // API-008: OUTPUT_FILTERING - Returns accurate, mutually exclusive counts
     let syncedTodayCount = 0;
     let failedCount = 0;
+    let queuedCount = 0;
+    let backoffCount = 0;
+    let retryableNowCount = 0;
     const store = storesDAL.getConfiguredStore();
     if (store) {
       const stats = syncQueueDAL.getStats(store.store_id);
       syncedTodayCount = stats.syncedToday;
       failedCount = stats.failed;
+      queuedCount = stats.queued;
+      // Get backoff visibility - shows how many items are waiting for retry delay
+      backoffCount = syncQueueDAL.getBackoffCount(store.store_id);
+      // Retryable now = queued items minus those in backoff
+      retryableNowCount = Math.max(0, queuedCount - backoffCount);
     }
 
     return {
@@ -468,8 +483,11 @@ export class SyncEngineService {
       lastSyncAt: this.lastSyncAt?.toISOString() || null,
       lastSyncStatus: this.lastSyncStatus,
       pendingCount: this.pendingCount,
+      queuedCount,
       syncedTodayCount,
       failedCount,
+      backoffCount,
+      retryableNowCount,
       nextSyncIn,
       isOnline: this.isOnline,
       // Phase 5: Heartbeat status
@@ -566,8 +584,19 @@ export class SyncEngineService {
         this.lastErrorMessage = null;
         this.lastErrorAt = null;
       } else {
-        // Partial success - track error but don't increment failures
-        this.lastErrorMessage = `${result.failed} item(s) failed to sync`;
+        // Partial success - distinguish between batch failures and permanent failures
+        // API-008: OUTPUT_FILTERING - Provide accurate, actionable error message
+        // SEC-006: Query uses parameterized store_id from authenticated context
+        const permanentFailures = syncQueueDAL.getFailedCount(store.store_id);
+        const retriableFailures = result.failed;
+
+        if (permanentFailures > 0) {
+          // Items that exceeded max retries - require manual intervention
+          this.lastErrorMessage = `${permanentFailures} item(s) exceeded retry limit`;
+        } else {
+          // Items failed but will be retried automatically
+          this.lastErrorMessage = `${retriableFailures} item(s) failed, will retry automatically`;
+        }
         this.lastErrorAt = new Date();
       }
 
@@ -706,6 +735,19 @@ export class SyncEngineService {
    * @returns Sync result statistics
    */
   private async processSyncQueue(storeId: string): Promise<SyncResult> {
+    // Reset items stuck in backoff for more than 2 minutes
+    // This prevents items from being perpetually delayed when cloud recovers
+    // Runs every sync cycle, not just at startup
+    const stuckReset = syncQueueDAL.resetStuckInBackoff(storeId, 2);
+    if (stuckReset > 0) {
+      log.info('Reset items stuck in backoff during sync cycle', {
+        storeId,
+        resetCount: stuckReset,
+      });
+      this.updatePendingCount();
+      this.notifyStatusChange();
+    }
+
     // Auto-reset failed items so they can be retried
     // This ensures items that exceeded max_attempts get another chance
     const failedCount = syncQueueDAL.getFailedCount(storeId);
@@ -718,6 +760,11 @@ export class SyncEngineService {
           storeId,
           count: failedIds.length,
         });
+        // Immediately broadcast status change after auto-reset
+        // This ensures UI reflects the reset state before items are retried
+        // Fixes discrepancy where sidebar shows stale failedCount
+        this.updatePendingCount();
+        this.notifyStatusChange();
       }
     }
 
@@ -888,10 +935,60 @@ export class SyncEngineService {
       return this.pushPackBatch(items);
     }
 
-    // Employee entity type - employees are pulled from cloud, not pushed
-    // Mark as synced since local employee changes don't sync to cloud
+    // Employee entity type - PULL-ONLY per API specification
+    // Cloud API only supports GET /api/v1/sync/employees (no POST endpoint)
+    // Employees are cloud-managed: created in portal, pulled to local for offline auth
+    // If employee items reach this code path, they are legacy queue items - mark as synced
     if (entityType === 'employee') {
-      log.info('Employee sync skipped - employees are cloud-managed (pull only)', {
+      log.info('Employee sync skipped - employees are cloud-managed (pull only per API spec)', {
+        itemCount: items.length,
+      });
+      return {
+        success: true,
+        results: items.map((item) => ({
+          id: item.id,
+          status: 'synced' as const,
+        })),
+      };
+    }
+
+    // User entity type - LOCAL-ONLY, no cloud sync endpoint
+    // Users are managed locally and synced via employee records from cloud
+    // Mark as synced to clear queue - no API endpoint exists for user push
+    if (entityType === 'user') {
+      log.info('User sync skipped - users are local-only (no push API endpoint)', {
+        itemCount: items.length,
+      });
+      return {
+        success: true,
+        results: items.map((item) => ({
+          id: item.id,
+          status: 'synced' as const,
+        })),
+      };
+    }
+
+    // Bin entity type - LOCAL-ONLY, no cloud sync endpoint
+    // Bins are managed locally; cloud bins are pulled via games sync
+    // Mark as synced to clear queue - no API endpoint exists for bin push
+    if (entityType === 'bin') {
+      log.info('Bin sync skipped - bins are local-only (no push API endpoint)', {
+        itemCount: items.length,
+      });
+      return {
+        success: true,
+        results: items.map((item) => ({
+          id: item.id,
+          status: 'synced' as const,
+        })),
+      };
+    }
+
+    // Game entity type - PULL-ONLY per API specification
+    // Games are cloud-managed: created in portal, pulled to local
+    // Mark as synced to clear queue - no API endpoint exists for game push
+    if (entityType === 'game') {
+      log.info('Game sync skipped - games are cloud-managed (pull only per API spec)', {
         itemCount: items.length,
       });
       return {
@@ -958,8 +1055,25 @@ export class SyncEngineService {
 
     for (const item of items) {
       try {
-        // Parse payload (may or may not include game_code for legacy items)
-        const payload = JSON.parse(item.payload) as {
+        // Parse payload - check if this is actual pack data or a pull tracking marker
+        const rawPayload = JSON.parse(item.payload);
+
+        // Skip PULL tracking items - these are markers for pull operations, not actual pack data
+        // They have format: { action: 'pull_activated_packs', timestamp: '...', lastPull: '...' }
+        if (rawPayload.action && rawPayload.action.startsWith('pull_')) {
+          log.debug('Skipping pull tracking item', {
+            itemId: item.id,
+            action: rawPayload.action,
+          });
+          results.push({
+            id: item.id,
+            status: 'synced' as const, // Mark as synced to clear from queue
+          });
+          continue;
+        }
+
+        // Cast to expected pack payload structure
+        const payload = rawPayload as {
           pack_id: string;
           store_id: string;
           game_id: string;
@@ -1833,6 +1947,10 @@ export class SyncEngineService {
           storeId: store.store_id,
           resetCount,
         });
+        // Immediately broadcast status change after auto-reset
+        // This ensures UI reflects the reset state at startup
+        this.updatePendingCount();
+        this.notifyStatusChange();
       }
 
       // Log via structured logger

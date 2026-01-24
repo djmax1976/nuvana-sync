@@ -704,13 +704,14 @@ registerHandler(
       );
 
       // Transform to API response format with current status preserved
-      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
+      // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
+      // Consistent with lottery-bins.dal.ts:924 transformation pattern
       const recentlyActivated = activatedPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_display_order || 0,
+        bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         status: p.status, // Preserves current status: ACTIVE, DEPLETED, or RETURNED
       }));
@@ -721,13 +722,14 @@ registerHandler(
         periodStartDate
       );
 
-      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
+      // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
+      // Consistent with lottery-bins.dal.ts:924 transformation pattern
       const recentlyDepleted = settledPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_display_order || 0,
+        bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         depleted_at: p.depleted_at || '',
       }));
@@ -738,13 +740,14 @@ registerHandler(
         periodStartDate
       );
 
-      // v039 Cloud-aligned: bin_display_order maps to bin_number for UI
+      // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
+      // Consistent with lottery-bins.dal.ts:924 transformation pattern
       const recentlyReturned = returnedPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
         game_name: p.game_name || 'Unknown Game',
         game_price: p.game_price || 0,
-        bin_number: p.bin_display_order || 0,
+        bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         returned_at: p.returned_at || '',
         return_reason: null,

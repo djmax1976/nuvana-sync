@@ -1286,14 +1286,30 @@ export interface SyncActivityPaginatedParams {
 }
 
 export interface SyncDetailedStats {
+  /** Total pending items (queued + failed) - for backward compatibility */
   pending: number;
+  /** Items still being retried (sync_attempts < max_attempts) */
+  queued: number;
+  /** Permanently failed items (sync_attempts >= max_attempts) */
   failed: number;
   syncedToday: number;
   syncedTotal: number;
   oldestPending: string | null;
   newestSync: string | null;
-  byEntityType: Array<{ entity_type: string; pending: number; failed: number; synced: number }>;
-  byOperation: Array<{ operation: string; pending: number; failed: number; synced: number }>;
+  byEntityType: Array<{
+    entity_type: string;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+  }>;
+  byOperation: Array<{
+    operation: string;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+  }>;
 }
 
 export interface SyncActivityPaginatedResponse {
