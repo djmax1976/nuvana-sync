@@ -42,10 +42,13 @@ interface SyncStatusData {
   isStarted: boolean;
   lastSyncAt: string | null;
   lastSyncStatus: 'success' | 'partial' | 'failed' | null;
+  /** Total pending items (queued + failed) - for backward compatibility */
   pendingCount: number;
+  /** Items still being retried (sync_attempts < max_attempts) */
+  queuedCount: number;
   /** Number of items successfully synced today */
   syncedTodayCount: number;
-  /** Number of items that have failed (exceeded max retries) */
+  /** Number of permanently failed items (exceeded max retries) */
   failedCount: number;
   nextSyncIn: number;
   isOnline: boolean;
@@ -182,7 +185,12 @@ function isSyncStatusData(data: unknown): data is SyncStatusData {
   // Required number fields
   if (typeof obj.pendingCount !== 'number' || !Number.isFinite(obj.pendingCount)) return false;
   if (typeof obj.nextSyncIn !== 'number' || !Number.isFinite(obj.nextSyncIn)) return false;
-  // New fields: syncedTodayCount and failedCount (default to 0 if missing for backwards compat)
+  // Optional fields with backward compatibility (default to 0 if missing)
+  if (
+    obj.queuedCount !== undefined &&
+    (typeof obj.queuedCount !== 'number' || !Number.isFinite(obj.queuedCount))
+  )
+    return false;
   if (
     obj.syncedTodayCount !== undefined &&
     (typeof obj.syncedTodayCount !== 'number' || !Number.isFinite(obj.syncedTodayCount))
@@ -387,7 +395,7 @@ const TooltipDetails = memo(function TooltipDetails({
         </div>
       )}
 
-      {/* Status details */}
+      {/* Status details - API-008: Clear, accurate labels for mutually exclusive counts */}
       {status && (
         <div className="text-xs space-y-1 border-t pt-2">
           <div className="flex justify-between">
@@ -401,16 +409,17 @@ const TooltipDetails = memo(function TooltipDetails({
               <span className="text-green-600">{status.syncedTodayCount} items</span>
             </div>
           )}
-          {status.pendingCount > 0 && (
+          {/* Show queued count - items still being retried */}
+          {(status.queuedCount ?? 0) > 0 && (
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Pending:</span>
-              <span>{status.pendingCount} items</span>
+              <span className="text-muted-foreground">Queued (retrying):</span>
+              <span className="text-yellow-600">{status.queuedCount} items</span>
             </div>
           )}
-          {/* Show failed count - items that exceeded max retries */}
+          {/* Show failed count - items that exceeded max retries (permanent failures) */}
           {(status.failedCount ?? 0) > 0 && (
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Failed to sync:</span>
+              <span className="text-muted-foreground">Failed (max retries):</span>
               <span className="text-destructive">{status.failedCount} item(s)</span>
             </div>
           )}
@@ -420,7 +429,7 @@ const TooltipDetails = memo(function TooltipDetails({
           </div>
           {status.consecutiveFailures > 0 && (
             <div className="flex justify-between">
-              <span className="text-muted-foreground">Failed attempts:</span>
+              <span className="text-muted-foreground">Consecutive failures:</span>
               <span className="text-destructive">{status.consecutiveFailures}</span>
             </div>
           )}

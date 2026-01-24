@@ -140,16 +140,40 @@ export interface SyncActivityListResponse {
 
 /**
  * Detailed sync statistics including breakdowns
+ * API-008: OUTPUT_FILTERING - Uses clear, mutually exclusive count definitions
+ *
+ * Count semantics:
+ * - pending: Total unsynced items (queued + failed) - for backward compatibility
+ * - queued: Items still being retried (sync_attempts < max_attempts)
+ * - failed: Items that exceeded max retries (sync_attempts >= max_attempts)
+ *
+ * Invariant: queued + failed = pending
  */
 export interface SyncDetailedStats {
+  /** Total unsynced items (queued + failed) - backward compatible */
   pending: number;
+  /** Items still being retried */
+  queued: number;
+  /** Items that exceeded max retry attempts */
   failed: number;
   syncedToday: number;
   syncedTotal: number;
   oldestPending: string | null;
   newestSync: string | null;
-  byEntityType: Array<{ entity_type: string; pending: number; failed: number; synced: number }>;
-  byOperation: Array<{ operation: string; pending: number; failed: number; synced: number }>;
+  byEntityType: Array<{
+    entity_type: string;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+  }>;
+  byOperation: Array<{
+    operation: string;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+  }>;
 }
 
 // ============================================================================
@@ -467,6 +491,67 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Get count of queued items (still retryable, not permanently failed)
+   * SEC-006: Parameterized query with validated store_id
+   * DB-006: TENANT_ISOLATION - Query is scoped to store
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Count of queued items that can still be retried
+   */
+  getQueuedCount(storeId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM sync_queue
+      WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+    `);
+    const result = stmt.get(storeId) as { count: number };
+    return result.count;
+  }
+
+  /**
+   * Get mutually exclusive sync counts for accurate UI display
+   * Returns counts that do NOT overlap - queued + failed = total pending
+   *
+   * SEC-006: All queries use parameterized statements
+   * DB-006: TENANT_ISOLATION - All queries scoped to store_id
+   * API-008: OUTPUT_FILTERING - Returns accurate, non-misleading data
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Object with mutually exclusive counts
+   */
+  getExclusiveCounts(storeId: string): {
+    queued: number;
+    failed: number;
+    totalPending: number;
+    syncedToday: number;
+  } {
+    // Single optimized query to get all counts in one database round-trip
+    // Performance: Avoids N+1 pattern by combining counts
+    const stmt = this.db.prepare(`
+      SELECT
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as total_pending,
+        SUM(CASE WHEN synced = 1 AND synced_at >= date('now', 'localtime') THEN 1 ELSE 0 END) as synced_today
+      FROM sync_queue
+      WHERE store_id = ?
+    `);
+
+    const result = stmt.get(storeId) as {
+      queued: number | null;
+      failed: number | null;
+      total_pending: number | null;
+      synced_today: number | null;
+    };
+
+    return {
+      queued: result.queued ?? 0,
+      failed: result.failed ?? 0,
+      totalPending: result.total_pending ?? 0,
+      syncedToday: result.synced_today ?? 0,
+    };
+  }
+
+  /**
    * Get failed items for review
    *
    * @param storeId - Store identifier
@@ -642,6 +727,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
    *
    * SEC-006: Parameterized query
    * API-002: Built-in rate limiting via backoff
+   * PERF: Scans all candidates to avoid missing items buried deep in queue
    *
    * @param storeId - Store identifier
    * @param limit - Maximum items to return
@@ -652,15 +738,18 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const now = new Date();
 
     // SQLite doesn't have POWER function, so we calculate backoff in application layer
-    // Get all unsynced items that haven't exceeded max attempts
+    // Get ALL unsynced items that haven't exceeded max attempts (no artificial limit)
+    // This ensures we don't miss items buried deep in the queue due to backoff filtering
+    // IMPORTANT: Only return PUSH items (sync_direction IS NULL or 'PUSH')
+    // PULL tracking items are handled separately by bidirectional-sync.service
     const stmt = this.db.prepare(`
       SELECT * FROM sync_queue
       WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
       ORDER BY priority DESC, created_at ASC
-      LIMIT ?
     `);
 
-    const allItems = stmt.all(storeId, safeLimit * 2) as SyncQueueItem[]; // Get extra to filter
+    const allItems = stmt.all(storeId) as SyncQueueItem[];
 
     // Filter items based on exponential backoff
     const retryableItems: SyncQueueItem[] = [];
@@ -688,9 +777,101 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       storeId,
       totalCandidates: allItems.length,
       retryable: retryableItems.length,
+      inBackoff: allItems.length - retryableItems.length,
     });
 
     return retryableItems;
+  }
+
+  /**
+   * Get count of items currently in backoff (waiting for retry delay)
+   * These are items that:
+   * - Have not exceeded max_attempts (still retryable)
+   * - Have a last_attempt_at within the backoff window
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier
+   * @returns Count of items in backoff
+   */
+  getBackoffCount(storeId: string): number {
+    const now = new Date();
+
+    // Get all retryable PUSH items to count those in backoff
+    // Excludes PULL tracking items which are handled separately
+    const stmt = this.db.prepare(`
+      SELECT sync_attempts, last_attempt_at FROM sync_queue
+      WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+        AND sync_attempts > 0 AND last_attempt_at IS NOT NULL
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+    `);
+
+    const items = stmt.all(storeId) as Array<{
+      sync_attempts: number;
+      last_attempt_at: string;
+    }>;
+
+    let inBackoff = 0;
+    for (const item of items) {
+      const backoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+      const lastAttempt = new Date(item.last_attempt_at);
+      const nextRetryTime = new Date(lastAttempt.getTime() + backoffSeconds * 1000);
+
+      if (now < nextRetryTime) {
+        inBackoff++;
+      }
+    }
+
+    return inBackoff;
+  }
+
+  /**
+   * Reset items stuck in backoff for extended period
+   * Clears sync_attempts for items that have been in backoff too long
+   * This prevents items from being perpetually delayed
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier
+   * @param maxBackoffMinutes - Reset items in backoff longer than this (default 2 minutes)
+   * @returns Number of items reset
+   */
+  resetStuckInBackoff(storeId: string, maxBackoffMinutes: number = 2): number {
+    const cutoffTime = new Date(Date.now() - maxBackoffMinutes * 60 * 1000);
+
+    // Reset PUSH items that:
+    // 1. Are not synced
+    // 2. Haven't exceeded max attempts (still retryable)
+    // 3. Have sync_attempts > 0 (have been tried)
+    // 4. Last attempt was before the cutoff time
+    // 5. Are PUSH items (not PULL tracking items)
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        sync_attempts = 0,
+        last_attempt_at = NULL,
+        last_sync_error = NULL
+      WHERE store_id = ?
+        AND synced = 0
+        AND sync_attempts < max_attempts
+        AND sync_attempts > 0
+        AND last_attempt_at IS NOT NULL
+        AND last_attempt_at < ?
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+    `);
+
+    const result = stmt.run(storeId, cutoffTime.toISOString());
+
+    if (result.changes > 0) {
+      log.info('Reset items stuck in backoff', {
+        storeId,
+        maxBackoffMinutes,
+        resetCount: result.changes,
+      });
+    }
+
+    return result.changes;
   }
 
   /**
@@ -1055,13 +1236,19 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
   /**
    * Get detailed sync statistics for the Sync Monitor page
-   * Includes breakdown by entity type and operation
+   * Includes breakdown by entity type and operation with mutually exclusive counts
    *
-   * SEC-006: Parameterized queries
-   * DB-006: Store-scoped queries
+   * SEC-006: Parameterized queries prevent SQL injection
+   * DB-006: Store-scoped queries ensure tenant isolation
+   * API-008: OUTPUT_FILTERING - Returns accurate, non-misleading counts
+   *
+   * Count definitions (mutually exclusive):
+   * - pending: Total unsynced (queued + failed) - for backward compatibility
+   * - queued: Items still being retried (sync_attempts < max_attempts)
+   * - failed: Items that exceeded max retries (sync_attempts >= max_attempts)
    *
    * @param storeId - Store identifier
-   * @returns Detailed sync statistics
+   * @returns Detailed sync statistics with mutually exclusive counts
    */
   getDetailedStats(storeId: string): SyncDetailedStats {
     const basicStats = this.getStats(storeId);
@@ -1082,11 +1269,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     `);
     const newestSyncResult = newestSyncStmt.get(storeId) as { synced_at: string } | undefined;
 
-    // Breakdown by entity type
+    // Breakdown by entity type with mutually exclusive counts
+    // pending = total unsynced (queued + failed), queued = retryable, failed = exceeded max
     const byEntityTypeStmt = this.db.prepare(`
       SELECT
         entity_type,
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
         SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
       FROM sync_queue
@@ -1097,15 +1286,17 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const byEntityType = byEntityTypeStmt.all(storeId) as Array<{
       entity_type: string;
       pending: number;
+      queued: number;
       failed: number;
       synced: number;
     }>;
 
-    // Breakdown by operation
+    // Breakdown by operation with mutually exclusive counts
     const byOperationStmt = this.db.prepare(`
       SELECT
         operation,
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
         SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
       FROM sync_queue
@@ -1116,6 +1307,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const byOperation = byOperationStmt.all(storeId) as Array<{
       operation: string;
       pending: number;
+      queued: number;
       failed: number;
       synced: number;
     }>;
@@ -1131,28 +1323,32 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
   /**
    * Get sync statistics for a store
+   * SEC-006: All queries use parameterized statements
+   * DB-006: TENANT_ISOLATION - All queries scoped to store_id
+   * API-008: OUTPUT_FILTERING - Returns accurate counts with clear semantics
+   *
+   * Returns:
+   * - pending: Total unsynced items (queued + failed) - for backward compatibility
+   * - queued: Items still retryable (sync_attempts < max_attempts)
+   * - failed: Items that exceeded max retries (sync_attempts >= max_attempts)
+   * - syncedToday: Items successfully synced today
+   *
+   * Note: queued + failed = pending (mutually exclusive counts)
    *
    * @param storeId - Store identifier
-   * @returns Sync statistics
+   * @returns Sync statistics with mutually exclusive counts
    */
   getStats(storeId: string): {
     pending: number;
+    queued: number;
     failed: number;
     syncedToday: number;
     oldestPending: string | null;
   } {
-    const pending = this.getPendingCount(storeId);
-    const failed = this.getFailedCount(storeId);
+    // Use optimized single-query method to avoid multiple database round-trips
+    const exclusiveCounts = this.getExclusiveCounts(storeId);
 
-    // Count synced today
-    const today = new Date().toISOString().split('T')[0];
-    const syncedTodayStmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sync_queue
-      WHERE store_id = ? AND synced = 1 AND synced_at >= ?
-    `);
-    const syncedResult = syncedTodayStmt.get(storeId, today) as { count: number };
-
-    // Get oldest pending
+    // Get oldest pending - separate query as it returns a different data type
     const oldestStmt = this.db.prepare(`
       SELECT created_at FROM sync_queue
       WHERE store_id = ? AND synced = 0
@@ -1162,9 +1358,10 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const oldestResult = oldestStmt.get(storeId) as { created_at: string } | undefined;
 
     return {
-      pending,
-      failed,
-      syncedToday: syncedResult.count,
+      pending: exclusiveCounts.totalPending, // Backward compatible: total unsynced
+      queued: exclusiveCounts.queued, // NEW: items still retryable
+      failed: exclusiveCounts.failed, // Items exceeded max retries
+      syncedToday: exclusiveCounts.syncedToday,
       oldestPending: oldestResult?.created_at || null,
     };
   }

@@ -230,14 +230,14 @@ export default function SyncMonitorPage() {
         </div>
       </div>
 
-      {/* Statistics Cards */}
+      {/* Statistics Cards - API-008: Clear labels for mutually exclusive counts */}
       {stats && (
         <div className="grid grid-cols-4 gap-4">
           <StatCard
-            label="Pending"
-            value={stats.pending}
+            label="Queued"
+            value={stats.queued ?? stats.pending}
             icon={<Clock className="h-5 w-5 text-yellow-500" />}
-            variant={stats.pending > 0 ? 'warning' : 'default'}
+            variant={(stats.queued ?? stats.pending) > 0 ? 'warning' : 'default'}
           />
           <StatCard
             label="Failed"
@@ -275,8 +275,10 @@ export default function SyncMonitorPage() {
                   <div key={item.entity_type} className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground capitalize">{item.entity_type}</span>
                     <div className="flex items-center gap-3">
-                      {item.pending > 0 && (
-                        <span className="text-yellow-600">{item.pending} pending</span>
+                      {(item.queued ?? item.pending) > 0 && (
+                        <span className="text-yellow-600">
+                          {item.queued ?? item.pending} queued
+                        </span>
                       )}
                       {item.failed > 0 && (
                         <span className="text-red-600">{item.failed} failed</span>
@@ -301,8 +303,10 @@ export default function SyncMonitorPage() {
                   <div key={item.operation} className="flex items-center justify-between text-sm">
                     <span className="text-muted-foreground">{item.operation}</span>
                     <div className="flex items-center gap-3">
-                      {item.pending > 0 && (
-                        <span className="text-yellow-600">{item.pending} pending</span>
+                      {(item.queued ?? item.pending) > 0 && (
+                        <span className="text-yellow-600">
+                          {item.queued ?? item.pending} queued
+                        </span>
                       )}
                       {item.failed > 0 && (
                         <span className="text-red-600">{item.failed} failed</span>
