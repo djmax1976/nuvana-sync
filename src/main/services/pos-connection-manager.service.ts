@@ -28,7 +28,6 @@ import {
   POSConnectionType,
   POSSystemType,
   validatePOSConnectionConfig,
-  formatPOSConnectionValidationErrors,
 } from '../../shared/types/config.types';
 
 const log = createLogger('pos-connection-manager');
@@ -247,13 +246,22 @@ export class POSConnectionManagerService extends EventEmitter {
       const initResult = await this.initializeConnectionByType();
 
       if (initResult.success) {
-        this.updateState({
-          status: 'CONNECTED',
-          lastConnectedAt: new Date().toISOString(),
-          isInitialized: true,
-        });
+        // Preserve MANUAL_MODE status if set by initializeManualMode()
+        // Only set CONNECTED for connection types that actually connect to something
+        if (this.state.status !== 'MANUAL_MODE') {
+          this.updateState({
+            status: 'CONNECTED',
+            lastConnectedAt: new Date().toISOString(),
+            isInitialized: true,
+          });
+        } else {
+          // For MANUAL_MODE, just mark as initialized
+          this.updateState({
+            isInitialized: true,
+          });
+        }
 
-        // Start health monitoring
+        // Start health monitoring (automatically skips for MANUAL_MODE)
         this.startHealthMonitoring();
       } else {
         this.updateState({

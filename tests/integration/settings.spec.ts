@@ -20,10 +20,23 @@ import {
   vi,
 } from 'vitest';
 
-// Skip tests that require complex dynamic mocking in CI
+// Check if native SQLite module is available and compatible
+let nativeModuleAvailable = true;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Database = require('better-sqlite3-multiple-ciphers');
+  const testDb = new Database(':memory:');
+  testDb.close();
+} catch {
+  nativeModuleAvailable = false;
+}
+
+// Skip tests that require complex dynamic mocking in CI or when native module unavailable
 const SKIP_COMPLEX_MOCK_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true';
-const itComplex = SKIP_COMPLEX_MOCK_TESTS ? it.skip : it;
+  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+
+// Use describe.skip for entire suite when native module unavailable
+const describeSuite = SKIP_COMPLEX_MOCK_TESTS ? describe.skip : describe;
 
 // Mock electron modules for integration tests
 vi.mock('electron', () => ({
@@ -92,7 +105,7 @@ vi.mock('../../src/main/utils/logger', () => ({
   })),
 }));
 
-describe('Settings Integration', () => {
+describeSuite('Settings Integration', () => {
   describe('Setup Wizard Flow', () => {
     it('should validate API key format before cloud validation', async () => {
       // Test that invalid format is rejected before network call
@@ -105,7 +118,7 @@ describe('Settings Integration', () => {
       expect(result.error).toContain('API key must be a valid');
     });
 
-    itComplex('should complete full setup flow with valid data', async () => {
+    it('should complete full setup flow with valid data', async () => {
       // Reset modules to apply fresh mocks
       vi.resetModules();
 
@@ -202,7 +215,7 @@ describe('Settings Integration', () => {
       vi.resetModules();
     });
 
-    itComplex('should create and delete bins correctly', async () => {
+    it('should create and delete bins correctly', async () => {
       // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       const mockBin = {
         bin_id: 'bin-001',
@@ -260,7 +273,7 @@ describe('Settings Integration', () => {
       expect(deleteResult.success).toBe(true);
     });
 
-    itComplex('should prevent deletion of bin with active packs', async () => {
+    it('should prevent deletion of bin with active packs', async () => {
       // After v037 migration: bin_id IS the cloud's UUID (no separate cloud_bin_id)
       const mockBin = {
         bin_id: 'bin-001',

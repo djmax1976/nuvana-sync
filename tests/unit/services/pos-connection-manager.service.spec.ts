@@ -33,7 +33,8 @@ vi.mock('../../../src/main/services/settings.service', () => ({
 }));
 
 vi.mock('../../../src/shared/types/config.types', () => ({
-  validatePOSConnectionConfig: vi.fn(),
+  // Default: pass-through validation (returns the input config unchanged)
+  validatePOSConnectionConfig: vi.fn((config) => config),
   formatPOSConnectionValidationErrors: vi.fn(() => ['Validation error']),
 }));
 
@@ -49,6 +50,7 @@ vi.mock('../../../src/main/utils/logger', () => ({
 vi.mock('fs', () => ({
   existsSync: vi.fn(() => true),
   accessSync: vi.fn(),
+  statSync: vi.fn(() => ({ isDirectory: () => true })),
   constants: { R_OK: 4 },
 }));
 
@@ -88,7 +90,15 @@ describe('POSConnectionManagerService', () => {
   let service: POSConnectionManagerService;
 
   beforeEach(() => {
-    vi.clearAllMocks();
+    // Reset all mocks including implementations (clearAllMocks doesn't reset implementations)
+    vi.resetAllMocks();
+    // Re-establish default mock implementations
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    vi.mocked(validatePOSConnectionConfig).mockImplementation((config: any) => config);
+    vi.mocked(fs.existsSync).mockReturnValue(true);
+    vi.mocked(fs.statSync).mockReturnValue({ isDirectory: () => true } as ReturnType<
+      typeof fs.statSync
+    >);
     service = new POSConnectionManagerService();
   });
 
@@ -101,9 +111,9 @@ describe('POSConnectionManagerService', () => {
   // ==========================================================================
 
   describe('Initialization', () => {
-    it('PCM-INIT-001: initializes with DISCONNECTED status by default', () => {
+    it('PCM-INIT-001: initializes with NOT_CONFIGURED status by default', () => {
       const state = service.getState();
-      expect(state.status).toBe('DISCONNECTED');
+      expect(state.status).toBe('NOT_CONFIGURED');
       expect(state.isInitialized).toBe(false);
     });
 
@@ -134,7 +144,7 @@ describe('POSConnectionManagerService', () => {
       const result = await service.initialize('store-123');
 
       expect(result.success).toBe(false);
-      expect(result.message).toContain('No POS connection configuration');
+      expect(result.message).toContain('POS connection not configured');
     });
 
     it('PCM-INIT-005: returns error on validation failure (SEC-014)', async () => {
@@ -243,8 +253,8 @@ describe('POSConnectionManagerService', () => {
   // ==========================================================================
 
   describe('Status Management', () => {
-    it('PCM-STATUS-001: getStatus returns current connection status', () => {
-      expect(service.getStatus()).toBe('DISCONNECTED');
+    it('PCM-STATUS-001: getStatus returns NOT_CONFIGURED for uninitialized service', () => {
+      expect(service.getStatus()).toBe('NOT_CONFIGURED');
     });
 
     it('PCM-STATUS-002: getState returns complete state object', () => {

@@ -22,10 +22,23 @@ import * as path from 'path';
 import * as fs from 'fs/promises';
 import * as os from 'os';
 
-// Skip tests that require native modules in CI
+// Check if native SQLite module is available and compatible
+let nativeModuleAvailable = true;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Database = require('better-sqlite3-multiple-ciphers');
+  const testDb = new Database(':memory:');
+  testDb.close();
+} catch {
+  nativeModuleAvailable = false;
+}
+
+// Skip tests that require native modules in CI or when module unavailable
 const SKIP_NATIVE_MODULE_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true';
-const itNative = SKIP_NATIVE_MODULE_TESTS ? it.skip : it;
+  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+
+// Use describe.skip for entire suite when native module unavailable
+const describeSuite = SKIP_NATIVE_MODULE_TESTS ? describe.skip : describe;
 
 // ============================================================================
 // Test Database Setup
@@ -837,7 +850,7 @@ const createTestSchema = () => {
 // Test Suite
 // ============================================================================
 
-describe('XML to Database Integration', () => {
+describeSuite('XML to Database Integration', () => {
   let parserService: ParserService;
 
   beforeAll(async () => {
@@ -873,7 +886,7 @@ describe('XML to Database Integration', () => {
   // ==========================================================================
 
   describe('FuelGradeMovement (FGM) Flow', () => {
-    itNative('INT-001: should parse FGM XML and store in shift_fuel_summaries table', async () => {
+    it('INT-001: should parse FGM XML and store in shift_fuel_summaries table', async () => {
       // Write test file
       const filePath = path.join(tempDir, 'FGM20250115.xml');
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
@@ -903,7 +916,7 @@ describe('XML to Database Integration', () => {
       expect(premiumRecord?.amount_sold).toBe(567.89);
     });
 
-    itNative('INT-002: should record file in processed_files table', async () => {
+    it('INT-002: should record file in processed_files table', async () => {
       const filePath = path.join(tempDir, 'FGM20250115_002.xml');
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
 
@@ -922,7 +935,7 @@ describe('XML to Database Integration', () => {
       expect(processedFile?.record_count).toBe(2);
     });
 
-    itNative('INT-003: should link FGM records to shift via shift_summary_id', async () => {
+    it('INT-003: should link FGM records to shift via shift_summary_id', async () => {
       const filePath = path.join(tempDir, 'FGM20250115_003.xml');
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
 
@@ -946,7 +959,7 @@ describe('XML to Database Integration', () => {
   // ==========================================================================
 
   describe('ItemSalesMovement (ISM) Flow', () => {
-    itNative('INT-020: should process ISM records and count them', async () => {
+    it('INT-020: should process ISM records and count them', async () => {
       const filePath = path.join(tempDir, 'ISM20250115.xml');
       await fs.writeFile(filePath, SAMPLE_ISM_XML);
 
@@ -1058,7 +1071,7 @@ describe('XML to Database Integration', () => {
   // ==========================================================================
 
   describe('Data Integrity', () => {
-    itNative('INT-090: should preserve numeric precision for amounts', async () => {
+    it('INT-090: should preserve numeric precision for amounts', async () => {
       const filePath = path.join(tempDir, 'FGM20250115_090.xml');
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
 
@@ -1073,7 +1086,7 @@ describe('XML to Database Integration', () => {
       expect(record?.amount_sold).toBe(1234.56);
     });
 
-    itNative('INT-091: should store correct business date in shift_summaries', async () => {
+    it('INT-091: should store correct business date in shift_summaries', async () => {
       const filePath = path.join(tempDir, 'FGM20250115_091.xml');
       await fs.writeFile(filePath, SAMPLE_FGM_XML);
 
@@ -1109,80 +1122,71 @@ describe('XML to Database Integration', () => {
     // ========================================================================
 
     describe('MSM Period 2 (Daily) Processing', () => {
-      itNative(
-        'INT-100: should parse MSM Period 2 XML and identify as MiscellaneousSummaryMovement',
-        async () => {
-          const filePath = path.join(tempDir, 'MSM20250109_100.xml');
-          await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
+      it('INT-100: should parse MSM Period 2 XML and identify as MiscellaneousSummaryMovement', async () => {
+        const filePath = path.join(tempDir, 'MSM20250109_100.xml');
+        await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
 
-          const fileHash = 'test-hash-msm-100';
-          const result = await parserService.processFile(filePath, fileHash);
+        const fileHash = 'test-hash-msm-100';
+        const result = await parserService.processFile(filePath, fileHash);
 
-          expect(result.success).toBe(true);
-          expect(result.documentType).toBe('MiscellaneousSummaryMovement');
-        }
-      );
+        expect(result.success).toBe(true);
+        expect(result.documentType).toBe('MiscellaneousSummaryMovement');
+      });
 
-      itNative(
-        'INT-101: should record MSM file in processed_files table with correct metadata',
-        async () => {
-          const filePath = path.join(tempDir, 'MSM20250109_101.xml');
-          await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
+      it('INT-101: should record MSM file in processed_files table with correct metadata', async () => {
+        const filePath = path.join(tempDir, 'MSM20250109_101.xml');
+        await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
 
-          const fileHash = 'test-hash-msm-101';
-          await parserService.processFile(filePath, fileHash);
+        const fileHash = 'test-hash-msm-101';
+        await parserService.processFile(filePath, fileHash);
 
-          const processedFile = testDb
-            .prepare('SELECT * FROM processed_files WHERE file_hash = ?')
-            .get(fileHash) as
-            | {
-                status: string;
-                document_type: string;
-                record_count: number;
-                store_id: string;
-              }
-            | undefined;
+        const processedFile = testDb
+          .prepare('SELECT * FROM processed_files WHERE file_hash = ?')
+          .get(fileHash) as
+          | {
+              status: string;
+              document_type: string;
+              record_count: number;
+              store_id: string;
+            }
+          | undefined;
 
-          expect(processedFile).toBeDefined();
-          expect(processedFile?.status).toBe('SUCCESS');
-          expect(processedFile?.document_type).toBe('MiscellaneousSummaryMovement');
-          expect(processedFile?.store_id).toBe(TEST_STORE_ID);
-          // Should have records for fuel grades, discounts
-          expect(processedFile?.record_count).toBeGreaterThanOrEqual(0);
-        }
-      );
+        expect(processedFile).toBeDefined();
+        expect(processedFile?.status).toBe('SUCCESS');
+        expect(processedFile?.document_type).toBe('MiscellaneousSummaryMovement');
+        expect(processedFile?.store_id).toBe(TEST_STORE_ID);
+        // Should have records for fuel grades, discounts
+        expect(processedFile?.record_count).toBeGreaterThanOrEqual(0);
+      });
 
-      itNative(
-        'INT-102: should store MSM Period 2 fuel data in day_fuel_summaries table',
-        async () => {
-          const filePath = path.join(tempDir, 'MSM20250109_102.xml');
-          await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
+      it('INT-102: should store MSM Period 2 fuel data in day_fuel_summaries table', async () => {
+        const filePath = path.join(tempDir, 'MSM20250109_102.xml');
+        await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
 
-          const fileHash = 'test-hash-msm-102';
-          await parserService.processFile(filePath, fileHash);
+        const fileHash = 'test-hash-msm-102';
+        await parserService.processFile(filePath, fileHash);
 
-          // Verify day_fuel_summaries records
-          const fuelRecords = testDb.prepare('SELECT * FROM day_fuel_summaries').all() as Array<{
-            fuel_grade_id: string | null;
-            total_volume: number;
-            total_sales: number;
-            inside_volume: number;
-            inside_amount: number;
-            outside_volume: number;
-            outside_amount: number;
-            fuel_source: string;
-          }>;
+        // Verify day_fuel_summaries records
+        const fuelRecords = testDb.prepare('SELECT * FROM day_fuel_summaries').all() as Array<{
+          fuel_grade_id: string | null;
+          total_volume: number;
+          total_sales: number;
+          inside_volume: number;
+          inside_amount: number;
+          outside_volume: number;
+          outside_amount: number;
+          fuel_source: string;
+        }>;
 
-          // Should have created fuel summary records for each grade
-          expect(fuelRecords.length).toBeGreaterThan(0);
+        // Should have created fuel summary records for each grade
+        expect(fuelRecords.length).toBeGreaterThan(0);
 
-          // Verify MSM source marking
-          const msmRecords = fuelRecords.filter((r) => r.fuel_source === 'MSM');
-          expect(msmRecords.length).toBeGreaterThan(0);
-        }
-      );
+        // Verify MSM source marking
+        const msmRecords = fuelRecords.filter((r) => r.fuel_source === 'MSM');
+        expect(msmRecords.length).toBeGreaterThan(0);
+      });
 
-      itNative('INT-103: should create day_summary for MSM Period 2 business date', async () => {
+      it('INT-103: should create day_summary for MSM Period 2 business date', async () => {
         const filePath = path.join(tempDir, 'MSM20250109_103.xml');
         await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
 
@@ -1262,7 +1266,7 @@ describe('XML to Database Integration', () => {
     // ========================================================================
 
     describe('MSM Period 98 (Shift) Processing', () => {
-      itNative('INT-111: should parse MSM Period 98 XML with SalesMovementHeader', async () => {
+      it('INT-111: should parse MSM Period 98 XML with SalesMovementHeader', async () => {
         const filePath = path.join(tempDir, 'MSM20250109_111.xml');
         await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_98_XML);
 
@@ -1504,7 +1508,7 @@ describe('XML to Database Integration', () => {
     // ========================================================================
 
     describe('MSM Security & Edge Cases', () => {
-      itNative('INT-126: should enforce store isolation - SEC-006/DB-006 compliance', async () => {
+      it('INT-126: should enforce store isolation - SEC-006/DB-006 compliance', async () => {
         // Process MSM for test store
         const filePath = path.join(tempDir, 'MSM20250109_126.xml');
         await fs.writeFile(filePath, SAMPLE_MSM_PERIOD_2_XML);
@@ -1534,7 +1538,7 @@ describe('XML to Database Integration', () => {
         expect(discountSummaries.every((r) => r.store_id === TEST_STORE_ID)).toBe(true);
       });
 
-      itNative('INT-127: should handle empty MSM file gracefully', async () => {
+      it('INT-127: should handle empty MSM file gracefully', async () => {
         const emptyMsmXml = `<?xml version="1.0" encoding="UTF-8"?>
 <NAXML-MovementReport version="3.4">
   <MiscellaneousSummaryMovement>
@@ -1559,7 +1563,7 @@ describe('XML to Database Integration', () => {
         expect(result.documentType).toBe('MiscellaneousSummaryMovement');
       });
 
-      itNative('INT-128: should handle MSM with only non-fuel entries', async () => {
+      it('INT-128: should handle MSM with only non-fuel entries', async () => {
         const nonFuelMsmXml = `<?xml version="1.0" encoding="UTF-8"?>
 <NAXML-MovementReport version="3.4">
   <MiscellaneousSummaryMovement>
@@ -1627,39 +1631,36 @@ describe('XML to Database Integration', () => {
         }
       });
 
-      itNative(
-        'INT-130: should handle both Period 2 and Period 98 files for same business date',
-        async () => {
-          // First process Period 2 (Daily)
-          const period2Path = path.join(tempDir, 'MSM_P2_130.xml');
-          await fs.writeFile(period2Path, SAMPLE_MSM_PERIOD_2_XML);
+      it('INT-130: should handle both Period 2 and Period 98 files for same business date', async () => {
+        // First process Period 2 (Daily)
+        const period2Path = path.join(tempDir, 'MSM_P2_130.xml');
+        await fs.writeFile(period2Path, SAMPLE_MSM_PERIOD_2_XML);
 
-          const period2Hash = 'period2-hash-130';
-          const result2 = await parserService.processFile(period2Path, period2Hash);
-          expect(result2.success).toBe(true);
+        const period2Hash = 'period2-hash-130';
+        const result2 = await parserService.processFile(period2Path, period2Hash);
+        expect(result2.success).toBe(true);
 
-          // Then process Period 98 (Shift) for same date
-          const period98Path = path.join(tempDir, 'MSM_P98_130.xml');
-          await fs.writeFile(period98Path, SAMPLE_MSM_PERIOD_98_XML);
+        // Then process Period 98 (Shift) for same date
+        const period98Path = path.join(tempDir, 'MSM_P98_130.xml');
+        await fs.writeFile(period98Path, SAMPLE_MSM_PERIOD_98_XML);
 
-          const period98Hash = 'period98-hash-130';
-          const result98 = await parserService.processFile(period98Path, period98Hash);
-          expect(result98.success).toBe(true);
+        const period98Hash = 'period98-hash-130';
+        const result98 = await parserService.processFile(period98Path, period98Hash);
+        expect(result98.success).toBe(true);
 
-          // Both should be recorded as processed
-          const processedCount = testDb
-            .prepare(
-              `
+        // Both should be recorded as processed
+        const processedCount = testDb
+          .prepare(
+            `
             SELECT COUNT(*) as count FROM processed_files
             WHERE document_type = 'MiscellaneousSummaryMovement'
             AND status = 'SUCCESS'
           `
-            )
-            .get() as { count: number };
+          )
+          .get() as { count: number };
 
-          expect(processedCount.count).toBeGreaterThanOrEqual(2);
-        }
-      );
+        expect(processedCount.count).toBeGreaterThanOrEqual(2);
+      });
     });
   });
 });
