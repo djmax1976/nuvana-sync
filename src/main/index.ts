@@ -38,6 +38,7 @@ import { storesDAL } from './dal/stores.dal';
 import { lotteryPacksDAL } from './dal/lottery-packs.dal';
 import { lotteryGamesDAL } from './dal/lottery-games.dal';
 import { syncQueueDAL } from './dal/sync-queue.dal';
+import { posConnectionManager } from './services/pos-connection-manager.service';
 
 // ============================================================================
 // EPIPE Error Handling - Suppress broken pipe errors
@@ -500,9 +501,21 @@ if (!gotTheLock) {
       return;
     }
 
-    // watchPath is optional - some POS systems connect via API, not file watcher
+    // SEC-014: POS type compatibility check - only NAXML-compatible types allowed
+    // This is a safety check - the main process should prevent calls for non-compatible types
+    if (!settingsService.isNAXMLCompatible()) {
+      const reason = settingsService.getFileWatcherUnavailableReason();
+      log.info('File watcher not started: POS type not compatible', {
+        reason,
+        posType: settingsService.getPOSType(),
+        connectionType: settingsService.getPOSConnectionType(),
+      });
+      return;
+    }
+
+    // watchPath is required for NAXML-compatible POS systems
     if (!config.watchPath) {
-      log.info('File watcher not started: no watchPath configured (API-based POS)');
+      log.info('File watcher not started: no watchPath configured');
       return;
     }
 
@@ -512,7 +525,12 @@ if (!gotTheLock) {
       return;
     }
 
-    log.info('Starting file watcher', { watchPath: config.watchPath });
+    // All validations passed - start file watcher for NAXML store
+    log.info('Starting file watcher for NAXML-compatible POS', {
+      watchPath: config.watchPath,
+      posType: settingsService.getPOSType(),
+      connectionType: settingsService.getPOSConnectionType(),
+    });
 
     // Local-first: FileWatcherService now uses ParserService internally
     // SyncService is kept for cloud sync operations
@@ -541,6 +559,99 @@ if (!gotTheLock) {
     });
 
     fileWatcher.start();
+  };
+
+  /**
+   * Initialize POS Connection Manager
+   *
+   * Sets up the connection manager based on the configured connection type.
+   * For FILE type, this coordinates with the file watcher.
+   * For other types (API, NETWORK, WEBHOOK), initializes appropriate handlers.
+   *
+   * Phase 3: Connect Based on Connection Type
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Initialization result
+   */
+  const initializePOSConnectionManager = async (
+    storeId: string
+  ): Promise<{
+    success: boolean;
+    connectionType?: string;
+    message?: string;
+  }> => {
+    log.info('Initializing POS Connection Manager', { storeId });
+
+    try {
+      const result = await posConnectionManager.initialize(storeId);
+
+      // Set up event listeners for connection status changes
+      posConnectionManager.on('status-change', (newStatus: string, previousStatus: string) => {
+        log.info('POS connection status changed', {
+          previousStatus,
+          newStatus,
+          storeId,
+        });
+
+        // Notify renderer of status change
+        mainWindow?.webContents.send('pos-connection-status', {
+          status: newStatus,
+          previousStatus,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      posConnectionManager.on('connected', () => {
+        log.info('POS connection established', { storeId });
+        mainWindow?.webContents.send('pos-connection-status', {
+          status: 'CONNECTED',
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      posConnectionManager.on('disconnected', (reason: string) => {
+        log.warn('POS connection lost', { reason, storeId });
+        mainWindow?.webContents.send('pos-connection-status', {
+          status: 'DISCONNECTED',
+          reason,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      posConnectionManager.on('error', (error: Error) => {
+        log.error('POS connection error', {
+          error: error.message,
+          storeId,
+        });
+        mainWindow?.webContents.send('pos-connection-status', {
+          status: 'ERROR',
+          error: error.message,
+          timestamp: new Date().toISOString(),
+        });
+      });
+
+      log.info('POS Connection Manager initialized', {
+        success: result.success,
+        connectionType: result.connectionType,
+        posType: result.posType,
+      });
+
+      return {
+        success: result.success,
+        connectionType: result.connectionType,
+        message: result.message,
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to initialize POS Connection Manager', {
+        error: errorMessage,
+        storeId,
+      });
+      return {
+        success: false,
+        message: errorMessage,
+      };
+    }
   };
 
   // Listen for file watcher restart requests from IPC handlers
@@ -650,14 +761,17 @@ if (!gotTheLock) {
       });
     }
 
-    // 3. Start file watcher (optional - only for NA XML stores with watchPath configured)
+    // 3. Start file watcher (optional - only for NAXML-compatible POS with FILE connection type)
+    // SEC-014: POS type validation - only NAXML-compatible types start file watcher
     const config = settingsService.getConfig();
-    if (config.watchPath) {
+    if (settingsService.isNAXMLCompatible() && config.watchPath) {
       try {
         startFileWatcher();
         servicesStarted.push('fileWatcher');
         log.info('File watcher started after setup completion', {
           watchPath: config.watchPath,
+          posType: settingsService.getPOSType(),
+          connectionType: settingsService.getPOSConnectionType(),
         });
       } catch (error) {
         log.error('Failed to start file watcher after setup', {
@@ -666,7 +780,14 @@ if (!gotTheLock) {
         });
       }
     } else {
-      log.info('File watcher not started: no watchPath configured (API-based POS mode)');
+      // File watcher not started - log reason for audit trail
+      const reason = settingsService.getFileWatcherUnavailableReason();
+      log.info('File watcher not started after setup (non-NAXML POS or no watch path)', {
+        reason,
+        posType: settingsService.getPOSType(),
+        connectionType: settingsService.getPOSConnectionType(),
+        hasWatchPath: !!config.watchPath,
+      });
     }
 
     // 4. Notify renderer that services are now running
@@ -1056,19 +1177,70 @@ if (!gotTheLock) {
       log.info('Auto-updater disabled in development mode');
     }
 
-    // Start file watcher if configured (watchPath is optional for API-based POS)
+    // Start file watcher if configured AND POS type supports NAXML file-based ingestion
     // CRITICAL: Database must be ready before file watcher starts to avoid
     // "Database not initialized" errors during file processing
+    //
+    // SEC-014: POS type validation - only NAXML-compatible types start file watcher
+    // LM-001: Structured logging with POS type decision audit trail
     const config = settingsService.getConfig();
+    const isNAXMLCompatible = settingsService.isNAXMLCompatible();
+    const fileWatcherReason = settingsService.getFileWatcherUnavailableReason();
 
-    if (config.watchPath && hasApiKey && isDatabaseReady()) {
-      startFileWatcher();
-    } else if (!config.watchPath) {
-      log.info('File watcher not started: no watchPath (API-based POS mode)');
-    } else if (!isDatabaseReady()) {
+    if (!isDatabaseReady()) {
       log.warn('File watcher not started: database not ready');
+    } else if (!hasApiKey) {
+      log.info('File watcher not started: API key not configured');
+    } else if (!isNAXMLCompatible) {
+      // POS type does not support NAXML file-based ingestion
+      // SEC-014: Audit log for POS type-based file watcher decisions
+      log.info('File watcher not started: POS type does not support file-based ingestion', {
+        reason: fileWatcherReason,
+        posType: settingsService.getPOSType(),
+        connectionType: settingsService.getPOSConnectionType(),
+      });
+    } else if (!config.watchPath) {
+      log.warn('File watcher not started: NAXML store but no import path configured', {
+        posType: settingsService.getPOSType(),
+      });
     } else {
-      log.info('Skipping file watcher start: API key not configured');
+      // All conditions met - start file watcher for NAXML store
+      log.info('Starting file watcher for NAXML-compatible POS', {
+        posType: settingsService.getPOSType(),
+        connectionType: settingsService.getPOSConnectionType(),
+        watchPath: config.watchPath,
+      });
+      startFileWatcher();
+    }
+
+    // ========================================================================
+    // Step 5.5: Initialize POS Connection Manager (Phase 3)
+    // Manages POS connections based on configured type (FILE, API, NETWORK, etc.)
+    // ========================================================================
+    if (hasApiKey && isDatabaseReady() && config.storeId) {
+      try {
+        const posInitResult = await initializePOSConnectionManager(config.storeId);
+        if (posInitResult.success) {
+          log.info('POS Connection Manager initialized', {
+            connectionType: posInitResult.connectionType,
+          });
+        } else {
+          log.warn('POS Connection Manager initialization returned non-success', {
+            message: posInitResult.message,
+          });
+        }
+      } catch (error) {
+        // Non-fatal: Log error but continue startup
+        log.error('Failed to initialize POS Connection Manager', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    } else {
+      log.info('Skipping POS Connection Manager: prerequisites not met', {
+        hasApiKey,
+        dbReady: isDatabaseReady(),
+        hasStoreId: !!config.storeId,
+      });
     }
 
     // ========================================================================
@@ -1110,12 +1282,20 @@ if (!gotTheLock) {
     }
   });
 
-  app.on('before-quit', () => {
+  app.on('before-quit', async () => {
     log.info('Application quitting');
     fileWatcher?.stop();
     stopUserSync();
     syncEngineService.stop();
     autoUpdaterService?.destroy();
+    // Shutdown POS Connection Manager
+    try {
+      await posConnectionManager.shutdown();
+    } catch (error) {
+      log.warn('POS Connection Manager shutdown error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
     // Gracefully shutdown database (checkpoint WAL, close connections)
     shutdownDatabase();
   });

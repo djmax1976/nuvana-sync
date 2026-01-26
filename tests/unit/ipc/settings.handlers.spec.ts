@@ -37,6 +37,25 @@ vi.mock('../../../src/main/services/settings.service', () => ({
     isConfigured: vi.fn(),
     getConfigurationStatus: vi.fn(),
     resetAll: vi.fn(),
+    // Phase 4: POS compatibility methods
+    isNAXMLCompatible: vi.fn(() => true),
+    getFileWatcherUnavailableReason: vi.fn(() => null),
+    getPOSConnectionType: vi.fn(() => 'FILE'),
+  },
+}));
+
+// Mock posConnectionManager (Phase 4)
+vi.mock('../../../src/main/services/pos-connection-manager.service', () => ({
+  posConnectionManager: {
+    getStatus: vi.fn(() => 'CONNECTED'),
+    getState: vi.fn(() => ({
+      connectionType: 'FILE',
+      posType: 'GILBARCO_PASSPORT',
+      status: 'CONNECTED',
+      isInitialized: true,
+    })),
+    isConnected: vi.fn(() => true),
+    on: vi.fn(),
   },
 }));
 
@@ -337,6 +356,14 @@ describe('Settings IPC Handlers', () => {
         hasApiKey: true,
         setupComplete: true,
         hasWatchFolder: true,
+        // New POS connection config fields
+        hasPOSConnectionConfig: true,
+        posConnectionType: 'FILE',
+        posType: 'GILBARCO_PASSPORT',
+        // Deprecated terminal fields (kept for backward compatibility)
+        hasTerminalConfig: true,
+        terminalConnectionType: 'FILE',
+        terminalPosType: 'GILBARCO_PASSPORT',
       });
 
       await import('../../../src/main/ipc/settings.handlers');
@@ -606,6 +633,8 @@ describe('Settings IPC Handlers', () => {
         businessDayCutoffTime: '06:00',
         lottery: { enabled: false, binCount: 0 },
         setupCompletedAt: null,
+        // Version 8.0: POS connection configuration
+        posConnectionConfig: null,
       } as ReturnType<typeof settingsService.getAll>);
 
       await import('../../../src/main/ipc/settings.handlers');
@@ -682,6 +711,205 @@ describe('Settings IPC Handlers', () => {
       expect(createErrorResponse).toHaveBeenCalledWith(
         'VALIDATION_ERROR',
         expect.stringContaining('HH:MM format')
+      );
+    });
+  });
+
+  // ==========================================================================
+  // Phase 4: POS Compatibility / File Watcher Status Tests
+  // ==========================================================================
+
+  describe('Phase 4: File Watcher Status in settings:get', () => {
+    it('POS4-001: should include fileWatcherStatus in settings:get response', async () => {
+      vi.mocked(settingsService.getAll).mockReturnValue({
+        storeId: 'store-123',
+        storeName: 'Test Store',
+        companyId: 'company-456',
+        companyName: 'Test Company',
+        timezone: 'America/New_York',
+        features: [],
+        xmlWatchFolder: 'C:\\NAXML\\Export',
+        syncIntervalSeconds: 60,
+        businessDayCutoffTime: '06:00',
+        lottery: { enabled: false, binCount: 0 },
+        setupCompletedAt: null,
+        posConnectionConfig: {
+          pos_type: 'GILBARCO_PASSPORT',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: 'C:\\NAXML\\Export' },
+        },
+      } as ReturnType<typeof settingsService.getAll>);
+
+      vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(true);
+      vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('FILE');
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileWatcherStatus: expect.objectContaining({
+            isNAXMLCompatible: true,
+            unavailableReason: null,
+            isRunning: true,
+          }),
+        })
+      );
+    });
+
+    it('POS4-002: should show unavailableReason when POS is not NAXML compatible', async () => {
+      vi.mocked(settingsService.getAll).mockReturnValue({
+        storeId: 'store-123',
+        storeName: 'Test Store',
+        companyId: 'company-456',
+        companyName: 'Test Company',
+        timezone: 'America/New_York',
+        features: [],
+        xmlWatchFolder: '',
+        syncIntervalSeconds: 60,
+        businessDayCutoffTime: '06:00',
+        lottery: { enabled: false, binCount: 0 },
+        setupCompletedAt: null,
+        posConnectionConfig: {
+          pos_type: 'SQUARE',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.square.com' },
+        },
+      } as ReturnType<typeof settingsService.getAll>);
+
+      vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
+      vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(
+        'Square POS uses API connection, not file-based sync'
+      );
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('API');
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          fileWatcherStatus: expect.objectContaining({
+            isNAXMLCompatible: false,
+            unavailableReason: 'Square POS uses API connection, not file-based sync',
+            isRunning: false,
+          }),
+        })
+      );
+    });
+
+    it('POS4-003: should return null if settings are not configured', async () => {
+      vi.mocked(settingsService.getAll).mockReturnValue(null);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:get');
+
+      const handler = getCall?.[1] as IPCHandler;
+      await handler();
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(null);
+    });
+  });
+
+  describe('Phase 4: File Watcher Compatibility in settings:validateApiKey', () => {
+    it('POS4-010: should include fileWatcherCompatible in validateApiKey response', async () => {
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue({
+        valid: true,
+        store: {
+          storeId: 'store-123',
+          storeName: 'Test Store',
+          companyId: 'company-456',
+          companyName: 'Test Company',
+          timezone: 'America/New_York',
+          features: [],
+          lottery: { enabled: false, binCount: 0 },
+          posConnectionConfig: {
+            pos_type: 'GILBARCO_PASSPORT',
+            pos_connection_type: 'FILE',
+            pos_connection_config: { import_path: 'C:\\NAXML\\Export' },
+          },
+        },
+      });
+
+      vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(true);
+      vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, { apiKey: 'test-api-key-123' });
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          valid: true,
+          store: expect.objectContaining({
+            fileWatcherCompatible: true,
+            fileWatcherUnavailableReason: null,
+          }),
+        })
+      );
+    });
+
+    it('POS4-011: should include unavailableReason for non-compatible POS in validateApiKey', async () => {
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue({
+        valid: true,
+        store: {
+          storeId: 'store-123',
+          storeName: 'Test Store',
+          companyId: 'company-456',
+          companyName: 'Test Company',
+          timezone: 'America/New_York',
+          features: [],
+          lottery: { enabled: false, binCount: 0 },
+          posConnectionConfig: {
+            pos_type: 'CLOVER',
+            pos_connection_type: 'API',
+            pos_connection_config: { base_url: 'https://api.clover.com' },
+          },
+        },
+      });
+
+      vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
+      vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(
+        'Clover POS requires API integration'
+      );
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, { apiKey: 'test-api-key-456' });
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          valid: true,
+          store: expect.objectContaining({
+            fileWatcherCompatible: false,
+            fileWatcherUnavailableReason: 'Clover POS requires API integration',
+          }),
+        })
       );
     });
   });

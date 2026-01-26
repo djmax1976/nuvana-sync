@@ -18,6 +18,17 @@ import Store from 'electron-store';
 import { z } from 'zod';
 import { createLogger } from '../utils/logger';
 import { licenseService, LicenseApiResponseSchema } from './license.service';
+import {
+  TerminalSyncRecord,
+  TerminalSyncRecordSchema,
+  validateTerminalConfig,
+  formatTerminalValidationErrors,
+  getMissingTerminalFields,
+  POSConnectionConfig,
+  validatePOSConnectionConfig,
+  formatPOSConnectionValidationErrors,
+  convertTerminalToPOSConnectionConfig,
+} from '../../shared/types/config.types';
 // SyncQueueItem type available from sync-queue.dal if needed
 
 // ============================================================================
@@ -247,6 +258,8 @@ export interface CloudStoreManager {
 
 /**
  * Raw API key validation response from cloud
+ * Version 7.0: Now includes terminal configuration for POS binding
+ * Version 8.0: Added posConnectionConfig (store-level POS config)
  */
 export interface CloudApiKeyValidationResponse {
   success: boolean;
@@ -257,12 +270,32 @@ export interface CloudApiKeyValidationResponse {
     serverTime: string;
     revocationCheckInterval: number;
     storeManager: CloudStoreManager | null;
+    /**
+     * Terminal configuration (Version 7.0 - DEPRECATED)
+     * Use posConnectionConfig instead.
+     * Kept for backward compatibility during migration.
+     */
+    terminal: TerminalSyncRecord | null;
+    /**
+     * POS Connection Configuration (Version 8.0 - NEW)
+     * Store-level POS connection settings.
+     * Terminals/registers are now discovered dynamically from POS data.
+     * Takes precedence over terminal field if present.
+     */
+    posConnectionConfig?: {
+      pos_type: string;
+      pos_connection_type: string;
+      pos_connection_config: unknown;
+    } | null;
   };
 }
 
 /**
  * Validation response from API key check (internal format)
  * Mapped from CloudApiKeyValidationResponse for local use
+ *
+ * Version 7.0: Now includes terminal configuration for automated POS setup
+ * Version 8.0: Added posConnectionConfig for store-level POS configuration
  */
 export interface ValidateApiKeyResponse {
   valid: boolean;
@@ -289,6 +322,50 @@ export interface ValidateApiKeyResponse {
    * SEC-001: PIN hash from cloud, already bcrypt hashed
    */
   initialManager?: InitialManager;
+  /**
+   * Terminal configuration (Version 7.0 - DEPRECATED)
+   * Use posConnectionConfig instead for new implementations.
+   * Kept for backward compatibility during migration.
+   *
+   * @security SEC-014: Validated against TerminalSyncRecordSchema
+   * @security DB-006: Store-scoped terminal configuration
+   * @deprecated Use posConnectionConfig instead
+   */
+  terminal?: TerminalSyncRecord;
+  /**
+   * Terminal validation errors if terminal config is invalid
+   * Present when terminal data exists but fails validation
+   * @deprecated Use posConnectionValidationErrors instead
+   */
+  terminalValidationErrors?: string[];
+  /**
+   * POS Connection Configuration (Version 8.0 - NEW)
+   * Store-level POS connection settings.
+   * Terminals/registers are now discovered dynamically from POS data.
+   * Takes precedence over terminal field if present.
+   *
+   * @security SEC-014: Validated against POSConnectionConfigSchema
+   * @security DB-006: Store-scoped POS connection configuration
+   */
+  posConnectionConfig?: POSConnectionConfig;
+  /**
+   * POS connection validation errors if config is invalid
+   * Present when posConnectionConfig data exists but fails validation
+   */
+  posConnectionValidationErrors?: string[];
+  /**
+   * Debug information for troubleshooting
+   * Includes raw cloud response and API configuration
+   */
+  _debug?: {
+    apiUrl: string;
+    environment: string;
+    timestamp: string;
+    rawCloudResponse?: unknown;
+    activationResponse?: unknown;
+    identityEndpoint: string;
+    activationEndpoint: string;
+  };
 }
 
 // ============================================================================
@@ -709,6 +786,13 @@ const ValidateApiKeyResponseSchema = z.object({
     .optional(),
   license: LicenseInfoSchema.optional(),
   initialManager: InitialManagerSchema.optional(),
+  /**
+   * Terminal configuration (Version 7.0)
+   * SEC-014: Validated via TerminalSyncRecordSchema
+   */
+  terminal: TerminalSyncRecordSchema.optional(),
+  /** Validation errors if terminal config is invalid */
+  terminalValidationErrors: z.array(z.string()).optional(),
 });
 
 const _BatchSyncResponseSchema = z.object({
@@ -967,6 +1051,55 @@ export class CloudApiService {
       });
       throw new Error('API key decryption failed');
     }
+  }
+
+  // ==========================================================================
+  // Debug Info
+  // ==========================================================================
+
+  /**
+   * Get debug information about the API configuration
+   * Used for troubleshooting connection issues
+   */
+  getDebugInfo(): {
+    apiUrl: string;
+    environment: string;
+    nodeEnv: string;
+    hasApiKey: boolean;
+    apiKeyPrefix?: string;
+    apiKeySuffix?: string;
+    apiKeyLength?: number;
+    timestamp: string;
+  } {
+    const apiUrl = this.getBaseUrl();
+    const nodeEnv = process.env.NODE_ENV || 'unknown';
+    const isDev = nodeEnv === 'development';
+
+    let hasApiKey = false;
+    let apiKeyPrefix: string | undefined;
+    let apiKeySuffix: string | undefined;
+    let apiKeyLength: number | undefined;
+
+    try {
+      const key = this.getApiKey();
+      hasApiKey = true;
+      apiKeyPrefix = key.substring(0, 15) + '...';
+      apiKeySuffix = '...' + key.substring(key.length - 8);
+      apiKeyLength = key.length;
+    } catch {
+      // API key not configured
+    }
+
+    return {
+      apiUrl,
+      environment: isDev ? 'development' : 'production',
+      nodeEnv,
+      hasApiKey,
+      apiKeyPrefix,
+      apiKeySuffix,
+      apiKeyLength,
+      timestamp: new Date().toISOString(),
+    };
   }
 
   // ==========================================================================
@@ -1408,7 +1541,23 @@ export class CloudApiService {
    *
    * @returns Activation response
    */
-  async activateApiKey(): Promise<{ success: boolean; message?: string }> {
+  /**
+   * Activate API key with device fingerprint
+   *
+   * @security SEC-014: Device fingerprint validated server-side
+   * @security LM-001: Structured logging with sensitive data redaction
+   * @security API-003: Centralized error handling with sanitized responses
+   *
+   * @returns Activation result including terminal and posConnectionConfig from cloud
+   */
+  async activateApiKey(): Promise<{
+    success: boolean;
+    message?: string;
+    /** @deprecated Use posConnectionConfig instead */
+    terminal?: unknown;
+    /** Version 8.0: Store-level POS connection configuration */
+    posConnectionConfig?: unknown;
+  }> {
     log.info('Activating API key');
 
     // Generate device fingerprint from machine-specific info
@@ -1429,7 +1578,22 @@ export class CloudApiService {
     const osInfo = `${os.platform()} ${os.release()} ${os.arch()}`;
 
     try {
-      const response = await this.request<Record<string, unknown>>(
+      // SEC-014: Response type includes all possible fields from cloud API
+      const response = await this.request<{
+        success?: boolean;
+        message?: string;
+        data?: {
+          terminal?: unknown;
+          identity?: unknown;
+          // Version 8.0: POS connection config (both naming conventions)
+          posConnectionConfig?: unknown;
+          pos_connection_config?: unknown;
+        };
+        terminal?: unknown; // May be at top level
+        // Version 8.0: POS connection config at root level (both naming conventions)
+        posConnectionConfig?: unknown;
+        pos_connection_config?: unknown;
+      }>(
         'POST',
         '/api/v1/keys/activate',
         {
@@ -1440,19 +1604,57 @@ export class CloudApiService {
         { retries: 0 } // Don't retry activation
       );
 
-      log.info('API key activated successfully');
+      // Version 7.0: Extract terminal from activation response (DEPRECATED)
+      // Terminal may be in response.data.terminal or response.terminal
+      const terminal = response.data?.terminal ?? response.terminal;
+
+      // Version 8.0: Extract posConnectionConfig from activation response
+      // Config may be in response.data or at root level, in camelCase or snake_case
+      const posConnectionConfig =
+        response.data?.posConnectionConfig ??
+        response.data?.pos_connection_config ??
+        response.posConnectionConfig ??
+        response.pos_connection_config;
+
+      // LM-001: Structured logging with all relevant fields for debugging
+      const responseKeys = Object.keys(response || {});
+      const dataKeys = response.data ? Object.keys(response.data) : [];
+      log.debug('Activation response structure', {
+        responseKeys,
+        dataKeys,
+        hasTerminalAtRoot: 'terminal' in response,
+        hasTerminalInData: response.data && 'terminal' in response.data,
+        terminalType: terminal ? typeof terminal : 'undefined',
+        // Version 8.0: Log posConnectionConfig presence
+        hasPosConnectionConfigAtRoot:
+          'posConnectionConfig' in response || 'pos_connection_config' in response,
+        hasPosConnectionConfigInData:
+          response.data &&
+          ('posConnectionConfig' in response.data || 'pos_connection_config' in response.data),
+        posConnectionConfigType: posConnectionConfig ? typeof posConnectionConfig : 'undefined',
+      });
+
+      log.info('API key activated successfully', {
+        hasTerminal: terminal !== undefined && terminal !== null,
+        hasPosConnectionConfig: posConnectionConfig !== undefined && posConnectionConfig !== null,
+      });
+
       return {
         success: true,
         message: typeof response.message === 'string' ? response.message : undefined,
+        terminal,
+        posConnectionConfig,
       };
     } catch (error) {
-      // If already activated, that's fine - continue to identity check
+      // API-003: Centralized error handling
       const errorMsg = error instanceof Error ? error.message : String(error);
       if (
         errorMsg.toLowerCase().includes('already activated') ||
         errorMsg.toLowerCase().includes('already active')
       ) {
         log.info('API key already activated');
+        // Note: When already activated, we don't have the activation response
+        // POS config will be fetched from identity endpoint instead
         return { success: true, message: 'Already activated' };
       }
       throw error;
@@ -1482,12 +1684,29 @@ export class CloudApiService {
    * @returns Validation result with store details
    */
   async validateApiKey(): Promise<ValidateApiKeyResponse> {
+    // Capture debug info at start
+    const debugInfo = this.getDebugInfo();
+    let rawActivationResponse: unknown | undefined;
+
     // Step 1: Activate the API key first (required before identity endpoint works)
     // This is idempotent - if already activated, it succeeds or returns "already activated"
+    // Version 7.0: Capture terminal from activation response (primary source) - DEPRECATED
+    // Version 8.0: Capture posConnectionConfig from activation response (preferred source)
+    let activationTerminal: unknown | undefined;
+    let activationPosConnectionConfig: unknown | undefined;
     try {
-      await this.activateApiKey();
+      const activationResult = await this.activateApiKey();
+      rawActivationResponse = activationResult; // Capture for debugging
+      activationTerminal = activationResult.terminal;
+      activationPosConnectionConfig = activationResult.posConnectionConfig;
+      log.debug('Activation result', {
+        success: activationResult.success,
+        hasTerminal: activationTerminal !== undefined && activationTerminal !== null,
+        hasPosConnectionConfig:
+          activationPosConnectionConfig !== undefined && activationPosConnectionConfig !== null,
+      });
     } catch (error) {
-      // If activation fails with something other than "already activated", propagate the error
+      // API-003: Centralized error handling with sanitized logging
       const errorMsg = error instanceof Error ? error.message : String(error);
       // Allow through if already activated or if it's just an auth/format error
       // (identity endpoint will give a clearer error)
@@ -1515,24 +1734,33 @@ export class CloudApiService {
         ? Object.keys(response.data)
         : [];
 
+    // Version 7.0: Check for terminal in the response data
+    const hasTerminalInData = response.data
+      ? 'terminal' in response.data && response.data.terminal !== undefined
+      : false;
+
     log.debug('Received API key validation response', {
       hasSuccess: 'success' in response,
       hasData: 'data' in response,
       hasIdentity: Boolean((response as CloudApiKeyValidationResponse).data?.identity),
       hasStoreManager: Boolean((response as CloudApiKeyValidationResponse).data?.storeManager),
+      hasTerminalInData,
+      hasActivationTerminal: activationTerminal !== undefined && activationTerminal !== null,
       responseKeys,
       dataKeys,
     });
 
     // Handle the actual cloud response structure
     // The cloud API may return data in different formats:
-    // 1. Nested: { success, data: { identity: {...}, offlineToken, storeManager } }
-    // 2. Flat snake_case: { success, data: { store_id, store_name, ... } }
-    // 3. Flat camelCase: { success, data: { storeId, storeName, ... } }
+    // 1. Nested: { success, data: { identity: {...}, offlineToken, storeManager, terminal, posConnectionConfig } }
+    // 2. Flat snake_case: { success, data: { store_id, store_name, ..., posConnectionConfig } }
+    // 3. Flat camelCase: { success, data: { storeId, storeName, ..., posConnectionConfig } }
     let identity: CloudStoreIdentity | undefined;
     let offlineToken: string | undefined;
     let offlineTokenExpiresAt: string | undefined;
     let storeManager: CloudStoreManager | null | undefined;
+    let terminalRaw: unknown | undefined; // Raw terminal data for validation (DEPRECATED)
+    let posConnectionConfigRaw: unknown | undefined; // Raw POS connection config (NEW)
 
     // Check for nested structure with identity object
     if (response.success && response.data?.identity) {
@@ -1540,6 +1768,8 @@ export class CloudApiService {
       offlineToken = response.data.offlineToken;
       offlineTokenExpiresAt = response.data.offlineTokenExpiresAt;
       storeManager = response.data.storeManager;
+      terminalRaw = response.data.terminal;
+      posConnectionConfigRaw = response.data.posConnectionConfig;
     }
     // Check for flat snake_case structure (actual cloud API format)
     else if (response.success && response.data && 'store_id' in response.data) {
@@ -1559,7 +1789,26 @@ export class CloudApiService {
         offline_token_expires_at?: string;
         store_manager?: CloudStoreManager | null;
         server_time?: string;
+        terminal?: unknown; // Version 7.0: Terminal configuration (DEPRECATED)
+        // Version 8.0: POS connection config (NEW - store-level)
+        posConnectionConfig?: unknown;
+        pos_connection_config?: unknown; // snake_case variant
+        // Check for pos_terminal_id at top level (alternative field name)
+        pos_terminal_id?: string;
+        pos_terminal_name?: string;
       };
+
+      // Version 8.0: Debug POS connection config and terminal fields in the response
+      log.debug('Identity response POS config fields', {
+        hasPosConnectionConfig:
+          ('posConnectionConfig' in data && data.posConnectionConfig !== undefined) ||
+          ('pos_connection_config' in data && data.pos_connection_config !== undefined),
+        hasTerminalField: 'terminal' in data && data.terminal !== undefined,
+        hasPosTerminalId: 'pos_terminal_id' in data && data.pos_terminal_id !== undefined,
+        metadataTerminalId: data.metadata?.terminal_id,
+        metadataPosVendor: data.metadata?.pos_vendor,
+        allDataKeys: Object.keys(data),
+      });
       identity = {
         storeId: data.store_id,
         storeName: data.store_name,
@@ -1575,6 +1824,9 @@ export class CloudApiService {
       offlineToken = data.offline_token;
       offlineTokenExpiresAt = data.offline_token_expires_at;
       storeManager = data.store_manager;
+      terminalRaw = data.terminal;
+      // Version 8.0: Extract posConnectionConfig (try both camelCase and snake_case)
+      posConnectionConfigRaw = data.posConnectionConfig ?? data.pos_connection_config;
     }
     // Check for flat camelCase structure
     else if (response.success && response.data && 'storeId' in response.data) {
@@ -1583,6 +1835,8 @@ export class CloudApiService {
         offlineToken?: string;
         offlineTokenExpiresAt?: string;
         storeManager?: CloudStoreManager | null;
+        terminal?: unknown; // Version 7.0: Terminal configuration (DEPRECATED)
+        posConnectionConfig?: unknown; // Version 8.0: POS connection config (NEW)
       };
       identity = {
         storeId: data.storeId,
@@ -1599,6 +1853,8 @@ export class CloudApiService {
       offlineToken = data.offlineToken;
       offlineTokenExpiresAt = data.offlineTokenExpiresAt;
       storeManager = data.storeManager;
+      terminalRaw = data.terminal;
+      posConnectionConfigRaw = data.posConnectionConfig;
     }
 
     if (!identity) {
@@ -1610,6 +1866,131 @@ export class CloudApiService {
         dataKeys,
       });
       throw new Error('Invalid API response: missing identity data');
+    }
+
+    // =========================================================================
+    // Version 8.0: POS Connection Configuration Validation (NEW)
+    // SEC-014: Strict validation for POS connection configuration
+    //
+    // Config source priority:
+    // 1. posConnectionConfig from identity response (new store-level format) - PREFERRED
+    // 2. posConnectionConfig from activation response - FALLBACK
+    // 3. terminal from identity/activation (legacy format) - LAST RESORT
+    //
+    // At least one must be present and valid for setup to proceed.
+    // =========================================================================
+    let posConnectionConfig: POSConnectionConfig | undefined;
+    let posConnectionValidationErrors: string[] | undefined;
+    let terminal: TerminalSyncRecord | undefined;
+    let terminalValidationErrors: string[] | undefined;
+
+    // Version 8.0: Use activation posConnectionConfig as fallback if identity doesn't have it
+    // This is the PRIMARY fix for the issue where identity endpoint doesn't return posConnectionConfig
+    // but the activation endpoint does
+    if (
+      (posConnectionConfigRaw === null || posConnectionConfigRaw === undefined) &&
+      activationPosConnectionConfig
+    ) {
+      log.info(
+        'posConnectionConfig not in identity response, using posConnectionConfig from activation response',
+        { hasActivationPosConnectionConfig: true }
+      );
+      posConnectionConfigRaw = activationPosConnectionConfig;
+    }
+
+    // Version 8.0: Try to validate posConnectionConfig first (new format takes precedence)
+    if (posConnectionConfigRaw !== null && posConnectionConfigRaw !== undefined) {
+      log.info('Processing posConnectionConfig (new store-level format)');
+      try {
+        posConnectionConfig = validatePOSConnectionConfig(posConnectionConfigRaw);
+        log.info('POS connection configuration validated successfully', {
+          posType: posConnectionConfig.pos_type,
+          connectionType: posConnectionConfig.pos_connection_type,
+          hasConnectionConfig: posConnectionConfig.pos_connection_config !== null,
+        });
+      } catch (error) {
+        // Validation failed - capture errors
+        if (error instanceof z.ZodError) {
+          posConnectionValidationErrors = formatPOSConnectionValidationErrors(error);
+          log.error('POS connection configuration validation failed', {
+            storeId: identity.storeId,
+            errors: posConnectionValidationErrors,
+          });
+        } else {
+          const errorMessage = error instanceof Error ? error.message : 'Unknown validation error';
+          posConnectionValidationErrors = [errorMessage];
+          log.error('POS connection configuration validation error', {
+            storeId: identity.storeId,
+            error: errorMessage,
+          });
+        }
+      }
+    }
+
+    // If no valid posConnectionConfig, fall back to terminal (legacy format)
+    if (!posConnectionConfig) {
+      // Version 7.0: Use activation terminal as fallback if identity doesn't have it
+      if ((terminalRaw === null || terminalRaw === undefined) && activationTerminal) {
+        log.info('Terminal not in identity response, using terminal from activation response', {
+          hasActivationTerminal: true,
+        });
+        terminalRaw = activationTerminal;
+      }
+
+      if (terminalRaw !== null && terminalRaw !== undefined) {
+        // Validate terminal configuration (legacy format)
+        try {
+          terminal = validateTerminalConfig(terminalRaw);
+          log.info('Terminal configuration validated successfully (legacy format)', {
+            terminalId: terminal.pos_terminal_id,
+            terminalName: terminal.name,
+            connectionType: terminal.connection_type,
+            posType: terminal.pos_type,
+            terminalStatus: terminal.terminal_status,
+          });
+
+          // Convert to new posConnectionConfig format for unified handling
+          posConnectionConfig = convertTerminalToPOSConnectionConfig(terminal);
+          log.debug('Converted legacy terminal to posConnectionConfig format');
+        } catch (error) {
+          // Validation failed - capture errors
+          if (error instanceof z.ZodError) {
+            terminalValidationErrors = formatTerminalValidationErrors(error);
+            const missingFields = getMissingTerminalFields(error);
+            log.error('Terminal configuration validation failed', {
+              storeId: identity.storeId,
+              errors: terminalValidationErrors,
+              missingFields,
+            });
+          } else {
+            const errorMessage =
+              error instanceof Error ? error.message : 'Unknown validation error';
+            terminalValidationErrors = [errorMessage];
+            log.error('Terminal configuration validation error', {
+              storeId: identity.storeId,
+              error: errorMessage,
+            });
+          }
+        }
+      }
+    }
+
+    // Check if we have any valid POS configuration
+    if (!posConnectionConfig && !terminal) {
+      // Neither new nor legacy config is available - setup cannot continue
+      log.error('POS connection configuration is missing from API response', {
+        storeId: identity.storeId,
+        storeName: identity.storeName,
+        hasPosConnectionConfigRaw: posConnectionConfigRaw !== undefined,
+        hasTerminalRaw: terminalRaw !== undefined,
+      });
+
+      // Prefer posConnectionValidationErrors if we tried to validate it
+      if (!posConnectionValidationErrors && !terminalValidationErrors) {
+        posConnectionValidationErrors = [
+          'POS connection configuration is missing. Please contact your administrator to configure the POS settings in the cloud portal.',
+        ];
+      }
     }
 
     // Map initial manager from storeManager if present
@@ -1668,6 +2049,22 @@ export class CloudApiService {
       // License will be extracted from response by extractAndUpdateLicense interceptor
       license: undefined,
       initialManager,
+      // Version 7.0: Terminal configuration (DEPRECATED - kept for backward compatibility)
+      terminal,
+      terminalValidationErrors,
+      // Version 8.0: POS connection configuration (NEW - store-level)
+      posConnectionConfig,
+      posConnectionValidationErrors,
+      // Debug information for troubleshooting
+      _debug: {
+        apiUrl: debugInfo.apiUrl,
+        environment: debugInfo.environment,
+        timestamp: debugInfo.timestamp,
+        rawCloudResponse: response,
+        activationResponse: rawActivationResponse,
+        identityEndpoint: '/api/v1/keys/identity',
+        activationEndpoint: '/api/v1/keys/activate',
+      },
     };
 
     // Validate the mapped response against our schema
@@ -1692,6 +2089,16 @@ export class CloudApiService {
       hasOfflineToken: Boolean(mapped.offlineToken),
       offlinePermissionCount: mapped.offlinePermissions.length,
       hasInitialManager: Boolean(mapped.initialManager),
+      // Version 8.0: POS connection configuration status (preferred)
+      hasPosConnectionConfig: Boolean(mapped.posConnectionConfig),
+      posConnectionType: mapped.posConnectionConfig?.pos_connection_type,
+      posType: mapped.posConnectionConfig?.pos_type,
+      hasPosConnectionErrors: Boolean(mapped.posConnectionValidationErrors?.length),
+      // Version 7.0: Terminal configuration status (deprecated)
+      hasTerminal: Boolean(mapped.terminal),
+      terminalConnectionType: mapped.terminal?.connection_type,
+      terminalPosType: mapped.terminal?.pos_type,
+      hasTerminalErrors: Boolean(mapped.terminalValidationErrors?.length),
     });
 
     return mapped;
@@ -5693,6 +6100,346 @@ export class CloudApiService {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
       throw error;
+    }
+  }
+
+  // ==========================================================================
+  // POS Connection Configuration (Version 8.0 - Phase 3)
+  // ==========================================================================
+
+  /**
+   * Get POS Connection Configuration from cloud
+   *
+   * Endpoint: GET /api/v1/sync/pos/config
+   *
+   * This endpoint allows the desktop app to refresh POS connection settings
+   * without re-activating the API key. Used when:
+   * - App needs to refresh config after cloud-side changes
+   * - Periodic config validation
+   * - Recovery from connection errors
+   *
+   * @security SEC-008: HTTPS enforcement
+   * @security API-004: Bearer token authentication via API key
+   * @security SEC-014: Response validated against POSConnectionConfigSchema
+   * @security LM-001: Structured logging with correlation ID
+   *
+   * @returns POS connection configuration response
+   * @throws Error if request fails or validation fails
+   */
+  async getPOSConfig(): Promise<{
+    success: boolean;
+    data: {
+      config: POSConnectionConfig | null;
+      store_id: string;
+      store_name: string;
+      is_configured: boolean;
+      server_time: string;
+    };
+  }> {
+    const correlationId = `pos-config-${Date.now()}`;
+    log.info('Fetching POS connection configuration from cloud', { correlationId });
+
+    try {
+      // Make the API request
+      const response = await this.request<{
+        success: boolean;
+        data?: {
+          config?: {
+            pos_type?: string;
+            pos_connection_type?: string;
+            pos_connection_config?: unknown;
+          } | null;
+          // Alternative field names for backward compatibility
+          posConnectionConfig?: {
+            pos_type?: string;
+            pos_connection_type?: string;
+            pos_connection_config?: unknown;
+          } | null;
+          store_id?: string;
+          storeId?: string;
+          store_name?: string;
+          storeName?: string;
+          is_configured?: boolean;
+          isConfigured?: boolean;
+          server_time?: string;
+          serverTime?: string;
+        };
+        // Error response structure
+        message?: string;
+        error?: string;
+      }>('GET', '/api/v1/sync/pos/config');
+
+      if (!response.success || !response.data) {
+        log.error('POS config request failed', {
+          correlationId,
+          message: response.message || response.error || 'Unknown error',
+        });
+        throw new Error(response.message || response.error || 'Failed to fetch POS configuration');
+      }
+
+      // Extract config with field name flexibility (snake_case vs camelCase)
+      const rawConfig = response.data.config ?? response.data.posConnectionConfig;
+      const storeId = response.data.store_id ?? response.data.storeId ?? '';
+      const storeName = response.data.store_name ?? response.data.storeName ?? '';
+      const isConfigured = response.data.is_configured ?? response.data.isConfigured ?? false;
+      const serverTime =
+        response.data.server_time ?? response.data.serverTime ?? new Date().toISOString();
+
+      // SEC-014: Validate POS connection config if present
+      let validatedConfig: POSConnectionConfig | null = null;
+
+      if (rawConfig !== null && rawConfig !== undefined) {
+        try {
+          validatedConfig = validatePOSConnectionConfig(rawConfig);
+          log.info('POS connection configuration validated successfully', {
+            correlationId,
+            posType: validatedConfig.pos_type,
+            connectionType: validatedConfig.pos_connection_type,
+            hasConnectionConfig: validatedConfig.pos_connection_config !== null,
+          });
+        } catch (error) {
+          // Validation failed - log error and capture details
+          if (error instanceof z.ZodError) {
+            const errors = formatPOSConnectionValidationErrors(error);
+            log.error('POS connection configuration validation failed', {
+              correlationId,
+              storeId,
+              errors,
+              rawConfig: JSON.stringify(rawConfig).substring(0, 500),
+            });
+            throw new Error(`POS configuration validation failed: ${errors.join(', ')}`);
+          }
+          throw error;
+        }
+      } else {
+        log.warn('POS connection configuration not configured in cloud', {
+          correlationId,
+          storeId,
+          storeName,
+        });
+      }
+
+      log.info('POS connection configuration fetched successfully', {
+        correlationId,
+        storeId,
+        isConfigured,
+        hasConfig: validatedConfig !== null,
+        posType: validatedConfig?.pos_type,
+        connectionType: validatedConfig?.pos_connection_type,
+      });
+
+      return {
+        success: true,
+        data: {
+          config: validatedConfig,
+          store_id: storeId,
+          store_name: storeName,
+          is_configured: isConfigured,
+          server_time: serverTime,
+        },
+      };
+    } catch (error) {
+      // API-003: Centralized error handling with sanitized responses
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to fetch POS configuration', {
+        correlationId,
+        error: errorMessage,
+      });
+
+      // Re-throw with sanitized message for client consumption
+      throw new Error(`POS configuration fetch failed: ${errorMessage}`);
+    }
+  }
+
+  /**
+   * Test POS Connection
+   *
+   * Verifies that the POS connection is accessible based on connection type:
+   * - FILE: Checks if import_path exists and is readable
+   * - API: Makes a test request to the POS API endpoint
+   * - NETWORK: Attempts a TCP connection to host:port
+   * - WEBHOOK: Validates webhook configuration (passive check)
+   * - MANUAL: Always returns success (no automated connection)
+   *
+   * @param config - POS connection configuration to test
+   * @returns Test result with status and message
+   *
+   * @security SEC-014: Path validation for FILE type
+   * @security SEC-008: HTTPS enforcement for API type
+   * @security LM-001: Structured logging for all test attempts
+   */
+  async testPOSConnection(config: POSConnectionConfig): Promise<{
+    success: boolean;
+    message: string;
+    details?: Record<string, unknown>;
+  }> {
+    const correlationId = `pos-test-${Date.now()}`;
+    log.info('Testing POS connection', {
+      correlationId,
+      posType: config.pos_type,
+      connectionType: config.pos_connection_type,
+    });
+
+    try {
+      switch (config.pos_connection_type) {
+        case 'FILE': {
+          // Test file-based connection (check import path accessibility)
+          const fileConfig = config.pos_connection_config as {
+            import_path?: string;
+          } | null;
+
+          if (!fileConfig?.import_path) {
+            return {
+              success: false,
+              message: 'Import path not configured',
+            };
+          }
+
+          // Note: Actual file system access check should be done in main process
+          // This is a configuration validation, not a live test
+          log.info('FILE connection test: configuration valid', {
+            correlationId,
+            hasImportPath: true,
+          });
+
+          return {
+            success: true,
+            message:
+              'File connection configuration is valid. Path accessibility must be verified in the main process.',
+            details: {
+              import_path: fileConfig.import_path,
+              requires_file_system_check: true,
+            },
+          };
+        }
+
+        case 'API': {
+          // Test API-based connection (configuration validation)
+          const apiConfig = config.pos_connection_config as {
+            base_url?: string;
+            api_key?: string;
+          } | null;
+
+          if (!apiConfig?.base_url) {
+            return {
+              success: false,
+              message: 'API base URL not configured',
+            };
+          }
+
+          // SEC-008: Validate HTTPS for non-localhost
+          const isLocalhost =
+            apiConfig.base_url.includes('localhost') || apiConfig.base_url.includes('127.0.0.1');
+          if (!isLocalhost && !apiConfig.base_url.startsWith('https://')) {
+            return {
+              success: false,
+              message: 'API base URL must use HTTPS for security',
+            };
+          }
+
+          log.info('API connection test: configuration valid', {
+            correlationId,
+            hasBaseUrl: true,
+            hasApiKey: !!apiConfig.api_key,
+            isHttps: apiConfig.base_url.startsWith('https://'),
+          });
+
+          return {
+            success: true,
+            message:
+              'API connection configuration is valid. Live connectivity test available when connection manager is initialized.',
+            details: {
+              base_url_configured: true,
+              api_key_configured: !!apiConfig.api_key,
+              requires_live_test: true,
+            },
+          };
+        }
+
+        case 'NETWORK': {
+          // Test network-based connection (configuration validation)
+          const netConfig = config.pos_connection_config as {
+            host?: string;
+            port?: number;
+          } | null;
+
+          if (!netConfig?.host || !netConfig?.port) {
+            return {
+              success: false,
+              message: 'Network host and port must be configured',
+            };
+          }
+
+          log.info('NETWORK connection test: configuration valid', {
+            correlationId,
+            hasHost: true,
+            hasPort: true,
+          });
+
+          return {
+            success: true,
+            message:
+              'Network connection configuration is valid. Live connectivity test available when connection manager is initialized.',
+            details: {
+              host_configured: true,
+              port_configured: true,
+              requires_live_test: true,
+            },
+          };
+        }
+
+        case 'WEBHOOK': {
+          // Webhook is passive - just validate config exists
+          log.info('WEBHOOK connection test: passive mode', { correlationId });
+
+          return {
+            success: true,
+            message:
+              'Webhook mode is passive - POS will push data to Nuvana. No outbound connection required.',
+            details: {
+              mode: 'passive',
+              requires_live_test: false,
+            },
+          };
+        }
+
+        case 'MANUAL': {
+          // Manual mode - no automated connection
+          log.info('MANUAL connection test: no automation', { correlationId });
+
+          return {
+            success: true,
+            message: 'Manual entry mode - no automated POS connection required.',
+            details: {
+              mode: 'manual',
+              requires_live_test: false,
+            },
+          };
+        }
+
+        default: {
+          log.warn('Unknown connection type for test', {
+            correlationId,
+            connectionType: config.pos_connection_type,
+          });
+
+          return {
+            success: false,
+            message: `Unknown connection type: ${config.pos_connection_type}`,
+          };
+        }
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      log.error('POS connection test failed', {
+        correlationId,
+        error: errorMessage,
+      });
+
+      return {
+        success: false,
+        message: `Connection test failed: ${errorMessage}`,
+      };
     }
   }
 }

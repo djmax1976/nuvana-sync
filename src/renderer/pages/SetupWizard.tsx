@@ -27,9 +27,17 @@ interface StoreInfo {
   timezone: string;
   lotteryEnabled?: boolean;
   lotteryBinCount?: number;
+  /** Terminal connection type from cloud (Version 7.0) */
+  connectionType?: string;
+  /** POS system type from cloud (Version 7.0) */
+  posType?: string;
 }
 
-type Step = 'welcome' | 'apiKey' | 'storeConfirm' | 'watchPath' | 'syncing' | 'complete';
+/**
+ * Setup wizard steps
+ * Version 7.0: Removed 'watchPath' step - now auto-configured from terminal config
+ */
+type Step = 'welcome' | 'apiKey' | 'storeConfirm' | 'syncing' | 'complete';
 
 function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
   const [step, setStep] = useState<Step>('welcome');
@@ -37,8 +45,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
   const [apiUrl, setApiUrl] = useState('https://api.nuvanaapp.com');
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [showApiKey, setShowApiKey] = useState(false);
-  const [watchPath, setWatchPath] = useState('');
-  const [archivePath, setArchivePath] = useState('');
+  // Version 7.0: watchPath and archivePath are now auto-configured from terminal config
 
   const [storeInfo, setStoreInfo] = useState<StoreInfo | null>(null);
   const [validating, setValidating] = useState(false);
@@ -48,6 +55,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
 
   /**
    * Validate API key and fetch store information
+   * Version 7.0: Now validates terminal configuration (MANDATORY)
    */
   const handleValidateApiKey = async (): Promise<void> => {
     setValidating(true);
@@ -63,6 +71,8 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
         timezone: 'America/New_York',
         lotteryEnabled: true,
         lotteryBinCount: 8,
+        connectionType: 'FILE',
+        posType: 'GILBARCO_PASSPORT',
       });
       setValidating(false);
       setStep('storeConfirm');
@@ -71,11 +81,13 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
 
     try {
       // Call settings:validateApiKey which validates and returns store info
+      // Version 7.0: Also validates terminal configuration (MANDATORY)
       const result = await window.electronAPI.invoke<{
         success: boolean;
         data?: {
           valid: boolean;
           error?: string;
+          terminalValidationErrors?: string[];
           store?: {
             storeId: string;
             storeName: string;
@@ -84,10 +96,24 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
             timezone: string;
             features: string[];
             lottery?: { enabled: boolean; binCount: number };
+            terminal?: {
+              connection_type: string;
+              pos_type: string;
+            };
           };
         };
         error?: string;
       }>('settings:validateApiKey', { apiKey });
+
+      // Check for terminal validation errors first (MANDATORY)
+      if (
+        result.data?.terminalValidationErrors &&
+        result.data.terminalValidationErrors.length > 0
+      ) {
+        setError(`Store setup cannot continue: ${result.data.terminalValidationErrors.join('. ')}`);
+        setValidating(false);
+        return;
+      }
 
       if (result.success && result.data?.valid && result.data?.store) {
         const store = result.data.store;
@@ -98,6 +124,8 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
           timezone: store.timezone || 'UTC',
           lotteryEnabled: store.lottery?.enabled,
           lotteryBinCount: store.lottery?.binCount,
+          connectionType: store.terminal?.connection_type,
+          posType: store.terminal?.pos_type,
         });
         setStep('storeConfirm');
       } else {
@@ -114,6 +142,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
 
   /**
    * Save configuration and trigger initial sync
+   * Version 7.0: Watch paths are now auto-configured from terminal config
    */
   const handleSaveAndSync = async (): Promise<void> => {
     if (!storeInfo) return;
@@ -124,7 +153,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
 
     // In dev mode without Electron, simulate sync
     if (!isElectron) {
-      setSyncStatus('Saving configuration...');
+      setSyncStatus('Configuring POS connection...');
       await new Promise((resolve) => setTimeout(resolve, 500));
       setSyncStatus('Syncing users...');
       await new Promise((resolve) => setTimeout(resolve, 1000));
@@ -138,15 +167,16 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
     }
 
     try {
-      // Step 1: Save configuration (use setup-specific endpoint - no auth required during setup)
-      setSyncStatus('Saving configuration...');
+      // Step 1: Finalize configuration
+      // Version 7.0: Watch paths already configured from terminal during API key validation
+      setSyncStatus('Finalizing configuration...');
       const saveResult = await window.electronAPI.invoke<{
         success: boolean;
         data?: { success: boolean };
         error?: string;
         message?: string;
       }>('settings:updateDuringSetup', {
-        xmlWatchFolder: watchPath || undefined,
+        // No xmlWatchFolder needed - auto-configured from terminal
       });
 
       if (!saveResult.success) {
@@ -183,7 +213,7 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
       setStep('complete');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Setup failed');
-      setStep('watchPath'); // Go back to allow retry
+      setStep('storeConfirm'); // Go back to allow retry
     } finally {
       setSyncing(false);
     }
@@ -389,6 +419,20 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                 <span className="text-gray-600">Timezone</span>
                 <span className="font-medium text-gray-900">{storeInfo.timezone}</span>
               </div>
+              {storeInfo.posType && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">POS System</span>
+                  <span className="font-medium text-gray-900">
+                    {storeInfo.posType.replace(/_/g, ' ')}
+                  </span>
+                </div>
+              )}
+              {storeInfo.connectionType && (
+                <div className="flex justify-between">
+                  <span className="text-gray-600">Connection</span>
+                  <span className="font-medium text-blue-600">{storeInfo.connectionType}</span>
+                </div>
+              )}
               {storeInfo.lotteryEnabled && (
                 <div className="flex justify-between">
                   <span className="text-gray-600">Lottery</span>
@@ -403,73 +447,17 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
               Is this the correct store? If not, please check your API key.
             </p>
 
+            {error && (
+              <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm mb-4">{error}</div>
+            )}
+
             <div className="flex gap-3">
               <button
                 onClick={() => {
                   setStoreInfo(null);
+                  setError(null);
                   setStep('apiKey');
                 }}
-                className="flex-1 py-3 px-6 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
-              >
-                Back
-              </button>
-              <button
-                onClick={() => setStep('watchPath')}
-                className="flex-1 py-3 px-6 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors"
-              >
-                Yes, Continue
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Watch Path Step */}
-        {step === 'watchPath' && (
-          <div>
-            <h2 className="text-xl font-bold text-gray-900 mb-2">Configure File Watching</h2>
-            <p className="text-gray-600 mb-6">
-              Optionally configure where to watch for POS export files.
-            </p>
-
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  NAXML Watch Folder (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={watchPath}
-                  onChange={(e) => setWatchPath(e.target.value)}
-                  placeholder="Z:\Gilbarco\Export\NAXML"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <p className="text-xs text-gray-500 mt-1">
-                  Leave empty if you don't need automatic file processing
-                </p>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-gray-700 mb-1">
-                  Archive Path (Optional)
-                </label>
-                <input
-                  type="text"
-                  value={archivePath}
-                  onChange={(e) => setArchivePath(e.target.value)}
-                  placeholder="Z:\Gilbarco\Export\NAXML\Processed"
-                  className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-indigo-500 focus:border-transparent"
-                />
-                <p className="text-xs text-gray-500 mt-1">Processed files will be moved here</p>
-              </div>
-
-              {error && (
-                <div className="p-3 rounded-lg bg-red-50 text-red-700 text-sm">{error}</div>
-              )}
-            </div>
-
-            <div className="flex gap-3 mt-8">
-              <button
-                onClick={() => setStep('storeConfirm')}
                 className="flex-1 py-3 px-6 border border-gray-300 rounded-lg font-medium text-gray-700 hover:bg-gray-50 transition-colors"
               >
                 Back
@@ -479,11 +467,13 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
                 disabled={syncing}
                 className="flex-1 py-3 px-6 bg-indigo-600 text-white rounded-lg font-medium hover:bg-indigo-700 transition-colors disabled:opacity-50"
               >
-                Complete Setup
+                {syncing ? 'Setting up...' : 'Complete Setup'}
               </button>
             </div>
           </div>
         )}
+
+        {/* Version 7.0: watchPath step removed - paths auto-configured from terminal */}
 
         {/* Syncing Step */}
         {step === 'syncing' && (
@@ -543,14 +533,13 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
         )}
 
         {/* Progress Indicator */}
+        {/* Version 7.0: Removed watchPath step - now 4 steps total */}
         <div className="mt-8 flex justify-center gap-2">
-          {['welcome', 'apiKey', 'storeConfirm', 'watchPath', 'complete'].map((s, i) => (
+          {['welcome', 'apiKey', 'storeConfirm', 'complete'].map((s, i) => (
             <div
               key={s}
               className={`w-2 h-2 rounded-full transition-colors ${
-                ['welcome', 'apiKey', 'storeConfirm', 'watchPath', 'syncing', 'complete'].indexOf(
-                  step
-                ) >= i
+                ['welcome', 'apiKey', 'storeConfirm', 'syncing', 'complete'].indexOf(step) >= i
                   ? 'bg-indigo-600'
                   : 'bg-gray-300'
               }`}

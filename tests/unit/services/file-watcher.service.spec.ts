@@ -1,10 +1,11 @@
 /**
  * File Watcher Service Unit Tests
  *
- * Tests for file watching, path validation, and local-first processing.
+ * Tests for file watching, path validation, POS type validation, and local-first processing.
  *
  * Test Coverage Matrix:
  * - FW-001 through 010: Path Validation (SEC-014)
+ * - FW-POS-001 through 011: POS Type Validation (Phase 3 - SEC-014)
  * - FW-020 through 030: File Processing Flow
  * - FW-040 through 050: File Type Detection
  * - FW-060 through 070: Archive/Error Handling
@@ -13,7 +14,7 @@
  * @module tests/unit/services/file-watcher.service.spec
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+// Using vitest globals (configured in vitest.config.ts with globals: true)
 import { EventEmitter } from 'events';
 
 // Mock close function for watcher
@@ -57,6 +58,29 @@ vi.mock('../../../src/main/services/parser.service', () => ({
   createParserService: vi.fn(() => ({
     processFile: mockProcessFile,
   })),
+}));
+
+// Mock settingsService for POS type validation tests
+// Use vi.hoisted() to ensure mock functions are defined before vi.mock hoisting
+const {
+  mockIsNAXMLCompatible,
+  mockGetFileWatcherUnavailableReason,
+  mockGetPOSType,
+  mockGetPOSConnectionType,
+} = vi.hoisted(() => ({
+  mockIsNAXMLCompatible: vi.fn(),
+  mockGetFileWatcherUnavailableReason: vi.fn(),
+  mockGetPOSType: vi.fn(),
+  mockGetPOSConnectionType: vi.fn(),
+}));
+
+vi.mock('../../../src/main/services/settings.service', () => ({
+  settingsService: {
+    isNAXMLCompatible: () => mockIsNAXMLCompatible(),
+    getFileWatcherUnavailableReason: () => mockGetFileWatcherUnavailableReason(),
+    getPOSType: () => mockGetPOSType(),
+    getPOSConnectionType: () => mockGetPOSConnectionType(),
+  },
 }));
 
 // Import after mocks are set up
@@ -172,6 +196,13 @@ describe('FileWatcherService', () => {
       typeof validateSafePath
     >);
 
+    // Default settingsService to NAXML-compatible state
+    // This ensures existing tests continue to work (they assume file watcher can start)
+    mockIsNAXMLCompatible.mockReturnValue(true);
+    mockGetFileWatcherUnavailableReason.mockReturnValue(null);
+    mockGetPOSType.mockReturnValue('GILBARCO_NAXML');
+    mockGetPOSConnectionType.mockReturnValue('FILE');
+
     service = new FileWatcherService(mockConfig, 'store-123');
   });
 
@@ -245,6 +276,169 @@ describe('FileWatcherService', () => {
       service.start();
 
       expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // FW-POS-001 through 010: POS Type Validation (Phase 3)
+  // ==========================================================================
+
+  describe('POS Type Validation', () => {
+    it('FW-POS-001: should throw error when started for non-NAXML POS (SQUARE_REST + API)', () => {
+      // Arrange: Configure SQUARE_REST POS (API-based, not NAXML-compatible)
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(
+        'SQUARE_REST uses API-based data ingestion (coming soon)'
+      );
+      mockGetPOSType.mockReturnValue('SQUARE_REST');
+      mockGetPOSConnectionType.mockReturnValue('API');
+
+      // Act & Assert: start() should throw
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-002: should throw error when started for CLOVER_REST + API', () => {
+      // Arrange: Configure CLOVER_REST POS
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(
+        'CLOVER_REST uses API-based data ingestion (coming soon)'
+      );
+      mockGetPOSType.mockReturnValue('CLOVER_REST');
+      mockGetPOSConnectionType.mockReturnValue('API');
+
+      // Act & Assert
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-003: should throw error when started for MANUAL_ENTRY + MANUAL', () => {
+      // Arrange: Configure MANUAL_ENTRY POS
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(
+        'Manual entry mode - no automated data ingestion'
+      );
+      mockGetPOSType.mockReturnValue('MANUAL_ENTRY');
+      mockGetPOSConnectionType.mockReturnValue('MANUAL');
+
+      // Act & Assert
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-004: should throw error when started for VERIFONE_RUBY2 + NETWORK', () => {
+      // Arrange: Configure VERIFONE_RUBY2 POS (network-based)
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(
+        'VERIFONE_RUBY2 uses network-based data ingestion (coming soon)'
+      );
+      mockGetPOSType.mockReturnValue('VERIFONE_RUBY2');
+      mockGetPOSConnectionType.mockReturnValue('NETWORK');
+
+      // Act & Assert
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-005: should start successfully for GILBARCO_NAXML + FILE', () => {
+      // Arrange: Configure GILBARCO_NAXML POS (NAXML-compatible)
+      mockIsNAXMLCompatible.mockReturnValue(true);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(null);
+      mockGetPOSType.mockReturnValue('GILBARCO_NAXML');
+      mockGetPOSConnectionType.mockReturnValue('FILE');
+
+      // Act: start() should NOT throw
+      expect(() => service.start()).not.toThrow();
+
+      // Assert: chokidar should be called
+      expect(chokidar.watch).toHaveBeenCalledWith(TEST_PATHS.watchPath, expect.any(Object));
+    });
+
+    it('FW-POS-006: should start successfully for GILBARCO_PASSPORT + FILE', () => {
+      // Arrange: Configure GILBARCO_PASSPORT POS (NAXML-compatible)
+      mockIsNAXMLCompatible.mockReturnValue(true);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(null);
+      mockGetPOSType.mockReturnValue('GILBARCO_PASSPORT');
+      mockGetPOSConnectionType.mockReturnValue('FILE');
+
+      // Act & Assert
+      expect(() => service.start()).not.toThrow();
+      expect(chokidar.watch).toHaveBeenCalled();
+    });
+
+    it('FW-POS-007: should start successfully for FILE_BASED + FILE', () => {
+      // Arrange: Configure FILE_BASED POS (NAXML-compatible)
+      mockIsNAXMLCompatible.mockReturnValue(true);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(null);
+      mockGetPOSType.mockReturnValue('FILE_BASED');
+      mockGetPOSConnectionType.mockReturnValue('FILE');
+
+      // Act & Assert
+      expect(() => service.start()).not.toThrow();
+      expect(chokidar.watch).toHaveBeenCalled();
+    });
+
+    it('FW-POS-008: should throw error when no POS config exists', () => {
+      // Arrange: No POS configuration
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue('POS connection not configured');
+      mockGetPOSType.mockReturnValue(null);
+      mockGetPOSConnectionType.mockReturnValue(null);
+
+      // Act & Assert
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-009: should throw error for GILBARCO_NAXML + API (mismatched connection type)', () => {
+      // Arrange: GILBARCO_NAXML POS type but wrong connection type (API instead of FILE)
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(
+        'GILBARCO_NAXML uses API-based data ingestion (coming soon)'
+      );
+      mockGetPOSType.mockReturnValue('GILBARCO_NAXML');
+      mockGetPOSConnectionType.mockReturnValue('API');
+
+      // Act & Assert: Should fail because connection type is wrong
+      expect(() => service.start()).toThrow(
+        'FileWatcherService should not be instantiated for this POS type'
+      );
+      expect(chokidar.watch).not.toHaveBeenCalled();
+    });
+
+    it('FW-POS-010: should include reason in error message', () => {
+      // Arrange
+      const expectedReason = 'SQUARE_REST uses API-based data ingestion (coming soon)';
+      mockIsNAXMLCompatible.mockReturnValue(false);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(expectedReason);
+      mockGetPOSType.mockReturnValue('SQUARE_REST');
+      mockGetPOSConnectionType.mockReturnValue('API');
+
+      // Act & Assert
+      expect(() => service.start()).toThrow(expectedReason);
+    });
+
+    it('FW-POS-011: should start successfully in legacy mode (watchPath exists, no POS config)', () => {
+      // Arrange: Legacy mode - watchPath configured but isNAXMLCompatible returns true
+      // because of backward compatibility in settingsService
+      mockIsNAXMLCompatible.mockReturnValue(true);
+      mockGetFileWatcherUnavailableReason.mockReturnValue(null);
+      mockGetPOSType.mockReturnValue(null); // No POS type (legacy)
+      mockGetPOSConnectionType.mockReturnValue(null); // No connection type (legacy)
+
+      // Act & Assert: Should start (legacy backward compatibility)
+      expect(() => service.start()).not.toThrow();
+      expect(chokidar.watch).toHaveBeenCalled();
     });
   });
 

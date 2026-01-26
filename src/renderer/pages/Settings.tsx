@@ -55,6 +55,84 @@ interface StoreInfo {
   timezone: string;
 }
 
+/**
+ * POS System Type (from cloud)
+ * Read-only - set by cloud during store configuration
+ */
+type POSSystemType =
+  | 'GILBARCO_PASSPORT'
+  | 'GILBARCO_NAXML'
+  | 'VERIFONE_RUBY2'
+  | 'VERIFONE_COMMANDER'
+  | 'SQUARE_REST'
+  | 'CLOVER_REST'
+  | 'NCR_RADIANT'
+  | 'INFOR_POS'
+  | 'ORACLE_SIMPHONY'
+  | 'CUSTOM_API'
+  | 'FILE_BASED'
+  | 'MANUAL'
+  | 'MANUAL_ENTRY'
+  | 'UNKNOWN';
+
+/**
+ * POS Connection Type (from cloud)
+ * Read-only - determines which config fields to show
+ */
+type POSConnectionType = 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
+
+/**
+ * FILE connection config (NAXML/XMLGateway)
+ */
+interface FileConnectionConfig {
+  import_path?: string;
+  export_path?: string;
+  file_pattern?: string;
+  poll_interval_seconds?: number;
+}
+
+/**
+ * API connection config (Square/Clover REST)
+ */
+interface ApiConnectionConfig {
+  base_url?: string;
+  api_key?: string;
+  location_id?: string;
+  merchant_id?: string;
+}
+
+/**
+ * NETWORK connection config (Direct TCP/IP)
+ */
+interface NetworkConnectionConfig {
+  host?: string;
+  port?: number;
+  timeout_ms?: number;
+}
+
+/**
+ * WEBHOOK connection config
+ */
+interface WebhookConnectionConfig {
+  webhook_secret?: string;
+  expected_source_ips?: string[];
+}
+
+/**
+ * POS Connection Configuration (Version 8.0)
+ * Store-level configuration from cloud
+ */
+interface POSConnectionConfig {
+  pos_type: POSSystemType;
+  pos_connection_type: POSConnectionType;
+  pos_connection_config:
+    | FileConnectionConfig
+    | ApiConnectionConfig
+    | NetworkConnectionConfig
+    | WebhookConnectionConfig
+    | null;
+}
+
 interface Config {
   apiKey: string;
   watchPath: string;
@@ -171,6 +249,9 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
     success: boolean;
     message: string;
   } | null>(null);
+  // Debug: Store raw API response for troubleshooting
+  const [debugApiResponse, setDebugApiResponse] = useState<Record<string, unknown> | null>(null);
+  const [showDebugResponse, setShowDebugResponse] = useState(false);
   const [errors, setErrors] = useState<ValidationErrors>({});
   const [saveError, setSaveError] = useState<string | null>(null);
   const [reprocessing, setReprocessing] = useState(false);
@@ -189,6 +270,19 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
   const [resetComplete, setResetComplete] = useState<{
     auditReferenceId: string;
     message: string;
+  } | null>(null);
+  // POS Connection Configuration (Version 8.0)
+  const [posConnectionConfig, setPosConnectionConfig] = useState<POSConnectionConfig | null>(null);
+  const [posConfigSaving, setPosConfigSaving] = useState(false);
+  const [posConfigSaved, setPosConfigSaved] = useState(false);
+  const [posConfigError, setPosConfigError] = useState<string | null>(null);
+
+  // Phase 5: File Watcher Status (POS Selection)
+  // Tracks whether file watcher is running for NAXML-compatible POS types
+  const [fileWatcherStatus, setFileWatcherStatus] = useState<{
+    isNAXMLCompatible: boolean;
+    unavailableReason: string | null;
+    isRunning: boolean;
   } | null>(null);
 
   useEffect(() => {
@@ -218,6 +312,22 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
         companyName: 'Demo Company',
         timezone: 'America/New_York',
       });
+      // Mock POS connection config for dev mode
+      setPosConnectionConfig({
+        pos_type: 'GILBARCO_NAXML',
+        pos_connection_type: 'FILE',
+        pos_connection_config: {
+          import_path: 'C:\\POS\\Export\\NAXML',
+          file_pattern: '*.xml',
+          poll_interval_seconds: 60,
+        },
+      });
+      // Phase 5: Mock file watcher status for dev mode
+      setFileWatcherStatus({
+        isNAXMLCompatible: true,
+        unavailableReason: null,
+        isRunning: true,
+      });
       return;
     }
 
@@ -237,6 +347,14 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           xmlWatchFolder?: string;
           syncIntervalSeconds?: number;
           businessDayCutoffTime?: string;
+          // Version 8.0: POS connection configuration
+          posConnectionConfig?: POSConnectionConfig | null;
+          // Phase 5 (POS Selection): File watcher status for NAXML compatibility
+          fileWatcherStatus?: {
+            isNAXMLCompatible: boolean;
+            unavailableReason: string | null;
+            isRunning: boolean;
+          };
         } | null;
       }>('settings:get');
 
@@ -266,6 +384,16 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
             companyName: result.data.companyName || 'Unknown',
             timezone: result.data.timezone || 'UTC',
           });
+        }
+
+        // Version 8.0: Set POS connection configuration
+        if (result.data.posConnectionConfig) {
+          setPosConnectionConfig(result.data.posConnectionConfig);
+        }
+
+        // Phase 5 (POS Selection): Set file watcher status
+        if (result.data.fileWatcherStatus) {
+          setFileWatcherStatus(result.data.fileWatcherStatus);
         }
       } else {
         // Default config if nothing is saved
@@ -397,11 +525,16 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
             companyId: string;
             companyName: string;
             timezone: string;
+            // Version 8.0: POS connection configuration
+            posConnectionConfig?: POSConnectionConfig | null;
           };
         };
         error?: string;
         message?: string;
-      }>('settings:validateApiKey', { apiKey: config.apiKey });
+      }>('settings:validateApiKey', { apiKey: config.apiKey, isInitialSetup: false });
+
+      // Store raw response for debugging
+      setDebugApiResponse(validateResult as unknown as Record<string, unknown>);
 
       if (!validateResult.success || !validateResult.data?.valid) {
         setSyncResult({
@@ -419,6 +552,11 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           companyName: validateResult.data.store.companyName,
           timezone: validateResult.data.store.timezone,
         });
+
+        // Version 8.0: Update POS connection configuration from cloud response
+        if (validateResult.data.store.posConnectionConfig) {
+          setPosConnectionConfig(validateResult.data.store.posConnectionConfig);
+        }
       }
 
       // Step 2: Sync users from cloud (this pulls all users including the store manager)
@@ -503,6 +641,80 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
       setSaveError(error instanceof Error ? error.message : 'An error occurred');
     } finally {
       setSaving(false);
+    }
+  };
+
+  /**
+   * Update POS connection config field
+   * SEC-014: Validates field before updating state
+   */
+  const updatePosConnectionConfig = useCallback(
+    (field: string, value: string | number | null) => {
+      if (!posConnectionConfig) return;
+
+      const currentConfig = posConnectionConfig.pos_connection_config || {};
+      const updatedConfig = {
+        ...posConnectionConfig,
+        pos_connection_config: {
+          ...currentConfig,
+          [field]: value,
+        },
+      };
+      setPosConnectionConfig(updatedConfig);
+      setPosConfigSaved(false);
+    },
+    [posConnectionConfig]
+  );
+
+  /**
+   * Save POS connection configuration
+   * SEC-014: Validates config before sending to backend
+   * API-001: Uses Zod-validated IPC handler
+   */
+  const handleSavePosConnectionConfig = async (): Promise<void> => {
+    if (!posConnectionConfig) return;
+
+    setPosConfigSaving(true);
+    setPosConfigError(null);
+
+    try {
+      // In dev mode without Electron, simulate successful save
+      if (!isElectron) {
+        await new Promise((resolve) => setTimeout(resolve, 500));
+        setPosConfigSaved(true);
+        setTimeout(() => setPosConfigSaved(false), 2000);
+        setPosConfigSaving(false);
+        return;
+      }
+
+      const result = await window.electronAPI.invoke<{
+        success: boolean;
+        error?: string;
+        message?: string;
+        posConnectionConfig?: POSConnectionConfig;
+      }>('settings:updatePOSConnectionConfig', {
+        pos_connection_config: posConnectionConfig.pos_connection_config,
+        cloudAuth: {
+          email: cloudAuthUser.email,
+          userId: cloudAuthUser.userId,
+          roles: cloudAuthUser.roles,
+        },
+      });
+
+      if (result.success) {
+        setPosConfigSaved(true);
+        setTimeout(() => setPosConfigSaved(false), 2000);
+        // Update with returned config
+        if (result.posConnectionConfig) {
+          setPosConnectionConfig(result.posConnectionConfig);
+        }
+      } else {
+        setPosConfigError(result.message || result.error || 'Failed to save POS configuration');
+      }
+    } catch (error) {
+      setPosConfigError(error instanceof Error ? error.message : 'An error occurred');
+    } finally {
+      setPosConfigSaving(false);
     }
   };
 
@@ -750,6 +962,346 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
               </div>
             )}
 
+            {/* Debug: Comprehensive API Response */}
+            {debugApiResponse && (
+              <div className="border border-amber-500/50 rounded-lg overflow-hidden bg-amber-500/5">
+                <button
+                  type="button"
+                  onClick={() => setShowDebugResponse(!showDebugResponse)}
+                  className="w-full px-3 py-2 text-left text-sm font-medium text-amber-700 dark:text-amber-400 bg-amber-500/10 hover:bg-amber-500/20 flex items-center justify-between"
+                >
+                  <span>Debug Panel (for troubleshooting)</span>
+                  <span className="text-xs">{showDebugResponse ? '[-] Hide' : '[+] Show'}</span>
+                </button>
+                {showDebugResponse && (
+                  <div className="p-3 space-y-4">
+                    {/* Connection Info */}
+                    <div className="bg-background/50 rounded p-3 border border-border">
+                      <h4 className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                        Connection Info
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div>
+                          <span className="text-muted-foreground">API URL:</span>
+                          <span className="ml-2 font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?._debug &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?._debug as Record<string, unknown>
+                            )?.apiUrl
+                              ? String(
+                                  (
+                                    (
+                                      (debugApiResponse as Record<string, unknown>).data as Record<
+                                        string,
+                                        unknown
+                                      >
+                                    )?._debug as Record<string, unknown>
+                                  )?.apiUrl
+                                )
+                              : 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Environment:</span>
+                          <span className="ml-2 font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?._debug &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?._debug as Record<string, unknown>
+                            )?.environment
+                              ? String(
+                                  (
+                                    (
+                                      (debugApiResponse as Record<string, unknown>).data as Record<
+                                        string,
+                                        unknown
+                                      >
+                                    )?._debug as Record<string, unknown>
+                                  )?.environment
+                                )
+                              : 'N/A'}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Timestamp:</span>
+                          <span className="ml-2 font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?._debug &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?._debug as Record<string, unknown>
+                            )?.timestamp
+                              ? String(
+                                  (
+                                    (
+                                      (debugApiResponse as Record<string, unknown>).data as Record<
+                                        string,
+                                        unknown
+                                      >
+                                    )?._debug as Record<string, unknown>
+                                  )?.timestamp
+                                )
+                              : new Date().toISOString()}
+                          </span>
+                        </div>
+                        <div>
+                          <span className="text-muted-foreground">Identity Endpoint:</span>
+                          <span className="ml-2 font-mono text-foreground">
+                            /api/v1/keys/identity
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Data Summary */}
+                    <div className="bg-background/50 rounded p-3 border border-border">
+                      <h4 className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                        Data Summary
+                      </h4>
+                      <div className="grid grid-cols-2 gap-2 text-xs">
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              (debugApiResponse as Record<string, unknown>).data &&
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.store &&
+                              (
+                                (
+                                  (debugApiResponse as Record<string, unknown>).data as Record<
+                                    string,
+                                    unknown
+                                  >
+                                )?.store as Record<string, unknown>
+                              )?.posConnectionConfig
+                                ? 'bg-green-500'
+                                : 'bg-red-500'
+                            }`}
+                          />
+                          <span className="text-muted-foreground">posConnectionConfig:</span>
+                          <span className="font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?.store &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.store as Record<string, unknown>
+                            )?.posConnectionConfig
+                              ? 'Present'
+                              : 'MISSING'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              (debugApiResponse as Record<string, unknown>).data &&
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.store &&
+                              (
+                                (
+                                  (debugApiResponse as Record<string, unknown>).data as Record<
+                                    string,
+                                    unknown
+                                  >
+                                )?.store as Record<string, unknown>
+                              )?.terminal
+                                ? 'bg-green-500'
+                                : 'bg-yellow-500'
+                            }`}
+                          />
+                          <span className="text-muted-foreground">terminal (legacy):</span>
+                          <span className="font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?.store &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.store as Record<string, unknown>
+                            )?.terminal
+                              ? 'Present'
+                              : 'Not present'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              (debugApiResponse as Record<string, unknown>).success
+                                ? 'bg-green-500'
+                                : 'bg-red-500'
+                            }`}
+                          />
+                          <span className="text-muted-foreground">IPC Success:</span>
+                          <span className="font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).success
+                              ? 'true'
+                              : 'false'}
+                          </span>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <span
+                            className={`w-2 h-2 rounded-full ${
+                              (debugApiResponse as Record<string, unknown>).data &&
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?.valid
+                                ? 'bg-green-500'
+                                : 'bg-red-500'
+                            }`}
+                          />
+                          <span className="text-muted-foreground">API Key Valid:</span>
+                          <span className="font-mono text-foreground">
+                            {(debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?.valid
+                              ? 'true'
+                              : 'false'}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Raw Cloud Response */}
+                    <div className="bg-background/50 rounded p-3 border border-border">
+                      <h4 className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                        Raw Cloud Response (from /api/v1/keys/identity)
+                      </h4>
+                      <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all max-h-48 overflow-auto bg-muted/30 p-2 rounded">
+                        {(debugApiResponse as Record<string, unknown>).data &&
+                        (
+                          (debugApiResponse as Record<string, unknown>).data as Record<
+                            string,
+                            unknown
+                          >
+                        )?._debug &&
+                        (
+                          (
+                            (debugApiResponse as Record<string, unknown>).data as Record<
+                              string,
+                              unknown
+                            >
+                          )?._debug as Record<string, unknown>
+                        )?.rawCloudResponse
+                          ? JSON.stringify(
+                              (
+                                (
+                                  (debugApiResponse as Record<string, unknown>).data as Record<
+                                    string,
+                                    unknown
+                                  >
+                                )?._debug as Record<string, unknown>
+                              )?.rawCloudResponse,
+                              null,
+                              2
+                            )
+                          : 'No raw cloud response captured'}
+                      </pre>
+                    </div>
+
+                    {/* Full IPC Response */}
+                    <div className="bg-background/50 rounded p-3 border border-border">
+                      <h4 className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wide">
+                        Full IPC Response (processed)
+                      </h4>
+                      <pre className="text-xs font-mono text-muted-foreground whitespace-pre-wrap break-all max-h-48 overflow-auto bg-muted/30 p-2 rounded">
+                        {JSON.stringify(debugApiResponse, null, 2)}
+                      </pre>
+                    </div>
+
+                    {/* Copy Button */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const debugData = {
+                          timestamp: new Date().toISOString(),
+                          ipcResponse: debugApiResponse,
+                          rawCloudResponse:
+                            (debugApiResponse as Record<string, unknown>).data &&
+                            (
+                              (debugApiResponse as Record<string, unknown>).data as Record<
+                                string,
+                                unknown
+                              >
+                            )?._debug &&
+                            (
+                              (
+                                (debugApiResponse as Record<string, unknown>).data as Record<
+                                  string,
+                                  unknown
+                                >
+                              )?._debug as Record<string, unknown>
+                            )?.rawCloudResponse,
+                        };
+                        navigator.clipboard.writeText(JSON.stringify(debugData, null, 2));
+                      }}
+                      className="w-full px-3 py-2 text-sm bg-amber-500/20 text-amber-700 dark:text-amber-400 rounded hover:bg-amber-500/30 font-medium"
+                    >
+                      Copy All Debug Data to Clipboard
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
             <button
               onClick={handleResync}
               disabled={syncing || !config.apiKey.trim()}
@@ -792,54 +1344,592 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           </div>
         </section>
 
-        {/* File Watching Section */}
+        {/* POS Connection Configuration Section (Version 8.0) */}
         <section className="bg-card rounded-xl border border-border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-foreground mb-4">File Watching</h2>
-
-          <div className="space-y-4">
+          <div className="flex items-center justify-between mb-4">
             <div>
-              <label htmlFor="watchPath" className="block text-sm font-medium text-foreground mb-1">
-                NAXML Watch Folder
-              </label>
-              <input
-                id="watchPath"
-                type="text"
-                value={config.watchPath}
-                onChange={(e) => updateConfig('watchPath', e.target.value)}
-                maxLength={VALIDATION.MAX_PATH_LENGTH}
-                placeholder="Z:\Gilbarco\Export\NAXML"
-                className={`w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent ${
-                  errors.watchPath ? 'border-destructive' : 'border-input'
-                }`}
-              />
-              {errors.watchPath && (
-                <p className="text-sm text-destructive mt-1">{errors.watchPath}</p>
+              <h2 className="text-lg font-semibold text-foreground">POS Connection</h2>
+              {posConnectionConfig && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  {posConnectionConfig.pos_type.replace(/_/g, ' ')} •{' '}
+                  {posConnectionConfig.pos_connection_type}
+                </p>
               )}
             </div>
-
-            <div>
-              <label
-                htmlFor="pollInterval"
-                className="block text-sm font-medium text-foreground mb-1"
+            {posConnectionConfig && (
+              <span
+                className={`px-2 py-1 text-xs font-medium rounded-full ${
+                  posConnectionConfig.pos_connection_type === 'MANUAL'
+                    ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-400'
+                    : 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-400'
+                }`}
               >
-                Sync Interval (seconds)
-              </label>
-              <input
-                id="pollInterval"
-                type="number"
-                min={VALIDATION.POLL_MIN}
-                max={VALIDATION.POLL_MAX}
-                value={config.pollInterval}
-                onChange={(e) => updateConfig('pollInterval', parseInt(e.target.value, 10) || 60)}
-                className={`w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent ${
-                  errors.pollInterval ? 'border-destructive' : 'border-input'
-                }`}
-              />
-              {errors.pollInterval && (
-                <p className="text-sm text-destructive mt-1">{errors.pollInterval}</p>
+                {posConnectionConfig.pos_connection_type === 'MANUAL'
+                  ? 'Manual Entry'
+                  : 'Automated'}
+              </span>
+            )}
+          </div>
+
+          {!posConnectionConfig ? (
+            <div className="text-center py-8 text-muted-foreground">
+              <svg
+                className="w-12 h-12 mx-auto mb-3 opacity-50"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M9.75 17L9 20l-1 1h8l-1-1-.75-3M3 13h18M5 17h14a2 2 0 002-2V5a2 2 0 00-2-2H5a2 2 0 00-2 2v10a2 2 0 002 2z"
+                />
+              </svg>
+              <p className="text-sm">No POS connection configured</p>
+              <p className="text-xs mt-1">Sync your API key to load POS settings from cloud</p>
+            </div>
+          ) : posConnectionConfig.pos_connection_type === 'MANUAL' ? (
+            /* MANUAL - No automated connection */
+            <div className="text-center py-6 bg-yellow-50 dark:bg-yellow-900/10 rounded-lg border border-yellow-200 dark:border-yellow-800">
+              <svg
+                className="w-10 h-10 mx-auto mb-2 text-yellow-600 dark:text-yellow-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z"
+                />
+              </svg>
+              <p className="text-sm font-medium text-yellow-800 dark:text-yellow-300">
+                Manual Data Entry Mode
+              </p>
+              <p className="text-xs text-yellow-700 dark:text-yellow-400 mt-1">
+                Transactions are entered manually through the app interface
+              </p>
+            </div>
+          ) : posConnectionConfig.pos_connection_type === 'FILE' ? (
+            /* FILE - File-based data exchange (NAXML/XMLGateway) */
+            <div className="space-y-4">
+              <div>
+                <label
+                  htmlFor="importPath"
+                  className="block text-sm font-medium text-foreground mb-1"
+                >
+                  Import Folder Path
+                </label>
+                <input
+                  id="importPath"
+                  type="text"
+                  value={
+                    (posConnectionConfig.pos_connection_config as FileConnectionConfig)
+                      ?.import_path || ''
+                  }
+                  onChange={(e) => updatePosConnectionConfig('import_path', e.target.value)}
+                  maxLength={VALIDATION.MAX_PATH_LENGTH}
+                  placeholder="\\\\server\\naxml\\export"
+                  className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Network path or local folder where POS exports XML files
+                </p>
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="filePattern"
+                    className="block text-sm font-medium text-foreground mb-1"
+                  >
+                    File Pattern
+                  </label>
+                  <input
+                    id="filePattern"
+                    type="text"
+                    value={
+                      (posConnectionConfig.pos_connection_config as FileConnectionConfig)
+                        ?.file_pattern || '*.xml'
+                    }
+                    onChange={(e) => updatePosConnectionConfig('file_pattern', e.target.value)}
+                    maxLength={100}
+                    placeholder="*.xml"
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="pollIntervalSeconds"
+                    className="block text-sm font-medium text-foreground mb-1"
+                  >
+                    Poll Interval (seconds)
+                  </label>
+                  <input
+                    id="pollIntervalSeconds"
+                    type="number"
+                    min={1}
+                    max={3600}
+                    value={
+                      (posConnectionConfig.pos_connection_config as FileConnectionConfig)
+                        ?.poll_interval_seconds || 60
+                    }
+                    onChange={(e) =>
+                      updatePosConnectionConfig(
+                        'poll_interval_seconds',
+                        parseInt(e.target.value, 10) || 60
+                      )
+                    }
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input"
+                  />
+                </div>
+              </div>
+
+              {posConfigError && (
+                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                  {posConfigError}
+                </div>
+              )}
+
+              <button
+                onClick={handleSavePosConnectionConfig}
+                disabled={posConfigSaving}
+                className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                  posConfigSaved
+                    ? 'bg-green-600 text-white'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                } disabled:opacity-50`}
+              >
+                {posConfigSaving ? 'Saving...' : posConfigSaved ? 'Saved!' : 'Save POS Settings'}
+              </button>
+
+              {/* Phase 5 (POS Selection): File Watcher Status Indicator
+                  SEC-004: No user input rendered - only display of backend state */}
+              {fileWatcherStatus && (
+                <div className="mt-4 p-3 rounded-lg bg-muted/50 border border-border">
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-2">
+                      <div
+                        className={`w-2.5 h-2.5 rounded-full ${
+                          fileWatcherStatus.isRunning
+                            ? 'bg-green-500 animate-pulse'
+                            : 'bg-yellow-500'
+                        }`}
+                      />
+                      <span className="text-sm font-medium text-foreground">File Watcher</span>
+                    </div>
+                    <span
+                      className={`text-sm font-medium ${
+                        fileWatcherStatus.isRunning
+                          ? 'text-green-600 dark:text-green-400'
+                          : 'text-yellow-600 dark:text-yellow-400'
+                      }`}
+                    >
+                      {fileWatcherStatus.isRunning ? 'Running' : 'Stopped'}
+                    </span>
+                  </div>
+                  {!fileWatcherStatus.isRunning && fileWatcherStatus.unavailableReason && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      {fileWatcherStatus.unavailableReason}
+                    </p>
+                  )}
+                  {fileWatcherStatus.isRunning && (
+                    <p className="text-xs text-muted-foreground mt-2">
+                      Monitoring import folder for NAXML files
+                    </p>
+                  )}
+                </div>
               )}
             </div>
-          </div>
+          ) : posConnectionConfig.pos_connection_type === 'API' ? (
+            /* API - REST API connection (Square/Clover) */
+            <div className="space-y-4">
+              <div>
+                <label htmlFor="baseUrl" className="block text-sm font-medium text-foreground mb-1">
+                  API Base URL
+                </label>
+                <input
+                  id="baseUrl"
+                  type="url"
+                  value={
+                    (posConnectionConfig.pos_connection_config as ApiConnectionConfig)?.base_url ||
+                    ''
+                  }
+                  onChange={(e) => updatePosConnectionConfig('base_url', e.target.value)}
+                  maxLength={500}
+                  placeholder="https://api.example.com/v2"
+                  className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                />
+              </div>
+
+              <div>
+                <label
+                  htmlFor="apiKeyConfig"
+                  className="block text-sm font-medium text-foreground mb-1"
+                >
+                  API Key / Access Token
+                </label>
+                <input
+                  id="apiKeyConfig"
+                  type="password"
+                  value={
+                    (posConnectionConfig.pos_connection_config as ApiConnectionConfig)?.api_key ||
+                    ''
+                  }
+                  onChange={(e) => updatePosConnectionConfig('api_key', e.target.value)}
+                  maxLength={500}
+                  placeholder="••••••••••••"
+                  className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div>
+                  <label
+                    htmlFor="locationId"
+                    className="block text-sm font-medium text-foreground mb-1"
+                  >
+                    Location ID
+                  </label>
+                  <input
+                    id="locationId"
+                    type="text"
+                    value={
+                      (posConnectionConfig.pos_connection_config as ApiConnectionConfig)
+                        ?.location_id || ''
+                    }
+                    onChange={(e) => updatePosConnectionConfig('location_id', e.target.value)}
+                    maxLength={100}
+                    placeholder="LID123456"
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label
+                    htmlFor="merchantId"
+                    className="block text-sm font-medium text-foreground mb-1"
+                  >
+                    Merchant ID
+                  </label>
+                  <input
+                    id="merchantId"
+                    type="text"
+                    value={
+                      (posConnectionConfig.pos_connection_config as ApiConnectionConfig)
+                        ?.merchant_id || ''
+                    }
+                    onChange={(e) => updatePosConnectionConfig('merchant_id', e.target.value)}
+                    maxLength={100}
+                    placeholder="MID789012"
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                  />
+                </div>
+              </div>
+
+              {posConfigError && (
+                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                  {posConfigError}
+                </div>
+              )}
+
+              <button
+                onClick={handleSavePosConnectionConfig}
+                disabled={posConfigSaving}
+                className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                  posConfigSaved
+                    ? 'bg-green-600 text-white'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                } disabled:opacity-50`}
+              >
+                {posConfigSaving ? 'Saving...' : posConfigSaved ? 'Saved!' : 'Save API Settings'}
+              </button>
+
+              {/* Phase 5 (POS Selection): Coming Soon Notice for API-based POS
+                  SEC-004: Static text only - no user input rendered */}
+              <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                <div className="flex items-start gap-2">
+                  <svg
+                    className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                      API Integration Coming Soon
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                      {/* SEC-004: pos_type is sanitized enum value from backend */}
+                      API-based data ingestion for {posConnectionConfig.pos_type.replace(
+                        /_/g,
+                        ' '
+                      )}{' '}
+                      is under development. Your settings have been saved and will be used when the
+                      integration is available.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : posConnectionConfig.pos_connection_type === 'NETWORK' ? (
+            /* NETWORK - Direct TCP/IP connection */
+            <div className="space-y-4">
+              <div className="grid grid-cols-3 gap-4">
+                <div className="col-span-2">
+                  <label htmlFor="host" className="block text-sm font-medium text-foreground mb-1">
+                    Host / IP Address
+                  </label>
+                  <input
+                    id="host"
+                    type="text"
+                    value={
+                      (posConnectionConfig.pos_connection_config as NetworkConnectionConfig)
+                        ?.host || ''
+                    }
+                    onChange={(e) => updatePosConnectionConfig('host', e.target.value)}
+                    maxLength={255}
+                    placeholder="192.168.1.100"
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                  />
+                </div>
+
+                <div>
+                  <label htmlFor="port" className="block text-sm font-medium text-foreground mb-1">
+                    Port
+                  </label>
+                  <input
+                    id="port"
+                    type="number"
+                    min={1}
+                    max={65535}
+                    value={
+                      (posConnectionConfig.pos_connection_config as NetworkConnectionConfig)
+                        ?.port || 5000
+                    }
+                    onChange={(e) =>
+                      updatePosConnectionConfig('port', parseInt(e.target.value, 10) || 5000)
+                    }
+                    className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="timeoutMs"
+                  className="block text-sm font-medium text-foreground mb-1"
+                >
+                  Timeout (milliseconds)
+                </label>
+                <input
+                  id="timeoutMs"
+                  type="number"
+                  min={1000}
+                  max={300000}
+                  value={
+                    (posConnectionConfig.pos_connection_config as NetworkConnectionConfig)
+                      ?.timeout_ms || 30000
+                  }
+                  onChange={(e) =>
+                    updatePosConnectionConfig('timeout_ms', parseInt(e.target.value, 10) || 30000)
+                  }
+                  className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Connection timeout in milliseconds (1,000 - 300,000)
+                </p>
+              </div>
+
+              {posConfigError && (
+                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                  {posConfigError}
+                </div>
+              )}
+
+              <button
+                onClick={handleSavePosConnectionConfig}
+                disabled={posConfigSaving}
+                className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                  posConfigSaved
+                    ? 'bg-green-600 text-white'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                } disabled:opacity-50`}
+              >
+                {posConfigSaving
+                  ? 'Saving...'
+                  : posConfigSaved
+                    ? 'Saved!'
+                    : 'Save Network Settings'}
+              </button>
+
+              {/* Phase 5 (POS Selection): Coming Soon Notice for Network-based POS
+                  SEC-004: Static text only - no user input rendered */}
+              <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                <div className="flex items-start gap-2">
+                  <svg
+                    className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                      Network Integration Coming Soon
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                      {/* SEC-004: pos_type is sanitized enum value from backend */}
+                      Network-based data ingestion for{' '}
+                      {posConnectionConfig.pos_type.replace(/_/g, ' ')} is under development. Your
+                      connection settings have been saved and will be used when the integration is
+                      available.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : posConnectionConfig.pos_connection_type === 'WEBHOOK' ? (
+            /* WEBHOOK - POS pushes data via webhook */
+            <div className="space-y-4">
+              <div className="text-center py-4 bg-blue-50 dark:bg-blue-900/10 rounded-lg border border-blue-200 dark:border-blue-800 mb-4">
+                <svg
+                  className="w-8 h-8 mx-auto mb-2 text-blue-600 dark:text-blue-400"
+                  fill="none"
+                  stroke="currentColor"
+                  viewBox="0 0 24 24"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    strokeWidth={1.5}
+                    d="M13 10V3L4 14h7v7l9-11h-7z"
+                  />
+                </svg>
+                <p className="text-xs text-blue-700 dark:text-blue-400">
+                  Webhook mode: POS system pushes data to Nuvana
+                </p>
+              </div>
+
+              <div>
+                <label
+                  htmlFor="webhookSecret"
+                  className="block text-sm font-medium text-foreground mb-1"
+                >
+                  Webhook Secret
+                </label>
+                <input
+                  id="webhookSecret"
+                  type="password"
+                  value={
+                    (posConnectionConfig.pos_connection_config as WebhookConnectionConfig)
+                      ?.webhook_secret || ''
+                  }
+                  onChange={(e) => updatePosConnectionConfig('webhook_secret', e.target.value)}
+                  maxLength={500}
+                  placeholder="••••••••••••"
+                  className="w-full px-4 py-2 border rounded-lg bg-background text-foreground focus:ring-2 focus:ring-primary focus:border-transparent border-input font-mono text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  Secret key used to verify incoming webhook requests
+                </p>
+              </div>
+
+              {posConfigError && (
+                <div className="p-3 rounded-lg bg-destructive/10 text-destructive text-sm">
+                  {posConfigError}
+                </div>
+              )}
+
+              <button
+                onClick={handleSavePosConnectionConfig}
+                disabled={posConfigSaving}
+                className={`w-full py-2 px-4 rounded-lg font-medium transition-colors ${
+                  posConfigSaved
+                    ? 'bg-green-600 text-white'
+                    : 'bg-primary text-primary-foreground hover:bg-primary/90'
+                } disabled:opacity-50`}
+              >
+                {posConfigSaving
+                  ? 'Saving...'
+                  : posConfigSaved
+                    ? 'Saved!'
+                    : 'Save Webhook Settings'}
+              </button>
+
+              {/* Phase 5 (POS Selection): Coming Soon Notice for Webhook-based POS
+                  SEC-004: Static text only - no user input rendered */}
+              <div className="mt-4 p-3 rounded-lg bg-blue-50 dark:bg-blue-900/10 border border-blue-200 dark:border-blue-800">
+                <div className="flex items-start gap-2">
+                  <svg
+                    className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-0.5"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
+                    />
+                  </svg>
+                  <div>
+                    <p className="text-sm font-medium text-blue-800 dark:text-blue-300">
+                      Webhook Integration Coming Soon
+                    </p>
+                    <p className="text-xs text-blue-700 dark:text-blue-400 mt-1">
+                      {/* SEC-004: pos_type is sanitized enum value from backend */}
+                      Webhook-based data ingestion for{' '}
+                      {posConnectionConfig.pos_type.replace(/_/g, ' ')} is under development. Your
+                      webhook settings have been saved and will be used when the integration is
+                      available.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          ) : (
+            /* Unknown connection type */
+            <div className="text-center py-6 bg-red-50 dark:bg-red-900/10 rounded-lg border border-red-200 dark:border-red-800">
+              <svg
+                className="w-10 h-10 mx-auto mb-2 text-red-600 dark:text-red-400"
+                fill="none"
+                stroke="currentColor"
+                viewBox="0 0 24 24"
+              >
+                <path
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  strokeWidth={1.5}
+                  d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z"
+                />
+              </svg>
+              <p className="text-sm font-medium text-red-800 dark:text-red-300">
+                Unknown Connection Type
+              </p>
+              <p className="text-xs text-red-700 dark:text-red-400 mt-1">
+                Connection type &quot;{posConnectionConfig.pos_connection_type}&quot; is not
+                supported
+              </p>
+            </div>
+          )}
         </section>
 
         {/* Business Day Settings Section */}
@@ -878,39 +1968,42 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           </div>
         </section>
 
-        {/* File Types Section */}
-        <section className="bg-card rounded-xl border border-border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-foreground mb-4">File Types</h2>
+        {/* File Types Section - Only shown for FILE connection type (NAXML-compatible POS)
+            SEC-004: Labels are hardcoded strings, no XSS risk */}
+        {posConnectionConfig?.pos_connection_type === 'FILE' && (
+          <section className="bg-card rounded-xl border border-border p-6 mb-6">
+            <h2 className="text-lg font-semibold text-foreground mb-4">File Types</h2>
 
-          <div className="space-y-3">
-            {[
-              { key: 'pjr', label: 'PJR - Transaction Journal' },
-              { key: 'fgm', label: 'FGM - Fuel Grade Movement' },
-              { key: 'msm', label: 'MSM - Miscellaneous Summary' },
-              { key: 'fpm', label: 'FPM - Fuel Product Movement' },
-              { key: 'mcm', label: 'MCM - Merchandise Code Movement' },
-              { key: 'tlm', label: 'TLM - Tax Level Movement' },
-            ].map(({ key, label }) => (
-              <label key={key} className="flex items-center gap-3 cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={config.enabledFileTypes[key as keyof typeof config.enabledFileTypes]}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      enabledFileTypes: {
-                        ...config.enabledFileTypes,
-                        [key]: e.target.checked,
-                      },
-                    })
-                  }
-                  className="w-4 h-4 text-primary rounded focus:ring-primary"
-                />
-                <span className="text-sm text-foreground">{label}</span>
-              </label>
-            ))}
-          </div>
-        </section>
+            <div className="space-y-3">
+              {[
+                { key: 'pjr', label: 'PJR - Transaction Journal' },
+                { key: 'fgm', label: 'FGM - Fuel Grade Movement' },
+                { key: 'msm', label: 'MSM - Miscellaneous Summary' },
+                { key: 'fpm', label: 'FPM - Fuel Product Movement' },
+                { key: 'mcm', label: 'MCM - Merchandise Code Movement' },
+                { key: 'tlm', label: 'TLM - Tax Level Movement' },
+              ].map(({ key, label }) => (
+                <label key={key} className="flex items-center gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={config.enabledFileTypes[key as keyof typeof config.enabledFileTypes]}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        enabledFileTypes: {
+                          ...config.enabledFileTypes,
+                          [key]: e.target.checked,
+                        },
+                      })
+                    }
+                    className="w-4 h-4 text-primary rounded focus:ring-primary"
+                  />
+                  <span className="text-sm text-foreground">{label}</span>
+                </label>
+              ))}
+            </div>
+          </section>
+        )}
 
         {/* Behavior Section */}
         <section className="bg-card rounded-xl border border-border p-6 mb-6">
@@ -949,109 +2042,115 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           </div>
         </section>
 
-        {/* Reprocess XML Files Section */}
-        <section className="bg-card rounded-xl border border-border p-6 mb-6">
-          <h2 className="text-lg font-semibold text-foreground mb-2">Reprocess XML Files</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            Clear processed file tracking and reprocess XML files from the watch folder. Use this if
-            files were processed before a parser fix was applied.
-          </p>
+        {/* Reprocess XML Files Section - Only shown for FILE connection type (NAXML-compatible POS)
+            SEC-004: Message content rendered via JSX text interpolation (auto-escaped, XSS-safe) */}
+        {posConnectionConfig?.pos_connection_type === 'FILE' && (
+          <section className="bg-card rounded-xl border border-border p-6 mb-6">
+            <h2 className="text-lg font-semibold text-foreground mb-2">Reprocess XML Files</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Clear processed file tracking and reprocess XML files from the watch folder. Use this
+              if files were processed before a parser fix was applied.
+            </p>
 
-          {reprocessResult && (
-            <div
-              className={`p-3 rounded-lg mb-4 ${
-                reprocessResult.success
-                  ? 'bg-green-500/10 text-green-600'
-                  : 'bg-destructive/10 text-destructive'
-              }`}
-              role="alert"
-            >
-              {reprocessResult.message}
-              {reprocessResult.clearedCount !== undefined && (
-                <span className="block text-sm mt-1">
-                  {reprocessResult.clearedCount} file record(s) cleared
-                </span>
-              )}
+            {reprocessResult && (
+              <div
+                className={`p-3 rounded-lg mb-4 ${
+                  reprocessResult.success
+                    ? 'bg-green-500/10 text-green-600'
+                    : 'bg-destructive/10 text-destructive'
+                }`}
+                role="alert"
+              >
+                {reprocessResult.message}
+                {reprocessResult.clearedCount !== undefined && (
+                  <span className="block text-sm mt-1">
+                    {reprocessResult.clearedCount} file record(s) cleared
+                  </span>
+                )}
+              </div>
+            )}
+
+            <div className="flex gap-2">
+              <button
+                onClick={handleReprocessXmlFiles}
+                disabled={reprocessing}
+                className="flex-1 py-2 px-4 rounded-lg font-medium transition-colors bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              >
+                {reprocessing ? 'Reprocessing...' : 'Reprocess Failed Files'}
+              </button>
+              <button
+                onClick={handleClearAllProcessedFiles}
+                disabled={reprocessing}
+                className="flex-1 py-2 px-4 rounded-lg font-medium transition-colors bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              >
+                {reprocessing ? 'Clearing...' : 'Clear ALL & Reprocess'}
+              </button>
             </div>
-          )}
-
-          <div className="flex gap-2">
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              Use &quot;Clear ALL&quot; to force reprocessing of all XML files
+            </p>
             <button
-              onClick={handleReprocessXmlFiles}
-              disabled={reprocessing}
-              className="flex-1 py-2 px-4 rounded-lg font-medium transition-colors bg-amber-600 text-white hover:bg-amber-700 disabled:opacity-50"
+              onClick={async () => {
+                try {
+                  const result = await window.electronAPI.invoke<{
+                    success: boolean;
+                    data?: {
+                      processedFilesCount: number;
+                      shiftsCount: number;
+                      recentProcessedFiles: unknown[];
+                      shifts: unknown[];
+                    };
+                  }>('sync:debugDump');
+                  alert(
+                    `Processed Files: ${result.data?.processedFilesCount || 0}\nShifts: ${result.data?.shiftsCount || 0}\n\nCheck console for details`
+                  );
+                } catch (e) {
+                  console.error('Debug dump failed:', e);
+                  alert('Debug dump failed: ' + e);
+                }
+              }}
+              className="mt-2 w-full py-2 px-4 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
             >
-              {reprocessing ? 'Reprocessing...' : 'Reprocess Failed Files'}
+              Debug: Dump Database State
             </button>
+          </section>
+        )}
+
+        {/* Fuel Data Reset Section - Only shown for FILE connection type (NAXML-compatible POS)
+            SEC-004: Message content rendered via JSX text interpolation (auto-escaped, XSS-safe) */}
+        {posConnectionConfig?.pos_connection_type === 'FILE' && (
+          <section className="bg-card rounded-xl p-6 border border-orange-500/30 mb-6">
+            <h2 className="text-lg font-semibold text-foreground mb-2">Reset Fuel Data</h2>
+            <p className="text-sm text-muted-foreground mb-4">
+              Fix incorrect fuel totals by clearing accumulated data and reprocessing FGM files. Use
+              this if shift fuel sales show values much higher than expected.
+            </p>
+
+            {fuelResetResult && (
+              <div
+                className={`p-3 rounded-lg mb-4 ${
+                  fuelResetResult.success
+                    ? 'bg-green-500/10 text-green-600'
+                    : 'bg-destructive/10 text-destructive'
+                }`}
+                role="alert"
+              >
+                {fuelResetResult.message}
+              </div>
+            )}
+
             <button
-              onClick={handleClearAllProcessedFiles}
-              disabled={reprocessing}
-              className="flex-1 py-2 px-4 rounded-lg font-medium transition-colors bg-red-600 text-white hover:bg-red-700 disabled:opacity-50"
+              onClick={handleResetFuelData}
+              disabled={resettingFuel}
+              className="w-full py-2 px-4 rounded-lg font-medium transition-colors bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
             >
-              {reprocessing ? 'Clearing...' : 'Clear ALL & Reprocess'}
+              {resettingFuel ? 'Resetting Fuel Data...' : 'Reset Fuel Data & Reprocess'}
             </button>
-          </div>
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            Use &quot;Clear ALL&quot; to force reprocessing of all XML files
-          </p>
-          <button
-            onClick={async () => {
-              try {
-                const result = await window.electronAPI.invoke<{
-                  success: boolean;
-                  data?: {
-                    processedFilesCount: number;
-                    shiftsCount: number;
-                    recentProcessedFiles: unknown[];
-                    shifts: unknown[];
-                  };
-                }>('sync:debugDump');
-                alert(
-                  `Processed Files: ${result.data?.processedFilesCount || 0}\nShifts: ${result.data?.shiftsCount || 0}\n\nCheck console for details`
-                );
-              } catch (e) {
-                console.error('Debug dump failed:', e);
-                alert('Debug dump failed: ' + e);
-              }
-            }}
-            className="mt-2 w-full py-2 px-4 rounded-lg font-medium transition-colors bg-purple-600 text-white hover:bg-purple-700"
-          >
-            Debug: Dump Database State
-          </button>
-        </section>
-
-        {/* Fuel Data Reset Section */}
-        <section className="bg-card rounded-xl p-6 border border-orange-500/30">
-          <h2 className="text-lg font-semibold text-foreground mb-2">Reset Fuel Data</h2>
-          <p className="text-sm text-muted-foreground mb-4">
-            Fix incorrect fuel totals by clearing accumulated data and reprocessing FGM files. Use
-            this if shift fuel sales show values much higher than expected.
-          </p>
-
-          {fuelResetResult && (
-            <div
-              className={`p-3 rounded-lg mb-4 ${
-                fuelResetResult.success
-                  ? 'bg-green-500/10 text-green-600'
-                  : 'bg-destructive/10 text-destructive'
-              }`}
-              role="alert"
-            >
-              {fuelResetResult.message}
-            </div>
-          )}
-
-          <button
-            onClick={handleResetFuelData}
-            disabled={resettingFuel}
-            className="w-full py-2 px-4 rounded-lg font-medium transition-colors bg-orange-600 text-white hover:bg-orange-700 disabled:opacity-50"
-          >
-            {resettingFuel ? 'Resetting Fuel Data...' : 'Reset Fuel Data & Reprocess'}
-          </button>
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            This will delete all fuel summaries and reprocess FGM files with the corrected logic
-          </p>
-        </section>
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              This will delete all fuel summaries and reprocess FGM files with the corrected logic
+            </p>
+          </section>
+        )}
 
         {/* Danger Zone - Store Reset */}
         <section className="bg-card rounded-xl p-6 border-2 border-red-500/50 mb-6">

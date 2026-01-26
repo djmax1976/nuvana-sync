@@ -23,6 +23,16 @@ import { licenseService } from './license.service';
 import { createLogger } from '../utils/logger';
 import path from 'path';
 import fs from 'fs';
+import {
+  TerminalSyncRecord,
+  POSConnectionType,
+  POSSystemType,
+  FileConnectionConfig,
+  POSConnectionConfig,
+  validatePOSConnectionConfig,
+  formatPOSConnectionValidationErrors,
+  convertTerminalToPOSConnectionConfig,
+} from '../../shared/types/config.types';
 // ConfigService has been consolidated into SettingsService - this is now the single source of truth
 
 // ============================================================================
@@ -122,7 +132,16 @@ export interface AppSettings {
   timezone: string;
   features: string[];
 
-  // Local (editable by MANAGER)
+  /**
+   * POS Connection Configuration (Version 8.0)
+   * Store-level POS connection settings from cloud.
+   * Determines how the app connects to the POS system.
+   *
+   * @security SEC-014: Validated against POSConnectionConfigSchema
+   */
+  posConnectionConfig: POSConnectionConfig | null;
+
+  // Local (editable by MANAGER/SUPPORT)
   xmlWatchFolder: string;
   syncIntervalSeconds: number;
   /**
@@ -157,11 +176,17 @@ export interface LocalSettingsUpdate {
 
 /**
  * API key validation result
+ * Version 7.0: Now includes terminal validation status
  */
 export interface ApiKeyValidationResult {
   valid: boolean;
   store?: ValidateApiKeyResponse;
   error?: string;
+  /**
+   * Terminal validation errors if terminal config is missing or invalid
+   * MANDATORY: If present, setup must be blocked
+   */
+  terminalValidationErrors?: string[];
 }
 
 /**
@@ -248,6 +273,44 @@ interface SettingsStoreSchema {
   setupCompletedAt?: string;
   /** Whether app is fully configured */
   isConfigured?: boolean;
+
+  // ========== Terminal Configuration (Version 7.0 - DEPRECATED) ==========
+  // NOTE: Terminal config is deprecated. Use posConnection.* for new implementations.
+  // These fields are kept for backward compatibility during migration.
+  /** Terminal UUID from cloud */
+  'terminal.posTerminalId'?: string;
+  /** Terminal display name */
+  'terminal.name'?: string;
+  /** Device identifier */
+  'terminal.deviceId'?: string;
+  /** Connection type: NETWORK, API, WEBHOOK, FILE, MANUAL */
+  'terminal.connectionType'?: POSConnectionType;
+  /** Connection config (JSON stringified) */
+  'terminal.connectionConfig'?: string;
+  /** POS system type */
+  'terminal.posType'?: POSSystemType;
+  /** Terminal status */
+  'terminal.terminalStatus'?: string;
+  /** Sync status */
+  'terminal.syncStatus'?: string;
+  /** Last sync timestamp */
+  'terminal.lastSyncAt'?: string;
+  /** Updated timestamp */
+  'terminal.updatedAt'?: string;
+
+  // ========== POS Connection Configuration (Store-Level - NEW) ==========
+  // This is the new store-level POS connection config from cloud API.
+  // Terminals/registers are now discovered dynamically from POS data.
+  /** POS system type (e.g., GILBARCO_NAXML, SQUARE_REST) */
+  'posConnection.posType'?: POSSystemType;
+  /** Connection type: NETWORK, API, WEBHOOK, FILE, MANUAL */
+  'posConnection.connectionType'?: POSConnectionType;
+  /** Connection config (JSON stringified) - structure depends on connectionType */
+  'posConnection.connectionConfig'?: string;
+  /** Whether store-level POS connection config is set (vs legacy terminal config) */
+  'posConnection.isConfigured'?: boolean;
+  /** Timestamp when POS connection config was last updated */
+  'posConnection.updatedAt'?: string;
 }
 
 // ============================================================================
@@ -290,6 +353,55 @@ const DEFAULT_ENABLED_FILE_TYPES = {
  * - Shift closing at 7:00 AM → belongs to today's business day
  */
 const DEFAULT_BUSINESS_DAY_CUTOFF_TIME = '06:00';
+
+/**
+ * POS types that support NAXML file-based data ingestion.
+ *
+ * These are the ONLY POS types for which the file watcher should run.
+ * All other POS types use different data ingestion methods (API, Network, etc.)
+ * which are not yet implemented.
+ *
+ * SEC-014: Strict allowlist validation - only these types enable file watcher
+ *
+ * @see POSSystemType for all possible POS types
+ */
+const NAXML_COMPATIBLE_POS_TYPES: readonly POSSystemType[] = [
+  'GILBARCO_NAXML',
+  'GILBARCO_PASSPORT',
+  'FILE_BASED',
+] as const;
+
+/**
+ * Phase 8: Rollback Feature Flag
+ *
+ * Environment variable to disable POS type checks if problems arise.
+ * When set to 'false', bypasses POS type validation and allows file watcher
+ * to start for any configuration with a watchPath (emergency rollback behavior).
+ *
+ * Usage:
+ *   - Default (not set or any value except 'false'): POS type checks ENABLED
+ *   - ENABLE_POS_TYPE_CHECKS=false: POS type checks DISABLED (rollback mode)
+ *
+ * @security OPS-012: Feature flag loaded from environment variable
+ * @security SEC-017: Audit logging when flag is used
+ *
+ * @example
+ * // In production, enable checks (default behavior)
+ * // ENABLE_POS_TYPE_CHECKS is not set → checks enabled
+ *
+ * // Emergency rollback: disable checks
+ * // set ENABLE_POS_TYPE_CHECKS=false
+ */
+const ENABLE_POS_TYPE_CHECKS: boolean = process.env.ENABLE_POS_TYPE_CHECKS !== 'false';
+
+// Log feature flag status at module load (only if disabled - notable event)
+if (!ENABLE_POS_TYPE_CHECKS) {
+  // Use console.warn since logger may not be initialized yet at module load time
+  // This is logged again via structured logging when the flag is actually used
+  console.warn(
+    '[settings-service] WARNING: POS type checks DISABLED via ENABLE_POS_TYPE_CHECKS=false environment variable'
+  );
+}
 
 // ============================================================================
 // Settings Service
@@ -349,6 +461,8 @@ export class SettingsService {
         companyName,
         timezone: 'America/New_York',
         features: (this.configStore.get('features') as string[]) || [],
+        // Version 8.0: POS connection configuration
+        posConnectionConfig: this.getPOSConnectionConfig(),
         xmlWatchFolder: this.getWatchPath(),
         syncIntervalSeconds:
           (this.configStore.get('syncIntervalSeconds') as number) || DEFAULT_SYNC_INTERVAL,
@@ -377,6 +491,9 @@ export class SettingsService {
       companyName: (this.configStore.get('companyName') as string) || '',
       timezone: store.timezone,
       features: (this.configStore.get('features') as string[]) || [],
+
+      // Version 8.0: POS connection configuration (store-level)
+      posConnectionConfig: this.getPOSConnectionConfig(),
 
       // Local settings
       xmlWatchFolder: this.getWatchPath(),
@@ -525,11 +642,18 @@ export class SettingsService {
    * 5. On failure: clear encrypted key
    *
    * @param apiKey - Store Sync Key to validate
+   * @param options - Validation options
+   * @param options.isInitialSetup - If true (default), terminal config is MANDATORY.
+   *                                  If false (resync), terminal is optional - updates if present.
    * @returns Validation result with store info on success
    * @security SEC-007: API key encrypted via safeStorage
    * @security SEC-008: HTTPS enforced for validation
    */
-  async validateAndSaveApiKey(apiKey: string): Promise<ApiKeyValidationResult> {
+  async validateAndSaveApiKey(
+    apiKey: string,
+    options: { isInitialSetup?: boolean } = {}
+  ): Promise<ApiKeyValidationResult> {
+    const { isInitialSetup = true } = options;
     // SEC-014: Validate key format first
     const formatValidation = ApiKeySchema.safeParse(apiKey);
     if (!formatValidation.success) {
@@ -634,10 +758,125 @@ export class SettingsService {
         }
       }
 
+      // =========================================================================
+      // Version 8.0: POS Connection Configuration Storage (NEW)
+      // SEC-014: Validated POS config from cloud
+      //
+      // Priority: posConnectionConfig (new) > terminal (legacy)
+      //
+      // Behavior differs based on isInitialSetup:
+      // - Initial Setup (wizard): POS config MANDATORY - block if missing
+      // - Re-sync/Refresh: POS config optional - update if present, keep existing
+      // =========================================================================
+
+      // Check for validation errors (prefer posConnectionConfig errors over terminal errors)
+      const validationErrors =
+        validation.posConnectionValidationErrors ?? validation.terminalValidationErrors;
+      const hasPosConfig = Boolean(validation.posConnectionConfig);
+      const hasTerminalConfig = Boolean(validation.terminal);
+
+      if (validationErrors && validationErrors.length > 0) {
+        if (isInitialSetup) {
+          // Initial setup - validation failed, block setup
+          log.error('POS connection configuration validation failed, blocking setup', {
+            storeId: validation.storeId,
+            errors: validationErrors,
+            source: validation.posConnectionValidationErrors ? 'posConnectionConfig' : 'terminal',
+          });
+          return {
+            valid: false,
+            store: validation,
+            error: `Store setup cannot continue: ${validationErrors[0]}`,
+            terminalValidationErrors: validationErrors,
+          };
+        } else {
+          // Resync - log warning but continue with existing config
+          log.warn(
+            'POS connection configuration validation failed during resync, keeping existing config',
+            {
+              storeId: validation.storeId,
+              errors: validationErrors,
+            }
+          );
+        }
+      }
+
+      // Process POS connection config (prefer new format, fall back to legacy)
+      if (hasPosConfig && validation.posConnectionConfig) {
+        // New store-level POS connection config available
+        this.savePOSConnectionConfig(validation.posConnectionConfig);
+        log.info('POS connection configuration saved (new format)', {
+          posType: validation.posConnectionConfig.pos_type,
+          connectionType: validation.posConnectionConfig.pos_connection_type,
+        });
+
+        // Also save to legacy terminal config for backward compatibility with existing code
+        if (hasTerminalConfig && validation.terminal) {
+          this.saveTerminalConfig(validation.terminal);
+        }
+      } else if (hasTerminalConfig && validation.terminal) {
+        // Legacy terminal config only - store it and convert to new format
+        this.saveTerminalConfig(validation.terminal);
+
+        // Auto-configure file watching paths for FILE connection type
+        if (
+          validation.terminal.connection_type === 'FILE' &&
+          validation.terminal.connection_config
+        ) {
+          const fileConfig = validation.terminal.connection_config as FileConnectionConfig;
+          if (fileConfig.import_path) {
+            this.configStore.set('watchPath', fileConfig.import_path);
+            log.info('Watch path auto-configured from terminal', {
+              pathLength: fileConfig.import_path.length,
+            });
+          }
+          if (fileConfig.export_path) {
+            this.configStore.set('archivePath', fileConfig.export_path);
+            log.info('Archive path auto-configured from terminal', {
+              pathLength: fileConfig.export_path.length,
+            });
+          }
+          if (fileConfig.poll_interval_seconds) {
+            this.configStore.set('pollInterval', fileConfig.poll_interval_seconds);
+            log.info('Poll interval auto-configured from terminal', {
+              interval: fileConfig.poll_interval_seconds,
+            });
+          }
+        }
+      } else if (isInitialSetup) {
+        // Initial setup - POS config MANDATORY, block setup
+        log.error('POS connection configuration is missing, blocking setup', {
+          storeId: validation.storeId,
+        });
+        return {
+          valid: false,
+          store: validation,
+          error:
+            'Store setup cannot continue: POS connection configuration is missing. Please contact your administrator to configure the POS settings in the cloud portal.',
+          terminalValidationErrors: ['POS connection configuration is missing'],
+        };
+      } else {
+        // Resync - config not provided, keep existing config
+        log.info(
+          'POS connection configuration not provided during resync, keeping existing config',
+          {
+            storeId: validation.storeId,
+            hasExistingPosConfig: this.hasPOSConnectionConfig(),
+            hasExistingTerminal: this.hasTerminalConfig(),
+          }
+        );
+      }
+
       log.info('API key validated and store configured', {
         storeId: validation.storeId,
         storeName: validation.storeName,
         hasInitialManager: Boolean(validation.initialManager),
+        hasPosConnectionConfig: hasPosConfig,
+        posConnectionType: validation.posConnectionConfig?.pos_connection_type,
+        posType: validation.posConnectionConfig?.pos_type,
+        hasTerminal: hasTerminalConfig,
+        terminalConnectionType: validation.terminal?.connection_type,
+        terminalPosType: validation.terminal?.pos_type,
       });
 
       return { valid: true, store: validation };
@@ -669,6 +908,697 @@ export class SettingsService {
   clearApiKey(): void {
     this.configStore.delete('encryptedApiKey');
     log.info('API key cleared');
+  }
+
+  // ==========================================================================
+  // Terminal Configuration (Version 7.0)
+  // ==========================================================================
+
+  /**
+   * Save terminal configuration from cloud API
+   *
+   * SEC-014: Terminal config is pre-validated before this method is called
+   * DB-006: Store-scoped terminal configuration
+   *
+   * @param terminal - Validated terminal configuration
+   */
+  private saveTerminalConfig(terminal: TerminalSyncRecord): void {
+    this.configStore.set('terminal.posTerminalId', terminal.pos_terminal_id);
+    this.configStore.set('terminal.name', terminal.name);
+    if (terminal.device_id) {
+      this.configStore.set('terminal.deviceId', terminal.device_id);
+    }
+    this.configStore.set('terminal.connectionType', terminal.connection_type);
+    if (terminal.connection_config) {
+      // Store connection config as JSON string for complex objects
+      this.configStore.set('terminal.connectionConfig', JSON.stringify(terminal.connection_config));
+    }
+    this.configStore.set('terminal.posType', terminal.pos_type);
+    this.configStore.set('terminal.terminalStatus', terminal.terminal_status);
+    this.configStore.set('terminal.syncStatus', terminal.sync_status);
+    if (terminal.last_sync_at) {
+      this.configStore.set('terminal.lastSyncAt', terminal.last_sync_at);
+    }
+    this.configStore.set('terminal.updatedAt', terminal.updated_at);
+
+    log.info('Terminal configuration saved', {
+      terminalId: terminal.pos_terminal_id,
+      name: terminal.name,
+      connectionType: terminal.connection_type,
+      posType: terminal.pos_type,
+    });
+  }
+
+  /**
+   * Get terminal configuration
+   *
+   * @returns Terminal configuration or null if not configured
+   */
+  getTerminalConfig(): TerminalSyncRecord | null {
+    const posTerminalId = this.configStore.get('terminal.posTerminalId') as string | undefined;
+    if (!posTerminalId) {
+      return null;
+    }
+
+    const connectionConfigStr = this.configStore.get('terminal.connectionConfig') as
+      | string
+      | undefined;
+    let connectionConfig = null;
+    if (connectionConfigStr) {
+      try {
+        connectionConfig = JSON.parse(connectionConfigStr);
+      } catch {
+        log.warn('Failed to parse terminal connection config');
+      }
+    }
+
+    return {
+      pos_terminal_id: posTerminalId,
+      name: (this.configStore.get('terminal.name') as string) || '',
+      device_id: (this.configStore.get('terminal.deviceId') as string) || null,
+      connection_type:
+        (this.configStore.get('terminal.connectionType') as POSConnectionType) || 'MANUAL',
+      connection_config: connectionConfig,
+      pos_type: (this.configStore.get('terminal.posType') as POSSystemType) || 'UNKNOWN',
+      terminal_status:
+        (this.configStore.get('terminal.terminalStatus') as
+          | 'ACTIVE'
+          | 'INACTIVE'
+          | 'MAINTENANCE'
+          | 'OFFLINE') || 'OFFLINE',
+      sync_status:
+        (this.configStore.get('terminal.syncStatus') as
+          | 'PENDING'
+          | 'SUCCESS'
+          | 'FAILED'
+          | 'IN_PROGRESS') || 'PENDING',
+      last_sync_at: (this.configStore.get('terminal.lastSyncAt') as string) || null,
+      updated_at: (this.configStore.get('terminal.updatedAt') as string) || '',
+    };
+  }
+
+  /**
+   * Check if terminal configuration is present
+   *
+   * @returns true if terminal is configured
+   */
+  hasTerminalConfig(): boolean {
+    return !!this.configStore.get('terminal.posTerminalId');
+  }
+
+  /**
+   * Get terminal connection type
+   *
+   * @returns Connection type or null if not configured
+   */
+  getTerminalConnectionType(): POSConnectionType | null {
+    return (this.configStore.get('terminal.connectionType') as POSConnectionType) || null;
+  }
+
+  /**
+   * Get terminal POS type
+   *
+   * @returns POS system type or null if not configured
+   */
+  getTerminalPosType(): POSSystemType | null {
+    return (this.configStore.get('terminal.posType') as POSSystemType) || null;
+  }
+
+  /**
+   * Clear terminal configuration
+   *
+   * Used during reset or reconfiguration.
+   *
+   * @security SEC-017: May be called during authorized FULL_RESET
+   */
+  clearTerminalConfig(): void {
+    this.configStore.delete('terminal.posTerminalId');
+    this.configStore.delete('terminal.name');
+    this.configStore.delete('terminal.deviceId');
+    this.configStore.delete('terminal.connectionType');
+    this.configStore.delete('terminal.connectionConfig');
+    this.configStore.delete('terminal.posType');
+    this.configStore.delete('terminal.terminalStatus');
+    this.configStore.delete('terminal.syncStatus');
+    this.configStore.delete('terminal.lastSyncAt');
+    this.configStore.delete('terminal.updatedAt');
+    log.info('Terminal configuration cleared');
+  }
+
+  // ==========================================================================
+  // POS Connection Configuration (Store-Level - NEW)
+  // ==========================================================================
+
+  /**
+   * Save POS connection configuration from cloud API (new store-level format)
+   *
+   * This is the new format where POS connection is at the store level.
+   * Terminals/registers are discovered dynamically from POS data.
+   *
+   * @security SEC-014: Defense-in-depth validation including path traversal prevention
+   * @security SEC-017: Audit logging for POS configuration changes
+   * @security DB-006: Store-scoped POS connection configuration
+   *
+   * @param config - POS connection configuration (validated here for defense-in-depth)
+   * @throws Error if validation fails (path traversal, invalid format, etc.)
+   */
+  savePOSConnectionConfig(config: POSConnectionConfig): void {
+    const timestamp = new Date().toISOString();
+
+    // SEC-014: Defense-in-depth - validate config even if pre-validated by caller
+    try {
+      validatePOSConnectionConfig(config);
+    } catch (error) {
+      const errors =
+        error instanceof z.ZodError ? formatPOSConnectionValidationErrors(error) : [String(error)];
+
+      // SEC-017: Audit log failed configuration attempts
+      log.error('SEC-014: POS connection configuration validation failed', {
+        timestamp,
+        action: 'SAVE_POS_CONFIG_REJECTED',
+        posType: config.pos_type,
+        connectionType: config.pos_connection_type,
+        validationErrors: errors,
+        reason: 'defense_in_depth_validation_failure',
+      });
+
+      throw new Error(`Invalid POS connection configuration: ${errors.join(', ')}`);
+    }
+
+    // SEC-014: Additional explicit path traversal check for FILE connection type
+    if (config.pos_connection_type === 'FILE' && config.pos_connection_config) {
+      const fileConfig = config.pos_connection_config as {
+        import_path?: string;
+        export_path?: string;
+      };
+
+      // Validate import_path for path traversal
+      if (fileConfig.import_path) {
+        if (fileConfig.import_path.includes('..')) {
+          log.error('SEC-014: Path traversal attempt detected in import_path', {
+            timestamp,
+            action: 'SAVE_POS_CONFIG_REJECTED',
+            posType: config.pos_type,
+            connectionType: config.pos_connection_type,
+            pathAttempt: fileConfig.import_path.substring(0, 50), // Truncate for logging
+            reason: 'path_traversal_detected',
+          });
+          throw new Error(
+            'Invalid import_path: Path cannot contain parent directory references (..)'
+          );
+        }
+      }
+
+      // Validate export_path for path traversal
+      if (fileConfig.export_path && fileConfig.export_path.includes('..')) {
+        log.error('SEC-014: Path traversal attempt detected in export_path', {
+          timestamp,
+          action: 'SAVE_POS_CONFIG_REJECTED',
+          posType: config.pos_type,
+          connectionType: config.pos_connection_type,
+          pathAttempt: fileConfig.export_path.substring(0, 50), // Truncate for logging
+          reason: 'path_traversal_detected',
+        });
+        throw new Error(
+          'Invalid export_path: Path cannot contain parent directory references (..)'
+        );
+      }
+    }
+
+    // Save validated configuration
+    this.configStore.set('posConnection.posType', config.pos_type);
+    this.configStore.set('posConnection.connectionType', config.pos_connection_type);
+
+    if (config.pos_connection_config) {
+      // Store connection config as JSON string for complex objects
+      this.configStore.set(
+        'posConnection.connectionConfig',
+        JSON.stringify(config.pos_connection_config)
+      );
+    } else {
+      this.configStore.delete('posConnection.connectionConfig');
+    }
+
+    this.configStore.set('posConnection.isConfigured', true);
+    this.configStore.set('posConnection.updatedAt', timestamp);
+
+    // SEC-017: Audit log successful configuration save
+    log.info('SEC-017: POS connection configuration saved', {
+      timestamp,
+      action: 'SAVE_POS_CONFIG_SUCCESS',
+      posType: config.pos_type,
+      connectionType: config.pos_connection_type,
+      hasConnectionConfig: config.pos_connection_config !== null,
+    });
+
+    // Auto-configure file watching paths for FILE connection type
+    if (config.pos_connection_type === 'FILE' && config.pos_connection_config) {
+      const fileConfig = config.pos_connection_config as {
+        import_path?: string;
+        export_path?: string;
+        poll_interval_seconds?: number;
+      };
+
+      if (fileConfig.import_path) {
+        this.configStore.set('watchPath', fileConfig.import_path);
+        log.info('Watch path auto-configured from POS connection config', {
+          pathLength: fileConfig.import_path.length,
+        });
+      }
+      if (fileConfig.export_path) {
+        this.configStore.set('archivePath', fileConfig.export_path);
+        log.info('Archive path auto-configured from POS connection config', {
+          pathLength: fileConfig.export_path.length,
+        });
+      }
+      if (fileConfig.poll_interval_seconds) {
+        this.configStore.set('pollInterval', fileConfig.poll_interval_seconds);
+        log.info('Poll interval auto-configured from POS connection config', {
+          interval: fileConfig.poll_interval_seconds,
+        });
+      }
+    }
+  }
+
+  /**
+   * Update POS connection configuration (local edits by SUPPORT)
+   *
+   * Allows updating the connection_config portion while preserving
+   * the pos_type and pos_connection_type from the cloud.
+   *
+   * SEC-014: Validates input against POSConnectionConfigSchema
+   * API-001: Schema validation for all inputs
+   *
+   * @param updates - Partial config updates (only pos_connection_config is editable)
+   * @throws Error if validation fails or no config exists
+   */
+  updatePOSConnectionConfig(updates: {
+    pos_connection_config: Record<string, unknown> | null;
+  }): void {
+    // Get current config to preserve pos_type and pos_connection_type
+    const currentConfig = this.getPOSConnectionConfig();
+    if (!currentConfig) {
+      throw new Error('No POS connection configuration exists to update');
+    }
+
+    // Build the updated config
+    const updatedConfig: POSConnectionConfig = {
+      pos_type: currentConfig.pos_type,
+      pos_connection_type: currentConfig.pos_connection_type,
+      pos_connection_config: updates.pos_connection_config,
+    };
+
+    // SEC-014: Validate the complete config
+    try {
+      const validated = validatePOSConnectionConfig(updatedConfig);
+
+      // Save the validated config
+      if (validated.pos_connection_config) {
+        this.configStore.set(
+          'posConnection.connectionConfig',
+          JSON.stringify(validated.pos_connection_config)
+        );
+      } else {
+        this.configStore.delete('posConnection.connectionConfig');
+      }
+      this.configStore.set('posConnection.updatedAt', new Date().toISOString());
+
+      log.info('POS connection configuration updated', {
+        posType: validated.pos_type,
+        connectionType: validated.pos_connection_type,
+        hasConnectionConfig: validated.pos_connection_config !== null,
+      });
+
+      // Auto-update legacy fields for FILE connection type
+      if (validated.pos_connection_type === 'FILE' && validated.pos_connection_config) {
+        const fileConfig = validated.pos_connection_config as {
+          import_path?: string;
+          export_path?: string;
+          poll_interval_seconds?: number;
+        };
+
+        if (fileConfig.import_path) {
+          this.configStore.set('watchPath', fileConfig.import_path);
+          log.info('Watch path auto-updated from POS connection config');
+        }
+        if (fileConfig.export_path) {
+          this.configStore.set('archivePath', fileConfig.export_path);
+          log.info('Archive path auto-updated from POS connection config');
+        }
+        if (fileConfig.poll_interval_seconds) {
+          this.configStore.set('pollInterval', fileConfig.poll_interval_seconds);
+          log.info('Poll interval auto-updated from POS connection config');
+        }
+      }
+
+      // Auto-update for API connection type
+      if (validated.pos_connection_type === 'API' && validated.pos_connection_config) {
+        // API config is stored in posConnection.connectionConfig, no legacy fields to update
+        log.info('API connection configuration updated');
+      }
+    } catch (error) {
+      if (error instanceof z.ZodError) {
+        const errors = formatPOSConnectionValidationErrors(error);
+        log.error('POS connection config update validation failed', { errors });
+        throw new Error(`Validation failed: ${errors.join(', ')}`);
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * Get POS connection configuration (store-level)
+   *
+   * Returns the new store-level POS connection config if configured,
+   * or converts from legacy terminal config for backward compatibility.
+   *
+   * @returns POS connection configuration or null if not configured
+   */
+  getPOSConnectionConfig(): POSConnectionConfig | null {
+    // First check if new format is configured
+    const isNewConfigured = this.configStore.get('posConnection.isConfigured') as boolean;
+
+    if (isNewConfigured) {
+      const connectionConfigStr = this.configStore.get('posConnection.connectionConfig') as
+        | string
+        | undefined;
+      let connectionConfig = null;
+
+      if (connectionConfigStr) {
+        try {
+          connectionConfig = JSON.parse(connectionConfigStr);
+        } catch {
+          log.warn('Failed to parse POS connection config');
+        }
+      }
+
+      return {
+        pos_type: (this.configStore.get('posConnection.posType') as POSSystemType) || 'UNKNOWN',
+        pos_connection_type:
+          (this.configStore.get('posConnection.connectionType') as POSConnectionType) || 'MANUAL',
+        pos_connection_config: connectionConfig,
+      };
+    }
+
+    // Fall back to legacy terminal config for backward compatibility
+    const terminalConfig = this.getTerminalConfig();
+    if (terminalConfig) {
+      log.debug('Converting legacy terminal config to POS connection config');
+      return convertTerminalToPOSConnectionConfig(terminalConfig);
+    }
+
+    return null;
+  }
+
+  /**
+   * Check if POS connection configuration is present (either new or legacy format)
+   *
+   * @returns true if POS connection is configured
+   */
+  hasPOSConnectionConfig(): boolean {
+    // Check new format first
+    if (this.configStore.get('posConnection.isConfigured')) {
+      return true;
+    }
+    // Fall back to legacy terminal config
+    return this.hasTerminalConfig();
+  }
+
+  /**
+   * Get POS connection type (from new config or legacy terminal)
+   *
+   * @returns Connection type or null if not configured
+   */
+  getPOSConnectionType(): POSConnectionType | null {
+    // Check new format first
+    if (this.configStore.get('posConnection.isConfigured')) {
+      return (this.configStore.get('posConnection.connectionType') as POSConnectionType) || null;
+    }
+    // Fall back to legacy
+    return this.getTerminalConnectionType();
+  }
+
+  /**
+   * Get POS system type (from new config or legacy terminal)
+   *
+   * @returns POS system type or null if not configured
+   */
+  getPOSType(): POSSystemType | null {
+    // Check new format first
+    if (this.configStore.get('posConnection.isConfigured')) {
+      return (this.configStore.get('posConnection.posType') as POSSystemType) || null;
+    }
+    // Fall back to legacy
+    return this.getTerminalPosType();
+  }
+
+  /**
+   * Clear POS connection configuration
+   *
+   * Used during reset or reconfiguration.
+   *
+   * @security SEC-017: May be called during authorized FULL_RESET
+   */
+  clearPOSConnectionConfig(): void {
+    this.configStore.delete('posConnection.posType');
+    this.configStore.delete('posConnection.connectionType');
+    this.configStore.delete('posConnection.connectionConfig');
+    this.configStore.delete('posConnection.isConfigured');
+    this.configStore.delete('posConnection.updatedAt');
+    log.info('POS connection configuration cleared');
+  }
+
+  // ==========================================================================
+  // NAXML Compatibility (POS Type Validation for File Watcher)
+  // ==========================================================================
+
+  /**
+   * Check if the current POS configuration supports NAXML file-based data ingestion.
+   *
+   * This method determines whether the file watcher should be started based on:
+   * 1. POS type must be in NAXML_COMPATIBLE_POS_TYPES (GILBARCO_NAXML, GILBARCO_PASSPORT, FILE_BASED)
+   * 2. Connection type must be FILE
+   *
+   * **Backward Compatibility**: If no POS connection config exists but a watchPath
+   * is configured (legacy installations), assumes NAXML compatibility to avoid
+   * breaking existing setups during migration.
+   *
+   * @returns true if POS type is NAXML-compatible AND connection type is FILE
+   *
+   * @security SEC-014: Strict allowlist validation for POS types
+   * @security LM-001: Audit logging for file watcher decisions
+   *
+   * @example
+   * // GILBARCO_NAXML + FILE → true (file watcher starts)
+   * // SQUARE_REST + API → false (file watcher skipped)
+   * // No config + watchPath exists → true (legacy mode)
+   */
+  isNAXMLCompatible(): boolean {
+    const timestamp = new Date().toISOString();
+
+    // ========================================================================
+    // Phase 8: Feature Flag Rollback Check
+    // If POS type checks are DISABLED via environment variable, bypass validation
+    // and return true if there's a watchPath configured (emergency rollback)
+    // ========================================================================
+    if (!ENABLE_POS_TYPE_CHECKS) {
+      const watchPath = this.getWatchPath();
+      const hasWatchPath = !!watchPath;
+
+      // SEC-017: Audit log for feature flag bypass - this is a notable security event
+      log.warn('SEC-017: POS type checks DISABLED via feature flag', {
+        timestamp,
+        action: 'POS_TYPE_DECISION',
+        decision: hasWatchPath ? 'NAXML_COMPATIBLE' : 'NOT_COMPATIBLE',
+        mode: 'feature_flag_bypass',
+        featureFlag: 'ENABLE_POS_TYPE_CHECKS',
+        featureFlagValue: 'false',
+        hasWatchPath,
+        reason: hasWatchPath
+          ? 'feature_flag_bypass_with_watchPath'
+          : 'feature_flag_bypass_without_watchPath',
+        securityNote:
+          'POS type validation bypassed - ensure this is intentional for rollback purposes',
+      });
+
+      // When feature flag is disabled, allow file watcher if watchPath exists
+      return hasWatchPath;
+    }
+
+    const posConfig = this.getPOSConnectionConfig();
+
+    if (!posConfig) {
+      // Backward compatibility: No POS config exists
+      // If watchPath is configured, assume NAXML compatibility (legacy mode)
+      const watchPath = this.getWatchPath();
+      if (watchPath) {
+        // SEC-017: Audit log for legacy mode decision
+        log.info('SEC-017: POS type decision - legacy mode NAXML compatible', {
+          timestamp,
+          action: 'POS_TYPE_DECISION',
+          decision: 'NAXML_COMPATIBLE',
+          mode: 'legacy',
+          hasWatchPath: true,
+          watchPathConfigured: true,
+          reason: 'existing_watchPath_implies_NAXML_compatibility',
+        });
+        return true;
+      }
+      // No config and no watchPath - not compatible
+      // SEC-017: Audit log for no-config decision
+      log.info('SEC-017: POS type decision - no configuration', {
+        timestamp,
+        action: 'POS_TYPE_DECISION',
+        decision: 'NOT_COMPATIBLE',
+        mode: 'unconfigured',
+        hasWatchPath: false,
+        reason: 'no_POS_config_and_no_watchPath',
+      });
+      return false;
+    }
+
+    // SEC-014: Strict allowlist check for POS type
+    const isCompatiblePOSType = NAXML_COMPATIBLE_POS_TYPES.includes(posConfig.pos_type);
+    const isFileConnectionType = posConfig.pos_connection_type === 'FILE';
+
+    const isCompatible = isCompatiblePOSType && isFileConnectionType;
+
+    // SEC-017: Audit log for POS type compatibility decision
+    log.info('SEC-017: POS type decision - compatibility check', {
+      timestamp,
+      action: 'POS_TYPE_DECISION',
+      decision: isCompatible ? 'NAXML_COMPATIBLE' : 'NOT_COMPATIBLE',
+      mode: 'configured',
+      posType: posConfig.pos_type,
+      connectionType: posConfig.pos_connection_type,
+      isCompatiblePOSType,
+      isFileConnectionType,
+      allowedPOSTypes: NAXML_COMPATIBLE_POS_TYPES,
+      reason: isCompatible
+        ? 'POS_type_and_connection_type_match_allowlist'
+        : isCompatiblePOSType
+          ? 'connection_type_not_FILE'
+          : 'POS_type_not_in_allowlist',
+    });
+
+    return isCompatible;
+  }
+
+  /**
+   * Get human-readable reason why file watcher is unavailable.
+   *
+   * Returns null if file watcher should run (NAXML-compatible configuration).
+   * Returns a descriptive string explaining why file watcher won't start for
+   * non-compatible configurations.
+   *
+   * @returns Reason string or null if file watcher should run
+   *
+   * @security LM-001: Structured logging for audit trail
+   *
+   * @example
+   * // GILBARCO_NAXML + FILE → null (file watcher should run)
+   * // SQUARE_REST + API → "SQUARE_REST uses API-based data ingestion (coming soon)"
+   * // MANUAL_ENTRY + MANUAL → "Manual entry mode - no automated data ingestion"
+   */
+  getFileWatcherUnavailableReason(): string | null {
+    const timestamp = new Date().toISOString();
+
+    // ========================================================================
+    // Phase 8: Feature Flag Rollback Check
+    // If POS type checks are DISABLED, allow file watcher if watchPath exists
+    // ========================================================================
+    if (!ENABLE_POS_TYPE_CHECKS) {
+      const watchPath = this.getWatchPath();
+      if (watchPath) {
+        // Feature flag bypass with watchPath - file watcher should run
+        return null;
+      }
+      // Feature flag bypass but no watchPath - still can't run
+      return 'No watch path configured (POS type checks disabled via feature flag)';
+    }
+
+    const posConfig = this.getPOSConnectionConfig();
+
+    if (!posConfig) {
+      // Check for legacy mode (watchPath without POS config)
+      const watchPath = this.getWatchPath();
+      if (watchPath) {
+        // Legacy mode - file watcher should run
+        return null;
+      }
+      // SEC-017: Audit log for file watcher unavailability
+      log.info('SEC-017: File watcher unavailable - no configuration', {
+        timestamp,
+        action: 'FILE_WATCHER_STATUS',
+        available: false,
+        reason: 'POS connection not configured',
+        hasWatchPath: false,
+      });
+      return 'POS connection not configured';
+    }
+
+    let reason: string | null = null;
+
+    // Check connection type first (most common differentiator)
+    switch (posConfig.pos_connection_type) {
+      case 'MANUAL':
+        reason = 'Manual entry mode - no automated data ingestion';
+        break;
+
+      case 'API':
+        reason = `${posConfig.pos_type} uses API-based data ingestion (coming soon)`;
+        break;
+
+      case 'NETWORK':
+        reason = `${posConfig.pos_type} uses network-based data ingestion (coming soon)`;
+        break;
+
+      case 'WEBHOOK':
+        reason = `${posConfig.pos_type} uses webhook-based data ingestion (coming soon)`;
+        break;
+
+      case 'FILE':
+        // FILE connection type - check if POS type is compatible
+        if (!NAXML_COMPATIBLE_POS_TYPES.includes(posConfig.pos_type)) {
+          reason = `${posConfig.pos_type} is not yet supported for file-based ingestion`;
+        }
+        // reason remains null if compatible - file watcher should run
+        break;
+
+      default:
+        // Unknown connection type - defensive handling
+        reason = `Unknown connection type: ${posConfig.pos_connection_type}`;
+    }
+
+    // SEC-017: Audit log for file watcher availability decision
+    if (reason) {
+      log.info('SEC-017: File watcher unavailable', {
+        timestamp,
+        action: 'FILE_WATCHER_STATUS',
+        available: false,
+        posType: posConfig.pos_type,
+        connectionType: posConfig.pos_connection_type,
+        reason,
+      });
+    }
+
+    return reason;
+  }
+
+  /**
+   * Check if POS type checks are enabled.
+   *
+   * Phase 8: Rollback feature flag status getter.
+   * Returns true when POS type validation is active (normal operation).
+   * Returns false when POS type checks are disabled via ENABLE_POS_TYPE_CHECKS=false
+   * environment variable (rollback mode).
+   *
+   * @returns true if POS type checks are enabled, false if disabled (rollback mode)
+   *
+   * @security OPS-012: Feature flag status exposure for monitoring
+   */
+  isPOSTypeChecksEnabled(): boolean {
+    return ENABLE_POS_TYPE_CHECKS;
   }
 
   // ==========================================================================
@@ -1291,6 +2221,13 @@ export class SettingsService {
     hasApiKey: boolean;
     setupComplete: boolean;
     hasWatchFolder: boolean;
+    hasPOSConnectionConfig: boolean;
+    posConnectionType: POSConnectionType | null;
+    posType: POSSystemType | null;
+    // Deprecated - kept for backward compatibility
+    hasTerminalConfig: boolean;
+    terminalConnectionType: POSConnectionType | null;
+    terminalPosType: POSSystemType | null;
   } {
     return {
       databaseReady: storesDAL.isDatabaseReady(),
@@ -1298,6 +2235,14 @@ export class SettingsService {
       hasApiKey: this.hasApiKey(),
       setupComplete: this.isSetupComplete(),
       hasWatchFolder: !!this.getWatchPath(),
+      // New POS connection config status
+      hasPOSConnectionConfig: this.hasPOSConnectionConfig(),
+      posConnectionType: this.getPOSConnectionType(),
+      posType: this.getPOSType(),
+      // Deprecated - kept for backward compatibility
+      hasTerminalConfig: this.hasTerminalConfig(),
+      terminalConnectionType: this.getTerminalConnectionType(),
+      terminalPosType: this.getTerminalPosType(),
     };
   }
 
