@@ -9,6 +9,12 @@
  */
 
 import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+import {
+  createAppSettings,
+  createApiKeyValidationResult,
+  POS_TYPES,
+  POS_CONNECTION_TYPES,
+} from '../../fixtures/test-factories';
 
 // Mock electron modules
 vi.mock('electron', () => ({
@@ -765,24 +771,19 @@ describe('Settings IPC Handlers', () => {
     });
 
     it('POS4-002: should show unavailableReason when POS is not NAXML compatible', async () => {
-      vi.mocked(settingsService.getAll).mockReturnValue({
-        storeId: 'store-123',
-        storeName: 'Test Store',
-        companyId: 'company-456',
-        companyName: 'Test Company',
-        timezone: 'America/New_York',
-        features: [],
-        xmlWatchFolder: '',
-        syncIntervalSeconds: 60,
-        businessDayCutoffTime: '06:00',
-        lottery: { enabled: false, binCount: 0 },
-        setupCompletedAt: null,
-        posConnectionConfig: {
-          pos_type: 'SQUARE',
-          pos_connection_type: 'API',
-          pos_connection_config: { base_url: 'https://api.square.com' },
-        },
-      } as ReturnType<typeof settingsService.getAll>);
+      vi.mocked(settingsService.getAll).mockReturnValue(
+        createAppSettings({
+          storeId: 'store-123',
+          storeName: 'Test Store',
+          companyId: 'company-456',
+          companyName: 'Test Company',
+          posConnectionConfig: {
+            pos_type: POS_TYPES.SQUARE_REST,
+            pos_connection_type: POS_CONNECTION_TYPES.API,
+            pos_connection_config: { base_url: 'https://api.square.com' },
+          },
+        }) as ReturnType<typeof settingsService.getAll>
+      );
 
       vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
       vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(
@@ -828,23 +829,22 @@ describe('Settings IPC Handlers', () => {
 
   describe('Phase 4: File Watcher Compatibility in settings:validateApiKey', () => {
     it('POS4-010: should include fileWatcherCompatible in validateApiKey response', async () => {
-      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue({
-        valid: true,
-        store: {
-          storeId: 'store-123',
-          storeName: 'Test Store',
-          companyId: 'company-456',
-          companyName: 'Test Company',
-          timezone: 'America/New_York',
-          features: [],
-          lottery: { enabled: false, binCount: 0 },
-          posConnectionConfig: {
-            pos_type: 'GILBARCO_PASSPORT',
-            pos_connection_type: 'FILE',
-            pos_connection_config: { import_path: 'C:\\NAXML\\Export' },
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+        createApiKeyValidationResult({
+          valid: true,
+          store: {
+            storeId: 'store-123',
+            storeName: 'Test Store',
+            companyId: 'company-456',
+            companyName: 'Test Company',
+            posConnectionConfig: {
+              pos_type: POS_TYPES.GILBARCO_PASSPORT,
+              pos_connection_type: POS_CONNECTION_TYPES.FILE,
+              pos_connection_config: { import_path: 'C:\\NAXML\\Export' },
+            },
           },
-        },
-      });
+        })
+      );
 
       vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(true);
       vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
@@ -870,23 +870,22 @@ describe('Settings IPC Handlers', () => {
     });
 
     it('POS4-011: should include unavailableReason for non-compatible POS in validateApiKey', async () => {
-      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue({
-        valid: true,
-        store: {
-          storeId: 'store-123',
-          storeName: 'Test Store',
-          companyId: 'company-456',
-          companyName: 'Test Company',
-          timezone: 'America/New_York',
-          features: [],
-          lottery: { enabled: false, binCount: 0 },
-          posConnectionConfig: {
-            pos_type: 'CLOVER',
-            pos_connection_type: 'API',
-            pos_connection_config: { base_url: 'https://api.clover.com' },
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+        createApiKeyValidationResult({
+          valid: true,
+          store: {
+            storeId: 'store-123',
+            storeName: 'Test Store',
+            companyId: 'company-456',
+            companyName: 'Test Company',
+            posConnectionConfig: {
+              pos_type: POS_TYPES.CLOVER_REST,
+              pos_connection_type: POS_CONNECTION_TYPES.API,
+              pos_connection_config: { base_url: 'https://api.clover.com' },
+            },
           },
-        },
-      });
+        })
+      );
 
       vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
       vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(

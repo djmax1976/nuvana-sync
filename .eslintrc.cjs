@@ -29,6 +29,25 @@ module.exports = {
     },
   },
   rules: {
+    // ==========================================================================
+    // TYPE SAFETY: Prevent invalid POS type string literals in tests
+    // ==========================================================================
+    // These rules prevent CI failures from type mismatches like 'SQUARE' vs 'SQUARE_REST'.
+    // Always import from tests/fixtures/test-factories.ts instead of using string literals.
+    'no-restricted-syntax': [
+      'error',
+      {
+        selector: "Literal[value='SQUARE']",
+        message:
+          "Use POS_TYPES.SQUARE_REST from 'tests/fixtures/test-factories' instead of 'SQUARE' string literal.",
+      },
+      {
+        selector: "Literal[value='CLOVER']",
+        message:
+          "Use POS_TYPES.CLOVER_REST from 'tests/fixtures/test-factories' instead of 'CLOVER' string literal.",
+      },
+    ],
+
     // Relax rules for early-stage development
     // These can be tightened as the project matures
     '@typescript-eslint/no-unused-vars': [
