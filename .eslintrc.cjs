@@ -50,6 +50,32 @@ module.exports = {
     'no-useless-escape': 'warn', // Regex patterns in NAXML schema
     'react/no-unescaped-entities': 'warn', // UI text with apostrophes
   },
+  // ==========================================================================
+  // TEST FILES: Stricter rules to catch type mismatches before CI
+  // ==========================================================================
+  overrides: [
+    {
+      // Apply POS type rules ONLY to test files
+      files: ['tests/**/*.ts', 'tests/**/*.tsx', '**/*.spec.ts', '**/*.test.ts'],
+      rules: {
+        // Prevent invalid POS type string literals in tests
+        // Catches 'SQUARE' vs 'SQUARE_REST' typos that cause CI failures
+        'no-restricted-syntax': [
+          'error',
+          {
+            selector: "Literal[value='SQUARE']",
+            message:
+              "Use POS_TYPES.SQUARE_REST from 'tests/fixtures/test-factories' instead of 'SQUARE' string literal.",
+          },
+          {
+            selector: "Literal[value='CLOVER']",
+            message:
+              "Use POS_TYPES.CLOVER_REST from 'tests/fixtures/test-factories' instead of 'CLOVER' string literal.",
+          },
+        ],
+      },
+    },
+  ],
   ignorePatterns: [
     'node_modules/',
     'dist/',

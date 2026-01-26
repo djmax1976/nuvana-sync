@@ -17,6 +17,7 @@ import * as crypto from 'crypto';
 import chokidar, { FSWatcher } from 'chokidar';
 import { createLogger } from '../utils/logger';
 import { type NuvanaConfig, validateSafePath } from '../../shared/types/config.types';
+import { settingsService } from './settings.service';
 import {
   type FileRecord,
   type SyncStats,
@@ -105,9 +106,55 @@ export class FileWatcherService extends EventEmitter {
   }
 
   /**
+   * Validate that the current POS configuration supports file-based ingestion.
+   *
+   * This is a safety check to prevent the file watcher from running on incompatible
+   * POS configurations. The main process should prevent instantiation for non-compatible
+   * POS types, but this provides defense-in-depth validation.
+   *
+   * @throws Error if POS type is not NAXML-compatible (includes connection type FILE
+   *         and POS type in GILBARCO_NAXML, GILBARCO_PASSPORT, or FILE_BASED)
+   *
+   * @security SEC-014: POS type validation before file system operations
+   * @security LM-001: Structured logging for audit trail
+   */
+  private validatePOSTypeCompatibility(): void {
+    if (!settingsService.isNAXMLCompatible()) {
+      const reason = settingsService.getFileWatcherUnavailableReason();
+      const posType = settingsService.getPOSType();
+      const connectionType = settingsService.getPOSConnectionType();
+
+      log.error('FileWatcherService POS type validation failed', {
+        reason,
+        posType,
+        connectionType,
+        validPOSTypes: ['GILBARCO_NAXML', 'GILBARCO_PASSPORT', 'FILE_BASED'],
+        requiredConnectionType: 'FILE',
+      });
+
+      throw new Error(
+        `FileWatcherService should not be instantiated for this POS type: ${reason ?? 'POS configuration is missing or incompatible'}`
+      );
+    }
+
+    log.debug('POS type validation passed', {
+      posType: settingsService.getPOSType(),
+      connectionType: settingsService.getPOSConnectionType(),
+    });
+  }
+
+  /**
    * Start watching the configured directory
+   *
+   * @security SEC-014: Validates POS type compatibility before starting file watcher
+   * @throws Error if POS type is not NAXML-compatible
    */
   start(): void {
+    // Safety check - validates POS type before file watcher starts
+    // This provides defense-in-depth; the main process should also prevent
+    // instantiation for non-compatible POS types
+    this.validatePOSTypeCompatibility();
+
     if (this.watcher) {
       log.info('File watcher already running');
       return;

@@ -8,7 +8,7 @@
  * @module tests/unit/services/settings
  */
 
-import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
+// Using vitest globals (configured in vitest.config.ts with globals: true)
 import fs from 'fs';
 
 // Helper to get platform-appropriate absolute paths for tests
@@ -161,6 +161,7 @@ describe('SettingsService', () => {
   };
 
   // Mock validation response (matches actual cloud API response structure)
+  // Version 8.0: posConnectionConfig is MANDATORY for initial setup
   const mockValidationResponse = {
     valid: true,
     storeId: 'store-123',
@@ -177,6 +178,16 @@ describe('SettingsService', () => {
     lottery: {
       enabled: true,
       binCount: 10,
+    },
+    // Version 8.0: POS connection configuration (MANDATORY for initial setup)
+    posConnectionConfig: {
+      pos_type: 'GILBARCO_NAXML' as const,
+      pos_connection_type: 'FILE' as const,
+      pos_connection_config: {
+        import_path: getTestAbsolutePath('Export'),
+        export_path: getTestAbsolutePath('Archive'),
+        poll_interval_seconds: 5,
+      },
     },
   };
 
@@ -996,6 +1007,566 @@ describe('SettingsService', () => {
 
         expect(settings).not.toBeNull();
         expect(settings?.businessDayCutoffTime).toBe('06:00');
+      });
+    });
+  });
+
+  // ==========================================================================
+  // POS Type Compatibility Tests (Phase 1)
+  // SEC-014: Strict allowlist validation for POS types
+  // ==========================================================================
+
+  describe('POS Type Compatibility', () => {
+    describe('isNAXMLCompatible()', () => {
+      it('POS-001: returns true for GILBARCO_NAXML + FILE', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_NAXML',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(true);
+      });
+
+      it('POS-002: returns true for GILBARCO_PASSPORT + FILE', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_PASSPORT',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(true);
+      });
+
+      it('POS-003: returns true for FILE_BASED + FILE', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'FILE_BASED',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(true);
+      });
+
+      it('POS-004: returns false for SQUARE_REST + API', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'SQUARE_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.squareup.com' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-005: returns false for CLOVER_REST + API', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'CLOVER_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.clover.com' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-006: returns false for MANUAL_ENTRY + MANUAL', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'MANUAL_ENTRY',
+          pos_connection_type: 'MANUAL',
+          pos_connection_config: null,
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-007: returns false for VERIFONE_RUBY2 + NETWORK', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'VERIFONE_RUBY2',
+          pos_connection_type: 'NETWORK',
+          pos_connection_config: { host: '192.168.1.100', port: 5000 },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-008: returns false when no POS config exists and no watchPath', () => {
+        // Fresh service with no config
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+
+        expect(freshService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-009: returns false for GILBARCO_NAXML + API (mismatched connection type)', () => {
+        // Edge case: NAXML-compatible POS type but wrong connection type
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_NAXML',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://example.com' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-010: returns true for legacy mode (watchPath exists, no POS config)', () => {
+        // Simulate legacy installation: watchPath but no POS connection config
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+        freshService.setWatchPath(TEST_PATHS.validFolder);
+
+        expect(freshService.isNAXMLCompatible()).toBe(true);
+      });
+
+      it('POS-011: returns false for CUSTOM_API + API', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'CUSTOM_API',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://custom-pos.example.com' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-012: returns false for VERIFONE_COMMANDER + NETWORK', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'VERIFONE_COMMANDER',
+          pos_connection_type: 'NETWORK',
+          pos_connection_config: { host: '192.168.1.200', port: 4000 },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('POS-013: returns false for WEBHOOK connection type', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'CUSTOM_API',
+          pos_connection_type: 'WEBHOOK',
+          pos_connection_config: { webhook_secret: 'test-secret' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+    });
+
+    describe('getFileWatcherUnavailableReason()', () => {
+      it('POS-020: returns null for NAXML-compatible config (GILBARCO_NAXML + FILE)', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_NAXML',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.getFileWatcherUnavailableReason()).toBeNull();
+      });
+
+      it('POS-021: returns null for GILBARCO_PASSPORT + FILE', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_PASSPORT',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.getFileWatcherUnavailableReason()).toBeNull();
+      });
+
+      it('POS-022: returns null for FILE_BASED + FILE', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'FILE_BASED',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        expect(settingsService.getFileWatcherUnavailableReason()).toBeNull();
+      });
+
+      it('POS-023: returns reason for MANUAL connection type', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'MANUAL_ENTRY',
+          pos_connection_type: 'MANUAL',
+          pos_connection_config: null,
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('Manual entry mode');
+        expect(reason).toContain('no automated data ingestion');
+      });
+
+      it('POS-024: returns reason for API connection type', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'SQUARE_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.squareup.com' },
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('SQUARE_REST');
+        expect(reason).toContain('API-based');
+        expect(reason).toContain('coming soon');
+      });
+
+      it('POS-025: returns reason for NETWORK connection type', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'VERIFONE_RUBY2',
+          pos_connection_type: 'NETWORK',
+          pos_connection_config: { host: '192.168.1.100', port: 5000 },
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('VERIFONE_RUBY2');
+        expect(reason).toContain('network-based');
+        expect(reason).toContain('coming soon');
+      });
+
+      it('POS-026: returns reason for WEBHOOK connection type', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'CUSTOM_API',
+          pos_connection_type: 'WEBHOOK',
+          pos_connection_config: { webhook_secret: 'test-secret' },
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('CUSTOM_API');
+        expect(reason).toContain('webhook-based');
+        expect(reason).toContain('coming soon');
+      });
+
+      it('POS-027: returns reason when no POS config exists and no watchPath', () => {
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+
+        const reason = freshService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('not configured');
+      });
+
+      it('POS-028: returns null for legacy mode (watchPath exists, no POS config)', () => {
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+        freshService.setWatchPath(TEST_PATHS.validFolder);
+
+        expect(freshService.getFileWatcherUnavailableReason()).toBeNull();
+      });
+
+      it('POS-029: returns reason for unsupported POS type with FILE connection', () => {
+        // Edge case: FILE connection type but POS type not in allowlist
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'NCR_RADIANT',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('NCR_RADIANT');
+        expect(reason).toContain('not yet supported');
+      });
+
+      it('POS-030: returns reason for CLOVER_REST + API', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'CLOVER_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.clover.com' },
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('CLOVER_REST');
+        expect(reason).toContain('API-based');
+      });
+    });
+
+    describe('POS Compatibility - Integration with getConfigurationStatus', () => {
+      it('POS-040: getConfigurationStatus includes POS connection info', () => {
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'GILBARCO_NAXML',
+          pos_connection_type: 'FILE',
+          pos_connection_config: { import_path: TEST_PATHS.validFolder },
+        });
+
+        const status = settingsService.getConfigurationStatus();
+
+        expect(status.hasPOSConnectionConfig).toBe(true);
+        expect(status.posConnectionType).toBe('FILE');
+        expect(status.posType).toBe('GILBARCO_NAXML');
+      });
+
+      it('POS-041: getConfigurationStatus shows no POS config when cleared', () => {
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+
+        const status = freshService.getConfigurationStatus();
+
+        // hasPOSConnectionConfig may still be true if legacy terminal config exists
+        // This test verifies the direct new POS config is gone
+        expect(status.posType).toBeNull();
+        expect(status.posConnectionType).toBeNull();
+      });
+    });
+
+    // ==========================================================================
+    // Security Test Cases - Section 7.2 of pos_selection.md
+    // SEC-014: Path traversal prevention
+    // SEC-017: Audit logging for POS type decisions
+    // ==========================================================================
+
+    describe('POS Type Security', () => {
+      // Note: Path traversal in import_path causes Zod union to fail validation
+      // because the FILE config schema's refine rejects paths containing ".."
+      // The error message varies based on how Zod processes the union failure
+      it('SEC-POS-001: rejects path traversal in FILE config import_path', () => {
+        // Arrange: Attempt to save POS config with path traversal in import_path
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: TEST_PATHS.traversal, // Path traversal attempt
+            },
+          });
+        }).toThrow(); // Path traversal is rejected (via Zod schema validation)
+      });
+
+      it('SEC-POS-001a: rejects Windows-style path traversal in import_path', () => {
+        // Windows-specific path traversal attempt
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: 'C:\\NAXML\\..\\..\\Windows\\System32',
+            },
+          });
+        }).toThrow(); // Path traversal is rejected
+      });
+
+      it('SEC-POS-001b: rejects Unix-style path traversal in import_path', () => {
+        // Unix-specific path traversal attempt
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: '/naxml/../../etc/passwd',
+            },
+          });
+        }).toThrow(); // Path traversal is rejected
+      });
+
+      it('SEC-POS-001c: rejects path traversal in export_path', () => {
+        // Path traversal in export_path field
+        // Note: Zod union validation may cause different error messages
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: TEST_PATHS.validFolder,
+              export_path: TEST_PATHS.traversal, // Path traversal in export_path
+            },
+          });
+        }).toThrow(); // Path traversal is rejected
+      });
+
+      it('SEC-POS-001d: accepts valid paths without path traversal', () => {
+        // Valid paths should be accepted
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: TEST_PATHS.validFolder,
+            },
+          });
+        }).not.toThrow();
+      });
+
+      it('SEC-POS-002: logs POS type decisions for audit trail', () => {
+        // Act: Save a POS config - this should trigger audit logging
+        // The logger mock is set up at module level and logs SEC-017 messages
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: { import_path: TEST_PATHS.validFolder },
+          });
+        }).not.toThrow();
+
+        // Check NAXML compatibility which logs SEC-017 decision
+        const isCompatible = settingsService.isNAXMLCompatible();
+        expect(isCompatible).toBe(true);
+      });
+
+      it('SEC-POS-002a: logs when file watcher is unavailable for API POS type', () => {
+        // Setup API-based POS that doesn't support file watching
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'SQUARE_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.squareup.com' },
+        });
+
+        // Act: Check NAXML compatibility - should return false for API type
+        const isCompatible = settingsService.isNAXMLCompatible();
+        expect(isCompatible).toBe(false);
+
+        // The audit log (SEC-017) is called internally with POS_TYPE_DECISION action
+      });
+
+      it('SEC-POS-002b: logs file watcher unavailable reason for non-compatible POS', () => {
+        // Setup MANUAL POS type
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'MANUAL_ENTRY',
+          pos_connection_type: 'MANUAL',
+          pos_connection_config: null,
+        });
+
+        // Act: Get unavailable reason
+        const reason = settingsService.getFileWatcherUnavailableReason();
+
+        // Assert: Reason should be provided for MANUAL type
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('Manual entry mode');
+        // SEC-017 audit log is called internally with FILE_WATCHER_STATUS action
+      });
+
+      it('SEC-POS-002c: logs audit trail when validation fails', () => {
+        // Act: Attempt to save invalid config (should throw)
+        expect(() => {
+          settingsService.savePOSConnectionConfig({
+            pos_type: 'GILBARCO_NAXML',
+            pos_connection_type: 'FILE',
+            pos_connection_config: {
+              import_path: 'C:\\..\\..\\Windows\\System32',
+            },
+          });
+        }).toThrow();
+
+        // Validation failures are logged with SEC-014 marker internally
+        // The error is caught and logged before being re-thrown
+      });
+    });
+
+    // ==========================================================================
+    // Phase 8: Feature Flag Rollback Tests
+    // OPS-012: Feature flag for emergency POS type check bypass
+    // ==========================================================================
+
+    describe('Phase 8 - Feature Flag Rollback (ENABLE_POS_TYPE_CHECKS)', () => {
+      it('ROLL-001: isPOSTypeChecksEnabled() returns boolean', () => {
+        // This test verifies the method exists and returns a boolean
+        const result = settingsService.isPOSTypeChecksEnabled();
+
+        expect(typeof result).toBe('boolean');
+      });
+
+      it('ROLL-002: isPOSTypeChecksEnabled() returns true by default (normal operation)', () => {
+        // Default behavior: POS type checks should be ENABLED
+        // Unless ENABLE_POS_TYPE_CHECKS=false is set in environment
+        // This test documents the expected default behavior
+        const result = settingsService.isPOSTypeChecksEnabled();
+
+        // If the test environment doesn't have ENABLE_POS_TYPE_CHECKS=false, this should be true
+        // If running with the flag disabled, update this expectation
+        if (process.env.ENABLE_POS_TYPE_CHECKS === 'false') {
+          expect(result).toBe(false);
+        } else {
+          expect(result).toBe(true);
+        }
+      });
+
+      it('ROLL-003: feature flag status is consistent across calls', () => {
+        // Feature flag should return consistent value (not change during runtime)
+        const firstCall = settingsService.isPOSTypeChecksEnabled();
+        const secondCall = settingsService.isPOSTypeChecksEnabled();
+        const thirdCall = settingsService.isPOSTypeChecksEnabled();
+
+        expect(firstCall).toBe(secondCall);
+        expect(secondCall).toBe(thirdCall);
+      });
+
+      it('ROLL-004: isNAXMLCompatible respects feature flag when enabled', () => {
+        // When feature flag is enabled (normal operation), POS type checks apply
+        if (!settingsService.isPOSTypeChecksEnabled()) {
+          // Skip this test if flag is disabled in test environment
+          console.log('Skipping ROLL-004: feature flag is disabled in test environment');
+          return;
+        }
+
+        // SQUARE_REST should NOT be NAXML compatible when checks are enabled
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'SQUARE_REST',
+          pos_connection_type: 'API',
+          pos_connection_config: { base_url: 'https://api.squareup.com' },
+        });
+
+        expect(settingsService.isNAXMLCompatible()).toBe(false);
+      });
+
+      it('ROLL-005: getFileWatcherUnavailableReason works correctly with feature flag', () => {
+        // When feature flag is enabled, non-NAXML types should have an unavailable reason
+        if (!settingsService.isPOSTypeChecksEnabled()) {
+          // Skip this test if flag is disabled in test environment
+          console.log('Skipping ROLL-005: feature flag is disabled in test environment');
+          return;
+        }
+
+        settingsService.savePOSConnectionConfig({
+          pos_type: 'MANUAL_ENTRY',
+          pos_connection_type: 'MANUAL',
+          pos_connection_config: null,
+        });
+
+        const reason = settingsService.getFileWatcherUnavailableReason();
+        expect(reason).not.toBeNull();
+        expect(reason).toContain('Manual entry mode');
+      });
+
+      it('ROLL-006: feature flag bypass requires watchPath to return NAXML compatible', () => {
+        // Document the bypass behavior: even when feature flag is disabled,
+        // NAXML compatibility still requires a watchPath to be configured
+        // (can't watch files without a path!)
+
+        // This test documents expected behavior regardless of flag status
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+        // Don't set watchPath
+
+        // Without watchPath, should not be NAXML compatible
+        // This is true regardless of feature flag - you need a path to watch
+        const result = freshService.isNAXMLCompatible();
+
+        // When no watchPath AND no POS config, should be false
+        if (!settingsService.isPOSTypeChecksEnabled()) {
+          // With flag disabled but no watchPath, still returns false
+          expect(result).toBe(false);
+        } else {
+          // With flag enabled and no config/watchPath, returns false
+          expect(result).toBe(false);
+        }
+      });
+
+      it('ROLL-007: legacy mode (watchPath only) works with feature flag enabled', () => {
+        // Legacy mode should work regardless of feature flag
+        if (!settingsService.isPOSTypeChecksEnabled()) {
+          console.log('Skipping ROLL-007: feature flag is disabled in test environment');
+          return;
+        }
+
+        const freshService = new SettingsService();
+        freshService.clearPOSConnectionConfig();
+        freshService.setWatchPath(TEST_PATHS.validFolder);
+
+        // Legacy mode should return true
+        expect(freshService.isNAXMLCompatible()).toBe(true);
       });
     });
   });

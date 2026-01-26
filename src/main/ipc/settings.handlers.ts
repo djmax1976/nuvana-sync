@@ -31,6 +31,7 @@ import {
 import { eventBus, MainEvents } from '../utils/event-bus';
 import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
+import { posConnectionManager } from '../services/pos-connection-manager.service';
 
 // ============================================================================
 // Logger
@@ -44,9 +45,15 @@ const log = createLogger('settings-handlers');
 
 /**
  * API Key validation schema
+ * Version 7.0: Added isInitialSetup flag for terminal config handling
  */
 const ApiKeySchema = z.object({
   apiKey: z.string().min(1, 'API key is required').max(500, 'API key too long'),
+  /**
+   * If true (default), terminal config is MANDATORY and setup is blocked if missing.
+   * If false (resync), terminal is optional - updates if present, keeps existing otherwise.
+   */
+  isInitialSetup: z.boolean().optional().default(true),
 });
 
 /**
@@ -81,6 +88,9 @@ const FolderPathSchema = z.object({
  * Returns combined cloud and local settings.
  * Returns null if not configured.
  *
+ * Phase 4 (POS Selection): Includes fileWatcherStatus with POS compatibility info.
+ * This allows the UI to display appropriate messaging for non-NAXML POS systems.
+ *
  * Channel: settings:get
  */
 registerHandler(
@@ -92,7 +102,26 @@ registerHandler(
       return createSuccessResponse(null);
     }
 
-    return createSuccessResponse(settings);
+    // Phase 4: Add file watcher status based on POS configuration
+    // This provides the UI with information about whether file-based sync
+    // is available for the configured POS type
+    const fileWatcherStatus = {
+      // Whether the current POS type supports NAXML file-based ingestion
+      isNAXMLCompatible: settingsService.isNAXMLCompatible(),
+      // Human-readable reason why file watcher is unavailable (if not compatible)
+      unavailableReason: settingsService.getFileWatcherUnavailableReason(),
+      // For FILE connection types, check posConnectionManager status
+      // This reflects actual connection state, not just configuration
+      isRunning:
+        settingsService.getPOSConnectionType() === 'FILE'
+          ? posConnectionManager.getStatus() === 'CONNECTED'
+          : false,
+    };
+
+    return createSuccessResponse({
+      ...settings,
+      fileWatcherStatus,
+    });
   },
   {
     description: 'Get all application settings',
@@ -193,20 +222,24 @@ registerHandler(
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
     }
 
-    const { apiKey } = parseResult.data;
+    const { apiKey, isInitialSetup } = parseResult.data;
 
-    log.info('API key validation requested');
+    log.info('API key validation requested', { isInitialSetup });
 
-    const result = await settingsService.validateAndSaveApiKey(apiKey);
+    const result = await settingsService.validateAndSaveApiKey(apiKey, { isInitialSetup });
 
     if (!result.valid) {
+      // Version 8.0: Include validation errors (prefer posConnectionConfig errors)
       return createSuccessResponse({
         valid: false,
         error: result.error,
+        terminalValidationErrors: result.terminalValidationErrors,
       });
     }
 
     // Return store info for confirmation step
+    // Version 8.0: Include POS connection configuration (new) and terminal (deprecated)
+    // Phase 4: Include file watcher compatibility info for UI to display appropriate messaging
     return createSuccessResponse({
       valid: true,
       store: {
@@ -217,11 +250,32 @@ registerHandler(
         timezone: result.store?.timezone,
         features: result.store?.features || [],
         lottery: result.store?.lottery,
+        // Version 8.0: POS connection configuration (NEW - preferred)
+        posConnectionConfig: result.store?.posConnectionConfig
+          ? {
+              pos_type: result.store.posConnectionConfig.pos_type,
+              pos_connection_type: result.store.posConnectionConfig.pos_connection_type,
+              pos_connection_config: result.store.posConnectionConfig.pos_connection_config,
+            }
+          : undefined,
+        // Version 7.0: Terminal configuration (DEPRECATED - kept for backward compatibility)
+        terminal: result.store?.terminal
+          ? {
+              connection_type: result.store.terminal.connection_type,
+              pos_type: result.store.terminal.pos_type,
+            }
+          : undefined,
+        // Phase 4 (POS Selection): File watcher compatibility info
+        // Allows UI to show appropriate messaging during setup for non-NAXML POS types
+        fileWatcherCompatible: settingsService.isNAXMLCompatible(),
+        fileWatcherUnavailableReason: settingsService.getFileWatcherUnavailableReason(),
       },
+      // Debug information for troubleshooting
+      _debug: result.store?._debug,
     });
   },
   {
-    description: 'Validate API key and configure store',
+    description: 'Validate API key, configure store, and validate terminal (Version 7.0)',
   }
 );
 
@@ -609,6 +663,149 @@ registerHandler(
   {
     // No local auth required - cloud auth is verified in handler
     description: 'Update local settings as cloud-authenticated support user',
+  }
+);
+
+// ============================================================================
+// POS Connection Configuration (Version 8.0)
+// ============================================================================
+
+/**
+ * POS Connection Config update schema
+ *
+ * SEC-014: Strict validation for connection config updates
+ * Only pos_connection_config is editable (pos_type and pos_connection_type are from cloud)
+ */
+const POSConnectionConfigUpdateSchema = z.object({
+  pos_connection_config: z
+    .union([
+      // FILE connection config
+      z.object({
+        import_path: z.string().max(500).optional(),
+        export_path: z.string().max(500).optional(),
+        file_pattern: z.string().max(100).optional(),
+        poll_interval_seconds: z.number().int().min(1).max(3600).optional(),
+      }),
+      // API connection config
+      z.object({
+        base_url: z.string().url().max(500).optional(),
+        api_key: z.string().max(500).optional(),
+        location_id: z.string().max(100).optional(),
+        merchant_id: z.string().max(100).optional(),
+      }),
+      // NETWORK connection config
+      z.object({
+        host: z.string().max(255).optional(),
+        port: z.number().int().min(1).max(65535).optional(),
+        timeout_ms: z.number().int().min(1000).max(300000).optional(),
+      }),
+      // WEBHOOK connection config
+      z.object({
+        webhook_secret: z.string().max(500).optional(),
+        // IP validation using regex pattern (IPv4 or IPv6)
+        expected_source_ips: z
+          .array(
+            z
+              .string()
+              .regex(
+                /^(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)$|^(?:[0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}$/,
+                'Invalid IP address format'
+              )
+          )
+          .optional(),
+      }),
+      // MANUAL - null config
+      z.null(),
+    ])
+    .nullable(),
+  cloudAuth: z.object({
+    email: z.string().email('Invalid email format'),
+    userId: z.string().min(1, 'User ID required'),
+    roles: z.array(z.string()).min(1, 'Roles required'),
+  }),
+});
+
+/**
+ * Update POS connection configuration as cloud-authenticated support user
+ *
+ * This handler allows cloud-authenticated SUPPORT/SUPERADMIN users to update
+ * the POS connection config (e.g., file paths, API settings) without requiring
+ * local PIN authentication.
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-004: Cloud-based role verification
+ * @security SEC-014: Strict input validation for connection config
+ * @security SEC-017: Audit logging for config changes
+ *
+ * Channel: settings:updatePOSConnectionConfig
+ */
+registerHandler(
+  'settings:updatePOSConnectionConfig',
+  async (_event, input: unknown) => {
+    // API-001: Validate input schema
+    const parseResult = POSConnectionConfigUpdateSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    const { pos_connection_config, cloudAuth } = parseResult.data;
+
+    // API-004: Verify user has required cloud role
+    const userRoles = cloudAuth.roles.map((r) => r.toUpperCase());
+    const hasRequiredRole = SUPPORT_SETTINGS_ROLES.some((role) =>
+      userRoles.includes(role.toUpperCase())
+    );
+
+    if (!hasRequiredRole) {
+      log.warn('Unauthorized POS config update attempt', {
+        userId: cloudAuth.userId,
+        roles: cloudAuth.roles,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.FORBIDDEN,
+        'Access denied. Only SUPPORT or SUPERADMIN roles can update POS connection configuration.'
+      );
+    }
+
+    // SEC-017: Log the config change with cloud user info
+    log.info('POS connection config update by cloud support user', {
+      userId: cloudAuth.userId,
+      email: cloudAuth.email.substring(0, 3) + '***',
+      roles: cloudAuth.roles,
+      hasConnectionConfig: pos_connection_config !== null,
+    });
+
+    try {
+      settingsService.updatePOSConnectionConfig({
+        pos_connection_config: pos_connection_config as Record<string, unknown> | null,
+      });
+
+      log.info('POS connection config updated successfully by support user', {
+        userId: cloudAuth.userId,
+      });
+
+      // Return updated config for UI refresh
+      const updatedConfig = settingsService.getPOSConnectionConfig();
+
+      return createSuccessResponse({
+        success: true,
+        posConnectionConfig: updatedConfig,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.warn('POS connection config update by support user failed', {
+        userId: cloudAuth.userId,
+        error: message,
+      });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, message);
+    }
+  },
+  {
+    // No local auth required - cloud auth is verified in handler
+    description: 'Update POS connection configuration as cloud-authenticated support user',
   }
 );
 
@@ -1004,6 +1201,306 @@ registerHandler(
     description: 'Reset store data with cloud authorization and audit logging',
   }
 );
+
+// ============================================================================
+// Phase 3: POS Connection Management Handlers
+// ============================================================================
+
+/**
+ * Refresh POS Configuration from Cloud
+ *
+ * Fetches the latest POS connection configuration from the cloud API
+ * and updates local storage. Used when:
+ * - Support needs to refresh config after cloud-side changes
+ * - Recovering from configuration errors
+ * - Periodic configuration validation
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-004: Cloud-based role verification (SUPPORT/SUPERADMIN)
+ * @security SEC-014: Response validated against POSConnectionConfigSchema
+ * @security LM-001: Structured logging with correlation ID
+ *
+ * Channel: settings:refreshPOSConfig
+ */
+registerHandler(
+  'settings:refreshPOSConfig',
+  async (_event, input: unknown) => {
+    // API-001: Validate input schema (optional cloud auth for support access)
+    const schema = z.object({
+      cloudAuth: z
+        .object({
+          email: z.string().email(),
+          userId: z.string().min(1),
+          roles: z.array(z.string()).min(1),
+        })
+        .optional(),
+    });
+
+    const parseResult = schema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    const { cloudAuth } = parseResult.data;
+    const correlationId = `refresh-pos-${Date.now()}`;
+
+    // If cloudAuth provided, verify roles (optional - store also needs to refresh)
+    if (cloudAuth) {
+      const hasPermission =
+        cloudAuth.roles.includes('SUPPORT') || cloudAuth.roles.includes('SUPERADMIN');
+
+      if (!hasPermission) {
+        log.warn('Unauthorized POS config refresh attempt', {
+          correlationId,
+          userId: cloudAuth.userId,
+          roles: cloudAuth.roles,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Insufficient permissions. SUPPORT or SUPERADMIN role required.'
+        );
+      }
+    }
+
+    log.info('Refreshing POS configuration from cloud', {
+      correlationId,
+      hasCloudAuth: !!cloudAuth,
+    });
+
+    try {
+      // Fetch POS config from cloud API
+      const response = await cloudApiService.getPOSConfig();
+
+      if (!response.success || !response.data.config) {
+        log.warn('POS configuration not available from cloud', {
+          correlationId,
+          isConfigured: response.data.is_configured,
+        });
+
+        return createSuccessResponse({
+          success: false,
+          message:
+            'POS configuration not available. Please configure POS settings in the cloud portal.',
+          isConfigured: response.data.is_configured,
+          storeId: response.data.store_id,
+        });
+      }
+
+      // Save the config locally
+      settingsService.savePOSConnectionConfig(response.data.config);
+
+      // SEC-017: Audit log for config refresh
+      log.info('POS configuration refreshed successfully', {
+        correlationId,
+        storeId: response.data.store_id,
+        posType: response.data.config.pos_type,
+        connectionType: response.data.config.pos_connection_type,
+        performedBy: cloudAuth ? { userId: cloudAuth.userId } : 'system',
+      });
+
+      return createSuccessResponse({
+        success: true,
+        message: 'POS configuration refreshed successfully',
+        posConnectionConfig: response.data.config,
+        storeId: response.data.store_id,
+        storeName: response.data.store_name,
+        serverTime: response.data.server_time,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to refresh POS configuration', {
+        correlationId,
+        error: message,
+      });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, `Refresh failed: ${message}`);
+    }
+  },
+  {
+    description: 'Refresh POS configuration from cloud API',
+  }
+);
+
+/**
+ * Get POS Connection Status
+ *
+ * Returns the current status of the POS connection including:
+ * - Connection type and POS type
+ * - Connection status (CONNECTED, DISCONNECTED, ERROR, etc.)
+ * - Last health check results
+ * - Configuration details (sanitized)
+ *
+ * @security API-003: Sanitized response (no secrets)
+ * @security LM-001: Structured logging
+ *
+ * Channel: settings:getPOSConnectionStatus
+ */
+registerHandler(
+  'settings:getPOSConnectionStatus',
+  async () => {
+    try {
+      const posConfig = settingsService.getPOSConnectionConfig();
+
+      if (!posConfig) {
+        return createSuccessResponse({
+          status: 'NOT_CONFIGURED',
+          message: 'POS connection not configured',
+          posType: null,
+          connectionType: null,
+          isConfigured: false,
+        });
+      }
+
+      // Get connection config details (sanitized - no secrets)
+      const sanitizedConfig = getSanitizedConnectionConfig(posConfig);
+
+      return createSuccessResponse({
+        status: 'CONFIGURED',
+        message: `${posConfig.pos_type.replace(/_/g, ' ')} configured with ${posConfig.pos_connection_type} connection`,
+        posType: posConfig.pos_type,
+        connectionType: posConfig.pos_connection_type,
+        isConfigured: true,
+        connectionConfig: sanitizedConfig,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to get POS connection status', { error: message });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, `Status check failed: ${message}`);
+    }
+  },
+  {
+    description: 'Get current POS connection status',
+  }
+);
+
+/**
+ * Test POS Connection
+ *
+ * Tests the current POS connection configuration:
+ * - FILE: Checks if import_path exists and is readable
+ * - API: Validates URL and config (live test in Phase 4)
+ * - NETWORK: Validates host/port config (live test in Phase 4)
+ * - WEBHOOK: Validates config (passive mode)
+ * - MANUAL: Always returns success
+ *
+ * @security API-001: Input validation
+ * @security SEC-014: Path validation for FILE type
+ * @security SEC-008: HTTPS validation for API type
+ *
+ * Channel: settings:testPOSConnection
+ */
+registerHandler(
+  'settings:testPOSConnection',
+  async () => {
+    const correlationId = `test-pos-${Date.now()}`;
+
+    try {
+      const posConfig = settingsService.getPOSConnectionConfig();
+
+      if (!posConfig) {
+        return createSuccessResponse({
+          success: false,
+          message: 'POS connection not configured. Please configure POS settings first.',
+          tested: false,
+        });
+      }
+
+      log.info('Testing POS connection', {
+        correlationId,
+        posType: posConfig.pos_type,
+        connectionType: posConfig.pos_connection_type,
+      });
+
+      // Use cloud API service to test connection
+      const testResult = await cloudApiService.testPOSConnection(posConfig);
+
+      log.info('POS connection test completed', {
+        correlationId,
+        success: testResult.success,
+        message: testResult.message,
+      });
+
+      return createSuccessResponse({
+        success: testResult.success,
+        message: testResult.message,
+        tested: true,
+        posType: posConfig.pos_type,
+        connectionType: posConfig.pos_connection_type,
+        details: testResult.details,
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      log.error('POS connection test failed', {
+        correlationId,
+        error: message,
+      });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, `Test failed: ${message}`);
+    }
+  },
+  {
+    description: 'Test current POS connection configuration',
+  }
+);
+
+/**
+ * Helper: Get sanitized connection config (remove secrets)
+ *
+ * @security API-008: Never return secrets in API responses
+ */
+function getSanitizedConnectionConfig(
+  config: {
+    pos_type: string;
+    pos_connection_type: string;
+    pos_connection_config: unknown;
+  } | null
+): Record<string, unknown> | null {
+  if (!config || !config.pos_connection_config) {
+    return null;
+  }
+
+  const connConfig = config.pos_connection_config as Record<string, unknown>;
+
+  switch (config.pos_connection_type) {
+    case 'FILE':
+      return {
+        import_path: connConfig.import_path,
+        export_path: connConfig.export_path,
+        file_pattern: connConfig.file_pattern,
+        poll_interval_seconds: connConfig.poll_interval_seconds,
+      };
+
+    case 'API':
+      return {
+        base_url: connConfig.base_url,
+        // Never expose api_key
+        api_key_configured: !!connConfig.api_key,
+        location_id: connConfig.location_id,
+        merchant_id: connConfig.merchant_id,
+      };
+
+    case 'NETWORK':
+      return {
+        host: connConfig.host,
+        port: connConfig.port,
+        timeout_ms: connConfig.timeout_ms,
+      };
+
+    case 'WEBHOOK':
+      return {
+        // Never expose webhook_secret
+        webhook_secret_configured: !!connConfig.webhook_secret,
+        expected_source_ips: connConfig.expected_source_ips,
+      };
+
+    case 'MANUAL':
+      return { mode: 'manual' };
+
+    default:
+      return null;
+  }
+}
 
 // Log handler registration
 log.info('Settings IPC handlers registered');
