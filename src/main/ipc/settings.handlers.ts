@@ -237,6 +237,24 @@ registerHandler(
       });
     }
 
+    // For resync (not initial setup), restart file watcher to pick up config changes
+    // Initial setup uses completeSetup -> SETUP_COMPLETED which handles this
+    // SEC-017: Audit log for POS config change that affects file watcher
+    if (!isInitialSetup && result.store?.posConnectionConfig) {
+      // Emit file watcher restart event
+      // The startFileWatcher() function already checks:
+      // - isNAXMLCompatible() - only runs for FILE connection + NAXML POS types
+      // - watchPath exists
+      // - database ready
+      // - API key configured
+      // So this is safe to call unconditionally - it will no-op for non-FILE POS types
+      eventBus.emit(MainEvents.FILE_WATCHER_RESTART);
+      log.info('File watcher restart triggered after POS config resync', {
+        posType: result.store.posConnectionConfig.pos_type,
+        connectionType: result.store.posConnectionConfig.pos_connection_type,
+      });
+    }
+
     // Return store info for confirmation step
     // Version 8.0: Include POS connection configuration (new) and terminal (deprecated)
     // Phase 4: Include file watcher compatibility info for UI to display appropriate messaging

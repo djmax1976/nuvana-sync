@@ -668,6 +668,20 @@ if (!gotTheLock) {
     fileWatcher?.stop();
     startFileWatcher();
 
+    // Refresh POS connection manager to update status for UI
+    // This ensures settings:get returns correct isRunning state
+    try {
+      const refreshResult = await posConnectionManager.refreshConfig();
+      log.info('POS connection manager refreshed after file watcher restart', {
+        success: refreshResult.success,
+        configChanged: refreshResult.configChanged,
+      });
+    } catch (err) {
+      log.error('Error refreshing POS connection manager', {
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+
     // After restart, explicitly process existing files to pick up cleared records
     // Small delay to ensure watcher is ready
     setTimeout(async () => {

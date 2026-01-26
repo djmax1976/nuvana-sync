@@ -912,4 +912,218 @@ describe('Settings IPC Handlers', () => {
       );
     });
   });
+
+  // ==========================================================================
+  // File Watcher Restart on API Key Resync Tests
+  // Bug Fix: File watcher should restart after resyncing API key from Settings
+  // ==========================================================================
+
+  describe('settings:validateApiKey - File Watcher Restart', () => {
+    describe('Resync (isInitialSetup: false)', () => {
+      it('FW-RESYNC-001: emits FILE_WATCHER_RESTART when POS config changes to NAXML', async () => {
+        // Arrange
+        vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+          createApiKeyValidationResult({
+            valid: true,
+            store: {
+              storeId: 'test-store',
+              storeName: 'Test Store',
+              companyId: 'test-company',
+              companyName: 'Test Company',
+              posConnectionConfig: {
+                pos_type: POS_TYPES.GILBARCO_PASSPORT,
+                pos_connection_type: POS_CONNECTION_TYPES.FILE,
+                pos_connection_config: { import_path: 'C:\\NAXML' },
+              },
+            },
+          })
+        );
+
+        vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(true);
+        vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
+        vi.mocked(eventBus.emit).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const validateCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+        const handler = validateCall?.[1] as IPCHandler;
+
+        // Act
+        const result = await handler(null, {
+          apiKey: 'nuvpos_sk_test_valid',
+          isInitialSetup: false, // RESYNC
+        });
+
+        // Assert
+        expect(result).toBeDefined();
+        expect(eventBus.emit).toHaveBeenCalledWith('file-watcher:restart');
+      });
+
+      it('FW-RESYNC-002: emits FILE_WATCHER_RESTART when POS config changes to MANUAL', async () => {
+        // Arrange
+        vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+          createApiKeyValidationResult({
+            valid: true,
+            store: {
+              storeId: 'test-store',
+              storeName: 'Test Store',
+              companyId: 'test-company',
+              companyName: 'Test Company',
+              posConnectionConfig: {
+                pos_type: POS_TYPES.MANUAL_ENTRY,
+                pos_connection_type: POS_CONNECTION_TYPES.MANUAL,
+                pos_connection_config: null,
+              },
+            },
+          })
+        );
+
+        vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
+        vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(
+          'Manual entry mode does not use file sync'
+        );
+        vi.mocked(eventBus.emit).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const validateCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+        const handler = validateCall?.[1] as IPCHandler;
+
+        // Act
+        const result = await handler(null, {
+          apiKey: 'nuvpos_sk_test_valid',
+          isInitialSetup: false, // RESYNC
+        });
+
+        // Assert
+        expect(result).toBeDefined();
+        // FILE_WATCHER_RESTART is still emitted - startFileWatcher() will no-op for MANUAL
+        expect(eventBus.emit).toHaveBeenCalledWith('file-watcher:restart');
+      });
+
+      it('FW-RESYNC-003: does NOT emit FILE_WATCHER_RESTART when validation fails', async () => {
+        // Arrange
+        vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+          createApiKeyValidationResult({
+            valid: false,
+            error: 'Invalid API key',
+          })
+        );
+
+        vi.mocked(eventBus.emit).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const validateCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+        const handler = validateCall?.[1] as IPCHandler;
+
+        // Act
+        await handler(null, {
+          apiKey: 'nuvpos_sk_test_invalid',
+          isInitialSetup: false,
+        });
+
+        // Assert
+        expect(eventBus.emit).not.toHaveBeenCalledWith('file-watcher:restart');
+      });
+
+      it('FW-RESYNC-004: does NOT emit FILE_WATCHER_RESTART when no posConnectionConfig', async () => {
+        // Arrange - Mock return value directly without factory to explicitly have no posConnectionConfig
+        vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue({
+          valid: true,
+          store: {
+            valid: true,
+            storeId: 'test-store',
+            storeName: 'Test Store',
+            storePublicId: 'test-store-public-id',
+            companyId: 'test-company',
+            companyName: 'Test Company',
+            timezone: 'America/New_York',
+            stateCode: 'NY',
+            features: [],
+            offlinePermissions: [],
+            offlineToken: 'test-token',
+            offlineTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+            lottery: { enabled: false, binCount: 0 },
+            // Explicitly NO posConnectionConfig
+            posConnectionConfig: undefined,
+          },
+        });
+
+        vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(false);
+        vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
+        vi.mocked(eventBus.emit).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const validateCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+        const handler = validateCall?.[1] as IPCHandler;
+
+        // Act
+        await handler(null, {
+          apiKey: 'nuvpos_sk_test_valid',
+          isInitialSetup: false,
+        });
+
+        // Assert
+        expect(eventBus.emit).not.toHaveBeenCalledWith('file-watcher:restart');
+      });
+    });
+
+    describe('Initial Setup (isInitialSetup: true)', () => {
+      it('FW-SETUP-001: does NOT emit FILE_WATCHER_RESTART during initial setup', async () => {
+        // Arrange
+        vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(
+          createApiKeyValidationResult({
+            valid: true,
+            store: {
+              storeId: 'test-store',
+              storeName: 'Test Store',
+              companyId: 'test-company',
+              companyName: 'Test Company',
+              posConnectionConfig: {
+                pos_type: POS_TYPES.GILBARCO_PASSPORT,
+                pos_connection_type: POS_CONNECTION_TYPES.FILE,
+                pos_connection_config: { import_path: 'C:\\NAXML' },
+              },
+            },
+          })
+        );
+
+        vi.mocked(settingsService.isNAXMLCompatible).mockReturnValue(true);
+        vi.mocked(settingsService.getFileWatcherUnavailableReason).mockReturnValue(null);
+        vi.mocked(eventBus.emit).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const validateCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+        const handler = validateCall?.[1] as IPCHandler;
+
+        // Act
+        await handler(null, {
+          apiKey: 'nuvpos_sk_test_valid',
+          isInitialSetup: true, // INITIAL SETUP
+        });
+
+        // Assert
+        // Should NOT emit - initial setup uses completeSetup -> SETUP_COMPLETED
+        expect(eventBus.emit).not.toHaveBeenCalledWith('file-watcher:restart');
+      });
+    });
+  });
 });

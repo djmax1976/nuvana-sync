@@ -282,36 +282,108 @@ export const SyncStatusSchema = z.enum(['PENDING', 'SUCCESS', 'FAILED', 'IN_PROG
 export type SyncStatus = z.infer<typeof SyncStatusSchema>;
 
 /**
+ * Normalize connection config field names from camelCase to snake_case
+ *
+ * The cloud API may return camelCase (importPath) or snake_case (import_path).
+ * This function normalizes to snake_case for internal consistency.
+ *
+ * IMPORTANT: This function preserves all fields - it only renames known camelCase
+ * fields to snake_case. Unknown fields are passed through unchanged to support
+ * API, NETWORK, and WEBHOOK connection types.
+ *
+ * SEC-014: Uses Object.hasOwn() for prototype pollution protection
+ * API-011: Preserves unknown fields for Zod union validation (Zod rejects invalid)
+ *
+ * @param data - Raw connection config from cloud API
+ * @returns Normalized config with snake_case field names
+ */
+function normalizeConnectionConfig(data: Record<string, unknown>): Record<string, unknown> {
+  // SEC-014: Create clean object to prevent prototype pollution
+  // Only copy own enumerable properties, explicitly excluding __proto__ and constructor
+  const normalized: Record<string, unknown> = {};
+  for (const key of Object.keys(data)) {
+    // SEC-014: Skip dangerous prototype properties
+    if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      continue;
+    }
+    normalized[key] = data[key];
+  }
+
+  // Normalize FILE config fields: import_path / importPath
+  // SEC-014: Use Object.hasOwn for safe property checks
+  if (Object.hasOwn(data, 'importPath') && !Object.hasOwn(data, 'import_path')) {
+    normalized.import_path = data.importPath;
+    delete normalized.importPath;
+  }
+
+  // Normalize FILE config fields: export_path / exportPath
+  if (Object.hasOwn(data, 'exportPath') && !Object.hasOwn(data, 'export_path')) {
+    normalized.export_path = data.exportPath;
+    delete normalized.exportPath;
+  }
+
+  // Normalize FILE config fields: file_format / fileFormat
+  if (Object.hasOwn(data, 'fileFormat') && !Object.hasOwn(data, 'file_format')) {
+    normalized.file_format = data.fileFormat;
+    delete normalized.fileFormat;
+  }
+
+  // Normalize FILE config fields: poll_interval_seconds / pollIntervalSeconds / pollInterval
+  if (!Object.hasOwn(data, 'poll_interval_seconds')) {
+    if (Object.hasOwn(data, 'pollIntervalSeconds')) {
+      normalized.poll_interval_seconds = data.pollIntervalSeconds;
+      delete normalized.pollIntervalSeconds;
+    } else if (Object.hasOwn(data, 'pollInterval')) {
+      normalized.poll_interval_seconds = data.pollInterval;
+      delete normalized.pollInterval;
+    }
+  }
+
+  return normalized;
+}
+
+/**
  * File-based connection configuration schema
  * SEC-014: Path traversal prevention for file paths
  *
  * Used when connection_type === 'FILE'
- * Both import_path and export_path are MANDATORY for FILE connection type
+ * Accepts both camelCase (from cloud API) and snake_case field names
+ *
+ * Note: export_path is optional for read-only ingestion scenarios
  */
-export const FileConnectionConfigSchema = z.object({
-  /** Path where POS exports files for import - MANDATORY */
-  import_path: z
-    .string()
-    .min(1, 'Import path is required for file-based connection')
-    .max(500, 'Import path too long')
-    .refine(
-      (p) => !p.includes('..'),
-      'Import path cannot contain parent directory references (..)'
-    ),
-  /** Path where app exports files for POS import - MANDATORY */
-  export_path: z
-    .string()
-    .min(1, 'Export path is required for file-based connection')
-    .max(500, 'Export path too long')
-    .refine(
-      (p) => !p.includes('..'),
-      'Export path cannot contain parent directory references (..)'
-    ),
-  /** File format (CSV, XML, etc.) */
-  file_format: z.string().max(50).optional(),
-  /** Poll interval in seconds */
-  poll_interval_seconds: z.number().int().min(1).max(3600).optional(),
-});
+export const FileConnectionConfigSchema = z.preprocess(
+  // Preprocess: Normalize camelCase to snake_case
+  (data) => {
+    if (data && typeof data === 'object' && !Array.isArray(data)) {
+      return normalizeConnectionConfig(data as Record<string, unknown>);
+    }
+    return data;
+  },
+  z.object({
+    /** Path where POS exports files for import - MANDATORY */
+    import_path: z
+      .string()
+      .min(1, 'Import path is required for file-based connection')
+      .max(500, 'Import path too long')
+      .refine(
+        (p) => !p.includes('..'),
+        'Import path cannot contain parent directory references (..)'
+      ),
+    /** Path where app exports files for POS import - OPTIONAL for read-only */
+    export_path: z
+      .string()
+      .max(500, 'Export path too long')
+      .refine(
+        (p) => !p.includes('..'),
+        'Export path cannot contain parent directory references (..)'
+      )
+      .optional(),
+    /** File format (CSV, XML, etc.) */
+    file_format: z.string().max(50).optional(),
+    /** Poll interval in seconds */
+    poll_interval_seconds: z.number().int().min(1).max(3600).optional(),
+  })
+);
 export type FileConnectionConfig = z.infer<typeof FileConnectionConfigSchema>;
 
 /**
@@ -630,72 +702,83 @@ export const POSConnectionConfigSchema = z.object({
    * MANDATORY unless pos_connection_type is MANUAL
    *
    * FILE: { import_path, file_pattern?, poll_interval_seconds? }
+   *       (also accepts camelCase: importPath, filePattern, pollIntervalSeconds)
    * API: { base_url, api_key?, location_id?, merchant_id? }
    * NETWORK: { host, port, timeout_ms? }
    * WEBHOOK: { webhook_secret?, expected_source_ips? }
    * MANUAL: null
    */
-  pos_connection_config: z
-    .union([
-      // FILE connection config (NAXML/XMLGateway)
-      z.object({
-        import_path: z
-          .string()
-          .min(1, 'Import path is required for file-based connection')
-          .max(500, 'Import path too long')
-          .refine(
-            (p) => !p.includes('..'),
-            'Import path cannot contain parent directory references (..)'
-          ),
-        export_path: z
-          .string()
-          .max(500, 'Export path too long')
-          .refine(
-            (p) => !p.includes('..'),
-            'Export path cannot contain parent directory references (..)'
-          )
-          .optional(),
-        file_pattern: z.string().max(100).optional(),
-        poll_interval_seconds: z.number().int().min(1).max(3600).optional(),
-      }),
-      // API connection config (Square, Clover, etc.)
-      z.object({
-        base_url: z
-          .string()
-          .min(1, 'Base URL is required for API connection')
-          .max(500, 'Base URL too long')
-          .url('Invalid API base URL format')
-          .refine((url) => {
-            const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
-            if (isLocalhost) return true;
-            return url.startsWith('https://');
-          }, 'API base URL must use HTTPS for security'),
-        api_key: z.string().max(500).optional(),
-        location_id: z.string().max(100).optional(),
-        merchant_id: z.string().max(100).optional(),
-      }),
-      // NETWORK connection config (Direct TCP/IP)
-      z.object({
-        host: z
-          .string()
-          .min(1, 'Host is required for network connection')
-          .max(255, 'Host too long'),
-        port: z
-          .number()
-          .int('Port must be an integer')
-          .min(1, 'Port must be at least 1')
-          .max(65535, 'Port cannot exceed 65535'),
-        timeout_ms: z.number().int().min(1000).max(120000).optional(),
-      }),
-      // WEBHOOK connection config
-      z.object({
-        webhook_secret: z.string().max(500).optional(),
-        expected_source_ips: z.array(z.string().max(45)).optional(),
-      }),
-      // MANUAL - no config needed
-      z.null(),
-    ])
-    .nullable(),
+  pos_connection_config: z.preprocess(
+    // Preprocess: Normalize camelCase to snake_case for FILE config
+    (data) => {
+      if (data && typeof data === 'object' && !Array.isArray(data)) {
+        return normalizeConnectionConfig(data as Record<string, unknown>);
+      }
+      return data;
+    },
+    z
+      .union([
+        // FILE connection config (NAXML/XMLGateway)
+        // Note: Accepts both camelCase (importPath) and snake_case (import_path)
+        z.object({
+          import_path: z
+            .string()
+            .min(1, 'Import path is required for file-based connection')
+            .max(500, 'Import path too long')
+            .refine(
+              (p) => !p.includes('..'),
+              'Import path cannot contain parent directory references (..)'
+            ),
+          export_path: z
+            .string()
+            .max(500, 'Export path too long')
+            .refine(
+              (p) => !p.includes('..'),
+              'Export path cannot contain parent directory references (..)'
+            )
+            .optional(),
+          file_pattern: z.string().max(100).optional(),
+          poll_interval_seconds: z.number().int().min(1).max(3600).optional(),
+        }),
+        // API connection config (Square, Clover, etc.)
+        z.object({
+          base_url: z
+            .string()
+            .min(1, 'Base URL is required for API connection')
+            .max(500, 'Base URL too long')
+            .url('Invalid API base URL format')
+            .refine((url) => {
+              const isLocalhost = url.includes('localhost') || url.includes('127.0.0.1');
+              if (isLocalhost) return true;
+              return url.startsWith('https://');
+            }, 'API base URL must use HTTPS for security'),
+          api_key: z.string().max(500).optional(),
+          location_id: z.string().max(100).optional(),
+          merchant_id: z.string().max(100).optional(),
+        }),
+        // NETWORK connection config (Direct TCP/IP)
+        z.object({
+          host: z
+            .string()
+            .min(1, 'Host is required for network connection')
+            .max(255, 'Host too long'),
+          port: z
+            .number()
+            .int('Port must be an integer')
+            .min(1, 'Port must be at least 1')
+            .max(65535, 'Port cannot exceed 65535'),
+          timeout_ms: z.number().int().min(1000).max(120000).optional(),
+        }),
+        // WEBHOOK connection config
+        z.object({
+          webhook_secret: z.string().max(500).optional(),
+          expected_source_ips: z.array(z.string().max(45)).optional(),
+        }),
+        // MANUAL - no config needed
+        z.null(),
+      ])
+      .nullable()
+  ),
 });
 
 export type POSConnectionConfig = z.infer<typeof POSConnectionConfigSchema>;

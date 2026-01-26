@@ -119,11 +119,12 @@ describe('IPC Handler Registry', () => {
     it('should log handler execution time', async () => {
       const startTime = Date.now();
 
-      // Simulate handler execution
-      await new Promise((resolve) => setTimeout(resolve, 10));
+      // Simulate handler execution (use 15ms to account for timer resolution variance)
+      await new Promise((resolve) => setTimeout(resolve, 15));
 
       const duration = Date.now() - startTime;
 
+      // Allow 5ms tolerance for timer inaccuracy on different systems
       expect(duration).toBeGreaterThanOrEqual(10);
     });
 
