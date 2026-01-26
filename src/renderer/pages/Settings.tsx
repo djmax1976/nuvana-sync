@@ -573,6 +573,31 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
         message: `Store data synced successfully! ${usersSynced} user(s) synced from cloud.`,
       });
 
+      // Step 3: Refresh file watcher status after resync
+      // The backend emits FILE_WATCHER_RESTART which may start/stop the file watcher
+      // Give it a moment to complete, then refresh the status
+      setTimeout(async () => {
+        try {
+          const refreshResult = await window.electronAPI.invoke<{
+            success: boolean;
+            data?: {
+              fileWatcherStatus?: {
+                isNAXMLCompatible: boolean;
+                unavailableReason: string | null;
+                isRunning: boolean;
+              };
+            };
+          }>('settings:get');
+
+          if (refreshResult.success && refreshResult.data?.fileWatcherStatus) {
+            setFileWatcherStatus(refreshResult.data.fileWatcherStatus);
+          }
+        } catch (e) {
+          // Non-critical - file watcher status will update on next page load
+          console.warn('Failed to refresh file watcher status after resync:', e);
+        }
+      }, 1500);
+
       // Clear the API key from the form after successful sync
       setConfig({ ...config, apiKey: '' });
     } catch (error) {
