@@ -15,6 +15,7 @@
     "url": "https://github.com/nuvana/nuvana-sync.git"
   },
   "scripts": {
+    "postinstall": "electron-rebuild",
     "dev": "node scripts/dev.js",
     "dev:app": "npm run build && release/win-unpacked/Nuvana.exe",
     "build": "electron-vite build",

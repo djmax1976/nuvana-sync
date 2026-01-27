@@ -1456,6 +1456,17 @@ export class CloudApiService {
     log.debug('Sending heartbeat to cloud');
 
     try {
+      // Generate device fingerprint (required per API documentation)
+      const machineIdModule = await import('node-machine-id');
+      const machineIdSync =
+        machineIdModule.machineIdSync ||
+        (machineIdModule as { default: { machineIdSync: () => string } }).default?.machineIdSync;
+      if (typeof machineIdSync !== 'function') {
+        log.error('Failed to import machineIdSync function for heartbeat');
+        throw new Error('Device fingerprint generation unavailable');
+      }
+      const deviceFingerprint = machineIdSync();
+
       // API-004: Authenticated request with client timestamp
       // LM-002: No retries for heartbeat - fail fast since it's periodic
       const response = await this.request<{
@@ -1466,6 +1477,8 @@ export class CloudApiService {
         'POST',
         '/api/v1/keys/heartbeat',
         {
+          deviceFingerprint,
+          appVersion: CLIENT_VERSION,
           timestamp: new Date().toISOString(),
         },
         { retries: 0 }
