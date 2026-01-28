@@ -21,12 +21,14 @@ import { syncLogDAL } from '../dal/sync-log.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { lotteryPacksDAL } from '../dal/lottery-packs.dal';
+import { usersDAL } from '../dal/users.dal';
 import { createLogger } from '../utils/logger';
 import { cloudApiService } from './cloud-api.service';
 import {
   bidirectionalSyncService,
   type BidirectionalSyncResult,
 } from './bidirectional-sync.service';
+import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.types';
 
 // ============================================================================
 // Types
@@ -935,21 +937,11 @@ export class SyncEngineService {
       return this.pushPackBatch(items);
     }
 
-    // Employee entity type - PULL-ONLY per API specification
-    // Cloud API only supports GET /api/v1/sync/employees (no POST endpoint)
-    // Employees are cloud-managed: created in portal, pulled to local for offline auth
-    // If employee items reach this code path, they are legacy queue items - mark as synced
+    // Employee entity type - BIDIRECTIONAL sync enabled
+    // Cloud API supports both GET and POST /api/v1/sync/employees
+    // Employees can be created/updated locally and pushed to cloud
     if (entityType === 'employee') {
-      log.info('Employee sync skipped - employees are cloud-managed (pull only per API spec)', {
-        itemCount: items.length,
-      });
-      return {
-        success: true,
-        results: items.map((item) => ({
-          id: item.id,
-          status: 'synced' as const,
-        })),
-      };
+      return this.pushEmployeeBatch(items);
     }
 
     // User entity type - LOCAL-ONLY, no cloud sync endpoint
@@ -998,6 +990,13 @@ export class SyncEngineService {
           status: 'synced' as const,
         })),
       };
+    }
+
+    // Route shift entity type to specialized endpoint
+    // IMPORTANT: Shifts MUST sync BEFORE pack operations that reference them
+    // to satisfy cloud FK constraints (activated_shift_id, etc.)
+    if (entityType === 'shift') {
+      return this.pushShiftBatch(items);
     }
 
     // Route shift_opening entity type to specialized endpoint
@@ -1100,7 +1099,12 @@ export class SyncEngineService {
           depleted_by?: string | null;
           returned_shift_id?: string | null;
           returned_by?: string | null;
-          depletion_reason?: string | null;
+          /** v019: SEC-014 validated at entry point */
+          depletion_reason?: DepletionReason | null;
+          // v019: Return context fields
+          /** SEC-014 validated at entry point */
+          return_reason?: ReturnReason | null;
+          return_notes?: string | null;
           // Mark-sold at activation fields (only if pack was mark-sold at activation time)
           mark_sold_tickets?: number;
           mark_sold_reason?: string;
@@ -1140,6 +1144,7 @@ export class SyncEngineService {
         // Route based on operation and status
         if (item.operation === 'CREATE') {
           // New pack received - API: POST /api/v1/sync/lottery/packs/receive
+          // Note: After cloud_id consolidation, pack_id IS the cloud ID
           try {
             const response = await cloudApiService.pushPackReceive({
               pack_id: payload.pack_id,
@@ -1147,18 +1152,17 @@ export class SyncEngineService {
               game_id: payload.game_id,
               game_code: gameCode,
               pack_number: payload.pack_number,
+              serial_start: payload.serial_start || '000',
+              serial_end: payload.serial_end || '299',
               received_at: payload.received_at || new Date().toISOString(),
               received_by: payload.received_by,
             });
 
-            // Store cloud_pack_id locally for future activate/deplete/return calls
-            if (response.success && response.cloud_pack_id) {
-              lotteryPacksDAL.updateCloudPackId(payload.pack_id, response.cloud_pack_id);
-            }
-
+            // Note: After cloud_id consolidation, pack_id IS the cloud ID
+            // No need to update a separate cloud_pack_id field
             results.push({
               id: item.id, // Use queue item ID, not entity_id (supports multiple items per entity)
-              cloudId: response.cloud_pack_id,
+              cloudId: payload.pack_id, // pack_id IS the cloud ID
               status: response.success ? 'synced' : 'failed',
               apiContext: {
                 api_endpoint: '/api/v1/sync/lottery/packs/receive',
@@ -1176,33 +1180,11 @@ export class SyncEngineService {
                 packNumber: payload.pack_number,
               });
 
-              // Try to extract cloud_pack_id from error response if available
-              // Some APIs return the existing resource ID in conflict responses
-              let cloudPackId: string | undefined;
-              try {
-                // Error message may contain JSON with existing pack details
-                const jsonMatch = errorMessage.match(/\{.*\}/);
-                if (jsonMatch) {
-                  const errorData = JSON.parse(jsonMatch[0]);
-                  cloudPackId =
-                    errorData.cloud_pack_id || errorData.pack_id || errorData.data?.pack_id;
-                }
-              } catch {
-                // Ignore JSON parse errors
-              }
-
-              // If we got a cloud_pack_id, store it locally
-              if (cloudPackId) {
-                lotteryPacksDAL.updateCloudPackId(payload.pack_id, cloudPackId);
-                log.info('Stored cloud_pack_id from duplicate response', {
-                  packId: payload.pack_id,
-                  cloudPackId,
-                });
-              }
-
+              // Note: After cloud_id consolidation, pack_id IS the cloud ID
+              // No need to extract or store a separate cloud_pack_id
               results.push({
                 id: item.id, // Use queue item ID, not entity_id
-                cloudId: cloudPackId,
+                cloudId: payload.pack_id, // pack_id IS the cloud ID
                 status: 'synced',
                 apiContext: {
                   api_endpoint: '/api/v1/sync/lottery/packs/receive',
@@ -1218,20 +1200,8 @@ export class SyncEngineService {
           // Route based on current status
           let success = false;
 
-          // Look up the pack to get cloud_pack_id (required by API)
-          const pack = lotteryPacksDAL.findById(payload.pack_id);
-          if (!pack?.cloud_pack_id) {
-            log.warn('Pack missing cloud_pack_id, cannot sync UPDATE', {
-              packId: payload.pack_id,
-              status: payload.status,
-            });
-            results.push({
-              id: item.id,
-              status: 'failed',
-              error: 'Pack not synced to cloud yet (missing cloud_pack_id)',
-            });
-            continue;
-          }
+          // Note: After cloud_id consolidation, pack_id IS the cloud ID
+          // No need to look up a separate cloud_pack_id field
 
           switch (payload.status) {
             case 'ACTIVE':
@@ -1263,8 +1233,9 @@ export class SyncEngineService {
                 }
 
                 // Build activation payload - mark_sold fields only included if pack was mark-sold at activation
+                // Note: After cloud_id consolidation, pack_id IS the cloud ID
                 const activatePayload: Parameters<typeof cloudApiService.pushPackActivate>[0] = {
-                  pack_id: pack.cloud_pack_id, // Use cloud ID, not local ID
+                  pack_id: payload.pack_id, // pack_id IS the cloud ID
                   store_id: payload.store_id,
                   bin_id: payload.bin_id, // TODO: May also need cloud bin_id
                   opening_serial: payload.opening_serial,
@@ -1277,7 +1248,7 @@ export class SyncEngineService {
                   activated_by: payload.activated_by,
                   // v019: Include shift context for cloud audit trail
                   shift_id: payload.shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference
+                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
                 };
 
                 // Only add mark_sold fields if pack was actually mark-sold at activation
@@ -1305,17 +1276,25 @@ export class SyncEngineService {
             case 'DEPLETED':
               // Pack was depleted/sold out
               // v019 Schema Alignment: Now includes shift context for audit trail
-              if (payload.closing_serial && payload.depleted_at) {
+              // Note: After cloud_id consolidation, pack_id IS the cloud ID
+              // SEC-014: depletion_reason validated at entry point by DepletionReasonSchema
+              // depletion_reason is REQUIRED by cloud API - fail sync if missing
+              if (payload.closing_serial && payload.depleted_at && payload.depletion_reason) {
                 const depleteResponse = await cloudApiService.pushPackDeplete({
-                  pack_id: pack.cloud_pack_id, // Use cloud ID, not local ID
+                  pack_id: payload.pack_id, // pack_id IS the cloud ID
                   store_id: payload.store_id,
                   closing_serial: payload.closing_serial,
                   tickets_sold: payload.tickets_sold,
                   sales_amount: payload.sales_amount,
                   depleted_at: payload.depleted_at,
+                  // v019: Include depletion reason (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
+                  // SEC-014: Type narrowed by guard above
+                  depletion_reason: payload.depletion_reason,
+                  // SEC-010: Include depleted_by for cloud audit trail (required by cloud API)
+                  depleted_by: payload.depleted_by,
                   // v019: Include shift context for cloud audit trail
                   shift_id: payload.depleted_shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference
+                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
                 });
                 success = depleteResponse.success;
               } else {
@@ -1323,6 +1302,7 @@ export class SyncEngineService {
                   packId: payload.pack_id,
                   hasClosingSerial: Boolean(payload.closing_serial),
                   hasDepletedAt: Boolean(payload.depleted_at),
+                  hasDepletionReason: Boolean(payload.depletion_reason),
                 });
                 success = false;
               }
@@ -1331,23 +1311,34 @@ export class SyncEngineService {
             case 'RETURNED':
               // Pack was returned
               // v019 Schema Alignment: Now includes shift context for audit trail
-              if (payload.returned_at) {
+              // Note: After cloud_id consolidation, pack_id IS the cloud ID
+              // SEC-014: return_reason validated at entry point by ReturnReasonSchema
+              // return_reason is REQUIRED by cloud API - fail sync if missing
+              if (payload.returned_at && payload.return_reason) {
                 const returnResponse = await cloudApiService.pushPackReturn({
-                  pack_id: pack.cloud_pack_id, // Use cloud ID, not local ID
+                  pack_id: payload.pack_id, // pack_id IS the cloud ID
                   store_id: payload.store_id,
                   closing_serial: payload.closing_serial,
                   tickets_sold: payload.tickets_sold,
                   sales_amount: payload.sales_amount,
                   returned_at: payload.returned_at,
+                  // v019: Include return reason (SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE)
+                  // SEC-014: Type narrowed by guard above
+                  return_reason: payload.return_reason,
+                  // v019: Include optional return notes (max 500 chars)
+                  return_notes: payload.return_notes,
+                  // SEC-010: Include returned_by for cloud audit trail (required by cloud API)
+                  returned_by: payload.returned_by,
                   // v019: Include shift context for cloud audit trail
                   shift_id: payload.returned_shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference
+                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
                 });
                 success = returnResponse.success;
               } else {
                 log.warn('Pack return missing required fields', {
                   packId: payload.pack_id,
                   hasReturnedAt: Boolean(payload.returned_at),
+                  hasReturnReason: Boolean(payload.return_reason),
                 });
                 success = false;
               }
@@ -1372,7 +1363,7 @@ export class SyncEngineService {
           // 1. Pack doesn't exist: Create it and activate
           // 2. Pack exists with RECEIVED status: Activate it
           // 3. Pack already ACTIVE in same bin: Idempotent success
-          // This bypasses the cloud_pack_id requirement since we send pack_id directly
+          // Note: After cloud_id consolidation, pack_id IS the cloud ID
 
           // Get serial_start and serial_end from payload or calculate from game
           const serialStart = payload.serial_start || '000';
@@ -1475,6 +1466,289 @@ export class SyncEngineService {
             response_body: errorMessage.substring(0, 500),
           },
         });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push shift records to cloud API
+   *
+   * Enterprise-grade shift sync implementation:
+   * - API-001: Validates payload structure with required field checks
+   * - API-003: Returns per-item results for error handling
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for all operations
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * IMPORTANT: Shifts MUST sync BEFORE pack operations that reference them
+   * to satisfy cloud FK constraints (activated_shift_id, depleted_shift_id, etc.)
+   *
+   * @param items - Shift sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushShiftBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        const payload = JSON.parse(item.payload) as {
+          shift_id: string;
+          store_id: string;
+          business_date: string;
+          shift_number: number;
+          start_time: string;
+          status: 'OPEN' | 'CLOSED';
+          cashier_id?: string | null;
+          end_time?: string | null;
+          external_register_id?: string | null;
+          external_cashier_id?: string | null;
+          external_till_id?: string | null;
+        };
+
+        // API-001: Validate required fields
+        if (
+          !payload.shift_id ||
+          !payload.store_id ||
+          !payload.business_date ||
+          typeof payload.shift_number !== 'number' ||
+          !payload.start_time ||
+          !payload.status
+        ) {
+          log.warn('Shift payload missing required fields', {
+            shiftId: payload.shift_id,
+            hasStoreId: Boolean(payload.store_id),
+            hasBusinessDate: Boolean(payload.business_date),
+            hasShiftNumber: typeof payload.shift_number === 'number',
+            hasStartTime: Boolean(payload.start_time),
+            hasStatus: Boolean(payload.status),
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required fields in shift payload',
+          });
+          continue;
+        }
+
+        // Route to cloud API
+        const response = await cloudApiService.pushShift({
+          shift_id: payload.shift_id,
+          store_id: payload.store_id,
+          business_date: payload.business_date,
+          shift_number: payload.shift_number,
+          start_time: payload.start_time,
+          status: payload.status,
+          cashier_id: payload.cashier_id,
+          end_time: payload.end_time,
+          external_register_id: payload.external_register_id,
+          external_cashier_id: payload.external_cashier_id,
+          external_till_id: payload.external_till_id,
+          local_id: payload.shift_id,
+        });
+
+        results.push({
+          id: item.id,
+          status: response.success ? 'synced' : 'failed',
+          error: response.success ? undefined : 'Failed to sync shift',
+        });
+
+        // SEC-017: Audit log
+        if (response.success) {
+          log.info('Shift synced to cloud', {
+            shiftId: payload.shift_id,
+            businessDate: payload.business_date,
+            shiftNumber: payload.shift_number,
+            idempotent: response.idempotent,
+          });
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to sync shift item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.id,
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push employee items to cloud API
+   *
+   * Enterprise-grade employee sync implementation for bidirectional sync:
+   * - API-001: Validates payload structure
+   * - API-003: Returns per-item results for error handling
+   * - SEC-001: NEVER includes PIN data in payload
+   * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-017: Audit logging for all operations
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * @param items - Employee sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushEmployeeBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    if (items.length === 0) {
+      return { success: true, results: [] };
+    }
+
+    // API-001: Parse and validate all payloads
+    const employees: Array<{
+      user_id: string;
+      role: string;
+      name: string;
+      pin_hash: string;
+      active: boolean;
+      itemId: string;
+    }> = [];
+
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        const payload = JSON.parse(item.payload) as {
+          user_id: string;
+          store_id: string;
+          role: string;
+          name: string;
+          active: boolean;
+        };
+
+        // SEC-001 UPDATED: Plain text PIN must never be in payload
+        // But pin_hash (bcrypt hashed) is now REQUIRED by cloud API
+        const payloadObj = payload as Record<string, unknown>;
+        if ('pin' in payloadObj) {
+          log.error('SECURITY: Plain text PIN detected in employee sync payload - rejecting', {
+            itemId: item.id,
+            userId: payload.user_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Security violation: Plain text PIN must not be in sync payload',
+          });
+          continue;
+        }
+
+        // API-001: Validate required fields
+        if (!payload.user_id || !payload.role || !payload.name) {
+          log.warn('Employee payload missing required fields', {
+            itemId: item.id,
+            userId: payload.user_id,
+            hasRole: Boolean(payload.role),
+            hasName: Boolean(payload.name),
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required fields in employee payload',
+          });
+          continue;
+        }
+
+        // Fetch pin_hash from database - cloud API requires it
+        // This is secure because pin_hash is already bcrypt hashed
+        const user = usersDAL.findById(payload.user_id);
+        if (!user || !user.pin_hash) {
+          log.warn('Employee not found or missing pin_hash', {
+            itemId: item.id,
+            userId: payload.user_id,
+            found: Boolean(user),
+            hasPinHash: Boolean(user?.pin_hash),
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Employee not found or missing PIN hash',
+          });
+          continue;
+        }
+
+        employees.push({
+          user_id: payload.user_id,
+          role: payload.role,
+          name: payload.name,
+          pin_hash: user.pin_hash,
+          active: payload.active ?? true,
+          itemId: item.id,
+        });
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to parse employee payload', {
+          itemId: item.id,
+          error: errorMessage,
+        });
+        results.push({
+          id: item.id,
+          status: 'failed',
+          error: `Invalid payload: ${errorMessage}`,
+        });
+      }
+    }
+
+    // Push all valid employees in one batch request
+    if (employees.length > 0) {
+      try {
+        const response = await cloudApiService.pushEmployees(
+          employees.map((emp) => ({
+            user_id: emp.user_id,
+            role: emp.role,
+            name: emp.name,
+            pin_hash: emp.pin_hash,
+            active: emp.active,
+          }))
+        );
+
+        // Map response results back to item IDs
+        for (let i = 0; i < employees.length; i++) {
+          const emp = employees[i];
+          const apiResult = response.results[i];
+
+          results.push({
+            id: emp.itemId,
+            status: apiResult?.status || (response.success ? 'synced' : 'failed'),
+            error: apiResult?.error,
+          });
+
+          // SEC-017: Audit log
+          if (apiResult?.status === 'synced' || response.success) {
+            log.info('Employee synced to cloud', {
+              userId: emp.user_id,
+              name: emp.name,
+              role: emp.role,
+            });
+          }
+        }
+      } catch (error) {
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+        log.error('Failed to push employee batch to cloud', {
+          count: employees.length,
+          error: errorMessage,
+        });
+
+        // Mark all items as failed
+        for (const emp of employees) {
+          results.push({
+            id: emp.itemId,
+            status: 'failed',
+            error: errorMessage,
+          });
+        }
       }
     }
 

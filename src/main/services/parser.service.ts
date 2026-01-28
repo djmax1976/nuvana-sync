@@ -74,8 +74,13 @@ import {
 import { withTransaction } from './database.service';
 import { settingsService } from './settings.service';
 import { eventBus, MainEvents } from '../utils/event-bus';
-import { determineShiftCloseType } from '../ipc/shifts.handlers';
+import {
+  determineShiftCloseType,
+  buildShiftSyncPayload,
+  SHIFT_SYNC_PRIORITY,
+} from '../ipc/shifts.handlers';
 import type { ShiftClosedEvent } from '../../shared/types/shift-events';
+import { syncQueueDAL } from '../dal/sync-queue.dal';
 
 // ============================================================================
 // Types
@@ -1050,6 +1055,17 @@ export class ParserService {
               endTime: `${movementHeader.endDate}T${movementHeader.endTime}`,
             });
             shiftId = shift.shift_id;
+
+            // SEC-017: Enqueue newly created closed shift for cloud sync
+            // CRITICAL: Shift MUST sync BEFORE pack operations that reference it
+            syncQueueDAL.enqueue({
+              entity_type: 'shift',
+              entity_id: shift.shift_id,
+              operation: 'CREATE',
+              store_id: this.storeId,
+              priority: SHIFT_SYNC_PRIORITY,
+              payload: buildShiftSyncPayload(shift),
+            });
           }
         }
       } else {
@@ -1064,6 +1080,19 @@ export class ParserService {
           startTime: `${movementHeader.beginDate}T${movementHeader.beginTime}`,
         });
         shiftId = shift.shift_id;
+
+        // SEC-017: Enqueue shift for cloud sync if not already pending
+        // Avoids duplicate enqueue for shifts that already exist
+        if (!syncQueueDAL.hasPendingSync('shift', shift.shift_id)) {
+          syncQueueDAL.enqueue({
+            entity_type: 'shift',
+            entity_id: shift.shift_id,
+            operation: 'CREATE',
+            store_id: this.storeId,
+            priority: SHIFT_SYNC_PRIORITY,
+            payload: buildShiftSyncPayload(shift),
+          });
+        }
 
         // Link till mapping to shift
         if (tillMappingId) {

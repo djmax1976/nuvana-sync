@@ -40,7 +40,6 @@ export interface LotteryBusinessDay extends StoreEntity {
   total_sales: number;
   total_packs_sold: number;
   total_packs_activated: number;
-  cloud_day_id: string | null;
   /** v034 API Alignment: Cloud day summary reference */
   day_summary_id: string | null;
   synced_at: string | null;

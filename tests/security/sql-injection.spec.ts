@@ -310,16 +310,18 @@ describe('SQL Injection Protection', () => {
       });
     });
 
-    describe('findByCloudId', () => {
-      it.each(INJECTION_PAYLOADS)('should safely handle malicious cloudId: %s', (payload) => {
+    // Note: After cloud_id consolidation, user_id IS the cloud ID
+    // findByCloudId is removed, users are found by findById (which uses user_id)
+    describe('findById', () => {
+      it.each(INJECTION_PAYLOADS)('should safely handle malicious userId: %s', (payload) => {
         mockPrepare.mockReturnValue({
           get: vi.fn().mockReturnValue(undefined),
         });
 
-        const result = dal.findByCloudId(payload);
+        const result = dal.findById(payload);
 
         const query = mockPrepare.mock.calls[0][0];
-        expect(query).toContain('WHERE cloud_user_id = ?');
+        expect(query).toContain('WHERE user_id = ?');
         expect(query).not.toContain(payload);
 
         expect(result).toBeUndefined();

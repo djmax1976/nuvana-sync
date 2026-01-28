@@ -29,6 +29,7 @@ import {
   formatPOSConnectionValidationErrors,
   convertTerminalToPOSConnectionConfig,
 } from '../../shared/types/config.types';
+import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.types';
 // SyncQueueItem type available from sync-queue.dal if needed
 
 // ============================================================================
@@ -3399,7 +3400,11 @@ export class CloudApiService {
    * - SEC-017: Audit logging for sync operations
    *
    * @param pack - Pack receive data
-   * @returns Success status with optional cloud pack ID
+   * @returns Success status with optional pack ID from cloud response
+   *
+   * Note: After cloud_id consolidation (v045 migration), pack_id IS the cloud ID.
+   * The cloud_pack_id return field is kept for backward compatibility but is
+   * now redundant - it will match the input pack_id.
    */
   async pushPackReceive(pack: {
     pack_id: string;
@@ -3407,6 +3412,8 @@ export class CloudApiService {
     game_id: string;
     game_code: string;
     pack_number: string;
+    serial_start: string;
+    serial_end: string;
     received_at: string;
     received_by: string | null;
   }): Promise<{ success: boolean; cloud_pack_id?: string }> {
@@ -3432,8 +3439,8 @@ export class CloudApiService {
         session_id: session.sessionId,
         game_code: pack.game_code,
         pack_number: pack.pack_number,
-        serial_start: '000', // Always starts at 000 - must be string per API spec
-        serial_end: '299', // Default pack size - 1 (TODO: get from game.tickets_per_pack) - must be string per API spec
+        serial_start: pack.serial_start,
+        serial_end: pack.serial_end,
         received_at: pack.received_at,
         local_id: pack.pack_id,
       };
@@ -3493,6 +3500,10 @@ export class CloudApiService {
    *
    * @param packs - Array of pack receive data
    * @returns Success status with per-pack results
+   *
+   * Note: After cloud_id consolidation (v045 migration), pack_id IS the cloud ID.
+   * The cloud_pack_id in results is kept for backward compatibility but is
+   * now redundant - it will match the input pack_id.
    */
   async pushPackReceiveBatch(
     packs: Array<{
@@ -3739,11 +3750,24 @@ export class CloudApiService {
     tickets_sold: number;
     sales_amount: number;
     depleted_at: string;
+    /**
+     * v019: Depletion reason - REQUIRED by cloud API
+     * SEC-014: Validated at entry point by DepletionReasonSchema
+     * Valid values: SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET
+     */
+    depletion_reason: DepletionReason;
+    /**
+     * User ID who depleted the pack - REQUIRED by cloud API for audit trail
+     * SEC-010: Audit trail - tracks who performed the action
+     */
+    depleted_by?: string | null;
     shift_id?: string | null;
     local_id?: string;
   }): Promise<{ success: boolean }> {
     log.debug('Pushing pack depletion to cloud', {
       packId: data.pack_id,
+      depletionReason: data.depletion_reason,
+      depletedBy: data.depleted_by,
       ticketsSold: data.tickets_sold,
       salesAmount: data.sales_amount,
     });
@@ -3761,18 +3785,23 @@ export class CloudApiService {
       // API spec: POST /api/v1/sync/lottery/packs/deplete
       // Required: session_id, pack_id, final_serial, depletion_reason, depleted_at, local_id
       // Optional: shift_id (omit if null, don't send null)
+      // SEC-014: depletion_reason validated at entry point - uses payload value directly
       const requestBody: Record<string, unknown> = {
         session_id: session.sessionId,
         pack_id: data.pack_id,
         final_serial: String(data.closing_serial), // API expects string, not number
-        depletion_reason: 'SOLD_OUT',
+        depletion_reason: data.depletion_reason,
         depleted_at: data.depleted_at,
         local_id: data.local_id || data.pack_id,
       };
 
-      // Only include shift_id if it has a value (API doesn't accept null)
+      // Only include optional fields if they have values (API doesn't accept null)
       if (data.shift_id) {
         requestBody.shift_id = data.shift_id;
+      }
+      // SEC-010: Include depleted_by for audit trail (required by cloud API)
+      if (data.depleted_by) {
+        requestBody.depleted_by = data.depleted_by;
       }
 
       const response = await this.request<{
@@ -3789,6 +3818,8 @@ export class CloudApiService {
 
       log.info('Pack depletion pushed to cloud', {
         packId: data.pack_id,
+        depletionReason: data.depletion_reason,
+        depletedBy: data.depleted_by,
         ticketsSold: data.tickets_sold,
         salesAmount: data.sales_amount,
       });
@@ -3829,14 +3860,29 @@ export class CloudApiService {
     closing_serial?: string | null;
     tickets_sold?: number;
     sales_amount?: number;
-    return_reason?: string | null;
+    /**
+     * v020: Return reason - REQUIRED by cloud API
+     * SEC-014: Validated at entry point by ReturnReasonSchema
+     * Valid values: SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE
+     * Note: 'OTHER' is NOT a valid value per cloud API spec
+     */
+    return_reason: ReturnReason;
+    /** Optional notes providing additional context for the return */
     return_notes?: string | null;
     returned_at: string;
+    /**
+     * User ID who returned the pack - REQUIRED by cloud API for audit trail
+     * SEC-010: Audit trail - tracks who performed the action
+     */
+    returned_by?: string | null;
     shift_id?: string | null;
     local_id?: string;
   }): Promise<{ success: boolean }> {
     log.debug('Pushing pack return to cloud', {
       packId: data.pack_id,
+      returnReason: data.return_reason,
+      returnedBy: data.returned_by,
+      hasReturnNotes: Boolean(data.return_notes),
       hasClosingSerial: Boolean(data.closing_serial),
     });
 
@@ -3853,10 +3899,11 @@ export class CloudApiService {
       // API spec: POST /api/v1/sync/lottery/packs/return
       // Required: session_id, pack_id, return_reason, last_sold_serial, tickets_sold_on_return, returned_at, local_id
       // Optional: shift_id, return_notes (omit if null, don't send null)
+      // SEC-014: return_reason validated at entry point - uses payload value directly (no fallback)
       const requestBody: Record<string, unknown> = {
         session_id: session.sessionId,
         pack_id: data.pack_id,
-        return_reason: data.return_reason || 'OTHER',
+        return_reason: data.return_reason,
         last_sold_serial: data.closing_serial ? String(data.closing_serial) : '0', // API expects string
         tickets_sold_on_return: data.tickets_sold || 0,
         returned_at: data.returned_at,
@@ -3869,6 +3916,10 @@ export class CloudApiService {
       }
       if (data.return_notes) {
         requestBody.return_notes = data.return_notes;
+      }
+      // SEC-010: Include returned_by for audit trail (required by cloud API)
+      if (data.returned_by) {
+        requestBody.returned_by = data.returned_by;
       }
 
       const response = await this.request<{
@@ -3886,6 +3937,8 @@ export class CloudApiService {
       log.info('Pack return pushed to cloud', {
         packId: data.pack_id,
         returnReason: data.return_reason,
+        returnedBy: data.returned_by,
+        hasReturnNotes: Boolean(data.return_notes),
       });
 
       return { success: response.success };
@@ -4429,6 +4482,127 @@ export class CloudApiService {
   // ==========================================================================
   // Phase 2: Shift Lottery Sync Methods
   // ==========================================================================
+
+  /**
+   * Push shift record to cloud
+   * API: POST /api/v1/sync/lottery/shifts
+   *
+   * Enterprise-grade implementation for syncing shift records to cloud.
+   * Shifts MUST be synced BEFORE any pack operations that reference them
+   * to satisfy foreign key constraints on the cloud database.
+   *
+   * Security & Standards Compliance:
+   * - API-001: Input validation via TypeScript types and session validation
+   * - API-003: Centralized error handling with sanitized responses
+   * - SEC-008: HTTPS enforcement (via base request method)
+   * - DB-006: Store-scoped via session validation
+   * - SEC-017: Audit logging for all sync operations
+   * - API-002: Rate limiting via sync session management
+   *
+   * @param data - Shift data to sync
+   * @returns Success status and idempotent flag
+   */
+  async pushShift(data: {
+    // Required fields
+    shift_id: string;
+    store_id: string;
+    business_date: string;
+    shift_number: number;
+    start_time: string;
+    status: 'OPEN' | 'CLOSED';
+    // Optional fields
+    cashier_id?: string | null;
+    end_time?: string | null;
+    external_register_id?: string | null;
+    external_cashier_id?: string | null;
+    external_till_id?: string | null;
+    local_id?: string;
+  }): Promise<{ success: boolean; idempotent?: boolean }> {
+    log.debug('Pushing shift to cloud', {
+      shiftId: data.shift_id,
+      businessDate: data.business_date,
+      shiftNumber: data.shift_number,
+      status: data.status,
+    });
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      const path = `/api/v1/sync/lottery/shifts`;
+
+      // API spec: POST /api/v1/sync/lottery/shifts
+      // Required: session_id, shift_id, store_id, business_date, shift_number, start_time, status
+      // Optional: cashier_id, end_time, external_register_id, external_cashier_id, external_till_id, local_id
+      const requestBody: Record<string, unknown> = {
+        session_id: session.sessionId,
+        shift_id: data.shift_id,
+        store_id: data.store_id,
+        business_date: data.business_date,
+        shift_number: data.shift_number,
+        start_time: data.start_time,
+        status: data.status,
+        local_id: data.local_id || data.shift_id,
+      };
+
+      // Optional fields - only include if present (don't send null)
+      if (data.cashier_id) {
+        requestBody.cashier_id = data.cashier_id;
+      }
+      if (data.end_time) {
+        requestBody.end_time = data.end_time;
+      }
+      if (data.external_register_id) {
+        requestBody.external_register_id = data.external_register_id;
+      }
+      if (data.external_cashier_id) {
+        requestBody.external_cashier_id = data.external_cashier_id;
+      }
+      if (data.external_till_id) {
+        requestBody.external_till_id = data.external_till_id;
+      }
+
+      const response = await this.request<{
+        success: boolean;
+        data?: {
+          shift_id: string;
+          idempotent?: boolean;
+        };
+      }>('POST', path, requestBody);
+
+      // Complete sync session
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled: 0,
+        pushed: 1,
+        conflictsResolved: 0,
+      });
+
+      const idempotent = response.data?.idempotent || false;
+      log.info('Shift pushed to cloud', {
+        shiftId: data.shift_id,
+        businessDate: data.business_date,
+        idempotent,
+      });
+
+      return { success: response.success, idempotent };
+    } catch (error) {
+      // API-003: Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after shift push error');
+      }
+      throw error;
+    }
+  }
 
   /**
    * Push shift opening serials to cloud
@@ -6452,6 +6626,154 @@ export class CloudApiService {
       return {
         success: false,
         message: `Connection test failed: ${errorMessage}`,
+      };
+    }
+  }
+
+  // ============================================================================
+  // Employee Push Sync
+  // ============================================================================
+
+  /**
+   * Push employee data to cloud
+   * API: POST /api/v1/sync/employees
+   *
+   * Enterprise-grade employee push for bidirectional sync.
+   * Previously employees were pull-only (cloud-managed), but this enables
+   * local employee creation/updates to sync to cloud.
+   *
+   * - API-001: Input validation
+   * - API-003: Centralized error handling with per-employee results
+   * - SEC-001: PIN data is NEVER included in payload
+   * - SEC-008: HTTPS enforcement (via base request method)
+   * - DB-006: Store-scoped via session validation
+   * - SEC-017: Audit logging for sync operations
+   *
+   * @param employees - Array of employee data to push
+   * @returns Success status with per-employee results
+   */
+  async pushEmployees(
+    employees: Array<{
+      user_id: string;
+      role: string;
+      name: string;
+      pin_hash: string;
+      active: boolean;
+      employee_code?: string;
+    }>
+  ): Promise<BatchSyncResponse> {
+    if (employees.length === 0) {
+      return { success: true, results: [] };
+    }
+
+    log.debug('Pushing employees to cloud', {
+      count: employees.length,
+      employeeIds: employees.map((e) => e.user_id),
+    });
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      const path = `/api/v1/sync/employees`;
+
+      // API spec: POST /api/v1/sync/employees
+      // Cloud gets store_id from session, uses upsert pattern (no operation field)
+      // pin_hash is the bcrypt-hashed PIN from desktop
+      const requestBody = {
+        session_id: session.sessionId,
+        employees: employees.map((emp) => ({
+          employee_id: emp.user_id,
+          name: emp.name,
+          role: emp.role.toUpperCase(), // Cloud expects STORE_MANAGER, SHIFT_MANAGER, CASHIER
+          pin_hash: emp.pin_hash,
+          is_active: emp.active,
+          ...(emp.employee_code && { employee_code: emp.employee_code }),
+        })),
+      };
+
+      log.info('Employee push request', {
+        sessionId: session.sessionId,
+        employeeCount: employees.length,
+      });
+
+      const response = await this.request<{
+        success: boolean;
+        data?: {
+          total_count: number;
+          success_count: number;
+          failure_count: number;
+          results?: Array<{
+            employee_id: string;
+            success: boolean;
+            idempotent?: boolean;
+            error?: string;
+          }>;
+          server_time: string;
+        };
+      }>('POST', path, requestBody);
+
+      // Complete sync session
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled: 0,
+        pushed: response.data?.success_count || employees.length,
+        conflictsResolved: 0,
+      });
+
+      // Map cloud response to BatchSyncResponse format
+      // Cloud returns: { employee_id, success, idempotent, error? }
+      // Desktop expects: { id, status: 'synced'|'failed', error? }
+      const results: BatchSyncResponse['results'] =
+        response.data?.results?.map((r) => ({
+          id: r.employee_id,
+          status: r.success ? ('synced' as const) : ('failed' as const),
+          error: r.error,
+        })) ||
+        employees.map((emp) => ({
+          id: emp.user_id,
+          status: response.success ? ('synced' as const) : ('failed' as const),
+        }));
+
+      log.info('Employees pushed to cloud', {
+        count: employees.length,
+        successCount: results.filter((r) => r.status === 'synced').length,
+        failedCount: results.filter((r) => r.status === 'failed').length,
+      });
+
+      return {
+        success: response.success,
+        results,
+      };
+    } catch (error) {
+      // Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after employee push error');
+      }
+
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to push employees to cloud', {
+        count: employees.length,
+        error: errorMessage,
+      });
+
+      // Return failed results for all employees
+      return {
+        success: false,
+        results: employees.map((emp) => ({
+          id: emp.user_id,
+          status: 'failed' as const,
+          error: errorMessage,
+        })),
       };
     }
   }

@@ -18,15 +18,16 @@ vi.mock('../../../src/main/services/cloud-api.service', () => ({
   },
 }));
 
-// Mock users DAL with new batch methods
+// Mock users DAL with batch methods
+// Note: After cloud_id consolidation, findByCloudId -> findById, findByCloudIds -> findByUserIds
 vi.mock('../../../src/main/dal/users.dal', () => ({
   usersDAL: {
-    findByCloudId: vi.fn(),
-    findByCloudIds: vi.fn(),
+    findById: vi.fn(),
+    findByUserIds: vi.fn(),
     findActiveByStore: vi.fn(),
     upsertFromCloud: vi.fn(),
     batchUpsertFromCloud: vi.fn(),
-    batchDeactivateNotInCloudIds: vi.fn(),
+    batchDeactivateNotInUserIds: vi.fn(),
     deactivate: vi.fn(),
     reactivate: vi.fn(),
   },
@@ -78,12 +79,13 @@ import { usersDAL } from '../../../src/main/dal/users.dal';
 import { storesDAL } from '../../../src/main/dal/stores.dal';
 
 // Get mock references
+// Note: After cloud_id consolidation, user_id IS the cloud ID
 const mockPullUsers = vi.mocked(cloudApiService.pullUsers);
-const mockFindByCloudId = vi.mocked(usersDAL.findByCloudId);
-const mockFindByCloudIds = vi.mocked(usersDAL.findByCloudIds);
+const mockFindById = vi.mocked(usersDAL.findById);
+const mockFindByUserIds = vi.mocked(usersDAL.findByUserIds);
 const mockFindActiveByStore = vi.mocked(usersDAL.findActiveByStore);
 const mockBatchUpsertFromCloud = vi.mocked(usersDAL.batchUpsertFromCloud);
-const mockBatchDeactivateNotInCloudIds = vi.mocked(usersDAL.batchDeactivateNotInCloudIds);
+const mockBatchDeactivateNotInUserIds = vi.mocked(usersDAL.batchDeactivateNotInUserIds);
 const mockDeactivate = vi.mocked(usersDAL.deactivate);
 const mockReactivate = vi.mocked(usersDAL.reactivate);
 const mockGetConfiguredStore = vi.mocked(storesDAL.getConfiguredStore);
@@ -100,8 +102,8 @@ describe('UserSyncService', () => {
 
     // Default mock implementations
     mockBatchUpsertFromCloud.mockReturnValue({ created: 0, updated: 0, errors: [] });
-    mockBatchDeactivateNotInCloudIds.mockReturnValue(0);
-    mockFindByCloudIds.mockReturnValue(new Map());
+    mockBatchDeactivateNotInUserIds.mockReturnValue(0);
+    mockFindByUserIds.mockReturnValue(new Map());
 
     service = new UserSyncService();
   });
@@ -153,13 +155,13 @@ describe('UserSyncService', () => {
       expect(mockBatchUpsertFromCloud).toHaveBeenCalledWith(
         expect.arrayContaining([
           expect.objectContaining({
-            cloud_user_id: 'cloud-user-1',
+            user_id: 'cloud-user-1',
             store_id: 'store-123',
             role: 'cashier',
             name: 'John Doe',
           }),
           expect.objectContaining({
-            cloud_user_id: 'cloud-user-2',
+            user_id: 'cloud-user-2',
             store_id: 'store-123',
             role: 'store_manager',
             name: 'Jane Smith',
@@ -182,13 +184,13 @@ describe('UserSyncService', () => {
         ],
       });
       mockBatchUpsertFromCloud.mockReturnValue({ created: 0, updated: 1, errors: [] });
-      mockFindByCloudIds.mockReturnValue(
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
+      mockFindByUserIds.mockReturnValue(
         new Map([
           [
             'cloud-user-1',
             {
-              user_id: 'local-user-1',
-              cloud_user_id: 'cloud-user-1',
+              user_id: 'cloud-user-1', // user_id IS the cloud ID
               name: 'John Doe',
               active: true,
             } as any,
@@ -218,12 +220,12 @@ describe('UserSyncService', () => {
         ],
       });
       mockBatchUpsertFromCloud.mockReturnValue({ created: 1, updated: 0, errors: [] });
-      mockBatchDeactivateNotInCloudIds.mockReturnValue(2);
+      mockBatchDeactivateNotInUserIds.mockReturnValue(2);
 
       const result = await service.syncUsers();
 
       expect(result.deactivated).toBe(2);
-      expect(mockBatchDeactivateNotInCloudIds).toHaveBeenCalledWith('store-123', expect.any(Set));
+      expect(mockBatchDeactivateNotInUserIds).toHaveBeenCalledWith('store-123', expect.any(Set));
     });
 
     it('should NOT deactivate when cloud returns no users (safety guard)', async () => {
@@ -235,7 +237,7 @@ describe('UserSyncService', () => {
 
       // Should return early without calling batch deactivate
       expect(result.deactivated).toBe(0);
-      expect(mockBatchDeactivateNotInCloudIds).not.toHaveBeenCalled();
+      expect(mockBatchDeactivateNotInUserIds).not.toHaveBeenCalled();
     });
 
     it('should deactivate users marked inactive in cloud', async () => {
@@ -250,17 +252,18 @@ describe('UserSyncService', () => {
           },
         ],
       });
-      mockFindByCloudId.mockReturnValue({
-        user_id: 'local-user-1',
-        cloud_user_id: 'cloud-user-1',
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
+      mockFindById.mockReturnValue({
+        user_id: 'cloud-user-1', // user_id IS the cloud ID
         name: 'Deactivated User',
         active: true, // Was active locally
-      } as unknown as ReturnType<typeof usersDAL.findByCloudId>);
+      } as unknown as ReturnType<typeof usersDAL.findById>);
 
       const result = await service.syncUsers();
 
       expect(result.deactivated).toBeGreaterThanOrEqual(1);
-      expect(mockDeactivate).toHaveBeenCalledWith('local-user-1');
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
+      expect(mockDeactivate).toHaveBeenCalledWith('cloud-user-1');
     });
 
     it('should reactivate users reactivated in cloud', async () => {
@@ -277,13 +280,13 @@ describe('UserSyncService', () => {
       });
       mockBatchUpsertFromCloud.mockReturnValue({ created: 0, updated: 1, errors: [] });
       // User exists but is inactive locally
-      mockFindByCloudIds.mockReturnValue(
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
+      mockFindByUserIds.mockReturnValue(
         new Map([
           [
             'cloud-user-1',
             {
-              user_id: 'local-user-1',
-              cloud_user_id: 'cloud-user-1',
+              user_id: 'cloud-user-1', // user_id IS the cloud ID
               name: 'Reactivated User',
               active: false, // Was inactive locally
             } as any,
@@ -294,7 +297,8 @@ describe('UserSyncService', () => {
       const result = await service.syncUsers();
 
       expect(result.reactivated).toBe(1);
-      expect(mockReactivate).toHaveBeenCalledWith('local-user-1');
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
+      expect(mockReactivate).toHaveBeenCalledWith('cloud-user-1');
     });
 
     it('should track batch errors and include in result', async () => {
@@ -372,7 +376,7 @@ describe('UserSyncService', () => {
         ],
       });
       mockBatchUpsertFromCloud.mockReturnValue({ created: 1, updated: 0, errors: [] });
-      mockBatchDeactivateNotInCloudIds.mockImplementation(() => {
+      mockBatchDeactivateNotInUserIds.mockImplementation(() => {
         throw new Error('DB connection failed');
       });
 
@@ -431,9 +435,10 @@ describe('UserSyncService', () => {
       expect(service.needsSync()).toBe(false);
     });
 
-    it('should return true if no users with cloud_user_id', () => {
+    // Note: After cloud_id consolidation, needsSync() checks synced_at field
+    it('should return true if no users have synced_at', () => {
       mockFindActiveByStore.mockReturnValue([
-        { user_id: 'local-1', cloud_user_id: null, name: 'Local Only' },
+        { user_id: 'user-1', synced_at: null, name: 'Local Only' },
       ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.needsSync()).toBe(true);
@@ -441,7 +446,7 @@ describe('UserSyncService', () => {
 
     it('should return false if synced users exist', () => {
       mockFindActiveByStore.mockReturnValue([
-        { user_id: 'local-1', cloud_user_id: 'cloud-1', name: 'Synced User' },
+        { user_id: 'user-1', synced_at: '2024-01-01T00:00:00.000Z', name: 'Synced User' },
       ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.needsSync()).toBe(false);
@@ -461,11 +466,12 @@ describe('UserSyncService', () => {
       expect(service.getSyncedUserCount()).toBe(0);
     });
 
-    it('should count only users with cloud_user_id', () => {
+    // Note: After cloud_id consolidation, getSyncedUserCount() checks synced_at field
+    it('should count only users with synced_at', () => {
       mockFindActiveByStore.mockReturnValue([
-        { user_id: 'local-1', cloud_user_id: 'cloud-1', name: 'Synced 1' },
-        { user_id: 'local-2', cloud_user_id: null, name: 'Local Only' },
-        { user_id: 'local-3', cloud_user_id: 'cloud-3', name: 'Synced 2' },
+        { user_id: 'user-1', synced_at: '2024-01-01T00:00:00.000Z', name: 'Synced 1' },
+        { user_id: 'user-2', synced_at: null, name: 'Local Only' },
+        { user_id: 'user-3', synced_at: '2024-01-01T00:00:00.000Z', name: 'Synced 2' },
       ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.getSyncedUserCount()).toBe(2);
@@ -473,7 +479,7 @@ describe('UserSyncService', () => {
 
     it('should return 0 if no synced users', () => {
       mockFindActiveByStore.mockReturnValue([
-        { user_id: 'local-1', cloud_user_id: null, name: 'Local Only' },
+        { user_id: 'user-1', synced_at: null, name: 'Local Only' },
       ] as unknown as ReturnType<typeof usersDAL.findActiveByStore>);
 
       expect(service.getSyncedUserCount()).toBe(0);

@@ -78,6 +78,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         updated_at TEXT NOT NULL
       );
 
+      -- Note: After cloud_id consolidation, pack_id IS the cloud ID - no separate cloud_pack_id
       CREATE TABLE lottery_packs (
         pack_id TEXT PRIMARY KEY,
         store_id TEXT NOT NULL,
@@ -97,13 +98,26 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         tickets_sold_count INTEGER DEFAULT 0,
         sales_amount REAL DEFAULT 0,
         return_reason TEXT,
+        return_notes TEXT,
         depleted_by TEXT,
         depleted_shift_id TEXT,
         depletion_reason TEXT,
         returned_by TEXT,
         returned_shift_id TEXT,
-        cloud_pack_id TEXT,
         synced_at TEXT,
+        -- Additional columns for cloud sync (v029+ API alignment)
+        serial_start TEXT,
+        serial_end TEXT,
+        last_sold_at TEXT,
+        last_sold_serial TEXT,
+        tickets_sold_on_return INTEGER,
+        return_sales_amount REAL,
+        serial_override_approved_by TEXT,
+        serial_override_reason TEXT,
+        serial_override_approved_at TEXT,
+        mark_sold_approved_by TEXT,
+        mark_sold_reason TEXT,
+        mark_sold_approved_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL,
         FOREIGN KEY (game_id) REFERENCES lottery_games(game_id),
@@ -299,7 +313,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           pack_number: 'PKG-RETURNED-001',
         });
 
-        dal.returnPack(pack.pack_id, { store_id: 'store-1' });
+        dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'SUPPLIER_RECALL' });
 
         expect(() =>
           dal.activate(pack.pack_id, {
@@ -508,11 +522,13 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
       const returnedPack = dal.returnPack(pack.pack_id, {
         store_id: 'store-1',
-        return_reason: 'OTHER',
+        return_reason: 'SUPPLIER_RECALL',
       });
 
-      // return_reason is passed as input but not stored on the pack entity
+      // SEC-014: return_reason is now required and validated - 'OTHER' is not accepted
+      // Valid values: SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE
       expect(returnedPack?.status).toBe('RETURNED');
+      expect(returnedPack?.return_reason).toBe('SUPPLIER_RECALL');
     });
   });
 
@@ -1068,7 +1084,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.returnPack(pack.pack_id, { store_id: 'store-1' });
+        dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'DAMAGED' });
 
         const found = dal.findByPackNumberOnly('store-1', '0103230');
 
@@ -1194,7 +1210,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0103230',
         });
-        dal.returnPack(pack.pack_id, { store_id: 'store-1' });
+        dal.returnPack(pack.pack_id, { store_id: 'store-1', return_reason: 'EXPIRED' });
 
         // User scans pack that was returned
         const existingPack = dal.findByPackNumberOnly('store-1', '0103230');
@@ -1247,6 +1263,1097 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         const found = dal.findByPackNumberOnly('store-1', '0103230');
 
         expect(found).toBeDefined();
+      });
+    });
+  });
+
+  // ==========================================================================
+  // upsertFromCloud - Status Protection Tests (LOTTERY-SYNC-001 Bug Fix)
+  //
+  // Traceability: LOTTERY-SYNC-001
+  // Component: LotteryPacksDAL.upsertFromCloud
+  //
+  // Tests validate:
+  // 1. Business rule enforcement (status lifecycle)
+  // 2. Timestamp-based conflict resolution
+  // 3. Edge cases and boundary conditions
+  // 4. Security: Preventing unauthorized state transitions
+  // ==========================================================================
+  describe('upsertFromCloud - Status Protection (LOTTERY-SYNC-001)', () => {
+    // Helper to create a test pack directly in DB with specific status and timestamp
+    // Note: After cloud_id consolidation, pack_id IS the cloud ID - no separate cloud_pack_id
+    const insertTestPack = (
+      overrides: {
+        pack_id?: string;
+        status?: string;
+        updated_at?: string;
+        activated_at?: string | null;
+      } = {}
+    ) => {
+      // pack_id IS the cloud ID now
+      const packId =
+        overrides.pack_id || `pack-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+      const now = new Date().toISOString();
+
+      db.prepare(
+        `
+        INSERT INTO lottery_packs (
+          pack_id, store_id, game_id, pack_number, status,
+          activated_at, updated_at, created_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+      `
+      ).run(
+        packId,
+        'store-1',
+        'game-1',
+        `PKG-${packId}`,
+        overrides.status || 'RECEIVED',
+        overrides.activated_at ?? null,
+        overrides.updated_at || now,
+        now
+      );
+
+      return { pack_id: packId };
+    };
+
+    // ============================================================================
+    // RULE 1: Terminal State Protection (DEPLETED/RETURNED cannot change)
+    // ============================================================================
+
+    // Note: After cloud_id consolidation, pack_id IS the cloud ID
+    describe('Rule 1: Terminal State Protection', () => {
+      it('should NOT allow DEPLETED status to change to RECEIVED', () => {
+        // Arrange: Create a DEPLETED pack (local state)
+        const localUpdatedAt = '2026-01-27T10:00:00.000Z';
+        const { pack_id } = insertTestPack({
+          status: 'DEPLETED',
+          updated_at: localUpdatedAt,
+        });
+
+        // Act: Cloud sends RECEIVED with newer timestamp
+        const cloudUpdatedAt = '2026-01-27T12:00:00.000Z'; // 2 hours later
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RECEIVED',
+            updated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        // Assert: Status should remain DEPLETED (terminal state locked)
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('DEPLETED');
+      });
+
+      it('should NOT allow DEPLETED status to change to ACTIVE', () => {
+        const { pack_id } = insertTestPack({ status: 'DEPLETED' });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: new Date(Date.now() + 3600000).toISOString(), // 1 hour later
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('DEPLETED');
+      });
+
+      it('should NOT allow RETURNED status to change to any other status', () => {
+        const { pack_id } = insertTestPack({ status: 'RETURNED' });
+
+        // Try each possible incoming status
+        const incomingStatuses = ['RECEIVED', 'ACTIVE', 'DEPLETED'] as const;
+
+        for (const incomingStatus of incomingStatuses) {
+          dal.upsertFromCloud(
+            {
+              pack_id, // pack_id IS the cloud ID now
+              store_id: 'store-1',
+              game_id: 'game-1',
+              pack_number: `PKG-${pack_id}`,
+              status: incomingStatus,
+              updated_at: new Date(Date.now() + 7200000).toISOString(), // 2 hours later
+            },
+            'store-1'
+          );
+
+          const result = dal.findById(pack_id);
+          expect(result?.status).toBe('RETURNED');
+        }
+      });
+
+      it('should NOT allow DEPLETED to change to RETURNED (both terminal)', () => {
+        const { pack_id } = insertTestPack({ status: 'DEPLETED' });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RETURNED',
+            updated_at: new Date(Date.now() + 3600000).toISOString(),
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('DEPLETED');
+      });
+    });
+
+    // ============================================================================
+    // RULE 2: ACTIVE Cannot Regress to RECEIVED (Bug Fix Validation)
+    // ============================================================================
+
+    describe('Rule 2: ACTIVE Regression Prevention (Bug Fix Validation)', () => {
+      it('should NOT overwrite ACTIVE with RECEIVED even if cloud timestamp is newer', () => {
+        // This is the exact bug scenario from LOTTERY-SYNC-001
+        const localActivatedAt = '2026-01-27T09:00:00.000Z';
+        const localUpdatedAt = '2026-01-27T09:00:00.000Z';
+
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          activated_at: localActivatedAt,
+          updated_at: localUpdatedAt,
+        });
+
+        // Cloud sends RECEIVED with NEWER timestamp (simulating delayed sync)
+        const cloudUpdatedAt = '2026-01-27T10:00:00.000Z'; // 1 hour after local activation
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RECEIVED', // Cloud still shows RECEIVED (hasn't received local activation push)
+            updated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        // Assert: Status MUST remain ACTIVE - this is the bug fix
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('ACTIVE');
+        expect(result?.activated_at).toBe(localActivatedAt); // Activation timestamp preserved
+      });
+
+      it('should NOT overwrite ACTIVE with RECEIVED even if cloud timestamp is older', () => {
+        const localUpdatedAt = '2026-01-27T10:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T08:00:00.000Z'; // Cloud is 2 hours older
+
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RECEIVED',
+            updated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('ACTIVE');
+      });
+    });
+
+    // ============================================================================
+    // RULE 3: Timestamp-Based Updates for Valid Transitions
+    // ============================================================================
+
+    describe('Rule 3: Timestamp-Based Conflict Resolution', () => {
+      it('should update RECEIVED to ACTIVE when cloud timestamp is newer', () => {
+        const localUpdatedAt = '2026-01-27T08:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T10:00:00.000Z'; // 2 hours newer
+
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: cloudUpdatedAt,
+            activated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('ACTIVE');
+      });
+
+      it('should NOT update RECEIVED to ACTIVE when cloud timestamp is older', () => {
+        const localUpdatedAt = '2026-01-27T10:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T08:00:00.000Z'; // 2 hours older
+
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('RECEIVED'); // Stale data rejected
+      });
+
+      it('should update ACTIVE to DEPLETED when cloud timestamp is newer', () => {
+        const localUpdatedAt = '2026-01-27T08:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T10:00:00.000Z';
+
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'DEPLETED',
+            updated_at: cloudUpdatedAt,
+            depleted_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('DEPLETED');
+      });
+
+      it('should update ACTIVE to RETURNED when cloud timestamp is newer', () => {
+        const localUpdatedAt = '2026-01-27T08:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T10:00:00.000Z';
+
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RETURNED',
+            updated_at: cloudUpdatedAt,
+            returned_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('RETURNED');
+      });
+    });
+
+    // ============================================================================
+    // Edge Cases and Boundary Conditions
+    // ============================================================================
+
+    describe('Edge Cases: Timestamp Boundaries', () => {
+      it('should handle identical timestamps (no update)', () => {
+        const sameTimestamp = '2026-01-27T10:00:00.000Z';
+
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: sameTimestamp,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: sameTimestamp, // Identical timestamp
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('RECEIVED'); // No update when timestamps equal
+      });
+
+      it('should handle millisecond precision in timestamps', () => {
+        const localUpdatedAt = '2026-01-27T10:00:00.000Z';
+        const cloudUpdatedAt = '2026-01-27T10:00:00.001Z'; // 1 millisecond later
+
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: localUpdatedAt,
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: cloudUpdatedAt,
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('ACTIVE'); // 1ms difference should trigger update
+      });
+
+      it('should handle NULL/missing updated_at in cloud data gracefully (no status change)', () => {
+        const localUpdatedAt = '2026-01-27T10:00:00.000Z';
+
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: localUpdatedAt,
+        });
+
+        // Cloud sends null/undefined updated_at
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: undefined as unknown as string, // Missing timestamp
+          },
+          'store-1'
+        );
+
+        const result = dal.findById(pack_id);
+        // Should NOT update when cloud timestamp is missing (safety)
+        expect(result?.status).toBe('RECEIVED');
+      });
+    });
+
+    // ============================================================================
+    // Security: Abuse Case Testing
+    // ============================================================================
+
+    describe('Security: Abuse Case Prevention', () => {
+      it('should prevent status manipulation via repeated sync calls', () => {
+        // Simulate attacker trying to repeatedly downgrade status
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: '2026-01-27T10:00:00.000Z',
+        });
+
+        // Attempt 10 rapid downgrade attempts
+        for (let i = 0; i < 10; i++) {
+          dal.upsertFromCloud(
+            {
+              pack_id, // pack_id IS the cloud ID now
+              store_id: 'store-1',
+              game_id: 'game-1',
+              pack_number: `PKG-${pack_id}`,
+              status: 'RECEIVED',
+              updated_at: new Date(Date.now() + i * 1000).toISOString(),
+            },
+            'store-1'
+          );
+        }
+
+        const result = dal.findById(pack_id);
+        expect(result?.status).toBe('ACTIVE'); // All attempts blocked
+      });
+
+      it('should enforce tenant isolation - reject cross-store updates', () => {
+        const { pack_id } = insertTestPack({ status: 'RECEIVED' });
+
+        const DIFFERENT_STORE_ID = 'attacker-store-uuid';
+
+        expect(() => {
+          dal.upsertFromCloud(
+            {
+              pack_id, // pack_id IS the cloud ID now
+              store_id: DIFFERENT_STORE_ID, // Different store
+              game_id: 'game-1',
+              pack_number: `PKG-${pack_id}`,
+              status: 'ACTIVE',
+              updated_at: new Date().toISOString(),
+            },
+            'store-1'
+          );
+        }).toThrow(/store.*mismatch|tenant.*isolation/i);
+      });
+    });
+
+    // ============================================================================
+    // Business Rules Matrix Validation
+    // ============================================================================
+
+    // Note: After cloud_id consolidation, pack_id IS the cloud ID
+    describe('Business Rules Matrix Validation', () => {
+      // Test each row from the business rules matrix in the plan
+
+      it('RECEIVED -> ACTIVE: allowed if newer', () => {
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'ACTIVE',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('ACTIVE');
+      });
+
+      it('RECEIVED -> DEPLETED: allowed if newer (edge case)', () => {
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'DEPLETED',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('DEPLETED');
+      });
+
+      it('RECEIVED -> RETURNED: allowed if newer (edge case)', () => {
+        const { pack_id } = insertTestPack({
+          status: 'RECEIVED',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RETURNED',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('RETURNED');
+      });
+
+      it('ACTIVE -> RECEIVED: ALWAYS blocked (core bug fix)', () => {
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        // Try with newer timestamp
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RECEIVED',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('ACTIVE');
+      });
+
+      it('ACTIVE -> DEPLETED: allowed if newer', () => {
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'DEPLETED',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('DEPLETED');
+      });
+
+      it('ACTIVE -> RETURNED: allowed if newer', () => {
+        const { pack_id } = insertTestPack({
+          status: 'ACTIVE',
+          updated_at: '2026-01-27T08:00:00.000Z',
+        });
+
+        dal.upsertFromCloud(
+          {
+            pack_id, // pack_id IS the cloud ID now
+            store_id: 'store-1',
+            game_id: 'game-1',
+            pack_number: `PKG-${pack_id}`,
+            status: 'RETURNED',
+            updated_at: '2026-01-27T10:00:00.000Z',
+          },
+          'store-1'
+        );
+
+        expect(dal.findById(pack_id)?.status).toBe('RETURNED');
+      });
+
+      it('DEPLETED -> Any: ALWAYS blocked (terminal state)', () => {
+        const statuses = ['RECEIVED', 'ACTIVE', 'RETURNED'] as const;
+
+        for (const targetStatus of statuses) {
+          const { pack_id } = insertTestPack({
+            status: 'DEPLETED',
+            updated_at: '2026-01-27T08:00:00.000Z',
+          });
+
+          dal.upsertFromCloud(
+            {
+              pack_id, // pack_id IS the cloud ID now
+              store_id: 'store-1',
+              game_id: 'game-1',
+              pack_number: `PKG-${pack_id}`,
+              status: targetStatus,
+              updated_at: '2026-01-27T10:00:00.000Z',
+            },
+            'store-1'
+          );
+
+          expect(dal.findById(pack_id)?.status).toBe('DEPLETED');
+        }
+      });
+
+      it('RETURNED -> Any: ALWAYS blocked (terminal state)', () => {
+        const statuses = ['RECEIVED', 'ACTIVE', 'DEPLETED'] as const;
+
+        for (const targetStatus of statuses) {
+          const { pack_id } = insertTestPack({
+            status: 'RETURNED',
+            updated_at: '2026-01-27T08:00:00.000Z',
+          });
+
+          dal.upsertFromCloud(
+            {
+              pack_id, // pack_id IS the cloud ID now
+              store_id: 'store-1',
+              game_id: 'game-1',
+              pack_number: `PKG-${pack_id}`,
+              status: targetStatus,
+              updated_at: '2026-01-27T10:00:00.000Z',
+            },
+            'store-1'
+          );
+
+          expect(dal.findById(pack_id)?.status).toBe('RETURNED');
+        }
+      });
+    });
+  });
+
+  // ============================================================================
+  // PHASE 9: returnPack - return_reason storage (Tasks 9.1-9.6)
+  // ============================================================================
+  // These tests verify the storage and retrieval of return_reason and return_notes
+  // fields in the returnPack DAL method.
+  //
+  // SEC-014: return_reason is validated at entry point (handler layer)
+  // DB-006: Store-scoped operations via store_id parameter
+  // SEC-006: All SQL uses parameterized prepared statements
+  // ============================================================================
+  describe('returnPack - return_reason storage (Phase 9)', () => {
+    /**
+     * Phase 9 Tasks 9.1-9.6: return_reason and return_notes storage validation
+     *
+     * Tests verify that:
+     * - return_reason is stored in the database (9.2)
+     * - return_notes is stored when provided (9.3)
+     * - Returned pack has return_reason field populated (9.4)
+     * - Returned pack has return_notes field populated (9.5)
+     * - null return_notes is handled gracefully (9.6)
+     *
+     * @security SEC-014: Strict enum values (already validated at handler)
+     * @security DB-006: Store-scoped operations
+     */
+
+    // 9.2: Test should store return_reason in database
+    describe('9.2: Store return_reason in database', () => {
+      it('should store SUPPLIER_RECALL return_reason in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-RECALL-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'SUPPLIER_RECALL',
+        });
+
+        expect(returnedPack?.return_reason).toBe('SUPPLIER_RECALL');
+
+        // Verify database storage by re-reading
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_reason).toBe('SUPPLIER_RECALL');
+      });
+
+      it('should store DAMAGED return_reason in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-DAMAGED-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+        });
+
+        expect(returnedPack?.return_reason).toBe('DAMAGED');
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_reason).toBe('DAMAGED');
+      });
+
+      it('should store EXPIRED return_reason in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-EXPIRED-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'EXPIRED',
+        });
+
+        expect(returnedPack?.return_reason).toBe('EXPIRED');
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_reason).toBe('EXPIRED');
+      });
+
+      it('should store INVENTORY_ADJUSTMENT return_reason in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-INV-ADJ-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'INVENTORY_ADJUSTMENT',
+        });
+
+        expect(returnedPack?.return_reason).toBe('INVENTORY_ADJUSTMENT');
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_reason).toBe('INVENTORY_ADJUSTMENT');
+      });
+
+      it('should store STORE_CLOSURE return_reason in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-CLOSURE-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'STORE_CLOSURE',
+        });
+
+        expect(returnedPack?.return_reason).toBe('STORE_CLOSURE');
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_reason).toBe('STORE_CLOSURE');
+      });
+    });
+
+    // 9.3: Test should store return_notes in database when provided
+    describe('9.3: Store return_notes in database when provided', () => {
+      it('should store return_notes in database', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-NOTES-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: 'Pack was crushed during shipping. All tickets are torn.',
+        });
+
+        expect(returnedPack?.return_notes).toBe(
+          'Pack was crushed during shipping. All tickets are torn.'
+        );
+
+        // Verify database storage by re-reading
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_notes).toBe(
+          'Pack was crushed during shipping. All tickets are torn.'
+        );
+      });
+
+      it('should store multiline return_notes correctly', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-MULTILINE-001',
+        });
+
+        const multilineNotes = 'Line 1: Pack damaged\nLine 2: Tickets torn\nLine 3: Cannot sell';
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: multilineNotes,
+        });
+
+        expect(returnedPack?.return_notes).toBe(multilineNotes);
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_notes).toBe(multilineNotes);
+      });
+
+      it('should store unicode characters in return_notes', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-UNICODE-001',
+        });
+
+        const unicodeNotes = 'Customer complaint: "Paquete dañado" 破损 📦';
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: unicodeNotes,
+        });
+
+        expect(returnedPack?.return_notes).toBe(unicodeNotes);
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_notes).toBe(unicodeNotes);
+      });
+    });
+
+    // 9.4: Test should return pack with return_reason field populated
+    describe('9.4: Return pack with return_reason field populated', () => {
+      it('should return pack object with return_reason field', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-FIELD-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'SUPPLIER_RECALL',
+        });
+
+        expect(returnedPack).toBeDefined();
+        expect(returnedPack).toHaveProperty('return_reason');
+        expect(returnedPack?.return_reason).toBe('SUPPLIER_RECALL');
+      });
+
+      it('should include return_reason in findById result after return', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-FINDBYID-001',
+        });
+
+        dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'EXPIRED',
+        });
+
+        const retrievedPack = dal.findById(pack.pack_id);
+        expect(retrievedPack).toBeDefined();
+        expect(retrievedPack?.return_reason).toBe('EXPIRED');
+        expect(retrievedPack?.status).toBe('RETURNED');
+      });
+    });
+
+    // 9.5: Test should return pack with return_notes field populated
+    describe('9.5: Return pack with return_notes field populated', () => {
+      it('should return pack object with return_notes field', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-NOTES-FIELD-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: 'Water damage visible on pack',
+        });
+
+        expect(returnedPack).toBeDefined();
+        expect(returnedPack).toHaveProperty('return_notes');
+        expect(returnedPack?.return_notes).toBe('Water damage visible on pack');
+      });
+
+      it('should include return_notes in findById result after return', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-NOTES-FIND-001',
+        });
+
+        dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'INVENTORY_ADJUSTMENT',
+          return_notes: 'Audit discrepancy - pack never received',
+        });
+
+        const retrievedPack = dal.findById(pack.pack_id);
+        expect(retrievedPack).toBeDefined();
+        expect(retrievedPack?.return_notes).toBe('Audit discrepancy - pack never received');
+      });
+
+      it('should preserve both return_reason and return_notes together', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-BOTH-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'STORE_CLOSURE',
+          return_notes: 'Store closing for renovation - returning all unsold inventory',
+        });
+
+        expect(returnedPack?.return_reason).toBe('STORE_CLOSURE');
+        expect(returnedPack?.return_notes).toBe(
+          'Store closing for renovation - returning all unsold inventory'
+        );
+
+        // Verify both fields persist
+        const retrievedPack = dal.findById(pack.pack_id);
+        expect(retrievedPack?.return_reason).toBe('STORE_CLOSURE');
+        expect(retrievedPack?.return_notes).toBe(
+          'Store closing for renovation - returning all unsold inventory'
+        );
+      });
+    });
+
+    // 9.6: Test should handle null return_notes gracefully
+    describe('9.6: Handle null return_notes gracefully', () => {
+      it('should store null when return_notes is not provided', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-NULL-NOTES-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'SUPPLIER_RECALL',
+          // return_notes not provided
+        });
+
+        expect(returnedPack?.return_reason).toBe('SUPPLIER_RECALL');
+        expect(returnedPack?.return_notes).toBeNull();
+
+        // Verify database storage
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.return_notes).toBeNull();
+      });
+
+      it('should store null when return_notes is explicitly undefined', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-UNDEF-NOTES-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: undefined,
+        });
+
+        expect(returnedPack?.return_reason).toBe('DAMAGED');
+        expect(returnedPack?.return_notes).toBeNull();
+      });
+
+      it('should convert empty string return_notes to null', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-EMPTY-NOTES-001',
+        });
+
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'EXPIRED',
+          return_notes: '',
+        });
+
+        expect(returnedPack?.return_reason).toBe('EXPIRED');
+        // DAL normalizes empty string to null for database consistency
+        expect(returnedPack?.return_notes).toBeNull();
+      });
+
+      it('should not require return_notes for successful return', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-NO-NOTES-001',
+        });
+
+        // Should not throw - return_notes is optional
+        expect(() =>
+          dal.returnPack(pack.pack_id, {
+            store_id: 'store-1',
+            return_reason: 'INVENTORY_ADJUSTMENT',
+          })
+        ).not.toThrow();
+
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.status).toBe('RETURNED');
+        expect(storedPack?.return_reason).toBe('INVENTORY_ADJUSTMENT');
+      });
+    });
+
+    // Additional comprehensive tests
+    describe('Comprehensive storage validation', () => {
+      it('should persist all fields through pack lifecycle', () => {
+        // Receive
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-LIFECYCLE-001',
+        });
+        expect(pack.status).toBe('RECEIVED');
+        expect(pack.return_reason).toBeNull();
+        expect(pack.return_notes).toBeNull();
+
+        // Activate
+        const activatedPack = dal.activate(pack.pack_id, {
+          store_id: 'store-1',
+          current_bin_id: 'bin-1',
+          opening_serial: '000',
+        });
+        expect(activatedPack?.status).toBe('ACTIVE');
+        expect(activatedPack?.return_reason).toBeNull();
+
+        // Return
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'DAMAGED',
+          return_notes: 'Final disposition: damaged beyond sale',
+        });
+
+        expect(returnedPack?.status).toBe('RETURNED');
+        expect(returnedPack?.return_reason).toBe('DAMAGED');
+        expect(returnedPack?.return_notes).toBe('Final disposition: damaged beyond sale');
+        expect(returnedPack?.returned_at).toBeDefined();
+      });
+
+      it('should store return data for RECEIVED pack (never activated)', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-RECEIVED-RETURN-001',
+        });
+
+        // Return directly from RECEIVED status
+        const returnedPack = dal.returnPack(pack.pack_id, {
+          store_id: 'store-1',
+          return_reason: 'SUPPLIER_RECALL',
+          return_notes: 'Returned before activation - manufacturer defect',
+        });
+
+        expect(returnedPack?.status).toBe('RETURNED');
+        expect(returnedPack?.return_reason).toBe('SUPPLIER_RECALL');
+        expect(returnedPack?.return_notes).toBe('Returned before activation - manufacturer defect');
+        expect(returnedPack?.activated_at).toBeNull();
+      });
+
+      it('DB-006: should not allow cross-store return_reason storage', () => {
+        const pack = dal.receive({
+          store_id: 'store-1',
+          game_id: 'game-1',
+          pack_number: 'PKG-CROSS-STORE-001',
+        });
+
+        // Try to return with wrong store_id
+        expect(() =>
+          dal.returnPack(pack.pack_id, {
+            store_id: 'store-2', // Different store
+            return_reason: 'DAMAGED',
+          })
+        ).toThrow();
+
+        // Verify pack was not modified
+        const storedPack = dal.findById(pack.pack_id);
+        expect(storedPack?.status).toBe('RECEIVED');
+        expect(storedPack?.return_reason).toBeNull();
       });
     });
   });

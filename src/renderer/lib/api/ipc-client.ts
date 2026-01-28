@@ -136,6 +136,11 @@ class IPCClient {
       case 'stores:isConfigured':
         return mockData.getMockIsConfigured() as T;
 
+      // Settings
+      case 'settings:getPOSConnectionType':
+        // Mock as MANUAL for testing manual shift functionality
+        return { connectionType: 'MANUAL' } as T;
+
       // Dashboard
       case 'dashboard:getStats':
         return mockData.mockDashboardStats as T;
@@ -160,6 +165,24 @@ class IPCClient {
         const shiftId = params as unknown as string;
         const shift = mockData.getMockShiftById(shiftId);
         return (shift ? { ...shift, status: 'CLOSED' } : {}) as T;
+      }
+      case 'shifts:manualStart': {
+        // Simulate manual shift start - return a new mock shift
+        // In production, cashier_id is determined by PIN lookup
+        const manualParams = params as unknown as ManualStartShiftParams;
+        return {
+          shift_id: `shift-manual-${Date.now()}`,
+          store_id: 'store-1',
+          shift_number: 1,
+          business_date: manualParams?.businessDate || new Date().toISOString().split('T')[0],
+          cashier_id: 'mock-cashier-id', // Would be determined by PIN in production
+          register_id: manualParams?.externalRegisterId || '1',
+          start_time: manualParams?.startTime || new Date().toISOString(),
+          end_time: null,
+          status: 'OPEN',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as T;
       }
 
       // Day Summaries
@@ -431,9 +454,24 @@ class IPCClient {
           updated_at: new Date().toISOString(),
         } as T;
       }
+      case 'terminals:getDayStatus': {
+        // Mock day status - returns based on mock registers with active shifts
+        const mockRegs = mockData.getMockRegisters();
+        const openShiftCount = mockRegs.registers.filter((r) => r.activeShift !== null).length;
+        return {
+          dayStarted: mockRegs.registers.length > 0,
+          hasOpenShifts: openShiftCount > 0,
+          openShiftCount,
+          totalShiftCount: mockRegs.registers.length,
+          businessDate: new Date().toISOString().split('T')[0],
+        } as T;
+      }
 
       // Employees
       case 'employees:list':
+        return mockData.getMockEmployees() as T;
+      case 'employees:listActive':
+        // Return only active employees for shift selection
         return mockData.getMockEmployees() as T;
       case 'employees:create':
         return {
@@ -444,7 +482,6 @@ class IPCClient {
             name: (params as { name: string }).name,
             active: 1,
             last_login_at: null,
-            cloud_user_id: null,
             synced_at: null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -459,7 +496,6 @@ class IPCClient {
             name: (params as { name?: string }).name || 'Updated Employee',
             active: 1,
             last_login_at: null,
-            cloud_user_id: null,
             synced_at: null,
             created_at: '2024-01-01T00:00:00.000Z',
             updated_at: new Date().toISOString(),
@@ -749,6 +785,13 @@ export const storesAPI = {
   isConfigured: () => ipcClient.invoke<boolean>('stores:isConfigured'),
 };
 
+// Settings API
+export const settingsAPI = {
+  /** Get the current POS connection type (MANUAL, FILE, API, etc.) */
+  getPOSConnectionType: () =>
+    ipcClient.invoke<POSConnectionTypeResponse>('settings:getPOSConnectionType'),
+};
+
 // Dashboard API
 export const dashboardAPI = {
   getStats: () => ipcClient.invoke<DashboardStats>('dashboard:getStats'),
@@ -763,6 +806,9 @@ export const shiftsAPI = {
   getSummary: (shiftId: string) => ipcClient.invoke<ShiftSummary>('shifts:getSummary', shiftId),
   findOpenShifts: () => ipcClient.invoke<Shift[]>('shifts:findOpenShifts'),
   close: (shiftId: string) => ipcClient.invoke<Shift>('shifts:close', shiftId),
+  /** Manually start a shift (MANUAL mode only) */
+  manualStart: (params: ManualStartShiftParams) =>
+    ipcClient.invoke<Shift>('shifts:manualStart', params),
 };
 
 // Day Summaries API
@@ -795,6 +841,8 @@ export const reportsAPI = {
 // Employees API
 export const employeesAPI = {
   list: () => ipcClient.invoke<EmployeeListResponse>('employees:list'),
+  /** List active employees for shift selection (shift_manager+ access) */
+  listActive: () => ipcClient.invoke<EmployeeListResponse>('employees:listActive'),
   create: (data: CreateEmployeeRequest) =>
     ipcClient.invoke<CreateEmployeeResponse>('employees:create', data),
   update: (data: UpdateEmployeeRequest) =>
@@ -817,6 +865,17 @@ export const terminalsAPI = {
   /** Update a register's description */
   update: (params: UpdateRegisterParams) =>
     ipcClient.invoke<RegisterResponse>('terminals:update', params),
+  /**
+   * Get business day status for day close availability
+   *
+   * Returns authoritative day status information for UI rendering.
+   * The frontend MUST use this to determine whether to show day close controls.
+   *
+   * BUSINESS RULE:
+   * - Day Close button should ONLY be visible when hasOpenShifts === true
+   * - DO NOT compute this locally; ALWAYS use this backend endpoint
+   */
+  getDayStatus: () => ipcClient.invoke<DayStatusResponse>('terminals:getDayStatus'),
   /**
    * Subscribe to shift closed events
    * Emitted when POS closes a shift (detected via XML file polling)
@@ -877,6 +936,51 @@ export const syncAPI = {
   /** Force sync games from cloud (bypasses rate limit) */
   syncGames: () =>
     ipcClient.invoke<{ pulled: number; conflicts: number; errors: string[] }>('sync:syncGames'),
+  /** Resync ACTIVE packs to cloud (when sync queue was cleared) */
+  resyncActivePacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalActive: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncActivePacks'),
+  /** Resync DEPLETED packs to cloud (when sync queue was cleared) */
+  resyncDepletedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalDepleted: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncDepletedPacks'),
+  /** Resync RETURNED packs to cloud (when sync queue was cleared) */
+  resyncReturnedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalReturned: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncReturnedPacks'),
+  /** Resync ALL packs (ACTIVE, DEPLETED, RETURNED) to cloud */
+  resyncAllPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      results: {
+        active: { total: number; enqueued: number; skipped: number };
+        depleted: { total: number; enqueued: number; skipped: number };
+        returned: { total: number; enqueued: number; skipped: number };
+      };
+      totalEnqueued: number;
+      totalSkipped: number;
+    }>('sync:resyncAllPacks'),
+  /** Backfill RECEIVED packs to sync queue */
+  backfillReceivedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalReceived?: number;
+      enqueuedCount: number;
+      alreadyQueuedCount?: number;
+      skippedCount?: number;
+    }>('sync:backfillReceivedPacks'),
 };
 
 // ============================================================================
@@ -1129,6 +1233,10 @@ export interface DateRangeReportResponse {
 // Employee Types
 export type EmployeeRole = 'store_manager' | 'shift_manager' | 'cashier';
 
+/**
+ * Employee interface
+ * Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
+ */
 export interface Employee {
   user_id: string;
   store_id: string;
@@ -1136,7 +1244,6 @@ export interface Employee {
   name: string;
   active: number;
   last_login_at: string | null;
-  cloud_user_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -1277,10 +1384,13 @@ export interface SyncActivityResponse {
 // Paginated Sync Activity Types (Full Sync Monitor Page)
 export type SyncStatusFilter = 'all' | 'queued' | 'failed' | 'synced';
 
+export type SyncDirectionFilter = SyncDirection | 'all';
+
 export interface SyncActivityPaginatedParams {
   status?: SyncStatusFilter;
   entityType?: string;
   operation?: SyncOperation;
+  direction?: SyncDirectionFilter;
   limit?: number;
   offset?: number;
 }
@@ -1309,6 +1419,15 @@ export interface SyncDetailedStats {
     queued: number;
     failed: number;
     synced: number;
+  }>;
+  /** Breakdown by sync direction (PUSH to cloud, PULL from cloud) */
+  byDirection: Array<{
+    direction: SyncDirection;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+    syncedToday: number;
   }>;
 }
 
@@ -1373,6 +1492,29 @@ export interface RegisterResponse {
   updated_at: string;
 }
 
+/**
+ * Day status response for determining day close availability
+ *
+ * This is the authoritative source for UI rendering decisions
+ * related to day close functionality. The frontend MUST use this
+ * backend-provided status rather than computing it locally.
+ *
+ * BUSINESS RULE:
+ * - Day Close button should ONLY be visible when hasOpenShifts === true
+ */
+export interface DayStatusResponse {
+  /** Whether any shifts exist for this date (day has started) */
+  dayStarted: boolean;
+  /** Whether there are open shifts (day close is available) */
+  hasOpenShifts: boolean;
+  /** Count of currently open shifts */
+  openShiftCount: number;
+  /** Total shift count for the business date */
+  totalShiftCount: number;
+  /** Business date checked (YYYY-MM-DD) */
+  businessDate: string;
+}
+
 // ============================================================================
 // Shift Close Event Types (SEC-014 compliant)
 // ============================================================================
@@ -1383,6 +1525,35 @@ export interface RegisterResponse {
  * - DAY_CLOSE: This is the last shift of the business day
  */
 export type ShiftCloseType = 'SHIFT_CLOSE' | 'DAY_CLOSE';
+
+/**
+ * POS Connection Type
+ * Determines how the store connects to POS system
+ * - MANUAL: No automated connection, user enters data manually
+ */
+export type POSConnectionType = 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
+
+/**
+ * Response from getPOSConnectionType
+ */
+export interface POSConnectionTypeResponse {
+  connectionType: POSConnectionType | null;
+}
+
+/**
+ * Parameters for manually starting a shift
+ * SEC-001: Employee identified by unique PIN
+ */
+export interface ManualStartShiftParams {
+  /** Cashier PIN for authentication (4-6 digits) - uniquely identifies the employee */
+  pin: string;
+  /** External register ID (e.g., "1", "2") */
+  externalRegisterId: string;
+  /** Business date in YYYY-MM-DD format (defaults to today) */
+  businessDate?: string;
+  /** Start time as ISO timestamp (defaults to now) */
+  startTime?: string;
+}
 
 /**
  * Payload emitted when a shift is closed via POS XML detection

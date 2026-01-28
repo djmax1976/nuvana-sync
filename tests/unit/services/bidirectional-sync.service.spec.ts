@@ -26,6 +26,10 @@ const {
   mockSetLastPullAt,
   mockReset,
   mockGetConfiguredStore,
+  // Sync queue mocks - hoisted for assertion in tests
+  mockSyncQueueEnqueue,
+  mockSyncQueueMarkSynced,
+  mockSyncQueueIncrementAttempts,
 } = vi.hoisted(() => ({
   mockPullBins: vi.fn(),
   mockPullLotteryGames: vi.fn(),
@@ -45,6 +49,10 @@ const {
   mockSetLastPullAt: vi.fn(),
   mockReset: vi.fn(),
   mockGetConfiguredStore: vi.fn(),
+  // Sync queue mocks
+  mockSyncQueueEnqueue: vi.fn(),
+  mockSyncQueueMarkSynced: vi.fn(),
+  mockSyncQueueIncrementAttempts: vi.fn(),
 }));
 
 // Mock cloud API service
@@ -95,19 +103,9 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 // Mock sync queue DAL (used by BidirectionalSyncService for PULL tracking)
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
-    enqueue: vi.fn().mockReturnValue({
-      id: 'mock-queue-id',
-      store_id: 'store-123',
-      entity_type: 'bin_sync',
-      entity_id: 'bin-sync-batch',
-      operation: 'PULL',
-      payload: '{}',
-      synced: 0,
-      sync_attempts: 0,
-      created_at: new Date().toISOString(),
-    }),
-    markSynced: vi.fn(),
-    incrementAttempts: vi.fn(),
+    enqueue: mockSyncQueueEnqueue,
+    markSynced: mockSyncQueueMarkSynced,
+    incrementAttempts: mockSyncQueueIncrementAttempts,
     getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
   },
 }));
@@ -135,6 +133,19 @@ describe('BidirectionalSyncService', () => {
     mockGetConfiguredStore.mockReturnValue({
       store_id: 'store-123',
       name: 'Test Store',
+    });
+    // Initialize sync queue mock with deterministic queue item for assertions
+    mockSyncQueueEnqueue.mockReturnValue({
+      id: 'mock-queue-id-bins',
+      store_id: 'store-123',
+      entity_type: 'bin',
+      entity_id: 'pull-1234567890',
+      operation: 'UPDATE',
+      payload: JSON.stringify({ action: 'pull_bins' }),
+      sync_direction: 'PULL',
+      synced: 0,
+      sync_attempts: 0,
+      created_at: '2024-01-01T00:00:00.000Z',
     });
     service = new BidirectionalSyncService();
   });
@@ -287,6 +298,164 @@ describe('BidirectionalSyncService', () => {
 
       expect(result.errors).toHaveLength(1);
       expect(mockSetLastPullAt).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // Enterprise-Grade Queue Item Tracking Tests
+    // Requirement: PULL tracking items must ALWAYS be marked as synced or failed
+    // This prevents queue item accumulation that causes UI clutter and confusion
+    // =========================================================================
+
+    describe('sync queue item tracking (PULL tracking records)', () => {
+      it('CRITICAL: should mark queue item as synced when cloud returns empty bins array', async () => {
+        // This is the EXACT bug scenario - empty bins response was leaving queue items pending
+        // Business impact: Queue accumulates "stuck" PULL tracking items every 5 minutes
+        mockGetLastPullAt.mockReturnValue('2024-01-01T00:00:00Z');
+        mockPullBins.mockResolvedValue({ bins: [] }); // Empty response - no bins to sync
+
+        await service.syncBins();
+
+        // CRITICAL ASSERTION: Queue item MUST be marked as synced even with empty response
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/bins',
+            http_status: 200,
+          })
+        );
+        // incrementAttempts should NOT be called on success
+        expect(mockSyncQueueIncrementAttempts).not.toHaveBeenCalled();
+      });
+
+      it('CRITICAL: should mark queue item as synced when bins are successfully pulled', async () => {
+        // Normal success path - verify queue tracking works correctly
+        mockGetLastPullAt.mockReturnValue(null);
+        mockPullBins.mockResolvedValue({
+          bins: [
+            {
+              bin_id: 'cloud-bin-1',
+              store_id: 'store-123',
+              name: 'Bin 1',
+              display_order: 1,
+              is_active: true,
+              updated_at: '2024-01-01T00:00:00Z',
+            },
+          ],
+        });
+        mockBinsBatchUpsertFromCloud.mockReturnValue({
+          created: 1,
+          updated: 0,
+          errors: [],
+        });
+        mockBinsBatchSoftDeleteNotInCloudIds.mockReturnValue(0);
+
+        await service.syncBins();
+
+        // Queue item must be marked synced after successful processing
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/bins',
+            http_status: 200,
+            response_body: expect.stringContaining('"pulled":1'),
+          })
+        );
+      });
+
+      it('CRITICAL: should increment attempts (not mark synced) on API failure', async () => {
+        // Error handling - queue item should track failure for retry logic
+        mockGetLastPullAt.mockReturnValue(null);
+        mockPullBins.mockRejectedValue(new Error('HTTP 503: Service Unavailable'));
+
+        await service.syncBins();
+
+        // On failure: incrementAttempts called, markSynced NOT called
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          'HTTP 503: Service Unavailable',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/bins',
+            http_status: 503, // Extracted from error message
+          })
+        );
+        expect(mockSyncQueueMarkSynced).not.toHaveBeenCalled();
+      });
+
+      it('should create PULL queue item with correct entity metadata', async () => {
+        // Verify queue item creation has correct metadata for monitoring/debugging
+        mockGetLastPullAt.mockReturnValue('2024-01-01T00:00:00Z');
+        mockPullBins.mockResolvedValue({ bins: [] });
+
+        await service.syncBins();
+
+        // Verify enqueue was called with correct PULL tracking metadata
+        expect(mockSyncQueueEnqueue).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueEnqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            store_id: 'store-123',
+            entity_type: 'bin',
+            entity_id: expect.stringMatching(/^pull-\d+$/), // pull-{timestamp}
+            operation: 'UPDATE',
+            sync_direction: 'PULL',
+            payload: expect.objectContaining({
+              action: 'pull_bins',
+              lastPull: '2024-01-01T00:00:00Z',
+            }),
+          })
+        );
+      });
+
+      it('should handle network timeout errors with proper queue tracking', async () => {
+        // Network resilience - timeout errors should be tracked for retry
+        mockGetLastPullAt.mockReturnValue(null);
+        mockPullBins.mockRejectedValue(new Error('ETIMEDOUT: Connection timed out'));
+
+        const result = await service.syncBins();
+
+        expect(result.errors).toContain('Pull failed: ETIMEDOUT: Connection timed out');
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          'ETIMEDOUT: Connection timed out',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/bins',
+          })
+        );
+      });
+
+      it('should handle HTTP 401 unauthorized with proper queue tracking', async () => {
+        // Security scenario - auth failures tracked for alerting
+        mockGetLastPullAt.mockReturnValue(null);
+        mockPullBins.mockRejectedValue(new Error('HTTP 401: Unauthorized'));
+
+        await service.syncBins();
+
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          'HTTP 401: Unauthorized',
+          expect.objectContaining({
+            http_status: 401,
+          })
+        );
+      });
+
+      it('should handle HTTP 500 server error with proper queue tracking', async () => {
+        // Server error scenario - should be tracked for retry
+        mockGetLastPullAt.mockReturnValue(null);
+        mockPullBins.mockRejectedValue(new Error('HTTP 500: Internal Server Error'));
+
+        await service.syncBins();
+
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-bins',
+          'HTTP 500: Internal Server Error',
+          expect.objectContaining({
+            http_status: 500,
+          })
+        );
+      });
     });
   });
 

@@ -46,7 +46,6 @@ export interface User extends StoreEntity {
   pin_hash: string;
   active: number; // SQLite boolean (0 or 1)
   last_login_at: string | null;
-  cloud_user_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -61,7 +60,6 @@ export interface CreateUserData {
   role: UserRole;
   name: string;
   pin: string; // Plaintext PIN - will be hashed
-  cloud_user_id?: string;
 }
 
 /**
@@ -76,9 +74,10 @@ export interface UpdateUserData {
 
 /**
  * Cloud user sync data
+ * After cloud_id consolidation, user_id IS the cloud ID
  */
 export interface CloudUserData {
-  cloud_user_id: string;
+  user_id: string;
   store_id: string;
   role: UserRole;
   name: string;
@@ -144,20 +143,11 @@ export class UsersDAL extends StoreBasedDAL<User> {
     const stmt = this.db.prepare(`
       INSERT INTO users (
         user_id, store_id, role, name, pin_hash, active,
-        cloud_user_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
+        created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
     `);
 
-    stmt.run(
-      userId,
-      data.store_id,
-      data.role,
-      data.name,
-      pinHash,
-      data.cloud_user_id || null,
-      now,
-      now
-    );
+    stmt.run(userId, data.store_id, data.role, data.name, pinHash, now, now);
 
     log.info('User created', {
       userId,
@@ -261,6 +251,82 @@ export class UsersDAL extends StoreBasedDAL<User> {
   }
 
   /**
+   * Check if a PIN is already in use by another active user in the store
+   *
+   * Since PINs are bcrypt hashed, we must iterate through all active users
+   * and compare the PIN against each hash. This is O(n) but necessary for security.
+   *
+   * SEC-001: Bcrypt comparison (timing-safe)
+   * DB-006: Store-scoped query for tenant isolation
+   * API-001: Business rule validation - PIN uniqueness within store
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param pin - Plaintext PIN to check
+   * @param excludeUserId - Optional user ID to exclude (for PIN updates)
+   * @returns User with matching PIN if found, undefined if PIN is available
+   */
+  async isPinInUse(
+    storeId: string,
+    pin: string,
+    excludeUserId?: string
+  ): Promise<User | undefined> {
+    // DB-006: Get all active users for this store only
+    const activeUsers = this.findActiveByStore(storeId);
+
+    // SEC-001: Compare against each user's bcrypt hash (timing-safe)
+    for (const user of activeUsers) {
+      // Skip the user being updated (for PIN change scenarios)
+      if (excludeUserId && user.user_id === excludeUserId) {
+        continue;
+      }
+
+      const isMatch = await bcrypt.compare(pin, user.pin_hash);
+      if (isMatch) {
+        log.warn('PIN collision detected', {
+          storeId,
+          existingUserId: user.user_id,
+          excludeUserId,
+        });
+        return user;
+      }
+    }
+
+    return undefined;
+  }
+
+  /**
+   * Find a user by their PIN within a store
+   *
+   * Since PINs are bcrypt hashed, we must iterate through all active users
+   * and compare the PIN against each hash until we find a match.
+   *
+   * SEC-001: Bcrypt comparison (timing-safe)
+   * DB-006: Store-scoped query for tenant isolation
+   *
+   * @param storeId - Store identifier
+   * @param pin - PIN to verify
+   * @returns User if found and PIN matches, undefined otherwise
+   */
+  async findByPin(storeId: string, pin: string): Promise<User | undefined> {
+    // Get all active users for this store
+    const activeUsers = this.findActiveByStore(storeId);
+
+    // Try to match PIN against each user's hash
+    for (const user of activeUsers) {
+      const isMatch = await bcrypt.compare(pin, user.pin_hash);
+      if (isMatch) {
+        // Update last login timestamp
+        this.updateLastLogin(user.user_id);
+        log.info('User found by PIN', { userId: user.user_id, storeId });
+        return user;
+      }
+    }
+
+    log.warn('No user found matching PIN', { storeId, activeUserCount: activeUsers.length });
+    return undefined;
+  }
+
+  /**
    * Find active users by store
    * DB-006: Store-scoped query
    *
@@ -277,57 +343,42 @@ export class UsersDAL extends StoreBasedDAL<User> {
   }
 
   /**
-   * Find user by cloud user ID
-   * Used for cloud sync matching
-   * SEC-006: Parameterized query
-   *
-   * @param cloudUserId - Cloud user identifier
-   * @returns User or undefined
-   */
-  findByCloudId(cloudUserId: string): User | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM users WHERE cloud_user_id = ?
-    `);
-    return stmt.get(cloudUserId) as User | undefined;
-  }
-
-  /**
-   * Find multiple users by cloud user IDs (batch operation)
+   * Find multiple users by user IDs (batch operation)
    * Enterprise-grade: Eliminates N+1 queries during sync
    * SEC-006: Parameterized IN clause with placeholders
-   * Performance: Single query for all cloud IDs
+   * Performance: Single query for all user IDs
    *
-   * @param cloudUserIds - Array of cloud user identifiers
-   * @returns Map of cloud_user_id -> User for efficient lookup
+   * Note: After cloud_id consolidation, user_id IS the cloud ID
+   *
+   * @param userIds - Array of user identifiers (which are now cloud IDs)
+   * @returns Map of user_id -> User for efficient lookup
    */
-  findByCloudIds(cloudUserIds: string[]): Map<string, User> {
+  findByUserIds(userIds: string[]): Map<string, User> {
     const result = new Map<string, User>();
 
-    if (cloudUserIds.length === 0) {
+    if (userIds.length === 0) {
       return result;
     }
 
     // SEC-006: Batch in chunks to avoid SQLite parameter limits (max ~999)
     const CHUNK_SIZE = 500;
-    for (let i = 0; i < cloudUserIds.length; i += CHUNK_SIZE) {
-      const chunk = cloudUserIds.slice(i, i + CHUNK_SIZE);
+    for (let i = 0; i < userIds.length; i += CHUNK_SIZE) {
+      const chunk = userIds.slice(i, i + CHUNK_SIZE);
       const placeholders = chunk.map(() => '?').join(', ');
 
       const stmt = this.db.prepare(`
-        SELECT * FROM users WHERE cloud_user_id IN (${placeholders})
+        SELECT * FROM users WHERE user_id IN (${placeholders})
       `);
 
       const users = stmt.all(...chunk) as User[];
 
       for (const user of users) {
-        if (user.cloud_user_id) {
-          result.set(user.cloud_user_id, user);
-        }
+        result.set(user.user_id, user);
       }
     }
 
-    log.debug('Batch lookup by cloud IDs', {
-      requested: cloudUserIds.length,
+    log.debug('Batch lookup by user IDs', {
+      requested: userIds.length,
       found: result.size,
     });
 
@@ -340,6 +391,8 @@ export class UsersDAL extends StoreBasedDAL<User> {
    * SEC-006: Parameterized queries
    * DB-006: Validates store_id for tenant isolation
    * Performance: Uses transaction for atomicity and speed
+   *
+   * Note: After cloud_id consolidation, user_id IS the cloud ID
    *
    * @param users - Array of cloud user data
    * @param expectedStoreId - Expected store ID for tenant isolation validation
@@ -358,9 +411,9 @@ export class UsersDAL extends StoreBasedDAL<User> {
     // DB-006: Validate all users belong to expected store
     for (const user of users) {
       if (user.store_id !== expectedStoreId) {
-        const errorMsg = `Store ID mismatch for user ${user.cloud_user_id}: expected ${expectedStoreId}, got ${user.store_id}`;
+        const errorMsg = `Store ID mismatch for user ${user.user_id}: expected ${expectedStoreId}, got ${user.store_id}`;
         log.error('Tenant isolation violation in batch upsert', {
-          cloudUserId: user.cloud_user_id,
+          userId: user.user_id,
           expectedStoreId,
           actualStoreId: user.store_id,
         });
@@ -376,8 +429,8 @@ export class UsersDAL extends StoreBasedDAL<User> {
     }
 
     // Get existing users in single batch query (eliminates N+1)
-    const cloudUserIds = users.map((u) => u.cloud_user_id);
-    const existingUsers = this.findByCloudIds(cloudUserIds);
+    const userIds = users.map((u) => u.user_id);
+    const existingUsers = this.findByUserIds(userIds);
 
     // Execute all upserts in single transaction for atomicity
     this.withTransaction(() => {
@@ -386,8 +439,8 @@ export class UsersDAL extends StoreBasedDAL<User> {
       const insertStmt = this.db.prepare(`
         INSERT INTO users (
           user_id, store_id, role, name, pin_hash, active,
-          cloud_user_id, synced_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+          synced_at, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
       `);
 
       const updateStmt = this.db.prepare(`
@@ -397,12 +450,12 @@ export class UsersDAL extends StoreBasedDAL<User> {
           pin_hash = ?,
           synced_at = ?,
           updated_at = ?
-        WHERE cloud_user_id = ?
+        WHERE user_id = ?
       `);
 
       for (const userData of users) {
         try {
-          const existing = existingUsers.get(userData.cloud_user_id);
+          const existing = existingUsers.get(userData.user_id);
 
           if (existing) {
             // Update existing user
@@ -412,19 +465,17 @@ export class UsersDAL extends StoreBasedDAL<User> {
               userData.pin_hash,
               now,
               now,
-              userData.cloud_user_id
+              userData.user_id
             );
             result.updated++;
           } else {
-            // Create new user
-            const userId = this.generateId();
+            // Create new user - user_id is the cloud ID
             insertStmt.run(
-              userId,
+              userData.user_id,
               userData.store_id,
               userData.role,
               userData.name,
               userData.pin_hash,
-              userData.cloud_user_id,
               now,
               now,
               now
@@ -433,9 +484,9 @@ export class UsersDAL extends StoreBasedDAL<User> {
           }
         } catch (error) {
           const message = error instanceof Error ? error.message : 'Unknown error';
-          result.errors.push(`User ${userData.cloud_user_id}: ${message}`);
+          result.errors.push(`User ${userData.user_id}: ${message}`);
           log.error('Failed to upsert user in batch', {
-            cloudUserId: userData.cloud_user_id,
+            userId: userData.user_id,
             error: message,
           });
         }
@@ -453,28 +504,28 @@ export class UsersDAL extends StoreBasedDAL<User> {
   }
 
   /**
-   * Batch deactivate users not in provided cloud IDs
+   * Batch deactivate users not in provided user IDs
    * Enterprise-grade: Single query for deactivation
    * SEC-006: Parameterized query
    * DB-006: Store-scoped for tenant isolation
    *
+   * Note: After cloud_id consolidation, user_id IS the cloud ID
+   *
    * @param storeId - Store ID for tenant isolation
-   * @param activeCloudIds - Set of cloud IDs that should remain active
+   * @param activeUserIds - Set of user IDs (cloud IDs) that should remain active
    * @returns Number of users deactivated
    */
-  batchDeactivateNotInCloudIds(storeId: string, activeCloudIds: Set<string>): number {
-    // Get all active users with cloud_user_id for this store
+  batchDeactivateNotInUserIds(storeId: string, activeUserIds: Set<string>): number {
+    // Get all active users for this store
     const stmt = this.db.prepare(`
-      SELECT user_id, cloud_user_id FROM users
-      WHERE store_id = ? AND active = 1 AND cloud_user_id IS NOT NULL
+      SELECT user_id FROM users
+      WHERE store_id = ? AND active = 1
     `);
 
-    const activeUsers = stmt.all(storeId) as Array<{ user_id: string; cloud_user_id: string }>;
+    const activeUsers = stmt.all(storeId) as Array<{ user_id: string }>;
 
-    // Find users to deactivate (have cloud_user_id but not in active set)
-    const toDeactivate = activeUsers.filter(
-      (u) => u.cloud_user_id && !activeCloudIds.has(u.cloud_user_id)
-    );
+    // Find users to deactivate (not in active set from cloud)
+    const toDeactivate = activeUsers.filter((u) => !activeUserIds.has(u.user_id));
 
     if (toDeactivate.length === 0) {
       return 0;
@@ -491,7 +542,6 @@ export class UsersDAL extends StoreBasedDAL<User> {
         deactivateStmt.run(now, user.user_id);
         log.info('User deactivated (removed from cloud)', {
           userId: user.user_id,
-          cloudUserId: user.cloud_user_id,
         });
       }
     });
@@ -507,14 +557,16 @@ export class UsersDAL extends StoreBasedDAL<User> {
 
   /**
    * Upsert user from cloud sync
-   * Creates if not exists, updates if exists (by cloud_user_id)
+   * Creates if not exists, updates if exists (by user_id)
    * SEC-006: Parameterized queries
+   *
+   * Note: After cloud_id consolidation, user_id IS the cloud ID
    *
    * @param data - Cloud user data
    * @returns Upserted user
    */
   upsertFromCloud(data: CloudUserData): User {
-    const existing = this.findByCloudId(data.cloud_user_id);
+    const existing = this.findById(data.user_id);
     const now = this.now();
 
     if (existing) {
@@ -526,49 +578,36 @@ export class UsersDAL extends StoreBasedDAL<User> {
           pin_hash = ?,
           synced_at = ?,
           updated_at = ?
-        WHERE cloud_user_id = ?
+        WHERE user_id = ?
       `);
 
-      stmt.run(data.role, data.name, data.pin_hash, now, now, data.cloud_user_id);
+      stmt.run(data.role, data.name, data.pin_hash, now, now, data.user_id);
 
-      log.info('User updated from cloud', { cloudUserId: data.cloud_user_id });
-      const updated = this.findByCloudId(data.cloud_user_id);
+      log.info('User updated from cloud', { userId: data.user_id });
+      const updated = this.findById(data.user_id);
       if (!updated) {
-        throw new Error(`Failed to retrieve updated user from cloud: ${data.cloud_user_id}`);
+        throw new Error(`Failed to retrieve updated user from cloud: ${data.user_id}`);
       }
       return updated;
     }
 
-    // Create new user
-    const userId = this.generateId();
-
+    // Create new user - user_id is the cloud ID
     const stmt = this.db.prepare(`
       INSERT INTO users (
         user_id, store_id, role, name, pin_hash, active,
-        cloud_user_id, synced_at, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?, ?)
+        synced_at, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)
     `);
 
-    stmt.run(
-      userId,
-      data.store_id,
-      data.role,
-      data.name,
-      data.pin_hash,
-      data.cloud_user_id,
-      now,
-      now,
-      now
-    );
+    stmt.run(data.user_id, data.store_id, data.role, data.name, data.pin_hash, now, now, now);
 
     log.info('User created from cloud', {
-      userId,
-      cloudUserId: data.cloud_user_id,
+      userId: data.user_id,
     });
 
-    const created = this.findById(userId);
+    const created = this.findById(data.user_id);
     if (!created) {
-      throw new Error(`Failed to retrieve created user from cloud: ${userId}`);
+      throw new Error(`Failed to retrieve created user from cloud: ${data.user_id}`);
     }
     return created;
   }

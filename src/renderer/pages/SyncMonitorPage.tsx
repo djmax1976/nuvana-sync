@@ -17,7 +17,12 @@ import {
   useDeleteSyncItem,
   useInvalidateSyncActivity,
 } from '../lib/hooks';
-import { syncAPI, type SyncStatusFilter, type SyncActivityItem } from '../lib/api/ipc-client';
+import {
+  syncAPI,
+  type SyncStatusFilter,
+  type SyncDirectionFilter,
+  type SyncActivityItem,
+} from '../lib/api/ipc-client';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import {
   RefreshCw,
@@ -45,6 +50,7 @@ import {
 interface FilterState {
   status: SyncStatusFilter;
   entityType: string;
+  direction: SyncDirectionFilter;
   limit: number;
   offset: number;
 }
@@ -69,6 +75,12 @@ const ENTITY_TYPE_OPTIONS = [
   { value: 'user', label: 'User' },
 ];
 
+const DIRECTION_OPTIONS: { value: SyncDirectionFilter; label: string }[] = [
+  { value: 'all', label: 'All Directions' },
+  { value: 'PUSH', label: 'Push (to cloud)' },
+  { value: 'PULL', label: 'Pull (from cloud)' },
+];
+
 const PAGE_SIZE_OPTIONS = [25, 50, 100];
 
 // ============================================================================
@@ -80,6 +92,7 @@ export default function SyncMonitorPage() {
   const [filters, setFilters] = useState<FilterState>({
     status: 'all',
     entityType: '',
+    direction: 'all',
     limit: 50,
     offset: 0,
   });
@@ -92,10 +105,11 @@ export default function SyncMonitorPage() {
     {
       status: filters.status,
       entityType: filters.entityType || undefined,
+      direction: filters.direction === 'all' ? undefined : filters.direction,
       limit: filters.limit,
       offset: filters.offset,
     },
-    { refetchInterval: 15000 } // Refresh every 15 seconds
+    { refetchInterval: 5000 } // Refresh every 5 seconds for live activity visibility
   );
 
   // Mutations
@@ -232,93 +246,114 @@ export default function SyncMonitorPage() {
 
       {/* Statistics Cards - API-008: Clear labels for mutually exclusive counts */}
       {stats && (
-        <div className="grid grid-cols-4 gap-4">
-          <StatCard
-            label="Queued"
-            value={stats.queued ?? stats.pending}
-            icon={<Clock className="h-5 w-5 text-yellow-500" />}
-            variant={(stats.queued ?? stats.pending) > 0 ? 'warning' : 'default'}
-          />
-          <StatCard
-            label="Failed"
-            value={stats.failed}
-            icon={<XCircle className="h-5 w-5 text-red-500" />}
-            variant={stats.failed > 0 ? 'error' : 'default'}
-          />
-          <StatCard
-            label="Synced Today"
-            value={stats.syncedToday}
-            icon={<CheckCircle2 className="h-5 w-5 text-green-500" />}
-            variant="success"
-          />
-          <StatCard
-            label="Total Synced"
-            value={stats.syncedTotal}
-            icon={<Activity className="h-5 w-5 text-blue-500" />}
-            variant="default"
-          />
+        <div className="space-y-4">
+          {/* Main Status Cards */}
+          <div className="grid grid-cols-4 gap-4">
+            <StatCard
+              label="Queued"
+              value={stats.queued ?? stats.pending}
+              icon={<Clock className="h-5 w-5 text-yellow-500" />}
+              variant={(stats.queued ?? stats.pending) > 0 ? 'warning' : 'default'}
+            />
+            <StatCard
+              label="Failed"
+              value={stats.failed}
+              icon={<XCircle className="h-5 w-5 text-red-500" />}
+              variant={stats.failed > 0 ? 'error' : 'default'}
+            />
+            <StatCard
+              label="Synced Today"
+              value={stats.syncedToday}
+              icon={<CheckCircle2 className="h-5 w-5 text-green-500" />}
+              variant="success"
+            />
+            <StatCard
+              label="Total Synced"
+              value={stats.syncedTotal}
+              icon={<Activity className="h-5 w-5 text-blue-500" />}
+              variant="default"
+            />
+          </div>
+
+          {/* Push/Pull Direction Cards */}
+          {stats.byDirection && stats.byDirection.length > 0 && (
+            <div className="grid grid-cols-2 gap-4">
+              {stats.byDirection.map((dir) => (
+                <DirectionStatCard key={dir.direction} direction={dir} />
+              ))}
+            </div>
+          )}
         </div>
       )}
 
-      {/* Breakdown Stats */}
+      {/* Breakdown Stats - Collapsible sections for detailed analysis */}
       {stats && (stats.byEntityType.length > 0 || stats.byOperation.length > 0) && (
-        <div className="grid grid-cols-2 gap-4">
-          {/* By Entity Type */}
-          {stats.byEntityType.length > 0 && (
-            <div className="bg-card rounded-lg border border-border p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-                <Package className="h-4 w-4" />
-                By Entity Type
-              </h3>
-              <div className="space-y-2">
-                {stats.byEntityType.map((item) => (
-                  <div key={item.entity_type} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground capitalize">{item.entity_type}</span>
-                    <div className="flex items-center gap-3">
-                      {(item.queued ?? item.pending) > 0 && (
-                        <span className="text-yellow-600">
-                          {item.queued ?? item.pending} queued
-                        </span>
-                      )}
-                      {item.failed > 0 && (
-                        <span className="text-red-600">{item.failed} failed</span>
-                      )}
-                      <span className="text-green-600">{item.synced} synced</span>
+        <details className="group" open>
+          <summary className="cursor-pointer text-sm font-medium text-muted-foreground mb-3 flex items-center gap-2 hover:text-foreground">
+            <span className="transform transition-transform group-open:rotate-90">▶</span>
+            Detailed Breakdown
+          </summary>
+          <div className="grid grid-cols-2 gap-4">
+            {/* By Entity Type */}
+            {stats.byEntityType.length > 0 && (
+              <div className="bg-card rounded-lg border border-border p-4">
+                <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+                  <Package className="h-4 w-4" />
+                  By Entity Type
+                </h3>
+                <div className="space-y-2">
+                  {stats.byEntityType.map((item) => (
+                    <div
+                      key={item.entity_type}
+                      className="flex items-center justify-between text-sm"
+                    >
+                      <span className="text-muted-foreground capitalize">{item.entity_type}</span>
+                      <div className="flex items-center gap-3">
+                        {(item.queued ?? item.pending) > 0 && (
+                          <span className="text-yellow-600">
+                            {item.queued ?? item.pending} queued
+                          </span>
+                        )}
+                        {item.failed > 0 && (
+                          <span className="text-red-600">{item.failed} failed</span>
+                        )}
+                        <span className="text-green-600">{item.synced} synced</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            )}
 
-          {/* By Operation */}
-          {stats.byOperation.length > 0 && (
-            <div className="bg-card rounded-lg border border-border p-4">
-              <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
-                <Zap className="h-4 w-4" />
-                By Operation
-              </h3>
-              <div className="space-y-2">
-                {stats.byOperation.map((item) => (
-                  <div key={item.operation} className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">{item.operation}</span>
-                    <div className="flex items-center gap-3">
-                      {(item.queued ?? item.pending) > 0 && (
-                        <span className="text-yellow-600">
-                          {item.queued ?? item.pending} queued
-                        </span>
-                      )}
-                      {item.failed > 0 && (
-                        <span className="text-red-600">{item.failed} failed</span>
-                      )}
-                      <span className="text-green-600">{item.synced} synced</span>
+            {/* By Operation */}
+            {stats.byOperation.length > 0 && (
+              <div className="bg-card rounded-lg border border-border p-4">
+                <h3 className="text-sm font-medium text-foreground mb-3 flex items-center gap-2">
+                  <Zap className="h-4 w-4" />
+                  By Operation
+                </h3>
+                <div className="space-y-2">
+                  {stats.byOperation.map((item) => (
+                    <div key={item.operation} className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">{item.operation}</span>
+                      <div className="flex items-center gap-3">
+                        {(item.queued ?? item.pending) > 0 && (
+                          <span className="text-yellow-600">
+                            {item.queued ?? item.pending} queued
+                          </span>
+                        )}
+                        {item.failed > 0 && (
+                          <span className="text-red-600">{item.failed} failed</span>
+                        )}
+                        <span className="text-green-600">{item.synced} synced</span>
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
-        </div>
+            )}
+          </div>
+        </details>
       )}
 
       {/* Filters */}
@@ -348,6 +383,21 @@ export default function SyncMonitorPage() {
               className="border border-border rounded px-3 py-1.5 text-sm bg-background text-foreground"
             >
               {ENTITY_TYPE_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>
+                  {opt.label}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div>
+            <select
+              value={filters.direction}
+              onChange={(e) =>
+                handleFilterChange('direction', e.target.value as SyncDirectionFilter)
+              }
+              className="border border-border rounded px-3 py-1.5 text-sm bg-background text-foreground"
+            >
+              {DIRECTION_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
                 </option>
@@ -690,6 +740,86 @@ function StatCard({ label, value, icon, variant }: StatCardProps) {
         </div>
         {icon}
       </div>
+    </div>
+  );
+}
+
+/**
+ * Direction-specific stat card showing push/pull activity details
+ * SEC-004: XSS prevention via React's automatic escaping
+ * API-008: Only safe display fields used
+ */
+interface DirectionStatCardProps {
+  direction: {
+    direction: 'PUSH' | 'PULL';
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+    syncedToday: number;
+  };
+}
+
+function DirectionStatCard({ direction: dir }: DirectionStatCardProps) {
+  const isPush = dir.direction === 'PUSH';
+  const config = isPush
+    ? {
+        icon: <ArrowUpRight className="h-6 w-6" />,
+        label: 'Push to Cloud',
+        description: 'Local changes sent to cloud',
+        bgClass: 'bg-blue-500/5 border-blue-500/20',
+        iconClass: 'text-blue-500',
+        accentClass: 'text-blue-600',
+      }
+    : {
+        icon: <ArrowDownLeft className="h-6 w-6" />,
+        label: 'Pull from Cloud',
+        description: 'Cloud changes received locally',
+        bgClass: 'bg-purple-500/5 border-purple-500/20',
+        iconClass: 'text-purple-500',
+        accentClass: 'text-purple-600',
+      };
+
+  const hasActivity = dir.queued > 0 || dir.failed > 0 || dir.syncedToday > 0;
+
+  return (
+    <div className={`rounded-lg border p-4 ${config.bgClass}`}>
+      <div className="flex items-start justify-between mb-3">
+        <div>
+          <h3 className={`text-lg font-semibold ${config.accentClass} flex items-center gap-2`}>
+            {config.icon}
+            {config.label}
+          </h3>
+          <p className="text-xs text-muted-foreground mt-0.5">{config.description}</p>
+        </div>
+        <div className="text-right">
+          <p className="text-2xl font-bold text-foreground">{dir.syncedToday.toLocaleString()}</p>
+          <p className="text-xs text-muted-foreground">synced today</p>
+        </div>
+      </div>
+
+      {hasActivity && (
+        <div className="flex items-center gap-4 text-sm">
+          {dir.queued > 0 && (
+            <div className="flex items-center gap-1.5">
+              <Clock className="h-3.5 w-3.5 text-yellow-500" />
+              <span className="text-yellow-600">{dir.queued} queued</span>
+            </div>
+          )}
+          {dir.failed > 0 && (
+            <div className="flex items-center gap-1.5">
+              <XCircle className="h-3.5 w-3.5 text-red-500" />
+              <span className="text-red-600">{dir.failed} failed</span>
+            </div>
+          )}
+          <div className="flex items-center gap-1.5 ml-auto">
+            <CheckCircle2 className="h-3.5 w-3.5 text-green-500" />
+            <span className="text-muted-foreground">{dir.synced.toLocaleString()} total</span>
+          </div>
+        </div>
+      )}
+
+      {!hasActivity && <p className="text-sm text-muted-foreground">No activity yet</p>}
     </div>
   );
 }

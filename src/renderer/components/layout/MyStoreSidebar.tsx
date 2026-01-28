@@ -16,7 +16,6 @@ import {
   Clock,
   Ticket,
   Package,
-  Plug,
   Monitor,
   Users,
   CalendarClock,
@@ -53,7 +52,6 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const isClockInOutActive = pathname === '/clock-in-out';
   const isLotteryActive = pathname === '/lottery';
   const isLotteryGamesActive = pathname === '/lottery/games';
-  const isPOSIntegrationActive = pathname === '/pos-integration';
   const isTerminalsActive = pathname === '/terminals' || pathname.startsWith('/terminal/');
   const isShiftsActive = pathname === '/shifts' || pathname.startsWith('/shifts/');
   const isTransactionsActive = pathname === '/transactions';
@@ -132,22 +130,6 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
         >
           <Package className="h-4 w-4" />
           <span>Inventory</span>
-        </Link>
-
-        {/* POS Integration Link */}
-        <Link
-          to="/pos-integration"
-          data-testid="pos-integration-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isPOSIntegrationActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <Plug className="h-5 w-5" />
-          <span>POS Integration</span>
         </Link>
 
         {/* Terminals Link */}

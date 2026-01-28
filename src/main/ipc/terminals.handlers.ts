@@ -306,4 +306,102 @@ registerHandler<POSTerminalMapping | ReturnType<typeof createErrorResponse>>(
   }
 );
 
+// ============================================================================
+// Day Status Response Type
+// ============================================================================
+
+/**
+ * Day status response for determining day close availability
+ *
+ * This response is the authoritative source for UI rendering decisions
+ * related to day close functionality. The frontend MUST use this
+ * backend-provided status rather than computing it locally.
+ */
+export interface DayStatusResponse {
+  /** Whether any shifts exist for this date (day has started) */
+  dayStarted: boolean;
+  /** Whether there are open shifts (day close is available) */
+  hasOpenShifts: boolean;
+  /** Count of currently open shifts */
+  openShiftCount: number;
+  /** Total shift count for the business date */
+  totalShiftCount: number;
+  /** Business date checked (YYYY-MM-DD) */
+  businessDate: string;
+}
+
+// ============================================================================
+// Get Day Status Handler
+// ============================================================================
+
+/**
+ * Get business day status for the configured store
+ *
+ * Returns authoritative day status information for UI rendering:
+ * - dayStarted: Whether any shifts exist today (day has begun)
+ * - hasOpenShifts: Whether day close functionality should be available
+ * - openShiftCount: Number of currently open shifts
+ *
+ * BUSINESS RULE:
+ * - Day Close button should ONLY be visible when hasOpenShifts === true
+ * - The frontend MUST NOT compute this locally; it MUST use this endpoint
+ *
+ * Performance characteristics:
+ * - Single query to shifts table with indexed columns
+ * - O(1) via COUNT aggregation (no row-by-row processing)
+ * - No N+1 queries
+ *
+ * Security:
+ * - SEC-006: All queries use parameterized statements via DAL
+ * - DB-006: All queries scoped to configured store (tenant isolation)
+ * - API-003: Generic error responses, no internal details leaked
+ */
+registerHandler<DayStatusResponse | ReturnType<typeof createErrorResponse>>(
+  'terminals:getDayStatus',
+  async (_event) => {
+    // Get configured store for tenant isolation
+    // DB-006: Tenant isolation via store scoping
+    const store = storesDAL.getConfiguredStore();
+
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    try {
+      // Get current business date (local date)
+      // Business date is based on local time, not UTC
+      const today = new Date().toISOString().split('T')[0];
+
+      // DB-006: Store-scoped query via DAL
+      // SEC-006: Parameterized query via DAL method
+      // Performance: Single optimized query with COUNT aggregation
+      const dayStatus = shiftsDAL.getDayStatus(store.store_id, today);
+
+      log.debug('Day status retrieved', {
+        storeId: store.store_id,
+        businessDate: today,
+        dayStarted: dayStatus.dayStarted,
+        hasOpenShifts: dayStatus.hasOpenShifts,
+        openShiftCount: dayStatus.openShiftCount,
+      });
+
+      return {
+        dayStarted: dayStatus.dayStarted,
+        hasOpenShifts: dayStatus.hasOpenShifts,
+        openShiftCount: dayStatus.openShiftCount,
+        totalShiftCount: dayStatus.totalShiftCount,
+        businessDate: dayStatus.businessDate,
+      };
+    } catch (error) {
+      // API-003: Log details server-side, return generic error to client
+      log.error('Failed to get day status', {
+        storeId: store.store_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+  { description: 'Get business day status for day close availability' }
+);
+
 log.info('Terminals handlers registered');

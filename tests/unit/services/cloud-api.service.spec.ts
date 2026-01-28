@@ -891,6 +891,8 @@ describe('CloudApiService', () => {
         game_id: 'game-789',
         game_code: '1234',
         pack_number: '1234567',
+        serial_start: '000',
+        serial_end: '299',
         received_at: '2025-01-15T10:00:00Z',
         received_by: 'user-001',
       };
@@ -1093,6 +1095,7 @@ describe('CloudApiService', () => {
     });
 
     describe('pushPackDeplete', () => {
+      // SEC-014: depletion_reason is now REQUIRED (valid DepletionReason enum value)
       const mockDepletion = {
         pack_id: 'pack-123',
         store_id: 'store-456',
@@ -1100,6 +1103,7 @@ describe('CloudApiService', () => {
         tickets_sold: 300,
         sales_amount: 150.0,
         depleted_at: '2025-01-16T18:00:00Z',
+        depletion_reason: 'MANUAL_SOLD_OUT' as const, // Required field per SEC-014
       };
 
       it('should push pack depletion to cloud successfully', async () => {
@@ -1119,18 +1123,251 @@ describe('CloudApiService', () => {
         const body = JSON.parse(depleteCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
         expect(body.final_serial).toBe('300');
-        expect(body.depletion_reason).toBe('SOLD_OUT');
+        expect(body.depletion_reason).toBe('MANUAL_SOLD_OUT');
+      });
+    });
+
+    /**
+     * Phase 7 Tests: pushPackDeplete - depletion_reason handling
+     *
+     * Comprehensive tests to verify that depletion_reason values from the payload
+     * are correctly passed through to the cloud API without hardcoded values.
+     *
+     * SEC-014: Validates that all DepletionReason enum values are accepted
+     * SEC-014: Confirms no hardcoded 'SOLD_OUT' value is sent
+     */
+    describe('pushPackDeplete - depletion_reason handling', () => {
+      const baseDepletion = {
+        pack_id: 'pack-deplete-test',
+        store_id: 'store-456',
+        closing_serial: '300',
+        tickets_sold: 300,
+        sales_amount: 150.0,
+        depleted_at: '2025-01-16T18:00:00Z',
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+      });
+
+      it('should send MANUAL_SOLD_OUT when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'MANUAL_SOLD_OUT' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depletion_reason).toBe('MANUAL_SOLD_OUT');
+      });
+
+      it('should send SHIFT_CLOSE when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'SHIFT_CLOSE' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depletion_reason).toBe('SHIFT_CLOSE');
+      });
+
+      it('should send AUTO_REPLACED when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'AUTO_REPLACED' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depletion_reason).toBe('AUTO_REPLACED');
+      });
+
+      it('should send POS_LAST_TICKET when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'POS_LAST_TICKET' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depletion_reason).toBe('POS_LAST_TICKET');
+      });
+
+      it('should NOT send hardcoded SOLD_OUT value', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        // Use MANUAL_SOLD_OUT to verify no SOLD_OUT hardcoding
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'MANUAL_SOLD_OUT' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        // Verify the value is from payload, not hardcoded 'SOLD_OUT'
+        expect(body.depletion_reason).not.toBe('SOLD_OUT');
+        expect(body.depletion_reason).toBe('MANUAL_SOLD_OUT');
+      });
+
+      it('should include depletion_reason in request body', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depletion_reason: 'SHIFT_CLOSE' as const,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        // Verify depletion_reason is present in the request body
+        expect(body).toHaveProperty('depletion_reason');
+        expect(typeof body.depletion_reason).toBe('string');
+        expect(body.depletion_reason.length).toBeGreaterThan(0);
+      });
+    });
+
+    /**
+     * SEC-010: Audit Trail - depleted_by field tests
+     *
+     * Enterprise-grade tests verifying that depleted_by (user ID) is correctly
+     * passed through to the cloud API for audit trail compliance.
+     *
+     * Cloud API Requirement: depleted_by is REQUIRED for audit trail
+     */
+    describe('pushPackDeplete - depleted_by handling', () => {
+      const baseDepletion = {
+        pack_id: 'pack-deplete-user-test',
+        store_id: 'store-456',
+        closing_serial: '300',
+        tickets_sold: 300,
+        sales_amount: 150.0,
+        depleted_at: '2025-01-16T18:00:00Z',
+        depletion_reason: 'MANUAL_SOLD_OUT' as const,
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+      });
+
+      it('should include depleted_by in request body when provided', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depleted_by: 'user-abc-123',
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depleted_by).toBe('user-abc-123');
+      });
+
+      it('should pass through valid UUID user ID for depleted_by', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const validUserId = '8981cc60-62c6-4412-8789-42d3afc2b4ac';
+        const depleteData = {
+          ...baseDepletion,
+          depleted_by: validUserId,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body.depleted_by).toBe(validUserId);
+      });
+
+      it('should omit depleted_by from request body when null', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depleted_by: null,
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body).not.toHaveProperty('depleted_by');
+      });
+
+      it('should omit depleted_by from request body when undefined', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        // No depleted_by field at all
+        await service.pushPackDeplete(baseDepletion);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        expect(body).not.toHaveProperty('depleted_by');
+      });
+
+      it('should include depleted_by alongside other required fields', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const depleteData = {
+          ...baseDepletion,
+          depleted_by: 'user-full-context',
+          shift_id: 'shift-xyz-789',
+        };
+
+        await service.pushPackDeplete(depleteData);
+
+        const calls = mockFetch.mock.calls;
+        const depleteCall = calls[1];
+        const body = JSON.parse(depleteCall[1].body as string);
+        // Verify all fields are present
+        expect(body.pack_id).toBe('pack-deplete-user-test');
+        expect(body.depleted_by).toBe('user-full-context');
+        expect(body.shift_id).toBe('shift-xyz-789');
+        expect(body.depletion_reason).toBe('MANUAL_SOLD_OUT');
       });
     });
 
     describe('pushPackReturn', () => {
+      // SEC-014: return_reason must be a valid ReturnReason enum value
       const mockReturn = {
         pack_id: 'pack-123',
         store_id: 'store-456',
         closing_serial: '150',
         tickets_sold: 150,
         sales_amount: 75.0,
-        return_reason: 'Defective pack',
+        return_reason: 'DAMAGED' as const, // Valid enum value per SEC-014
         returned_at: '2025-01-16T12:00:00Z',
       };
 
@@ -1151,15 +1388,17 @@ describe('CloudApiService', () => {
         const body = JSON.parse(returnCall[1].body as string);
         expect(body.pack_id).toBe('pack-123');
         expect(body.last_sold_serial).toBe('150');
-        expect(body.return_reason).toBe('Defective pack');
+        expect(body.return_reason).toBe('DAMAGED');
       });
 
       it('should handle return without closing serial', async () => {
         setupSyncSessionMocks({ success: true });
 
+        // SEC-014: return_reason is now REQUIRED (no 'OTHER' fallback)
         const returnWithoutSerial = {
           pack_id: 'pack-123',
           store_id: 'store-456',
+          return_reason: 'INVENTORY_ADJUSTMENT' as const, // Required field
           returned_at: '2025-01-16T12:00:00Z',
         };
 
@@ -1174,7 +1413,325 @@ describe('CloudApiService', () => {
         const body = JSON.parse(returnCall[1].body as string);
         expect(body.last_sold_serial).toBe('0');
         expect(body.tickets_sold_on_return).toBe(0);
-        expect(body.return_reason).toBe('OTHER');
+        expect(body.return_reason).toBe('INVENTORY_ADJUSTMENT');
+      });
+    });
+
+    /**
+     * Phase 7 Tests: pushPackReturn - return_reason handling
+     *
+     * Comprehensive tests to verify that return_reason values from the payload
+     * are correctly passed through to the cloud API without default values.
+     *
+     * SEC-014: Validates that all ReturnReason enum values are accepted
+     * SEC-014: Confirms no default 'OTHER' fallback is used
+     * Tests return_notes inclusion/omission behavior
+     */
+    describe('pushPackReturn - return_reason handling', () => {
+      const baseReturn = {
+        pack_id: 'pack-return-test',
+        store_id: 'store-456',
+        closing_serial: '150',
+        tickets_sold: 150,
+        sales_amount: 75.0,
+        returned_at: '2025-01-16T12:00:00Z',
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+      });
+
+      it('should send SUPPLIER_RECALL when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'SUPPLIER_RECALL' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.return_reason).toBe('SUPPLIER_RECALL');
+      });
+
+      it('should send DAMAGED when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'DAMAGED' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.return_reason).toBe('DAMAGED');
+      });
+
+      it('should send EXPIRED when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'EXPIRED' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.return_reason).toBe('EXPIRED');
+      });
+
+      it('should send INVENTORY_ADJUSTMENT when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'INVENTORY_ADJUSTMENT' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.return_reason).toBe('INVENTORY_ADJUSTMENT');
+      });
+
+      it('should send STORE_CLOSURE when provided in payload', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'STORE_CLOSURE' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.return_reason).toBe('STORE_CLOSURE');
+      });
+
+      it('should NOT default to OTHER value', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        // Use a valid return reason and verify 'OTHER' is not sent
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'DAMAGED' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        // Verify the value is from payload, not defaulted to 'OTHER'
+        expect(body.return_reason).not.toBe('OTHER');
+        expect(body.return_reason).toBe('DAMAGED');
+      });
+
+      it('should include return_reason in request body', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'SUPPLIER_RECALL' as const,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        // Verify return_reason is present in the request body
+        expect(body).toHaveProperty('return_reason');
+        expect(typeof body.return_reason).toBe('string');
+        expect(body.return_reason.length).toBeGreaterThan(0);
+      });
+
+      it('should include return_notes when provided', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'DAMAGED' as const,
+          return_notes: 'Pack was water damaged during shipping',
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body).toHaveProperty('return_notes');
+        expect(body.return_notes).toBe('Pack was water damaged during shipping');
+      });
+
+      it('should omit return_notes when not provided', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          return_reason: 'EXPIRED' as const,
+          // Note: return_notes is NOT provided
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        // Verify return_notes is not in the request body when not provided
+        expect(body).not.toHaveProperty('return_notes');
+      });
+    });
+
+    /**
+     * SEC-010: Audit Trail - returned_by field tests
+     *
+     * Enterprise-grade tests verifying that returned_by (user ID) is correctly
+     * passed through to the cloud API for audit trail compliance.
+     *
+     * Cloud API Requirement: returned_by is REQUIRED for audit trail
+     */
+    describe('pushPackReturn - returned_by handling', () => {
+      const baseReturn = {
+        pack_id: 'pack-return-user-test',
+        store_id: 'store-456',
+        closing_serial: '150',
+        tickets_sold: 150,
+        sales_amount: 75.0,
+        return_reason: 'DAMAGED' as const,
+        returned_at: '2025-01-16T12:00:00Z',
+      };
+
+      beforeEach(() => {
+        vi.clearAllMocks();
+      });
+
+      it('should include returned_by in request body when provided', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          returned_by: 'user-abc-123',
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.returned_by).toBe('user-abc-123');
+      });
+
+      it('should pass through valid UUID user ID for returned_by', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const validUserId = '8981cc60-62c6-4412-8789-42d3afc2b4ac';
+        const returnData = {
+          ...baseReturn,
+          returned_by: validUserId,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body.returned_by).toBe(validUserId);
+      });
+
+      it('should omit returned_by from request body when null', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          returned_by: null,
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body).not.toHaveProperty('returned_by');
+      });
+
+      it('should omit returned_by from request body when undefined', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        // No returned_by field at all
+        await service.pushPackReturn(baseReturn);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        expect(body).not.toHaveProperty('returned_by');
+      });
+
+      it('should include returned_by alongside other fields for full audit context', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnData = {
+          ...baseReturn,
+          returned_by: 'user-full-context',
+          shift_id: 'shift-xyz-789',
+          return_notes: 'Pack damaged during transit',
+        };
+
+        await service.pushPackReturn(returnData);
+
+        const calls = mockFetch.mock.calls;
+        const returnCall = calls[1];
+        const body = JSON.parse(returnCall[1].body as string);
+        // Verify all fields are present for complete audit trail
+        expect(body.pack_id).toBe('pack-return-user-test');
+        expect(body.returned_by).toBe('user-full-context');
+        expect(body.shift_id).toBe('shift-xyz-789');
+        expect(body.return_notes).toBe('Pack damaged during transit');
+        expect(body.return_reason).toBe('DAMAGED');
+      });
+
+      it('should maintain returned_by with all return reason types', async () => {
+        setupSyncSessionMocks({ success: true });
+
+        const returnReasons = [
+          'SUPPLIER_RECALL',
+          'DAMAGED',
+          'EXPIRED',
+          'INVENTORY_ADJUSTMENT',
+          'STORE_CLOSURE',
+        ] as const;
+
+        for (const reason of returnReasons) {
+          vi.clearAllMocks();
+          setupSyncSessionMocks({ success: true });
+
+          const returnData = {
+            ...baseReturn,
+            return_reason: reason,
+            returned_by: `user-for-${reason.toLowerCase()}`,
+          };
+
+          await service.pushPackReturn(returnData);
+
+          const calls = mockFetch.mock.calls;
+          const returnCall = calls[1];
+          const body = JSON.parse(returnCall[1].body as string);
+          expect(body.returned_by).toBe(`user-for-${reason.toLowerCase()}`);
+          expect(body.return_reason).toBe(reason);
+        }
       });
     });
 

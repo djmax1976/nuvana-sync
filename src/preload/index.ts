@@ -87,6 +87,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'shifts:findOpenShifts',
   'shifts:getFuelData',
   'shifts:getDailyFuelTotals',
+  'shifts:manualStart', // Manual shift start for MANUAL mode stores
   // Day Summaries
   'daySummaries:list',
   'daySummaries:getByDate',
@@ -124,6 +125,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'settings:updateAsSupport', // Cloud-authenticated support user settings update
   'settings:testConnection',
   'settings:validateApiKey',
+  'settings:getPOSConnectionType', // Manual mode detection
   'settings:completeSetup',
   'settings:isSetupComplete',
   'settings:browseFolder',
@@ -152,6 +154,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'license:shouldShowWarning',
   // Employees
   'employees:list',
+  'employees:listActive', // For shift start dialog (shift_manager+ access)
   'employees:create',
   'employees:update',
   'employees:updatePin',

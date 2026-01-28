@@ -122,6 +122,7 @@ export interface SyncActivityListParams {
   status?: 'all' | 'queued' | 'failed' | 'synced';
   entityType?: string;
   operation?: SyncOperation;
+  direction?: SyncDirection | 'all';
   limit?: number;
   offset?: number;
 }
@@ -173,6 +174,15 @@ export interface SyncDetailedStats {
     queued: number;
     failed: number;
     synced: number;
+  }>;
+  /** Breakdown by sync direction (PUSH/PULL) */
+  byDirection: Array<{
+    direction: SyncDirection;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+    syncedToday: number;
   }>;
 }
 
@@ -1123,6 +1133,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
         ? params.operation
         : undefined;
 
+    // SEC-006: Validate direction against allowlist
+    const ALLOWED_DIRECTIONS: SyncDirection[] = ['PUSH', 'PULL'];
+    const direction =
+      params.direction && ALLOWED_DIRECTIONS.includes(params.direction as SyncDirection)
+        ? (params.direction as SyncDirection)
+        : undefined;
+
     // Build WHERE clause based on filters
     const conditions: string[] = ['store_id = ?'];
     const queryParams: (string | number)[] = [storeId];
@@ -1147,6 +1164,17 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     if (operation) {
       conditions.push('operation = ?');
       queryParams.push(operation);
+    }
+
+    // Direction filter (SEC-006: validated above)
+    if (direction) {
+      // Handle NULL values: treat NULL as 'PUSH' for backward compatibility
+      if (direction === 'PUSH') {
+        conditions.push('(sync_direction = ? OR sync_direction IS NULL)');
+      } else {
+        conditions.push('sync_direction = ?');
+      }
+      queryParams.push(direction);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -1312,12 +1340,51 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       synced: number;
     }>;
 
+    // Breakdown by sync direction (PUSH/PULL) with synced today counts
+    // SEC-006: Parameterized query with store_id scoping
+    // Treats NULL sync_direction as 'PUSH' for backward compatibility
+    const byDirectionStmt = this.db.prepare(`
+      SELECT
+        COALESCE(sync_direction, 'PUSH') as direction,
+        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced,
+        SUM(CASE WHEN synced = 1 AND synced_at >= date('now', 'localtime') THEN 1 ELSE 0 END) as synced_today
+      FROM sync_queue
+      WHERE store_id = ?
+      GROUP BY COALESCE(sync_direction, 'PUSH')
+      ORDER BY direction
+    `);
+    const byDirectionRaw = byDirectionStmt.all(storeId) as Array<{
+      direction: string;
+      pending: number;
+      queued: number;
+      failed: number;
+      synced: number;
+      synced_today: number;
+    }>;
+
+    // Ensure we always have both PUSH and PULL entries, even with 0 counts
+    const byDirection: SyncDetailedStats['byDirection'] = ['PUSH', 'PULL'].map((dir) => {
+      const found = byDirectionRaw.find((d) => d.direction === dir);
+      return {
+        direction: dir as SyncDirection,
+        pending: found?.pending ?? 0,
+        queued: found?.queued ?? 0,
+        failed: found?.failed ?? 0,
+        synced: found?.synced ?? 0,
+        syncedToday: found?.synced_today ?? 0,
+      };
+    });
+
     return {
       ...basicStats,
       syncedTotal: syncedTotalResult.count,
       newestSync: newestSyncResult?.synced_at || null,
       byEntityType,
       byOperation,
+      byDirection,
     };
   }
 

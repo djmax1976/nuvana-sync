@@ -79,7 +79,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: data.name,
       pin_hash: '$2b$12$mockedHashValue',
       active: 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: new Date().toISOString(),
@@ -92,7 +91,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: data.name || 'Updated User',
       pin_hash: '$2b$12$mockedHashValue',
       active: data.active !== undefined ? (data.active ? 1 : 0) : 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: '2024-01-01T00:00:00.000Z',
@@ -105,7 +103,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: 'Test User',
       pin_hash: '$2b$12$mockedHashValue',
       active: 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: '2024-01-01T00:00:00.000Z',
@@ -153,11 +150,12 @@ vi.mock('../../src/main/services/auth.service', () => ({
 }));
 
 // Mock cloud API service
+// Note: After cloud_id consolidation, user_id IS the cloud ID - no separate cloud_user_id
 vi.mock('../../src/main/services/cloud-api.service', () => ({
   cloudApiService: {
     pushEmployees: vi.fn().mockResolvedValue({
       success: true,
-      results: [{ user_id: 'user-123', cloud_user_id: 'cloud-user-456', status: 'synced' }],
+      results: [{ user_id: 'user-123', status: 'synced' }],
     }),
     startSyncSession: vi.fn().mockResolvedValue({
       sessionId: 'session-123',
@@ -215,7 +213,7 @@ describe('Employee Sync Integration Tests', () => {
         payload: {
           user_id: user.user_id,
           store_id: user.store_id,
-          cloud_user_id: user.cloud_user_id,
+          // user_id IS the cloud ID after consolidation - no separate cloud_user_id field
           role: user.role,
           name: user.name,
           active: user.active === 1,
@@ -243,7 +241,7 @@ describe('Employee Sync Integration Tests', () => {
       const syncPayload = {
         user_id: user.user_id,
         store_id: user.store_id,
-        cloud_user_id: user.cloud_user_id,
+        // user_id IS the cloud ID after consolidation - no separate cloud_user_id field
         role: user.role,
         name: user.name,
         active: user.active === 1,
@@ -352,7 +350,6 @@ describe('Employee Sync Integration Tests', () => {
         role: 'cashier',
         name: 'Test User',
         active: 0, // Deactivated
-        cloud_user_id: null,
       };
 
       syncQueueDAL.enqueue({
@@ -395,7 +392,6 @@ describe('Employee Sync Integration Tests', () => {
         role: 'cashier',
         name: 'Test User',
         active: 1, // Reactivated
-        cloud_user_id: null,
       };
 
       syncQueueDAL.enqueue({
@@ -635,7 +631,6 @@ describe('Employee Sync Integration Tests', () => {
         payload: {
           user_id: TEST_USER_ID,
           store_id: TEST_STORE_ID,
-          cloud_user_id: null,
           role: 'cashier',
           name: 'Test Employee',
           active: true,
@@ -645,10 +640,10 @@ describe('Employee Sync Integration Tests', () => {
       });
 
       const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      // Note: After cloud_id consolidation, user_id IS the cloud ID - no separate cloud_user_id
       const expectedFields = [
         'user_id',
         'store_id',
-        'cloud_user_id',
         'role',
         'name',
         'active',

@@ -31,7 +31,6 @@ const SettingsPage = lazy(() => import('./pages/SettingsPage'));
 const ClockInOutPage = lazy(() => import('./pages/ClockInOutPage'));
 const LotteryPage = lazy(() => import('./pages/LotteryPage'));
 const LotteryGamesPage = lazy(() => import('./pages/LotteryGamesPage'));
-const POSIntegrationPage = lazy(() => import('./pages/POSIntegrationPage'));
 const TerminalsPage = lazy(() => import('./pages/TerminalsPage'));
 const EmployeesPage = lazy(() => import('./pages/EmployeesPage'));
 
@@ -112,14 +111,6 @@ const router = createHashRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <LotteryGamesPage />
-          </Suspense>
-        ),
-      },
-      {
-        path: 'pos-integration',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <POSIntegrationPage />
           </Suspense>
         ),
       },

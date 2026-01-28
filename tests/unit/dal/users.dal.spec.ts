@@ -42,6 +42,7 @@ import { UsersDAL, type User, type UserRole } from '../../../src/main/dal/users.
 describe('UsersDAL', () => {
   let dal: UsersDAL;
 
+  // Note: After cloud_id consolidation, user_id IS the cloud ID - no separate cloud_user_id
   const mockUser: User = {
     user_id: 'user-123',
     store_id: 'store-456',
@@ -50,7 +51,6 @@ describe('UsersDAL', () => {
     pin_hash: '$2b$12$hashedpin123',
     active: 1,
     last_login_at: null,
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
@@ -98,9 +98,10 @@ describe('UsersDAL', () => {
       });
 
       // SEC-006: Verify parameterized query
+      // Note: After cloud_id consolidation, no separate cloud_user_id column
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO users'));
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('VALUES (?, ?, ?, ?, ?, 1, ?, ?, ?)')
+        expect.stringContaining('VALUES (?, ?, ?, ?, ?, 1, ?, ?)')
       );
     });
 
@@ -119,13 +120,13 @@ describe('UsersDAL', () => {
         pin: '1234',
       });
 
+      // Note: After cloud_id consolidation, no separate cloud_user_id column
       expect(mockRun).toHaveBeenCalledWith(
         'custom-user-id',
         'store-456',
         'cashier',
         'John Doe',
         '$2b$12$hashedpin123',
-        null, // cloud_user_id
         expect.any(String),
         expect.any(String)
       );
@@ -328,59 +329,38 @@ describe('UsersDAL', () => {
     });
   });
 
-  describe('findByCloudId', () => {
-    it('should find user by cloud_user_id - SEC-006', () => {
-      const cloudUser = { ...mockUser, cloud_user_id: 'cloud-789' };
-
-      mockPrepare.mockReturnValue({
-        get: vi.fn().mockReturnValue(cloudUser),
-      });
-
-      const result = dal.findByCloudId('cloud-789');
-
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('WHERE cloud_user_id = ?'));
-      expect(result?.cloud_user_id).toBe('cloud-789');
-    });
-
-    it('should return undefined when not found', () => {
-      mockPrepare.mockReturnValue({
-        get: vi.fn().mockReturnValue(undefined),
-      });
-
-      const result = dal.findByCloudId('nonexistent');
-
-      expect(result).toBeUndefined();
-    });
-  });
+  // Note: findByCloudId method removed after cloud_id consolidation
+  // user_id IS now the cloud ID, so use findById directly
 
   describe('upsertFromCloud', () => {
+    // Note: After cloud_id consolidation, user_id IS the cloud ID
     it('should create new user when not exists', () => {
       const cloudData = {
-        cloud_user_id: 'cloud-789',
+        user_id: 'cloud-user-789', // user_id IS the cloud ID now
         store_id: 'store-456',
         role: 'cashier' as UserRole,
         name: 'Cloud User',
         pin_hash: '$2b$12$cloudhashedpin',
       };
 
-      const createdUser = { ...mockUser, ...cloudData };
+      const createdUser = { ...mockUser, user_id: 'cloud-user-789', name: 'Cloud User' };
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
 
       mockPrepare
-        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(undefined) }) // findByCloudId
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(undefined) }) // findById
         .mockReturnValueOnce({ run: mockRun }) // INSERT
         .mockReturnValueOnce({ get: vi.fn().mockReturnValue(createdUser) }); // findById
 
       const result = dal.upsertFromCloud(cloudData);
 
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO users'));
-      expect(result.cloud_user_id).toBe('cloud-789');
+      expect(result.user_id).toBe('cloud-user-789');
     });
 
     it('should update existing user when found', () => {
-      const existingUser = { ...mockUser, cloud_user_id: 'cloud-789' };
+      const existingUser = { ...mockUser, user_id: 'cloud-user-789' };
       const cloudData = {
-        cloud_user_id: 'cloud-789',
+        user_id: 'cloud-user-789', // user_id IS the cloud ID now
         store_id: 'store-456',
         role: 'shift_manager' as UserRole,
         name: 'Updated Name',
@@ -391,9 +371,9 @@ describe('UsersDAL', () => {
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
 
       mockPrepare
-        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(existingUser) }) // findByCloudId
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(existingUser) }) // findById
         .mockReturnValueOnce({ run: mockRun }) // UPDATE
-        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(updatedUser) }); // findByCloudId
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue(updatedUser) }); // findById
 
       const result = dal.upsertFromCloud(cloudData);
 
@@ -404,7 +384,7 @@ describe('UsersDAL', () => {
 
     it('should update synced_at on cloud sync', () => {
       const cloudData = {
-        cloud_user_id: 'cloud-789',
+        user_id: 'cloud-user-789', // user_id IS the cloud ID now
         store_id: 'store-456',
         role: 'cashier' as UserRole,
         name: 'Cloud User',
@@ -428,7 +408,7 @@ describe('UsersDAL', () => {
 
     it('should throw if created cloud user cannot be retrieved', () => {
       const cloudData = {
-        cloud_user_id: 'cloud-789',
+        user_id: 'cloud-user-789', // user_id IS the cloud ID now
         store_id: 'store-456',
         role: 'cashier' as UserRole,
         name: 'Cloud User',
@@ -513,6 +493,259 @@ describe('UsersDAL', () => {
       expect(safeUser.name).toBe('John Doe');
       expect(safeUser.active).toBe(1);
       expect(safeUser.created_at).toBe('2024-01-01T00:00:00.000Z');
+    });
+  });
+
+  // ===========================================================================
+  // PIN Uniqueness Validation (Business Critical)
+  // ===========================================================================
+
+  describe('isPinInUse - PIN Uniqueness Validation', () => {
+    /**
+     * BUSINESS RULE: PINs must be unique within a store because they identify
+     * users at the point of sale. Duplicate PINs would cause authentication
+     * ambiguity and potential audit trail corruption.
+     *
+     * SECURITY: SEC-001 - Uses bcrypt comparison (timing-safe)
+     * SECURITY: DB-006 - Store-scoped for tenant isolation
+     */
+
+    it('PIN-U-001: should return undefined when PIN is not in use', async () => {
+      const activeUsers = [
+        { ...mockUser, user_id: 'user-1', pin_hash: '$2b$12$hash1' },
+        { ...mockUser, user_id: 'user-2', pin_hash: '$2b$12$hash2' },
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(activeUsers),
+      });
+
+      // All comparisons return false - PIN not found
+      mockBcryptCompare.mockResolvedValue(false);
+
+      const result = await dal.isPinInUse('store-456', '9999');
+
+      expect(result).toBeUndefined();
+      expect(mockBcryptCompare).toHaveBeenCalledTimes(2);
+    });
+
+    it('PIN-U-002: should return user when PIN collision detected', async () => {
+      const existingUser = {
+        ...mockUser,
+        user_id: 'existing-user',
+        pin_hash: '$2b$12$existinghash',
+      };
+      const activeUsers = [existingUser];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(activeUsers),
+      });
+
+      // PIN matches existing user
+      mockBcryptCompare.mockResolvedValue(true);
+
+      const result = await dal.isPinInUse('store-456', '1234');
+
+      expect(result).toEqual(existingUser);
+      expect(mockBcryptCompare).toHaveBeenCalledWith('1234', existingUser.pin_hash);
+    });
+
+    it('PIN-U-003: should exclude specified user for PIN update scenarios', async () => {
+      const userBeingUpdated = {
+        ...mockUser,
+        user_id: 'updating-user',
+        pin_hash: '$2b$12$oldhash',
+      };
+      const otherUser = { ...mockUser, user_id: 'other-user', pin_hash: '$2b$12$otherhash' };
+      const activeUsers = [userBeingUpdated, otherUser];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(activeUsers),
+      });
+
+      mockBcryptCompare.mockResolvedValue(false);
+
+      const result = await dal.isPinInUse('store-456', '5678', 'updating-user');
+
+      // Should NOT compare against the excluded user
+      expect(mockBcryptCompare).toHaveBeenCalledTimes(1);
+      expect(mockBcryptCompare).toHaveBeenCalledWith('5678', otherUser.pin_hash);
+      expect(result).toBeUndefined();
+    });
+
+    it('PIN-U-004: should detect collision even when excluding a different user', async () => {
+      const userBeingUpdated = {
+        ...mockUser,
+        user_id: 'updating-user',
+        pin_hash: '$2b$12$oldhash',
+      };
+      const collidingUser = {
+        ...mockUser,
+        user_id: 'colliding-user',
+        pin_hash: '$2b$12$collidinghash',
+      };
+      const activeUsers = [userBeingUpdated, collidingUser];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(activeUsers),
+      });
+
+      // First call (skipped due to exclude), second call matches
+      mockBcryptCompare.mockResolvedValue(true);
+
+      const result = await dal.isPinInUse('store-456', '1234', 'updating-user');
+
+      // Should return the colliding user, not the excluded one
+      expect(result).toEqual(collidingUser);
+    });
+
+    it('PIN-U-005: should return undefined when no active users exist - DB-006', async () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      const result = await dal.isPinInUse('store-456', '1234');
+
+      expect(result).toBeUndefined();
+      expect(mockBcryptCompare).not.toHaveBeenCalled();
+    });
+
+    it('PIN-U-006: should only check users from specified store - DB-006 tenant isolation', async () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      await dal.isPinInUse('store-456', '1234');
+
+      // Verify store-scoped query
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('WHERE store_id = ? AND active = 1')
+      );
+    });
+
+    it('PIN-U-007: should use timing-safe bcrypt comparison - SEC-001', async () => {
+      const activeUsers = [mockUser];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(activeUsers),
+      });
+      mockBcryptCompare.mockResolvedValue(false);
+
+      await dal.isPinInUse('store-456', '1234');
+
+      // bcrypt.compare is inherently timing-safe
+      expect(mockBcryptCompare).toHaveBeenCalledWith('1234', mockUser.pin_hash);
+    });
+
+    it('PIN-U-008: should check all active users until match found', async () => {
+      const users = [
+        { ...mockUser, user_id: 'user-1', pin_hash: '$2b$12$hash1' },
+        { ...mockUser, user_id: 'user-2', pin_hash: '$2b$12$hash2' },
+        { ...mockUser, user_id: 'user-3', pin_hash: '$2b$12$hash3' },
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(users),
+      });
+
+      // Match on second user
+      mockBcryptCompare.mockResolvedValueOnce(false).mockResolvedValueOnce(true);
+
+      const result = await dal.isPinInUse('store-456', '1234');
+
+      expect(result).toEqual(users[1]);
+      // Should stop after finding match
+      expect(mockBcryptCompare).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('findByPin - PIN Authentication', () => {
+    /**
+     * BUSINESS RULE: Users authenticate at POS using their PIN.
+     * This method finds the user matching the provided PIN within a store.
+     *
+     * SECURITY: SEC-001 - Bcrypt timing-safe comparison
+     * SECURITY: DB-006 - Store-scoped queries
+     */
+
+    it('PIN-A-001: should return user when PIN matches', async () => {
+      const activeUsers = [mockUser];
+
+      mockPrepare
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue(activeUsers) })
+        .mockReturnValueOnce({ run: vi.fn() }); // updateLastLogin
+
+      mockBcryptCompare.mockResolvedValue(true);
+
+      const result = await dal.findByPin('store-456', '1234');
+
+      expect(result).toEqual(mockUser);
+      expect(mockBcryptCompare).toHaveBeenCalledWith('1234', mockUser.pin_hash);
+    });
+
+    it('PIN-A-002: should return undefined when no PIN match found', async () => {
+      const activeUsers = [mockUser];
+
+      mockPrepare.mockReturnValueOnce({ all: vi.fn().mockReturnValue(activeUsers) });
+      mockBcryptCompare.mockResolvedValue(false);
+
+      const result = await dal.findByPin('store-456', 'wrong');
+
+      expect(result).toBeUndefined();
+    });
+
+    it('PIN-A-003: should update last_login_at on successful PIN match', async () => {
+      const mockUpdateRun = vi.fn();
+      const activeUsers = [mockUser];
+
+      mockPrepare
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue(activeUsers) })
+        .mockReturnValueOnce({ run: mockUpdateRun });
+
+      mockBcryptCompare.mockResolvedValue(true);
+
+      await dal.findByPin('store-456', '1234');
+
+      expect(mockUpdateRun).toHaveBeenCalledWith(expect.any(String), mockUser.user_id);
+    });
+
+    it('PIN-A-004: should only search active users - DB-006', async () => {
+      mockPrepare.mockReturnValueOnce({ all: vi.fn().mockReturnValue([]) });
+
+      await dal.findByPin('store-456', '1234');
+
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('WHERE store_id = ? AND active = 1')
+      );
+    });
+
+    it('PIN-A-005: should return first matching user when multiple exist', async () => {
+      // Edge case: if duplicate PINs exist (bug scenario), return first match
+      const users = [
+        { ...mockUser, user_id: 'first-user' },
+        { ...mockUser, user_id: 'second-user' },
+      ];
+
+      mockPrepare
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue(users) })
+        .mockReturnValueOnce({ run: vi.fn() });
+
+      // Both match (simulating duplicate PIN bug)
+      mockBcryptCompare.mockResolvedValue(true);
+
+      const result = await dal.findByPin('store-456', '1234');
+
+      // Should return first user found
+      expect(result?.user_id).toBe('first-user');
+    });
+
+    it('PIN-A-006: should handle empty store with no users', async () => {
+      mockPrepare.mockReturnValueOnce({ all: vi.fn().mockReturnValue([]) });
+
+      const result = await dal.findByPin('store-456', '1234');
+
+      expect(result).toBeUndefined();
+      expect(mockBcryptCompare).not.toHaveBeenCalled();
     });
   });
 

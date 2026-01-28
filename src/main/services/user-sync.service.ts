@@ -3,7 +3,7 @@
  *
  * Handles synchronization of users from cloud to local database.
  * Users are always pulled from cloud (cloud is authoritative).
- * Local users without cloud_user_id are deactivated when removed from cloud.
+ * After cloud_id consolidation, user_id IS the cloud ID.
  *
  * Enterprise-grade implementation:
  * - Batch operations to eliminate N+1 queries
@@ -115,6 +115,14 @@ export class UserSyncService {
 
       if (response.users.length === 0) {
         log.info('No users to sync from cloud');
+        // BUG FIX: Mark PULL queue item as synced even when no users returned
+        // Previously this early return left queue items permanently pending
+        const apiContext: SyncApiContext = {
+          api_endpoint: apiEndpoint,
+          http_status: 200,
+          response_body: JSON.stringify({ synced: 0, message: 'No users to sync' }),
+        };
+        syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
         return result;
       }
 
@@ -127,9 +135,10 @@ export class UserSyncService {
       const allCloudIds = new Set<string>(response.users.map((u) => u.userId));
 
       // Step 3: Batch upsert active users
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
       if (activeUsers.length > 0) {
         const userData: CloudUserData[] = activeUsers.map((cloudUser) => ({
-          cloud_user_id: cloudUser.userId,
+          user_id: cloudUser.userId, // user_id IS the cloud ID after consolidation
           store_id: storeId, // DB-006: Always use configured store ID
           role: cloudUser.role,
           name: cloudUser.name,
@@ -157,15 +166,15 @@ export class UserSyncService {
       }
 
       // Step 4: Handle users marked inactive in cloud
+      // Note: After cloud_id consolidation, user_id IS the cloud userId
       for (const cloudUser of inactiveUsers) {
         try {
-          const existing = usersDAL.findByCloudId(cloudUser.userId);
+          const existing = usersDAL.findById(cloudUser.userId);
           if (existing && existing.active) {
             usersDAL.deactivate(existing.user_id);
             result.deactivated++;
             log.info('User deactivated from cloud', {
               userId: existing.user_id,
-              cloudUserId: cloudUser.userId,
               name: cloudUser.name,
             });
           }
@@ -177,7 +186,8 @@ export class UserSyncService {
       }
 
       // Step 5: Handle reactivations (user was inactive locally but active in cloud)
-      const existingUsersMap = usersDAL.findByCloudIds(Array.from(activeCloudIds));
+      // Note: After cloud_id consolidation, user_id IS the cloud userId
+      const existingUsersMap = usersDAL.findByUserIds(Array.from(activeCloudIds));
       for (const cloudUser of activeUsers) {
         const existing = existingUsersMap.get(cloudUser.userId);
         if (existing && !existing.active) {
@@ -186,7 +196,6 @@ export class UserSyncService {
             result.reactivated++;
             log.info('User reactivated from cloud', {
               userId: existing.user_id,
-              cloudUserId: cloudUser.userId,
               name: cloudUser.name,
             });
           } catch (error) {
@@ -197,9 +206,9 @@ export class UserSyncService {
       }
 
       // Step 6: Batch deactivate local users not in cloud response
-      // (users with cloud_user_id that are no longer returned by cloud)
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
       try {
-        const deactivatedCount = usersDAL.batchDeactivateNotInCloudIds(storeId, allCloudIds);
+        const deactivatedCount = usersDAL.batchDeactivateNotInUserIds(storeId, allCloudIds);
         result.deactivated += deactivatedCount;
       } catch (error) {
         const message = error instanceof Error ? error.message : 'Unknown error';
@@ -253,6 +262,9 @@ export class UserSyncService {
    * Check if users need to be synced
    * Returns true if no synced users exist locally
    *
+   * Note: After cloud_id consolidation, all users have user_id which IS the cloud ID.
+   * The presence of synced_at indicates the user was synced from cloud.
+   *
    * @returns true if sync is needed
    */
   needsSync(): boolean {
@@ -263,14 +275,18 @@ export class UserSyncService {
 
     const users = usersDAL.findActiveByStore(store.store_id);
 
-    // If no users with cloud_user_id exist, we need to sync
-    return !users.some((u) => u.cloud_user_id !== null);
+    // If no users with synced_at exist, we need to sync
+    // (synced_at indicates the user was pulled from cloud)
+    return !users.some((u) => u.synced_at !== null);
   }
 
   /**
    * Get count of synced users for a store
    *
-   * @returns Count of users with cloud_user_id
+   * Note: After cloud_id consolidation, all users have user_id which IS the cloud ID.
+   * The presence of synced_at indicates the user was synced from cloud.
+   *
+   * @returns Count of users synced from cloud
    */
   getSyncedUserCount(): number {
     const store = storesDAL.getConfiguredStore();
@@ -279,7 +295,8 @@ export class UserSyncService {
     }
 
     const users = usersDAL.findActiveByStore(store.store_id);
-    return users.filter((u) => u.cloud_user_id !== null).length;
+    // synced_at indicates the user was pulled from cloud
+    return users.filter((u) => u.synced_at !== null).length;
   }
 
   /**

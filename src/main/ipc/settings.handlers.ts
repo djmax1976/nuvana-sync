@@ -1463,6 +1463,28 @@ registerHandler(
 );
 
 /**
+ * Get POS connection type only
+ *
+ * Lightweight handler that returns only the connection type without full config.
+ * Useful for UI to determine if manual mode is enabled.
+ *
+ * @returns { connectionType: POSConnectionType | null }
+ *
+ * Channel: settings:getPOSConnectionType
+ */
+registerHandler(
+  'settings:getPOSConnectionType',
+  async () => {
+    const connectionType = settingsService.getPOSConnectionType();
+    log.info('getPOSConnectionType called', { connectionType });
+    return createSuccessResponse({ connectionType });
+  },
+  {
+    description: 'Get POS connection type (MANUAL, FILE, API, etc.)',
+  }
+);
+
+/**
  * Helper: Get sanitized connection config (remove secrets)
  *
  * @security API-008: Never return secrets in API responses

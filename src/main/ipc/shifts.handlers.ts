@@ -14,6 +14,7 @@ import { z } from 'zod';
 import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { shiftsDAL, type Shift } from '../dal/shifts.dal';
+import { usersDAL } from '../dal/users.dal';
 import { transactionsDAL } from '../dal/transactions.dal';
 import {
   shiftSummariesDAL,
@@ -27,6 +28,8 @@ import {
   type MSMFuelByGrade,
 } from '../dal';
 import { createLogger } from '../utils/logger';
+import { settingsService } from '../services/settings.service';
+import { syncQueueDAL } from '../dal/sync-queue.dal';
 import type { ShiftCloseType } from '../../shared/types/shift-events';
 
 // ============================================================================
@@ -159,6 +162,59 @@ export function determineShiftCloseType(
 
   return { closeType, remainingOpenShifts };
 }
+
+/**
+ * Shift sync payload for cloud synchronization
+ * Contains all fields required by the POST /api/v1/sync/lottery/shifts endpoint
+ */
+export interface ShiftSyncPayload {
+  shift_id: string;
+  store_id: string;
+  business_date: string;
+  shift_number: number;
+  start_time: string;
+  status: 'OPEN' | 'CLOSED';
+  cashier_id: string | null;
+  end_time: string | null;
+  external_register_id: string | null;
+  external_cashier_id: string | null;
+  external_till_id: string | null;
+}
+
+/**
+ * Build sync payload from shift entity
+ *
+ * Creates a payload suitable for cloud sync containing all required
+ * and optional fields per API specification.
+ *
+ * SEC-006: No string concatenation, structured payload only
+ * API-008: OUTPUT_FILTERING - Only includes fields defined in API contract
+ *
+ * @param shift - Shift entity from DAL
+ * @returns Sync payload for cloud API
+ */
+export function buildShiftSyncPayload(shift: Shift): ShiftSyncPayload {
+  return {
+    shift_id: shift.shift_id,
+    store_id: shift.store_id,
+    business_date: shift.business_date,
+    shift_number: shift.shift_number,
+    start_time: shift.start_time || new Date().toISOString(),
+    status: shift.status,
+    cashier_id: shift.cashier_id,
+    end_time: shift.end_time,
+    external_register_id: shift.external_register_id,
+    external_cashier_id: shift.external_cashier_id,
+    external_till_id: shift.external_till_id,
+  };
+}
+
+/**
+ * Priority level for shift sync
+ * Higher priority ensures shifts sync BEFORE pack operations
+ * that reference them (pack activations with shift_id FK)
+ */
+export const SHIFT_SYNC_PRIORITY = 10;
 
 // ============================================================================
 // IPC Handlers
@@ -539,9 +595,16 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         );
       }
 
-      // NOTE: No sync enqueue for 'shift' entity type - no push endpoint exists
-      // Shift data is synced via shift_opening and shift_closing entity types
-      // in lottery.handlers.ts using /api/v1/sync/lottery/shift/open and /close
+      // SEC-017: Enqueue SHIFT STATUS UPDATE for cloud sync
+      // Updates the shift record on cloud with CLOSED status and end_time
+      syncQueueDAL.enqueue({
+        entity_type: 'shift',
+        entity_id: closedShift.shift_id,
+        operation: 'UPDATE',
+        store_id: store.store_id,
+        priority: SHIFT_SYNC_PRIORITY, // High priority ensures consistent state
+        payload: buildShiftSyncPayload(closedShift),
+      });
 
       // SEC-017: Audit log
       log.info('Shift closed', {
@@ -896,4 +959,183 @@ registerHandler<DailyFuelTotalsResponse | ReturnType<typeof createErrorResponse>
     }
   },
   { description: 'Get daily fuel totals with inside/outside breakdown' }
+);
+
+// ============================================================================
+// Manual Shift Start Handler
+// ============================================================================
+
+/**
+ * Input schema for manual shift start
+ * API-001: Validate all input parameters
+ * SEC-001: PIN authentication - employee identified by unique PIN
+ */
+const ManualStartShiftSchema = z.object({
+  /** Cashier PIN for authentication (4-6 digits) - uniquely identifies the employee */
+  pin: z
+    .string()
+    .min(4, 'PIN must be at least 4 digits')
+    .max(6, 'PIN must be at most 6 digits')
+    .regex(/^\d+$/, 'PIN must contain only digits'),
+  /** External register ID (e.g., "1", "2") */
+  externalRegisterId: z.string().min(1, 'Register ID is required').max(50),
+  /** Business date in YYYY-MM-DD format (defaults to today) */
+  businessDate: z
+    .string()
+    .regex(/^\d{4}-\d{2}-\d{2}$/, 'Business date must be YYYY-MM-DD')
+    .optional(),
+  /** Start time as ISO timestamp (defaults to now) */
+  startTime: z.string().optional(),
+});
+
+type ManualStartShiftInput = z.infer<typeof ManualStartShiftSchema>;
+
+/**
+ * Manually start a shift
+ *
+ * Only available for stores with MANUAL POS connection type.
+ * Creates a new OPEN shift for the specified register.
+ * The employee is automatically identified by their unique PIN.
+ *
+ * @security API-001: Input validation with Zod schema
+ * @security SEC-001: PIN-based authentication - employee identified by unique PIN
+ * @security DB-006: Store-scoped operations
+ *
+ * Channel: shifts:manualStart
+ */
+registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
+  'shifts:manualStart',
+  async (_event, input: unknown) => {
+    // Get configured store
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // Verify store is in MANUAL mode
+    const connectionType = settingsService.getPOSConnectionType();
+    if (connectionType !== 'MANUAL') {
+      return createErrorResponse(
+        IPCErrorCodes.FORBIDDEN,
+        'Manual shift operations are only available in MANUAL mode'
+      );
+    }
+
+    // API-001: Validate input
+    const parseResult = ManualStartShiftSchema.safeParse(input);
+    if (!parseResult.success) {
+      log.warn('Invalid manual start shift params', { errors: parseResult.error.issues });
+      return createErrorResponse(
+        IPCErrorCodes.VALIDATION_ERROR,
+        `Invalid parameters: ${parseResult.error.issues.map((i) => i.message).join(', ')}`
+      );
+    }
+
+    const { pin, externalRegisterId, businessDate, startTime } = parseResult.data;
+    const today = businessDate || new Date().toISOString().split('T')[0];
+    const shiftStartTime = startTime || new Date().toISOString();
+
+    try {
+      // SEC-001: Find employee by their unique PIN
+      // This iterates through all active employees and compares bcrypt hashes
+      const cashier = await usersDAL.findByPin(store.store_id, pin);
+      if (!cashier) {
+        log.warn('Manual shift start failed: Invalid PIN - no matching employee', {
+          storeId: store.store_id,
+        });
+        return createErrorResponse(IPCErrorCodes.NOT_AUTHENTICATED, 'Invalid PIN');
+      }
+
+      // Check for existing open shift on this register for today
+      const existingOpenShift = shiftsDAL.findOpenShiftByRegister(
+        store.store_id,
+        today,
+        externalRegisterId
+      );
+
+      if (existingOpenShift) {
+        return createErrorResponse(
+          IPCErrorCodes.ALREADY_EXISTS,
+          `A shift is already open on register ${externalRegisterId} for ${today}`
+        );
+      }
+
+      // Ensure day_summary exists for this business date
+      // First shift of the day implicitly starts the day
+      const daySummary = daySummariesDAL.getOrCreateForDate(store.store_id, today);
+      log.debug('Day summary ensured for manual shift', {
+        daySummaryId: daySummary.day_summary_id,
+        businessDate: today,
+        status: daySummary.status,
+      });
+
+      // Create the shift using existing DAL method with internal user ID
+      const shift = shiftsDAL.getOrCreateForDate(store.store_id, today, {
+        externalRegisterId,
+        internalUserId: cashier.user_id, // Link cashier to shift via FK-safe internal ID
+        startTime: shiftStartTime,
+      });
+
+      // Create a shift summary record to track manual entry
+      shiftSummariesDAL.create({
+        shift_id: shift.shift_id,
+        store_id: store.store_id,
+        business_date: today,
+        shift_opened_at: shiftStartTime,
+      });
+
+      // SEC-017: Enqueue SHIFT RECORD for cloud sync with HIGH PRIORITY
+      // CRITICAL: Shift record MUST sync BEFORE pack operations that reference it
+      // to satisfy cloud FK constraints (activated_shift_id, etc.)
+      syncQueueDAL.enqueue({
+        entity_type: 'shift',
+        entity_id: shift.shift_id,
+        operation: 'CREATE',
+        store_id: store.store_id,
+        priority: SHIFT_SYNC_PRIORITY, // High priority ensures shift syncs before packs
+        payload: buildShiftSyncPayload(shift),
+      });
+
+      // SEC-017: Enqueue shift_opening for lottery serial readings
+      // Note: This has lower priority than the shift record itself
+      syncQueueDAL.enqueue({
+        entity_type: 'shift_opening',
+        entity_id: shift.shift_id,
+        operation: 'CREATE',
+        store_id: store.store_id,
+        payload: {
+          shift_id: shift.shift_id,
+          business_date: today,
+          external_register_id: externalRegisterId,
+          cashier_id: cashier.user_id,
+          cashier_name: cashier.name,
+          start_time: shiftStartTime,
+          source: 'MANUAL',
+        },
+      });
+
+      // SEC-017: Audit log for manual shift start
+      log.info('Manual shift started', {
+        shiftId: shift.shift_id,
+        storeId: store.store_id,
+        registerId: externalRegisterId,
+        businessDate: today,
+        cashierId: cashier.user_id,
+        cashierName: cashier.name,
+      });
+
+      return shift;
+    } catch (error) {
+      log.error('Failed to start manual shift', {
+        externalRegisterId,
+        businessDate: today,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+  {
+    requiresAuth: false, // No prior auth required - PIN is the authentication
+    description: 'Manually start a shift (MANUAL mode only)',
+  }
 );
