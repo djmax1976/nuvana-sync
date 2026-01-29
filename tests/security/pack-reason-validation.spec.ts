@@ -307,7 +307,7 @@ describe('PRV-S-002: XSS Prevention in return_notes', () => {
      */
 
     const DANGEROUS_PATTERNS = [
-      /<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi,
+      /<script\b[^<]*(?:(?!<\/script\s*>)<[^<]*)*<\/script\s*>/gi,
       /javascript:/gi,
       /on\w+\s*=/gi, // Event handlers like onclick=
       /<iframe/gi,
@@ -658,7 +658,8 @@ describe('PRV-S-005: Max Length Enforcement on return_notes', () => {
 describe('PRV-S-006: Sanitization of return_notes Before Storage', () => {
   // Mock database for DAL testing
   const mockPrepare = vi.fn();
-  const mockTransaction = vi.fn((fn) => () => fn());
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  const _mockTransaction = vi.fn((fn: () => unknown) => () => fn());
 
   beforeEach(() => {
     vi.clearAllMocks();
