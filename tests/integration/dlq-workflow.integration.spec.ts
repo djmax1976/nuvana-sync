@@ -133,11 +133,15 @@ function simulateSyncAttempt(
   errorMessage: string,
   apiEndpoint: string = '/api/v1/sync/lottery/packs'
 ): void {
-  dal.incrementAttempts(itemId, errorMessage, {
-    api_endpoint: apiEndpoint,
-    http_status: httpStatus || undefined,
-    response_body: JSON.stringify({ error: errorMessage }),
-  });
+  const apiContext =
+    httpStatus !== null
+      ? {
+          api_endpoint: apiEndpoint,
+          http_status: httpStatus,
+          response_body: JSON.stringify({ error: errorMessage }),
+        }
+      : undefined;
+  dal.incrementAttempts(itemId, errorMessage, apiContext);
 }
 
 // ============================================================================

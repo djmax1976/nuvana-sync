@@ -261,10 +261,10 @@ describe('Dead Letter Queue IPC Handlers', () => {
             id: 'dlq-1',
             entity_type: 'pack',
             entity_id: 'pack-123',
-            operation: 'CREATE',
-            dead_letter_reason: 'PERMANENT_ERROR',
+            operation: 'CREATE' as const,
+            dead_letter_reason: 'PERMANENT_ERROR' as const,
             dead_lettered_at: '2024-01-01T12:00:00Z',
-            error_category: 'PERMANENT',
+            error_category: 'PERMANENT' as const,
             sync_attempts: 5,
             max_attempts: 5,
             last_sync_error: 'API Error 400',
@@ -797,9 +797,19 @@ describe('Dead Letter Queue IPC Handlers', () => {
 
       mockGetDeadLetterStats.mockReturnValue({
         total: 0,
-        byReason: {},
+        byReason: {
+          MANUAL: 0,
+          MAX_ATTEMPTS_EXCEEDED: 0,
+          PERMANENT_ERROR: 0,
+          STRUCTURAL_FAILURE: 0,
+        },
         byEntityType: {},
-        byErrorCategory: {},
+        byErrorCategory: {
+          UNKNOWN: 0,
+          TRANSIENT: 0,
+          PERMANENT: 0,
+          STRUCTURAL: 0,
+        },
         oldestItem: null,
         newestItem: null,
       });

@@ -83,26 +83,20 @@ const mockIpcClient = {
 // Create a mock syncAPI that mirrors the real one
 const mockSyncAPI = {
   getDeadLetterItems: vi.fn((params?: DeadLetterParams) =>
-    mockIpcClient.invoke<DeadLetterListResponse>('sync:getDeadLetterItems', params)
+    mockIpcClient.invoke('sync:getDeadLetterItems', params)
   ),
-  getDeadLetterStats: vi.fn(() => mockIpcClient.invoke<DeadLetterStats>('sync:getDeadLetterStats')),
+  getDeadLetterStats: vi.fn(() => mockIpcClient.invoke('sync:getDeadLetterStats')),
   restoreFromDeadLetter: vi.fn((id: string) =>
-    mockIpcClient.invoke<{ restored: boolean; id: string }>('sync:restoreFromDeadLetter', { id })
+    mockIpcClient.invoke('sync:restoreFromDeadLetter', { id })
   ),
   restoreFromDeadLetterMany: vi.fn((ids: string[]) =>
-    mockIpcClient.invoke<{ requested: number; restored: number }>(
-      'sync:restoreFromDeadLetterMany',
-      { ids }
-    )
+    mockIpcClient.invoke('sync:restoreFromDeadLetterMany', { ids })
   ),
   deleteDeadLetterItem: vi.fn((id: string) =>
-    mockIpcClient.invoke<{ deleted: boolean; id: string }>('sync:deleteDeadLetterItem', { id })
+    mockIpcClient.invoke('sync:deleteDeadLetterItem', { id })
   ),
   manualDeadLetter: vi.fn((id: string, reason?: string) =>
-    mockIpcClient.invoke<{ deadLettered: boolean; id: string }>('sync:manualDeadLetter', {
-      id,
-      reason,
-    })
+    mockIpcClient.invoke('sync:manualDeadLetter', { id, reason })
   ),
 };
 
