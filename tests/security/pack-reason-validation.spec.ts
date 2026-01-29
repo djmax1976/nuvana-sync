@@ -307,7 +307,7 @@ describe('PRV-S-002: XSS Prevention in return_notes', () => {
      */
 
     const DANGEROUS_PATTERNS = [
-      /<script\b[^<]*(?:(?!<\/script\s*>)<[^<]*)*<\/script\s*>/gi,
+      /<script\b[^<]*(?:(?!<\/script[^>]*>)<[^<]*)*<\/script[^>]*>/gi,
       /javascript:/gi,
       /on\w+\s*=/gi, // Event handlers like onclick=
       /<iframe/gi,
