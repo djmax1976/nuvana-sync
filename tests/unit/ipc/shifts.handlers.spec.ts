@@ -54,23 +54,31 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
 }));
 
 // Mock shift summaries DAL for fuel data handlers
-vi.mock('../../../src/main/dal/shift-summaries.dal', () => ({
-  shiftSummariesDAL: {
-    findByShiftId: vi.fn(),
-    getOrCreateForShift: vi.fn(),
-  },
-}));
+vi.mock('../../../src/main/dal/shift-summaries.dal', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    shiftSummariesDAL: {
+      findByShiftId: vi.fn(),
+      getOrCreateForShift: vi.fn(),
+    },
+  };
+});
 
 // Mock shift fuel summaries DAL for fuel data handlers
-vi.mock('../../../src/main/dal/shift-fuel-summaries.dal', () => ({
-  shiftFuelSummariesDAL: {
-    hasMSMData: vi.fn(),
-    getMSMShiftTotals: vi.fn(),
-    getMSMFuelByGrade: vi.fn(),
-    getTotalsByBusinessDate: vi.fn(),
-    getByGradeForBusinessDate: vi.fn(),
-  },
-}));
+vi.mock('../../../src/main/dal/shift-fuel-summaries.dal', async (importOriginal) => {
+  const actual = await importOriginal();
+  return {
+    ...actual,
+    shiftFuelSummariesDAL: {
+      hasMSMData: vi.fn(),
+      getMSMShiftTotals: vi.fn(),
+      getMSMFuelByGrade: vi.fn(),
+      getTotalsByBusinessDate: vi.fn(),
+      getByGradeForBusinessDate: vi.fn(),
+    },
+  };
+});
 
 // Mock day fuel summaries DAL for daily fuel totals
 vi.mock('../../../src/main/dal/day-fuel-summaries.dal', () => ({

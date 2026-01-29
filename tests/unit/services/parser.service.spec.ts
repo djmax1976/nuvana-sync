@@ -71,6 +71,7 @@ vi.mock('../../../src/main/dal', () => {
     },
     syncQueueDAL: {
       enqueue,
+      hasPendingSync: vi.fn(() => false),
     },
     shiftsDAL: {
       getOrCreateForDate,
@@ -191,9 +192,21 @@ vi.mock('../../../src/shared/naxml/parser', () => {
     extractFuelDataFromMSM: vi.fn(() => ({
       fuelTotals: null,
       fuelByGrade: [],
+      // Match the actual return shape expected by parser.service.ts
+      totalFuel: [],
+      insideFuel: [],
+      outsideFuel: [],
     })),
   };
 });
+
+// Mock sync-queue.dal.ts direct import (parser.service.ts imports it directly)
+vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
+  syncQueueDAL: {
+    enqueue: vi.fn(() => ({ id: 'queue-item-id' })),
+    hasPendingSync: vi.fn(() => false),
+  },
+}));
 
 // Import after mocks
 import * as fs from 'fs/promises';
