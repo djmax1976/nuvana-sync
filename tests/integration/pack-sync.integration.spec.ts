@@ -60,6 +60,7 @@ vi.mock('../../src/main/dal/sync-queue.dal', () => ({
     getUnsyncedByStore: vi.fn(() => []),
     getPendingCount: vi.fn(() => 0),
     markSynced: vi.fn(),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 

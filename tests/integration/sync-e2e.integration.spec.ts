@@ -99,6 +99,7 @@ vi.mock('../../src/main/dal/sync-queue.dal', () => ({
       syncedToday: 0,
       oldestPending: null,
     })),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 

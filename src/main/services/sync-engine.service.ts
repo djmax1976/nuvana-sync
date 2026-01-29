@@ -305,6 +305,10 @@ export class SyncEngineService {
     // Clean up any stale running syncs from previous session
     this.cleanupStaleRunning();
 
+    // Clean up stale PULL tracking items that accumulated from previous sessions
+    // These are tracking-only items that will never be retried (PULL creates new items each time)
+    this.cleanupStalePullTrackingAtStartup();
+
     // Update pending count
     this.updatePendingCount();
 
@@ -2253,6 +2257,36 @@ export class SyncEngineService {
       }
     } catch (error) {
       log.warn('Failed to cleanup stale running syncs', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  /**
+   * Clean up stale PULL tracking items from previous sessions
+   *
+   * PULL tracking items are created each time a PULL operation runs with unique
+   * entity_ids. If previous sessions had failed PULLs or the app crashed, these
+   * items accumulate and appear as stuck "pending" items in the UI.
+   *
+   * This cleanup removes all PULL tracking items older than 10 minutes since
+   * they are purely for UI tracking and will never be retried (PULL operations
+   * always create new tracking items).
+   */
+  private cleanupStalePullTrackingAtStartup(): void {
+    try {
+      const store = storesDAL.getConfiguredStore();
+      if (store) {
+        const deleted = syncQueueDAL.cleanupAllStalePullTracking(store.store_id, 10);
+        if (deleted > 0) {
+          log.info('Cleaned up stale PULL tracking items at startup', {
+            storeId: store.store_id,
+            deletedCount: deleted,
+          });
+        }
+      }
+    } catch (error) {
+      log.warn('Failed to cleanup stale PULL tracking items', {
         error: error instanceof Error ? error.message : String(error),
       });
     }

@@ -30,6 +30,8 @@ const {
   mockSyncQueueEnqueue,
   mockSyncQueueMarkSynced,
   mockSyncQueueIncrementAttempts,
+  mockSyncQueueCleanupStalePullTracking,
+  mockSyncQueueCleanupAllStalePullTracking,
 } = vi.hoisted(() => ({
   mockPullBins: vi.fn(),
   mockPullLotteryGames: vi.fn(),
@@ -53,6 +55,8 @@ const {
   mockSyncQueueEnqueue: vi.fn(),
   mockSyncQueueMarkSynced: vi.fn(),
   mockSyncQueueIncrementAttempts: vi.fn(),
+  mockSyncQueueCleanupStalePullTracking: vi.fn(),
+  mockSyncQueueCleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
 }));
 
 // Mock cloud API service
@@ -106,6 +110,8 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
     enqueue: mockSyncQueueEnqueue,
     markSynced: mockSyncQueueMarkSynced,
     incrementAttempts: mockSyncQueueIncrementAttempts,
+    cleanupStalePullTracking: mockSyncQueueCleanupStalePullTracking,
+    cleanupAllStalePullTracking: mockSyncQueueCleanupAllStalePullTracking,
     getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
   },
 }));

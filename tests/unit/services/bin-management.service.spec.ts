@@ -44,6 +44,7 @@ vi.mock('../../../src/main/dal/lottery-packs.dal', () => ({
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
     enqueue: vi.fn(),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 

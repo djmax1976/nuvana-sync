@@ -23,6 +23,7 @@ const {
   mockResetStuckInBackoff,
   mockGetQueuedCount,
   mockGetExclusiveCounts,
+  mockCleanupAllStalePullTracking,
   mockStartSync,
   mockCompleteSync,
   mockFailSync,
@@ -30,6 +31,8 @@ const {
   mockGetConfiguredStore,
   // Phase 10: Pack sync operation mocks
   mockGameFindById,
+  // Employee sync: usersDAL mock for pin_hash lookup
+  mockUserFindById,
 } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockGetRetryableItems: vi.fn(),
@@ -46,6 +49,7 @@ const {
   mockResetStuckInBackoff: vi.fn(),
   mockGetQueuedCount: vi.fn(),
   mockGetExclusiveCounts: vi.fn(),
+  mockCleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   mockStartSync: vi.fn(),
   mockCompleteSync: vi.fn(),
   mockFailSync: vi.fn(),
@@ -53,6 +57,8 @@ const {
   mockGetConfiguredStore: vi.fn(),
   // Phase 10: Pack sync operation mocks
   mockGameFindById: vi.fn(),
+  // Employee sync: usersDAL mock for pin_hash lookup
+  mockUserFindById: vi.fn(),
 }));
 
 // Mock electron (including safeStorage for cloud-api.service)
@@ -97,6 +103,7 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
     resetStuckInBackoff: mockResetStuckInBackoff,
     getQueuedCount: mockGetQueuedCount,
     getExclusiveCounts: mockGetExclusiveCounts,
+    cleanupAllStalePullTracking: mockCleanupAllStalePullTracking,
   },
 }));
 
@@ -119,6 +126,13 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 vi.mock('../../../src/main/dal/lottery-games.dal', () => ({
   lotteryGamesDAL: {
     findById: mockGameFindById,
+  },
+}));
+
+// Mock users DAL for employee sync (pin_hash lookup)
+vi.mock('../../../src/main/dal/users.dal', () => ({
+  usersDAL: {
+    findById: mockUserFindById,
   },
 }));
 
@@ -404,6 +418,15 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(1);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(mockItems);
+      // Mock usersDAL.findById to return employee with pin_hash (required for push)
+      mockUserFindById.mockReturnValue({
+        user_id: 'entity-1',
+        store_id: 'store-123',
+        role: 'cashier',
+        name: 'Test Employee',
+        pin_hash: '$2b$12$hashedPinValue',
+        active: 1,
+      });
       // Mock pushEmployees to return success with the item marked as synced
       mockPushEmployees.mockResolvedValue({
         success: true,
@@ -548,6 +571,15 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(3);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(mockItems);
+      // Mock usersDAL.findById to return employees with pin_hash (required for push)
+      mockUserFindById.mockImplementation((userId: string) => ({
+        user_id: userId,
+        store_id: 'store-123',
+        role: 'cashier',
+        name: `Employee ${userId}`,
+        pin_hash: '$2b$12$hashedPinValue',
+        active: 1,
+      }));
       // Mock pushEmployees to return success for all items
       mockPushEmployees.mockResolvedValue({
         success: true,
@@ -986,6 +1018,15 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(2);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(items);
+      // Mock usersDAL.findById to return employees with pin_hash (required for push)
+      mockUserFindById.mockImplementation((userId: string) => ({
+        user_id: userId,
+        store_id: 'store-123',
+        role: 'cashier',
+        name: `Employee ${userId}`,
+        pin_hash: '$2b$12$hashedPinValue',
+        active: 1,
+      }));
       // Mock pushEmployees to return success for all items
       mockPushEmployees.mockResolvedValue({
         success: true,

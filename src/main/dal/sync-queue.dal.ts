@@ -1432,6 +1432,123 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       oldestPending: oldestResult?.created_at || null,
     };
   }
+
+  /**
+   * Cleanup stale PULL tracking items for a specific action type
+   *
+   * PULL tracking items are created each time a PULL operation runs with unique
+   * entity_ids (e.g., "pull-1706537000000"). If a PULL fails and gets auto-reset,
+   * the old item sits forever because subsequent PULL operations create NEW items.
+   *
+   * This method removes old pending PULL items of a specific action type after
+   * a successful PULL, preventing accumulation of stale tracking items.
+   *
+   * SEC-006: Parameterized DELETE query - no string concatenation with user input
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_direction index (store_id, sync_direction, created_at)
+   * SAFETY: Excludes the current PULL item and only deletes items older than 5 seconds
+   *         to prevent race conditions with concurrent operations
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param actionPattern - Action to match in payload (e.g., 'pull_bins', 'pull_games')
+   * @param excludeId - ID of current PULL item to exclude from cleanup
+   * @returns Number of stale items deleted
+   */
+  cleanupStalePullTracking(storeId: string, actionPattern: string, excludeId: string): number {
+    // SEC-006: Allowlist validation for actionPattern to prevent injection via JSON LIKE
+    const ALLOWED_ACTIONS = [
+      'pull_bins',
+      'pull_games',
+      'pull_received_packs',
+      'pull_activated_packs',
+    ];
+
+    if (!ALLOWED_ACTIONS.includes(actionPattern)) {
+      log.warn('Invalid actionPattern for PULL cleanup - rejected', {
+        storeId,
+        actionPattern,
+        allowed: ALLOWED_ACTIONS,
+      });
+      return 0;
+    }
+
+    // Calculate cutoff time (5 seconds ago) to prevent race conditions
+    // with items being created/processed concurrently
+    const cutoffTime = new Date(Date.now() - 5000).toISOString();
+
+    // SEC-006: Parameterized query with validated actionPattern
+    // PERF: Uses idx_sync_queue_direction (store_id, sync_direction, created_at)
+    // Query plan: Index scan on (store_id, sync_direction) then filter by conditions
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND id != ?
+        AND created_at < ?
+        AND payload LIKE ?
+    `);
+
+    // Build LIKE pattern: matches JSON containing the action
+    // Example: '%"action":"pull_bins"%' matches {"action":"pull_bins",...}
+    const likePattern = `%"action":"${actionPattern}"%`;
+
+    const result = stmt.run(storeId, excludeId, cutoffTime, likePattern);
+
+    if (result.changes > 0) {
+      log.info('Cleaned up stale PULL tracking items', {
+        storeId,
+        actionPattern,
+        deletedCount: result.changes,
+        excludedId: excludeId,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
+   * Cleanup ALL stale PULL tracking items for a store
+   *
+   * Called at startup to clear accumulated PULL tracking items that will never
+   * be retried. This is a one-time bulk cleanup that removes all pending PULL
+   * items older than the specified age.
+   *
+   * SEC-006: Parameterized DELETE query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_direction index (store_id, sync_direction, created_at)
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param maxAgeMinutes - Delete PULL items older than this (default: 10 minutes)
+   * @returns Number of stale items deleted
+   */
+  cleanupAllStalePullTracking(storeId: string, maxAgeMinutes: number = 10): number {
+    // Calculate cutoff time
+    const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+
+    // SEC-006: Parameterized query
+    // Delete all pending PULL tracking items older than cutoff
+    // These are tracking-only items that will never be retried
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND created_at < ?
+    `);
+
+    const result = stmt.run(storeId, cutoffTime);
+
+    if (result.changes > 0) {
+      log.info('Cleaned up all stale PULL tracking items at startup', {
+        storeId,
+        maxAgeMinutes,
+        deletedCount: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
 }
 
 // ============================================================================

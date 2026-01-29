@@ -142,6 +142,11 @@ export class BidirectionalSyncService {
           response_body: JSON.stringify({ pulled: 0, message: 'No bins to sync' }),
         };
         syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
+        // Cleanup stale PULL tracking items from previous failed/reset operations
+        // Prevents accumulation of pending items that will never be retried
+        syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
+
         return result;
       }
 
@@ -234,6 +239,10 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
 
       return result;
     } catch (error: unknown) {
@@ -416,6 +425,10 @@ export class BidirectionalSyncService {
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
 
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_games', pullQueueItem.id);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -592,6 +605,10 @@ export class BidirectionalSyncService {
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
 
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_received_packs', pullQueueItem.id);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -761,6 +778,10 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_activated_packs', pullQueueItem.id);
 
       return result;
     } catch (error: unknown) {

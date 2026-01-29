@@ -57,6 +57,7 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
     markSynced: vi.fn(),
     incrementAttempts: vi.fn(),
     getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 

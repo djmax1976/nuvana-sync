@@ -576,4 +576,100 @@ describe('SyncQueueDAL', () => {
       expect(mockRun).toHaveBeenCalledWith();
     });
   });
+
+  describe('cleanupStalePullTracking', () => {
+    it('should delete stale PULL tracking items with valid action pattern', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 3 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.cleanupStalePullTracking('store-123', 'pull_bins', 'current-id');
+
+      expect(result).toBe(3);
+      expect(mockPrepare).toHaveBeenCalled();
+      // Verify parameterized query with proper LIKE pattern
+      const prepareCall = mockPrepare.mock.calls[0][0];
+      expect(prepareCall).toContain('DELETE FROM sync_queue');
+      expect(prepareCall).toContain('store_id = ?');
+      expect(prepareCall).toContain("sync_direction = 'PULL'");
+      expect(prepareCall).toContain('synced = 0');
+      expect(prepareCall).toContain('id != ?');
+      expect(prepareCall).toContain('payload LIKE ?');
+    });
+
+    it('should reject invalid action patterns (SEC-006 allowlist)', () => {
+      const mockRun = vi.fn();
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Attempt injection via action pattern
+      const result = dal.cleanupStalePullTracking('store-123', 'malicious_action', 'current-id');
+
+      expect(result).toBe(0);
+      expect(mockPrepare).not.toHaveBeenCalled();
+      expect(mockRun).not.toHaveBeenCalled();
+    });
+
+    it('should accept all valid action patterns', () => {
+      const validActions = [
+        'pull_bins',
+        'pull_games',
+        'pull_received_packs',
+        'pull_activated_packs',
+      ];
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      for (const action of validActions) {
+        vi.clearAllMocks();
+        mockPrepare.mockReturnValue({ run: mockRun });
+
+        const result = dal.cleanupStalePullTracking('store-123', action, 'current-id');
+
+        expect(result).toBe(1);
+        expect(mockPrepare).toHaveBeenCalled();
+      }
+    });
+
+    it('should exclude current item from cleanup', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 2 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.cleanupStalePullTracking('store-123', 'pull_bins', 'exclude-this-id');
+
+      // Verify the excludeId is passed as parameter
+      expect(mockRun).toHaveBeenCalled();
+      const runArgs = mockRun.mock.calls[0];
+      expect(runArgs).toContain('exclude-this-id');
+    });
+
+    it('should scope cleanup to store_id (DB-006 tenant isolation)', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.cleanupStalePullTracking('tenant-store-456', 'pull_games', 'current-id');
+
+      // Verify store_id is first parameter (tenant scoping)
+      const runArgs = mockRun.mock.calls[0];
+      expect(runArgs[0]).toBe('tenant-store-456');
+    });
+
+    it('should return 0 when no items to cleanup', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.cleanupStalePullTracking('store-123', 'pull_bins', 'current-id');
+
+      expect(result).toBe(0);
+    });
+
+    it('should use LIKE pattern for JSON payload matching', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.cleanupStalePullTracking('store-123', 'pull_bins', 'current-id');
+
+      // Verify LIKE pattern is constructed correctly
+      const runArgs = mockRun.mock.calls[0];
+      expect(runArgs).toContain('%"action":"pull_bins"%');
+    });
+  });
 });

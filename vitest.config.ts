@@ -18,8 +18,9 @@ export default defineConfig({
       'tests/integration/**',
     ],
     passWithNoTests: false,
-    // Use forks pool with isolation (Vitest 4 compatible)
-    pool: 'forks',
+    // Use vmForks pool with isolation (Vitest 4 compatible)
+    // Note: 'forks' pool has issues with vi.mock hoisting on Windows
+    pool: 'vmForks',
     isolate: true,
     // Add server.deps.inline to help with ESM module resolution for vi.mock
     server: {
