@@ -55,6 +55,11 @@ describe('SyncQueueDAL', () => {
         api_endpoint: null,
         http_status: null,
         response_body: null,
+        dead_lettered: 0,
+        dead_letter_reason: null,
+        dead_lettered_at: null,
+        error_category: null,
+        retry_after: null,
       };
 
       mockPrepare
@@ -124,6 +129,11 @@ describe('SyncQueueDAL', () => {
           api_endpoint: null,
           http_status: null,
           response_body: null,
+          dead_lettered: 0,
+          dead_letter_reason: null,
+          dead_lettered_at: null,
+          error_category: null,
+          retry_after: null,
         },
       ];
 
