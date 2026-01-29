@@ -21,6 +21,7 @@ import {
 } from './index';
 import { usersDAL, UsersDAL, type UserRole, type SafeUser, type User } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
+import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { getCurrentAuthUser, hasMinimumRole } from '../services/auth.service';
 import { createLogger } from '../utils/logger';
 
@@ -181,6 +182,53 @@ registerHandler(
 );
 
 /**
+ * List active employees for shift selection
+ *
+ * This handler returns only active employees and does NOT require authentication.
+ * Used by ShiftStartDialog for manual shift start - users select themselves from
+ * the list and then authenticate with their PIN.
+ *
+ * SEC-001: Returns only active employees (no PIN data - only names and roles)
+ * DB-006: Store-scoped query for tenant isolation
+ *
+ * Channel: employees:listActive
+ */
+registerHandler(
+  'employees:listActive',
+  async () => {
+    // Get store ID from settings (no auth required)
+    const storeResult = getStoreIdOrError();
+    if ('error' in storeResult) return storeResult.error;
+
+    try {
+      // DB-006: Store-scoped query - get only active users
+      const result = usersDAL.findByStore(storeResult.storeId, { limit: 1000 });
+      const activeUsers = result.data.filter((user) => user.active === 1);
+
+      // SEC-001: Remove sensitive PIN data
+      const safeUsers: SafeUser[] = activeUsers.map((user) => UsersDAL.toSafeUser(user));
+
+      log.info('Active employee list retrieved for shift selection', {
+        storeId: storeResult.storeId,
+        count: safeUsers.length,
+      });
+
+      return createSuccessResponse({
+        employees: safeUsers,
+        total: safeUsers.length,
+      });
+    } catch (error) {
+      log.error('Failed to list active employees', { error });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, 'Failed to retrieve employees');
+    }
+  },
+  {
+    requiresAuth: false, // No auth required - users authenticate via PIN entry
+    description: 'List active employees for shift selection',
+  }
+);
+
+/**
  * Create a new employee
  * Requires store manager role
  *
@@ -207,12 +255,44 @@ registerHandler(
     if ('error' in storeResult) return storeResult.error;
 
     try {
+      // API-001: Business rule validation - PIN must be unique within the store
+      // SEC-001: Uses bcrypt comparison (timing-safe)
+      // DB-006: Scoped to configured store for tenant isolation
+      const existingUserWithPin = await usersDAL.isPinInUse(storeResult.storeId, pin);
+      if (existingUserWithPin) {
+        log.warn('PIN uniqueness violation on create', {
+          storeId: storeResult.storeId,
+          existingUserId: existingUserWithPin.user_id,
+          attemptedBy: getCurrentAuthUser()?.userId,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'This PIN is already in use by another employee. Please choose a different PIN.'
+        );
+      }
+
       // SEC-001: PIN will be hashed by DAL
       const user = await usersDAL.create({
         store_id: storeResult.storeId,
         name,
         role: role as UserRole,
         pin,
+      });
+
+      // Enqueue sync item for cloud push
+      // SEC-001: Payload excludes pin_hash - never sync PIN data
+      syncQueueDAL.enqueue({
+        store_id: storeResult.storeId,
+        entity_type: 'employee',
+        entity_id: user.user_id,
+        operation: 'CREATE',
+        payload: {
+          user_id: user.user_id,
+          store_id: user.store_id,
+          role: user.role,
+          name: user.name,
+          active: user.active === 1,
+        },
       });
 
       // SEC-017: Audit log
@@ -222,6 +302,7 @@ registerHandler(
         role: user.role,
         storeId: storeResult.storeId,
         createdBy: getCurrentAuthUser()?.userId,
+        syncEnqueued: true,
       });
 
       return createSuccessResponse({
@@ -298,11 +379,28 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Employee not found');
       }
 
+      // Enqueue sync item for cloud push
+      // SEC-001: Payload excludes pin_hash - never sync PIN data
+      syncQueueDAL.enqueue({
+        store_id: storeResult.storeId,
+        entity_type: 'employee',
+        entity_id: updatedUser.user_id,
+        operation: 'UPDATE',
+        payload: {
+          user_id: updatedUser.user_id,
+          store_id: updatedUser.store_id,
+          role: updatedUser.role,
+          name: updatedUser.name,
+          active: updatedUser.active === 1,
+        },
+      });
+
       // SEC-017: Audit log
       log.info('Employee updated', {
         userId,
         changes: { name, role },
         updatedBy: getCurrentAuthUser()?.userId,
+        syncEnqueued: true,
       });
 
       return createSuccessResponse({
@@ -368,6 +466,28 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Current PIN is incorrect');
       }
 
+      // API-001: Business rule validation - New PIN must be unique within the store
+      // SEC-001: Uses bcrypt comparison (timing-safe)
+      // DB-006: Scoped to configured store for tenant isolation
+      // Note: Exclude current user since they may be keeping the same PIN
+      const existingUserWithPin = await usersDAL.isPinInUse(
+        storeResult.storeId,
+        newPin,
+        userId // Exclude the user being updated
+      );
+      if (existingUserWithPin) {
+        log.warn('PIN uniqueness violation on update', {
+          storeId: storeResult.storeId,
+          userId,
+          existingUserId: existingUserWithPin.user_id,
+          attemptedBy: getCurrentAuthUser()?.userId,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'This PIN is already in use by another employee. Please choose a different PIN.'
+        );
+      }
+
       // Update PIN (will be hashed by DAL)
       const updatedUser = await usersDAL.update(userId, { pin: newPin });
 
@@ -375,10 +495,28 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Employee not found');
       }
 
+      // Enqueue sync item for cloud push
+      // SEC-001: Payload EXCLUDES pin_hash - PIN changes are local-only
+      // Cloud does not receive PIN data for security reasons
+      syncQueueDAL.enqueue({
+        store_id: storeResult.storeId,
+        entity_type: 'employee',
+        entity_id: updatedUser.user_id,
+        operation: 'UPDATE',
+        payload: {
+          user_id: updatedUser.user_id,
+          store_id: updatedUser.store_id,
+          role: updatedUser.role,
+          name: updatedUser.name,
+          active: updatedUser.active === 1,
+        },
+      });
+
       // SEC-017: Audit log (without PIN values)
       log.info('Employee PIN updated', {
         userId,
         updatedBy: getCurrentAuthUser()?.userId,
+        syncEnqueued: true,
       });
 
       return createSuccessResponse({
@@ -456,10 +594,27 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Employee not found');
       }
 
+      // Enqueue sync item for cloud push
+      // SEC-001: Payload excludes pin_hash - never sync PIN data
+      syncQueueDAL.enqueue({
+        store_id: storeResult.storeId,
+        entity_type: 'employee',
+        entity_id: existingUser.user_id,
+        operation: 'UPDATE',
+        payload: {
+          user_id: existingUser.user_id,
+          store_id: existingUser.store_id,
+          role: existingUser.role,
+          name: existingUser.name,
+          active: false, // Deactivated
+        },
+      });
+
       // SEC-017: Audit log
       log.info('Employee deactivated', {
         userId,
         deactivatedBy: currentUser?.userId,
+        syncEnqueued: true,
       });
 
       return createSuccessResponse({
@@ -514,16 +669,49 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.FORBIDDEN, 'Access denied');
       }
 
+      // NOTE: PIN uniqueness cannot be verified on reactivation because:
+      // 1. PINs are bcrypt-hashed with random salts (SEC-001 compliant)
+      // 2. We don't have the plaintext PIN to check against other users
+      // 3. Different bcrypt hashes of the same PIN cannot be compared directly
+      //
+      // Risk: If user A (PIN 1234) was deactivated, then user B was given PIN 1234,
+      // reactivating user A would create a PIN collision.
+      //
+      // Mitigation: The manager should reset the employee's PIN after reactivation
+      // if there's any concern about conflicts. The isPinInUse check on PIN updates
+      // will catch this when the PIN is changed.
+      //
+      // Future enhancement: Add a deterministic hash (HMAC-SHA256) column for
+      // uniqueness checking that can be compared without the plaintext PIN.
+
       const success = usersDAL.reactivate(userId);
 
       if (!success) {
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Employee not found');
       }
 
-      // SEC-017: Audit log
+      // Enqueue sync item for cloud push
+      // SEC-001: Payload excludes pin_hash - never sync PIN data
+      syncQueueDAL.enqueue({
+        store_id: storeResult.storeId,
+        entity_type: 'employee',
+        entity_id: existingUser.user_id,
+        operation: 'UPDATE',
+        payload: {
+          user_id: existingUser.user_id,
+          store_id: existingUser.store_id,
+          role: existingUser.role,
+          name: existingUser.name,
+          active: true, // Reactivated
+        },
+      });
+
+      // SEC-017: Audit log with reactivation warning for PIN review
       log.info('Employee reactivated', {
         userId,
         reactivatedBy: getCurrentAuthUser()?.userId,
+        warning: 'Manager should verify PIN uniqueness or reset PIN if needed',
+        syncEnqueued: true,
       });
 
       return createSuccessResponse({

@@ -89,10 +89,11 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 }));
 
 // Mock usersDAL
+// Note: After cloud_id consolidation, findById -> findById
 vi.mock('../../../src/main/dal/users.dal', () => ({
   usersDAL: {
     isDatabaseReady: vi.fn(() => true),
-    findByCloudId: vi.fn(),
+    findById: vi.fn(),
     upsertFromCloud: vi.fn(),
   },
 }));
@@ -489,15 +490,15 @@ describe('SettingsService', () => {
     it('should return false when initial manager already exists in database', async () => {
       vi.mocked(usersDAL.isDatabaseReady).mockReturnValue(true);
       vi.mocked(storesDAL.isDatabaseReady).mockReturnValue(true);
-      vi.mocked(usersDAL.findByCloudId).mockReturnValue({
-        user_id: 'local-user-123',
+      // Note: After cloud_id consolidation, user_id IS the cloud user ID
+      vi.mocked(usersDAL.findById).mockReturnValue({
+        user_id: 'cloud-user-123', // user_id IS the cloud ID
         store_id: 'store-123',
         role: 'store_manager',
         name: 'Test Manager',
         pin_hash: '$2b$12$existinghash',
         active: 1,
         last_login_at: null,
-        cloud_user_id: 'cloud-user-123',
         synced_at: new Date().toISOString(),
         created_at: new Date().toISOString(),
         updated_at: new Date().toISOString(),
@@ -526,7 +527,7 @@ describe('SettingsService', () => {
     it('should sync initial manager to database when valid config exists', async () => {
       vi.mocked(usersDAL.isDatabaseReady).mockReturnValue(true);
       vi.mocked(storesDAL.isDatabaseReady).mockReturnValue(true);
-      vi.mocked(usersDAL.findByCloudId).mockReturnValue(undefined); // User doesn't exist
+      vi.mocked(usersDAL.findById).mockReturnValue(undefined); // User doesn't exist
 
       // Validate API key with initial manager
       const mockValidationWithManager = {
@@ -546,7 +547,7 @@ describe('SettingsService', () => {
       // Verify user was synced - SEC-001: PIN hash from cloud
       expect(usersDAL.upsertFromCloud).toHaveBeenCalledWith(
         expect.objectContaining({
-          cloud_user_id: 'cloud-user-456',
+          user_id: 'cloud-user-456',
           name: 'New Manager',
           role: 'store_manager',
           pin_hash: '$2b$12$newhashvalue',
@@ -558,7 +559,7 @@ describe('SettingsService', () => {
     it('should use correct role type for initial manager - SEC-001', async () => {
       vi.mocked(usersDAL.isDatabaseReady).mockReturnValue(true);
       vi.mocked(storesDAL.isDatabaseReady).mockReturnValue(true);
-      vi.mocked(usersDAL.findByCloudId).mockReturnValue(undefined);
+      vi.mocked(usersDAL.findById).mockReturnValue(undefined);
 
       // Test with shift_manager role
       const mockValidationWithShiftManager = {
@@ -611,7 +612,7 @@ describe('SettingsService', () => {
     it('should sync initial manager immediately if database is ready', async () => {
       vi.mocked(storesDAL.isDatabaseReady).mockReturnValue(true);
       vi.mocked(usersDAL.isDatabaseReady).mockReturnValue(true);
-      vi.mocked(usersDAL.findByCloudId).mockReturnValue(undefined);
+      vi.mocked(usersDAL.findById).mockReturnValue(undefined);
 
       const mockValidationWithManager = {
         ...mockValidationResponse,
@@ -629,7 +630,7 @@ describe('SettingsService', () => {
       // Should sync immediately
       expect(usersDAL.upsertFromCloud).toHaveBeenCalledWith(
         expect.objectContaining({
-          cloud_user_id: 'immediate-mgr-123',
+          user_id: 'immediate-mgr-123',
           pin_hash: '$2b$12$immediatehash',
         })
       );

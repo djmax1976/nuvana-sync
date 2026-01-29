@@ -27,6 +27,7 @@ import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { shiftsDAL } from '../dal/shifts.dal';
 import { parseBarcode, validateBarcode } from '../services/scanner.service';
 import { createLogger } from '../utils/logger';
+import { ReturnReasonSchema } from '../../shared/types/lottery.types';
 
 // ============================================================================
 // Logger
@@ -93,11 +94,20 @@ const SettlePackSchema = z.object({
 
 /**
  * Return pack input
+ *
+ * SEC-014: Strict input validation for return operations
+ * - return_reason: Required, must be one of the valid enum values
+ * - return_notes: Optional, max 500 chars for additional context
+ *
+ * @see shared/types/lottery.types.ts for ReturnReasonSchema definition
  */
 const ReturnPackSchema = z.object({
   pack_id: UUIDSchema,
   closing_serial: SerialSchema.optional(),
-  return_reason: z.string().max(500).optional(),
+  /** Required return reason - must be valid enum value */
+  return_reason: ReturnReasonSchema,
+  /** Optional notes for additional context (max 500 chars) */
+  return_notes: z.string().max(500).optional(),
 });
 
 /**
@@ -198,6 +208,8 @@ interface PackSyncPayload {
   returned_shift_id: string | null; // Return shift context
   returned_by: string | null; // User who returned the pack
   depletion_reason: string | null; // Reason for depletion (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
+  return_reason: string | null; // Reason for return (SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE)
+  return_notes: string | null; // Optional notes for return context
 }
 
 /**
@@ -217,6 +229,10 @@ interface PackSyncShiftContext {
   returned_by?: string | null;
   /** Reason for depletion */
   depletion_reason?: string | null;
+  /** Reason for return (SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE) */
+  return_reason?: string | null;
+  /** Optional notes for return context (max 500 chars) */
+  return_notes?: string | null;
 }
 
 /**
@@ -228,7 +244,7 @@ interface PackSyncShiftContext {
  * v019 Schema Alignment: Now includes shift tracking fields for:
  * - Activation shift context (shift_id)
  * - Depletion shift context (depleted_shift_id, depleted_by, depletion_reason)
- * - Return shift context (returned_shift_id, returned_by)
+ * - Return shift context (returned_shift_id, returned_by, return_reason, return_notes)
  *
  * @param pack - Pack data from DAL
  * @param gameCode - Game code from lottery_games table (required by API)
@@ -297,6 +313,8 @@ function buildPackSyncPayload(
     returned_shift_id: shiftContext?.returned_shift_id ?? null,
     returned_by: shiftContext?.returned_by ?? null,
     depletion_reason: shiftContext?.depletion_reason ?? null,
+    return_reason: shiftContext?.return_reason ?? null,
+    return_notes: shiftContext?.return_notes ?? null,
   };
 }
 
@@ -1574,7 +1592,8 @@ registerHandler(
     }
 
     try {
-      const { pack_id, closing_serial } = parseResult.data;
+      // Extract validated input including return reason fields
+      const { pack_id, closing_serial, return_reason, return_notes } = parseResult.data;
       const storeId = getStoreId();
 
       // SEC-010: AUTHZ - Get returned_by from authenticated session
@@ -1598,6 +1617,7 @@ registerHandler(
       // DB-006: Pass store_id for tenant isolation validation
       // v019: Pass shift tracking fields
       // v029 API Alignment: Uses tickets_sold_count
+      // SEC-014: return_reason validated by ReturnReasonSchema
       const pack = lotteryPacksDAL.returnPack(pack_id, {
         store_id: storeId,
         closing_serial,
@@ -1605,6 +1625,8 @@ registerHandler(
         sales_amount: salesAmount,
         returned_by,
         returned_shift_id,
+        return_reason,
+        return_notes,
       });
 
       // Look up game to get game_code for sync payload
@@ -1619,6 +1641,7 @@ registerHandler(
       // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
       // API-001: game_code, serial_start, serial_end required by cloud API spec
       // v019: shift context included in sync payload
+      // SEC-014: return_reason and return_notes included for cloud API
       syncQueueDAL.enqueue({
         store_id: storeId,
         entity_type: 'pack',
@@ -1627,6 +1650,8 @@ registerHandler(
         payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, null, {
           returned_shift_id,
           returned_by,
+          return_reason,
+          return_notes,
         }),
       });
 
@@ -1634,6 +1659,7 @@ registerHandler(
         packId: pack.pack_id,
         storeId,
         closingSerial: closing_serial,
+        returnReason: return_reason,
         returnedBy: returned_by,
         shiftId: returned_shift_id,
         syncQueued: true,

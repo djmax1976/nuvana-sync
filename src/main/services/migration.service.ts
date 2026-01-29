@@ -189,27 +189,59 @@ export function applyMigration(migration: Migration): MigrationResult {
     name: migration.name,
   });
 
+  // Check if migration needs FK constraints disabled
+  // PRAGMA foreign_keys must be set OUTSIDE transactions to take effect
+  const needsFkDisabled =
+    migration.sql.includes('PRAGMA defer_foreign_keys') ||
+    migration.sql.includes('PRAGMA foreign_keys') ||
+    migration.sql.includes('-- FK_SENSITIVE');
+
   try {
     // Calculate checksum before applying
     const checksum = calculateChecksum(migration.sql);
 
-    // Execute migration within transaction
-    // DB-001: Automatic rollback on any error
-    const transaction = db.transaction(() => {
-      // Execute migration SQL
-      db.exec(migration.sql);
+    // Disable FK constraints BEFORE transaction if needed
+    // This is required because PRAGMA foreign_keys cannot be changed inside a transaction
+    if (needsFkDisabled) {
+      log.debug('Disabling FK constraints for migration', { version: migration.version });
+      db.pragma('foreign_keys = OFF');
+    }
 
-      // Record migration in tracking table
-      // SEC-006: Parameterized insert
-      const insertStmt = db.prepare(`
-        INSERT INTO ${MIGRATION_TABLE} (version, name, checksum)
-        VALUES (?, ?, ?)
-      `);
+    try {
+      // Execute migration within transaction
+      // DB-001: Automatic rollback on any error
+      const transaction = db.transaction(() => {
+        // Execute migration SQL (strip out any PRAGMA statements since we handle them outside)
+        const cleanedSql = migration.sql
+          .replace(
+            /PRAGMA\s+defer_foreign_keys\s*=\s*\w+\s*;?/gi,
+            '-- (FK pragma handled by migration service)'
+          )
+          .replace(
+            /PRAGMA\s+foreign_keys\s*=\s*\w+\s*;?/gi,
+            '-- (FK pragma handled by migration service)'
+          );
 
-      insertStmt.run(migration.version, migration.name, checksum);
-    });
+        db.exec(cleanedSql);
 
-    transaction();
+        // Record migration in tracking table
+        // SEC-006: Parameterized insert
+        const insertStmt = db.prepare(`
+          INSERT INTO ${MIGRATION_TABLE} (version, name, checksum)
+          VALUES (?, ?, ?)
+        `);
+
+        insertStmt.run(migration.version, migration.name, checksum);
+      });
+
+      transaction();
+    } finally {
+      // Re-enable FK constraints AFTER transaction
+      if (needsFkDisabled) {
+        log.debug('Re-enabling FK constraints after migration', { version: migration.version });
+        db.pragma('foreign_keys = ON');
+      }
+    }
 
     const durationMs = Date.now() - startTime;
 
@@ -235,6 +267,15 @@ export function applyMigration(migration: Migration): MigrationResult {
       error: errorMessage,
       durationMs,
     });
+
+    // Ensure FK constraints are re-enabled even on failure
+    if (needsFkDisabled) {
+      try {
+        db.pragma('foreign_keys = ON');
+      } catch {
+        // Ignore errors re-enabling FKs
+      }
+    }
 
     return {
       success: false,

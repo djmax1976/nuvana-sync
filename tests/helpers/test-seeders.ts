@@ -58,6 +58,7 @@ export type POSConnectionType = 'FILE' | 'API' | 'NETWORK' | 'WEBHOOK' | 'MANUAL
 
 /**
  * User entity returned from seeder
+ * Note: After cloud_id consolidation, user_id IS the cloud ID
  */
 export interface SeededUser {
   user_id: string;
@@ -67,13 +68,13 @@ export interface SeededUser {
   pin_hash: string;
   active: number;
   last_login_at: string | null;
-  cloud_user_id: string | null;
   created_at: string;
   updated_at: string;
 }
 
 /**
  * User seeder options
+ * Note: After cloud_id consolidation, user_id IS the cloud ID
  */
 export interface SeedUserOptions {
   user_id?: string;
@@ -81,7 +82,6 @@ export interface SeedUserOptions {
   name?: string;
   pin?: string;
   active?: boolean;
-  cloud_user_id?: string;
 }
 
 /**
@@ -108,11 +108,12 @@ export function seedUser(
   const pinHash = bcrypt.hashSync(pin, 10); // Lower rounds for test speed
 
   // SEC-006: Parameterized query
+  // Note: After cloud_id consolidation, user_id IS the cloud ID - no separate cloud_user_id column
   const stmt = db.prepare(`
     INSERT INTO users (
       user_id, store_id, role, name, pin_hash, active,
-      cloud_user_id, created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+      created_at, updated_at
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -122,7 +123,6 @@ export function seedUser(
     options.name ?? `Test User ${userId.slice(0, 8)}`,
     pinHash,
     options.active === false ? 0 : 1,
-    options.cloud_user_id ?? null,
     now,
     now
   );
@@ -135,7 +135,6 @@ export function seedUser(
     pin_hash: pinHash,
     active: options.active === false ? 0 : 1,
     last_login_at: null,
-    cloud_user_id: options.cloud_user_id ?? null,
     created_at: now,
     updated_at: now,
   };

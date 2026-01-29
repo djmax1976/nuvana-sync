@@ -37,6 +37,7 @@ vi.mock('../../../src/main/dal/transactions.dal', () => ({
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
     getPendingCount: vi.fn(),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 

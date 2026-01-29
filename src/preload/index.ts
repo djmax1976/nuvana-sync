@@ -75,6 +75,14 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:getActivityPaginated', // Full sync monitor page
   'sync:retryItem', // Retry individual sync item
   'sync:deleteItem', // Delete individual sync item
+  // Dead Letter Queue (MQ-002)
+  'sync:getDeadLetterItems', // Get paginated DLQ items
+  'sync:getDeadLetterStats', // Get DLQ statistics
+  'sync:restoreFromDeadLetter', // Restore single item from DLQ
+  'sync:restoreFromDeadLetterMany', // Batch restore from DLQ
+  'sync:deleteDeadLetterItem', // Permanently delete DLQ item
+  'sync:cleanupDeadLetter', // Cleanup old DLQ items
+  'sync:manualDeadLetter', // Manually move item to DLQ
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',
@@ -87,6 +95,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'shifts:findOpenShifts',
   'shifts:getFuelData',
   'shifts:getDailyFuelTotals',
+  'shifts:manualStart', // Manual shift start for MANUAL mode stores
   // Day Summaries
   'daySummaries:list',
   'daySummaries:getByDate',
@@ -124,6 +133,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'settings:updateAsSupport', // Cloud-authenticated support user settings update
   'settings:testConnection',
   'settings:validateApiKey',
+  'settings:getPOSConnectionType', // Manual mode detection
   'settings:completeSetup',
   'settings:isSetupComplete',
   'settings:browseFolder',
@@ -152,6 +162,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'license:shouldShowWarning',
   // Employees
   'employees:list',
+  'employees:listActive', // For shift start dialog (shift_manager+ access)
   'employees:create',
   'employees:update',
   'employees:updatePin',

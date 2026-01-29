@@ -615,6 +615,10 @@ export interface DateRangeReportResponse {
 // Employee Types
 export type EmployeeRole = 'store_manager' | 'shift_manager' | 'cashier';
 
+/**
+ * Employee interface
+ * Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
+ */
 export interface Employee {
   user_id: string;
   store_id: string;
@@ -622,7 +626,6 @@ export interface Employee {
   name: string;
   active: number;
   last_login_at: string | null;
-  cloud_user_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;

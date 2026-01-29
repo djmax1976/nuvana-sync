@@ -886,6 +886,76 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
     log.info('Stale shifts closed', { closedCount, storeId });
     return closedCount;
   }
+
+  /**
+   * Get day status for determining if day close is available
+   *
+   * Returns business day status in a single optimized query that:
+   * - Counts total shifts for the date (day has started)
+   * - Counts open shifts (day close available)
+   * - Determines the current business date from most recent shift
+   *
+   * Performance: O(1) via COUNT with indexed columns (store_id, business_date, end_time)
+   * Uses a single query with conditional aggregation to minimize DB round trips.
+   *
+   * SEC-006: Parameterized query - no string concatenation
+   * DB-006: Store-scoped query via storeId parameter
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param businessDate - Business date to check (YYYY-MM-DD)
+   * @returns Day status with shift counts and flags
+   */
+  getDayStatus(
+    storeId: string,
+    businessDate: string
+  ): {
+    /** Whether any shifts exist for this date (day has started) */
+    dayStarted: boolean;
+    /** Whether there are open shifts (day close available) */
+    hasOpenShifts: boolean;
+    /** Count of currently open shifts */
+    openShiftCount: number;
+    /** Total shift count for the date */
+    totalShiftCount: number;
+    /** Business date checked */
+    businessDate: string;
+  } {
+    // Single optimized query with conditional aggregation
+    // SEC-006: Parameterized query with bound parameters
+    // Performance: Uses COUNT with indexed columns, no full table scan
+    const stmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total_shifts,
+        SUM(CASE WHEN end_time IS NULL THEN 1 ELSE 0 END) as open_shifts
+      FROM shifts
+      WHERE store_id = ? AND business_date = ?
+    `);
+
+    const result = stmt.get(storeId, businessDate) as
+      | {
+          total_shifts: number;
+          open_shifts: number;
+        }
+      | undefined;
+
+    const totalShiftCount = result?.total_shifts ?? 0;
+    const openShiftCount = result?.open_shifts ?? 0;
+
+    log.debug('Day status retrieved', {
+      storeId,
+      businessDate,
+      totalShiftCount,
+      openShiftCount,
+    });
+
+    return {
+      dayStarted: totalShiftCount > 0,
+      hasOpenShifts: openShiftCount > 0,
+      openShiftCount,
+      totalShiftCount,
+      businessDate,
+    };
+  }
 }
 
 // ============================================================================

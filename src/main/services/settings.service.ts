@@ -1331,11 +1331,21 @@ export class SettingsService {
    */
   getPOSConnectionType(): POSConnectionType | null {
     // Check new format first
-    if (this.configStore.get('posConnection.isConfigured')) {
-      return (this.configStore.get('posConnection.connectionType') as POSConnectionType) || null;
+    const isConfigured = this.configStore.get('posConnection.isConfigured');
+    const newConnectionType = this.configStore.get('posConnection.connectionType');
+    const legacyConnectionType = this.getTerminalConnectionType();
+
+    log.debug('getPOSConnectionType check', {
+      isConfigured,
+      newConnectionType,
+      legacyConnectionType,
+    });
+
+    if (isConfigured) {
+      return (newConnectionType as POSConnectionType) || null;
     }
     // Fall back to legacy
-    return this.getTerminalConnectionType();
+    return legacyConnectionType;
   }
 
   /**
@@ -2151,12 +2161,12 @@ export class SettingsService {
       return false;
     }
 
-    // Check if user already exists (by cloud_user_id)
-    const existingUser = usersDAL.findByCloudId(userId);
+    // Check if user already exists
+    // Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
+    const existingUser = usersDAL.findById(userId);
     if (existingUser) {
       log.debug('syncInitialManagerToDatabase: Initial manager already exists', {
         userId: existingUser.user_id,
-        cloudUserId: userId,
       });
       // Clear config store data since user is already in database
       this.clearInitialManager();
@@ -2164,9 +2174,10 @@ export class SettingsService {
     }
 
     // Sync initial manager to database
+    // Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
     try {
       usersDAL.upsertFromCloud({
-        cloud_user_id: userId,
+        user_id: userId, // user_id IS the cloud user ID after consolidation
         store_id: storeId,
         role: (role as 'store_manager' | 'cashier' | 'shift_manager') || 'store_manager',
         name,
@@ -2174,7 +2185,7 @@ export class SettingsService {
       });
 
       log.info('Initial manager synced from config to database', {
-        cloudUserId: userId,
+        userId,
         name,
         role,
         storeId,

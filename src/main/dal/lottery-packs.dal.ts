@@ -11,6 +11,7 @@
 
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
+import type { ReturnReason } from '../../shared/types/lottery.types';
 
 // ============================================================================
 // Types
@@ -64,7 +65,6 @@ export interface LotteryPack extends StoreEntity {
   /** v038: Timestamp when mark sold was approved */
   mark_sold_approved_at: string | null;
   mark_sold_reason: string | null;
-  cloud_pack_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -81,7 +81,6 @@ export interface ReceivePackData {
   store_id: string;
   game_id: string;
   pack_number: string;
-  cloud_pack_id?: string;
   /** User ID of who received the pack (for audit trail) */
   received_by?: string;
 }
@@ -127,8 +126,10 @@ export interface SettlePackData {
 /**
  * Pack return data
  * DB-006: Requires store_id for tenant isolation validation
+ * SEC-014: return_reason is required and must be a valid ReturnReason enum value
  *
  * v019 Schema Alignment: Added shift tracking for return operations
+ * v020 Schema Alignment: Added return_reason and return_notes for audit trail
  */
 export interface ReturnPackData {
   store_id: string;
@@ -136,7 +137,14 @@ export interface ReturnPackData {
   /** v029: Renamed from tickets_sold for API alignment */
   tickets_sold_count?: number;
   sales_amount?: number;
-  return_reason?: string;
+  /**
+   * Return reason - REQUIRED, must be valid enum value
+   * SEC-014: Validated at entry point by ReturnReasonSchema
+   * Valid values: SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE
+   */
+  return_reason: ReturnReason;
+  /** Optional notes for return context (max 500 chars, SEC-014 length validation) */
+  return_notes?: string;
   /** User who returned the pack (v019 schema alignment) */
   returned_by?: string | null;
   /** Shift ID during which pack was returned (v019 schema alignment) */
@@ -226,8 +234,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     const stmt = this.db.prepare(`
       INSERT INTO lottery_packs (
         pack_id, store_id, game_id, pack_number, status,
-        received_at, received_by, cloud_pack_id, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, 'RECEIVED', ?, ?, ?, ?, ?)
+        received_at, received_by, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'RECEIVED', ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -237,7 +245,6 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.pack_number,
       now,
       data.received_by || null,
-      data.cloud_pack_id || null,
       now,
       now
     );
@@ -466,7 +473,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     // SEC-006: Parameterized UPDATE with store_id constraint
     // DB-006: Include store_id in WHERE clause for tenant isolation
     // SEC-010: AUTHZ - Store returned_by and returned_shift_id for audit trail
+    // SEC-014: return_reason validated at entry point, stored directly
     // v019 Schema Alignment: Now includes return context
+    // v020 Schema Alignment: Now includes return_reason and return_notes
     // v029 API Alignment: Uses tickets_sold_count
     const stmt = this.db.prepare(`
       UPDATE lottery_packs SET
@@ -477,6 +486,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         sales_amount = COALESCE(?, sales_amount),
         returned_by = ?,
         returned_shift_id = ?,
+        return_reason = ?,
+        return_notes = ?,
         updated_at = ?
       WHERE pack_id = ? AND store_id = ? AND status IN ('RECEIVED', 'ACTIVE')
     `);
@@ -488,6 +499,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       data.sales_amount ?? null,
       data.returned_by || null,
       data.returned_shift_id || null,
+      data.return_reason,
+      data.return_notes || null,
       now,
       packId,
       data.store_id
@@ -506,6 +519,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       closingSerial: data.closing_serial,
       returnedBy: data.returned_by,
       returnedShiftId: data.returned_shift_id,
+      returnReason: data.return_reason,
+      returnNotes: data.return_notes || null,
     });
 
     const updated = this.findByIdForStore(data.store_id, packId);
@@ -604,42 +619,6 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       WHERE store_id = ? AND game_id = ? AND pack_number = ?
     `);
     return stmt.get(storeId, gameId, packNumber) as LotteryPack | undefined;
-  }
-
-  /**
-   * Find pack by cloud ID
-   * SEC-006: Parameterized query
-   *
-   * @param cloudPackId - Cloud pack identifier
-   * @returns Pack or undefined
-   */
-  findByCloudId(cloudPackId: string): LotteryPack | undefined {
-    const stmt = this.db.prepare(`
-      SELECT * FROM lottery_packs WHERE cloud_pack_id = ?
-    `);
-    return stmt.get(cloudPackId) as LotteryPack | undefined;
-  }
-
-  /**
-   * Update the cloud_pack_id after successful sync
-   * SEC-006: Parameterized UPDATE
-   *
-   * @param packId - Local pack identifier
-   * @param cloudPackId - Cloud pack identifier returned from API
-   * @returns true if updated
-   */
-  updateCloudPackId(packId: string, cloudPackId: string): boolean {
-    const stmt = this.db.prepare(`
-      UPDATE lottery_packs SET cloud_pack_id = ?, updated_at = ?
-      WHERE pack_id = ?
-    `);
-    const result = stmt.run(cloudPackId, this.now(), packId);
-
-    if (result.changes > 0) {
-      log.debug('Updated cloud_pack_id', { packId, cloudPackId });
-    }
-
-    return result.changes > 0;
   }
 
   /**
@@ -1042,10 +1021,12 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * Upsert a pack from cloud data (pull operation)
    *
    * Enterprise-grade implementation for cloud sync:
-   * - Matches by cloud_pack_id (primary) or pack_number+game_id (fallback)
+   * - Matches by pack_id (primary) or pack_number+game_id (fallback)
    * - Updates existing records with cloud data
    * - Creates new records for unknown packs
    * - Validates store_id for tenant isolation
+   *
+   * Note: After cloud_id consolidation, pack_id IS the cloud ID
    *
    * Field names match cloud API exactly per replica_end_points.md:
    * - current_bin_id: UUID of bin pack is currently in
@@ -1060,7 +1041,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    */
   upsertFromCloud(
     data: {
-      cloud_pack_id: string;
+      pack_id: string;
       store_id: string;
       game_id: string;
       pack_number: string;
@@ -1113,8 +1094,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
     const now = this.now();
 
-    // First try to find by cloud_pack_id
-    let existing = this.findByCloudId(data.cloud_pack_id);
+    // First try to find by pack_id (which is now the cloud ID)
+    let existing = this.findById(data.pack_id);
 
     // Fallback: find by pack_number + game_id in same store
     if (!existing) {
@@ -1127,13 +1108,31 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         throw new Error('Pack belongs to different store - tenant isolation violation');
       }
 
+      // Store existing state for audit logging
+      const existingStatus = existing.status;
+      const existingUpdatedAt = existing.updated_at;
+
       // Update existing pack with cloud data
       // SEC-006: Parameterized UPDATE - all values bound, no string concatenation
       // Field names match cloud API exactly per replica_end_points.md
+      //
+      // LOTTERY-SYNC-001 FIX: Status protection logic
+      // Business rules:
+      //   Rule 1: Terminal states (DEPLETED/RETURNED) are locked - cannot change
+      //   Rule 2: ACTIVE cannot regress to RECEIVED (prevents sync race condition)
+      //   Rule 3: For valid transitions, only accept if cloud data is newer (timestamp comparison)
       const stmt = this.db.prepare(`
         UPDATE lottery_packs SET
-          cloud_pack_id = ?,
-          status = ?,
+          status = CASE
+            -- Rule 1: Terminal states (DEPLETED/RETURNED) are locked - cannot change
+            WHEN status IN ('DEPLETED', 'RETURNED') THEN status
+            -- Rule 2: ACTIVE cannot regress to RECEIVED (business rule - prevents sync race condition)
+            WHEN status = 'ACTIVE' AND ? = 'RECEIVED' THEN status
+            -- Rule 3: For valid transitions, only accept if cloud data is newer
+            WHEN ? > updated_at THEN ?
+            -- Otherwise keep existing status (stale cloud data)
+            ELSE status
+          END,
           current_bin_id = COALESCE(?, current_bin_id),
           opening_serial = COALESCE(?, opening_serial),
           closing_serial = COALESCE(?, closing_serial),
@@ -1171,8 +1170,10 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       `);
 
       stmt.run(
-        data.cloud_pack_id,
-        data.status,
+        // LOTTERY-SYNC-001: Status protection CASE parameters
+        data.status, // Rule 2: ACTIVE regression check (? = 'RECEIVED')
+        data.updated_at ?? null, // Rule 3: timestamp comparison (? > updated_at)
+        data.status, // Rule 3: THEN value (new status if newer)
         data.current_bin_id ?? null,
         data.opening_serial ?? null,
         data.closing_serial ?? null,
@@ -1210,27 +1211,48 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         storeId
       );
 
-      log.debug('Pack updated from cloud', {
-        packId: existing.pack_id,
-        cloudPackId: data.cloud_pack_id,
-        status: data.status,
-      });
-
+      // Retrieve updated pack to check final status
       const updated = this.findById(existing.pack_id);
+
+      // LOTTERY-SYNC-001: Audit logging for blocked status updates
+      if (updated && updated.status !== data.status) {
+        // Status update was blocked - determine reason for audit trail
+        let blockReason: string;
+        if (existingStatus === 'ACTIVE' && data.status === 'RECEIVED') {
+          blockReason = 'ACTIVE_REGRESSION_BLOCKED';
+        } else if (['DEPLETED', 'RETURNED'].includes(existingStatus)) {
+          blockReason = 'TERMINAL_STATE_LOCKED';
+        } else {
+          blockReason = 'STALE_CLOUD_DATA';
+        }
+
+        log.info('Pack status update blocked by sync protection', {
+          packId: existing.pack_id,
+          cloudStatus: data.status,
+          cloudUpdatedAt: data.updated_at,
+          localStatus: updated.status,
+          localUpdatedAt: existingUpdatedAt,
+          reason: blockReason,
+        });
+      } else {
+        log.debug('Pack updated from cloud', {
+          packId: existing.pack_id,
+          status: data.status,
+        });
+      }
+
       if (!updated) {
         throw new Error(`Failed to retrieve updated pack: ${existing.pack_id}`);
       }
       return updated;
     } else {
-      // Create new pack from cloud data
-      const packId = this.generateId();
-
+      // Create new pack from cloud data - pack_id is the cloud ID
       // SEC-006: Parameterized INSERT - all values bound, no string concatenation
       // Field names match cloud API exactly per replica_end_points.md
       const stmt = this.db.prepare(`
         INSERT INTO lottery_packs (
           pack_id, store_id, game_id, pack_number, status,
-          cloud_pack_id, current_bin_id, opening_serial, closing_serial,
+          current_bin_id, opening_serial, closing_serial,
           serial_start, serial_end, tickets_sold_count, last_sold_at, sales_amount,
           received_at, received_by,
           activated_at, activated_by, activated_shift_id,
@@ -1241,16 +1263,15 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           serial_override_approved_by, serial_override_reason, serial_override_approved_at,
           mark_sold_approved_by, mark_sold_reason, mark_sold_approved_at,
           synced_at, created_at, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       `);
 
       stmt.run(
-        packId,
+        data.pack_id,
         storeId,
         data.game_id,
         data.pack_number,
         data.status,
-        data.cloud_pack_id,
         data.current_bin_id ?? null,
         data.opening_serial ?? null,
         data.closing_serial ?? null,
@@ -1288,15 +1309,14 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       );
 
       log.info('Pack created from cloud', {
-        packId,
-        cloudPackId: data.cloud_pack_id,
+        packId: data.pack_id,
         packNumber: data.pack_number,
         status: data.status,
       });
 
-      const created = this.findById(packId);
+      const created = this.findById(data.pack_id);
       if (!created) {
-        throw new Error(`Failed to retrieve created pack: ${packId}`);
+        throw new Error(`Failed to retrieve created pack: ${data.pack_id}`);
       }
       return created;
     }
@@ -1308,6 +1328,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * Uses SQLite transaction for atomicity and performance.
    * Each pack is validated for tenant isolation before upsert.
    *
+   * Note: After cloud_id consolidation, pack_id IS the cloud ID
+   *
    * @security SEC-006: Parameterized queries prevent SQL injection
    * @security DB-006: Store-scoped operations for tenant isolation
    *
@@ -1317,7 +1339,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    */
   batchUpsertFromCloud(
     packs: Array<{
-      cloud_pack_id: string;
+      pack_id: string;
       store_id: string;
       game_id: string;
       pack_number: string;
@@ -1408,13 +1430,13 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
             );
             log.error('Pack upsert skipped - game not found', {
               packNumber: pack.pack_number,
-              cloudPackId: pack.cloud_pack_id,
+              packId: pack.pack_id,
               gameId: pack.game_id,
             });
             continue;
           }
 
-          const existing = this.findByCloudId(pack.cloud_pack_id);
+          const existing = this.findById(pack.pack_id);
           this.upsertFromCloud(pack, storeId);
 
           if (existing) {
@@ -1428,7 +1450,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           result.errors.push(errorDetail);
           log.error('Pack upsert failed', {
             packNumber: pack.pack_number,
-            cloudPackId: pack.cloud_pack_id,
+            packId: pack.pack_id,
             gameId: pack.game_id,
             error: message,
           });
@@ -1451,32 +1473,33 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
-   * Find multiple packs by their cloud IDs
+   * Find multiple packs by their pack IDs (batch operation)
+   * Enterprise-grade: Eliminates N+1 queries during sync
+   *
+   * Note: After cloud_id consolidation, pack_id IS the cloud ID
    *
    * @security SEC-006: Parameterized query
-   * @param cloudIds - Array of cloud pack IDs
-   * @returns Map of cloud_pack_id to LotteryPack
+   * @param packIds - Array of pack IDs (which are now cloud IDs)
+   * @returns Map of pack_id to LotteryPack
    */
-  findByCloudIds(cloudIds: string[]): Map<string, LotteryPack> {
+  findByPackIds(packIds: string[]): Map<string, LotteryPack> {
     const result = new Map<string, LotteryPack>();
 
-    if (cloudIds.length === 0) {
+    if (packIds.length === 0) {
       return result;
     }
 
     // SEC-006: Use parameterized placeholders
-    const placeholders = cloudIds.map(() => '?').join(',');
+    const placeholders = packIds.map(() => '?').join(',');
     const stmt = this.db.prepare(`
       SELECT * FROM lottery_packs
-      WHERE cloud_pack_id IN (${placeholders})
+      WHERE pack_id IN (${placeholders})
     `);
 
-    const packs = stmt.all(...cloudIds) as LotteryPack[];
+    const packs = stmt.all(...packIds) as LotteryPack[];
 
     for (const pack of packs) {
-      if (pack.cloud_pack_id) {
-        result.set(pack.cloud_pack_id, pack);
-      }
+      result.set(pack.pack_id, pack);
     }
 
     return result;

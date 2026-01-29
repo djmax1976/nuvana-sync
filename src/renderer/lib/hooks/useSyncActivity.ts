@@ -16,6 +16,13 @@ import {
   type SyncActivityPaginatedResponse,
   type SyncRetryItemResponse,
   type SyncDeleteItemResponse,
+  type DeadLetterParams,
+  type DeadLetterListResponse,
+  type DeadLetterStats,
+  type DeadLetterRestoreResponse,
+  type DeadLetterRestoreManyResponse,
+  type DeadLetterDeleteResponse,
+  type DeadLetterManualResponse,
 } from '../api/ipc-client';
 
 // ============================================================================
@@ -28,6 +35,16 @@ export const syncActivityKeys = {
   list: (params?: SyncActivityPaginatedParams) =>
     [...syncActivityKeys.lists(), params || {}] as const,
   stats: () => [...syncActivityKeys.all, 'stats'] as const,
+};
+
+/**
+ * Dead Letter Queue query keys (v046: MQ-002)
+ */
+export const deadLetterKeys = {
+  all: ['deadLetter'] as const,
+  lists: () => [...deadLetterKeys.all, 'list'] as const,
+  list: (params?: DeadLetterParams) => [...deadLetterKeys.lists(), params || {}] as const,
+  stats: () => [...deadLetterKeys.all, 'stats'] as const,
 };
 
 // ============================================================================
@@ -106,5 +123,122 @@ export function useInvalidateSyncActivity() {
   return {
     invalidateAll: () => queryClient.invalidateQueries({ queryKey: syncActivityKeys.all }),
     invalidateList: () => queryClient.invalidateQueries({ queryKey: syncActivityKeys.lists() }),
+  };
+}
+
+// ============================================================================
+// Dead Letter Queue Hooks (v046: MQ-002 Compliance)
+// ============================================================================
+
+/**
+ * Hook to fetch paginated Dead Letter Queue items
+ *
+ * @param params - Pagination parameters
+ * @param options - Query options
+ * @returns Query result with DLQ items
+ */
+export function useDeadLetterItems(
+  params?: DeadLetterParams,
+  options?: { enabled?: boolean; refetchInterval?: number }
+) {
+  return useQuery<DeadLetterListResponse>({
+    queryKey: deadLetterKeys.list(params),
+    queryFn: () => syncAPI.getDeadLetterItems(params),
+    enabled: options?.enabled !== false,
+    staleTime: 10000, // 10 seconds
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: options?.refetchInterval ?? 30000, // Refresh every 30 seconds
+  });
+}
+
+/**
+ * Hook to fetch Dead Letter Queue statistics
+ *
+ * @param options - Query options
+ * @returns Query result with DLQ stats
+ */
+export function useDeadLetterStats(options?: { enabled?: boolean; refetchInterval?: number }) {
+  return useQuery<DeadLetterStats>({
+    queryKey: deadLetterKeys.stats(),
+    queryFn: () => syncAPI.getDeadLetterStats(),
+    enabled: options?.enabled !== false,
+    staleTime: 10000, // 10 seconds
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    refetchInterval: options?.refetchInterval ?? 30000, // Refresh every 30 seconds
+  });
+}
+
+/**
+ * Hook to restore a single item from Dead Letter Queue
+ */
+export function useRestoreFromDeadLetter() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DeadLetterRestoreResponse, Error, string>({
+    mutationFn: (id: string) => syncAPI.restoreFromDeadLetter(id),
+    onSuccess: () => {
+      // Invalidate both DLQ and sync activity queries
+      queryClient.invalidateQueries({ queryKey: deadLetterKeys.all });
+      queryClient.invalidateQueries({ queryKey: syncActivityKeys.all });
+    },
+  });
+}
+
+/**
+ * Hook to restore multiple items from Dead Letter Queue
+ */
+export function useRestoreFromDeadLetterMany() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DeadLetterRestoreManyResponse, Error, string[]>({
+    mutationFn: (ids: string[]) => syncAPI.restoreFromDeadLetterMany(ids),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deadLetterKeys.all });
+      queryClient.invalidateQueries({ queryKey: syncActivityKeys.all });
+    },
+  });
+}
+
+/**
+ * Hook to delete an item from Dead Letter Queue permanently
+ */
+export function useDeleteDeadLetterItem() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DeadLetterDeleteResponse, Error, string>({
+    mutationFn: (id: string) => syncAPI.deleteDeadLetterItem(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deadLetterKeys.all });
+    },
+  });
+}
+
+/**
+ * Hook to manually move an item to Dead Letter Queue
+ */
+export function useManualDeadLetter() {
+  const queryClient = useQueryClient();
+
+  return useMutation<DeadLetterManualResponse, Error, { id: string; reason?: string }>({
+    mutationFn: ({ id, reason }) => syncAPI.manualDeadLetter(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: deadLetterKeys.all });
+      queryClient.invalidateQueries({ queryKey: syncActivityKeys.all });
+    },
+  });
+}
+
+/**
+ * Hook to invalidate Dead Letter Queue queries
+ */
+export function useInvalidateDeadLetter() {
+  const queryClient = useQueryClient();
+
+  return {
+    invalidateAll: () => queryClient.invalidateQueries({ queryKey: deadLetterKeys.all }),
+    invalidateList: () => queryClient.invalidateQueries({ queryKey: deadLetterKeys.lists() }),
+    invalidateStats: () => queryClient.invalidateQueries({ queryKey: deadLetterKeys.stats() }),
   };
 }

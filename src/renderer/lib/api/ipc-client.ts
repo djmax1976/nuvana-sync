@@ -136,6 +136,11 @@ class IPCClient {
       case 'stores:isConfigured':
         return mockData.getMockIsConfigured() as T;
 
+      // Settings
+      case 'settings:getPOSConnectionType':
+        // Mock as MANUAL for testing manual shift functionality
+        return { connectionType: 'MANUAL' } as T;
+
       // Dashboard
       case 'dashboard:getStats':
         return mockData.mockDashboardStats as T;
@@ -160,6 +165,24 @@ class IPCClient {
         const shiftId = params as unknown as string;
         const shift = mockData.getMockShiftById(shiftId);
         return (shift ? { ...shift, status: 'CLOSED' } : {}) as T;
+      }
+      case 'shifts:manualStart': {
+        // Simulate manual shift start - return a new mock shift
+        // In production, cashier_id is determined by PIN lookup
+        const manualParams = params as unknown as ManualStartShiftParams;
+        return {
+          shift_id: `shift-manual-${Date.now()}`,
+          store_id: 'store-1',
+          shift_number: 1,
+          business_date: manualParams?.businessDate || new Date().toISOString().split('T')[0],
+          cashier_id: 'mock-cashier-id', // Would be determined by PIN in production
+          register_id: manualParams?.externalRegisterId || '1',
+          start_time: manualParams?.startTime || new Date().toISOString(),
+          end_time: null,
+          status: 'OPEN',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        } as T;
       }
 
       // Day Summaries
@@ -431,9 +454,24 @@ class IPCClient {
           updated_at: new Date().toISOString(),
         } as T;
       }
+      case 'terminals:getDayStatus': {
+        // Mock day status - returns based on mock registers with active shifts
+        const mockRegs = mockData.getMockRegisters();
+        const openShiftCount = mockRegs.registers.filter((r) => r.activeShift !== null).length;
+        return {
+          dayStarted: mockRegs.registers.length > 0,
+          hasOpenShifts: openShiftCount > 0,
+          openShiftCount,
+          totalShiftCount: mockRegs.registers.length,
+          businessDate: new Date().toISOString().split('T')[0],
+        } as T;
+      }
 
       // Employees
       case 'employees:list':
+        return mockData.getMockEmployees() as T;
+      case 'employees:listActive':
+        // Return only active employees for shift selection
         return mockData.getMockEmployees() as T;
       case 'employees:create':
         return {
@@ -444,7 +482,6 @@ class IPCClient {
             name: (params as { name: string }).name,
             active: 1,
             last_login_at: null,
-            cloud_user_id: null,
             synced_at: null,
             created_at: new Date().toISOString(),
             updated_at: new Date().toISOString(),
@@ -459,7 +496,6 @@ class IPCClient {
             name: (params as { name?: string }).name || 'Updated Employee',
             active: 1,
             last_login_at: null,
-            cloud_user_id: null,
             synced_at: null,
             created_at: '2024-01-01T00:00:00.000Z',
             updated_at: new Date().toISOString(),
@@ -621,6 +657,103 @@ class IPCClient {
       case 'sync:deleteItem':
         return { success: true, deletedId: (params as { id: string }).id } as T;
 
+      // Dead Letter Queue mock data (v046)
+      case 'sync:getDeadLetterItems':
+        return {
+          items: [
+            {
+              id: 'dlq-1',
+              entity_type: 'pack',
+              entity_id: 'pack-dead-1',
+              operation: 'UPDATE',
+              sync_direction: 'PUSH',
+              sync_attempts: 5,
+              max_attempts: 5,
+              last_sync_error: '404 GAME_NOT_FOUND - Game code 9999 not found',
+              dead_letter_reason: 'PERMANENT_ERROR',
+              error_category: 'PERMANENT',
+              dead_lettered_at: new Date(Date.now() - 3600000).toISOString(),
+              created_at: new Date(Date.now() - 86400000).toISOString(),
+              api_endpoint: '/api/v1/sync/lottery/packs/deplete',
+              http_status: 404,
+              response_body: '{"code":"GAME_NOT_FOUND","message":"Game not found"}',
+              summary: { pack_number: 'PKG9999', game_code: '9999', status: 'DEPLETED' },
+            },
+            {
+              id: 'dlq-2',
+              entity_type: 'pack',
+              entity_id: 'pack-dead-2',
+              operation: 'ACTIVATE',
+              sync_direction: 'PUSH',
+              sync_attempts: 10,
+              max_attempts: 5,
+              last_sync_error: 'Connection timeout after 30000ms',
+              dead_letter_reason: 'MAX_ATTEMPTS_EXCEEDED',
+              error_category: 'TRANSIENT',
+              dead_lettered_at: new Date(Date.now() - 7200000).toISOString(),
+              created_at: new Date(Date.now() - 172800000).toISOString(),
+              api_endpoint: '/api/v1/sync/lottery/packs/activate',
+              http_status: null,
+              response_body: null,
+              summary: { pack_number: 'PKG8888', game_code: '1001', status: 'ACTIVE' },
+            },
+            {
+              id: 'dlq-3',
+              entity_type: 'pack',
+              entity_id: 'pack-dead-3',
+              operation: 'CREATE',
+              sync_direction: 'PUSH',
+              sync_attempts: 1,
+              max_attempts: 5,
+              last_sync_error: 'Missing required field: bin_id',
+              dead_letter_reason: 'STRUCTURAL_FAILURE',
+              error_category: 'STRUCTURAL',
+              dead_lettered_at: new Date(Date.now() - 1800000).toISOString(),
+              created_at: new Date(Date.now() - 43200000).toISOString(),
+              api_endpoint: '/api/v1/sync/lottery/packs/receive',
+              http_status: 400,
+              response_body:
+                '{"code":"VALIDATION_ERROR","message":"Missing required field: bin_id"}',
+              summary: { pack_number: 'PKG7777', game_code: '2002', status: 'RECEIVED' },
+            },
+          ],
+          total: 3,
+          limit: 50,
+          offset: 0,
+          hasMore: false,
+        } as T;
+      case 'sync:getDeadLetterStats':
+        return {
+          total: 3,
+          byReason: {
+            MAX_ATTEMPTS_EXCEEDED: 1,
+            PERMANENT_ERROR: 1,
+            STRUCTURAL_FAILURE: 1,
+            MANUAL: 0,
+          },
+          byEntityType: [{ entity_type: 'pack', count: 3 }],
+          byErrorCategory: [
+            { error_category: 'PERMANENT', count: 1 },
+            { error_category: 'TRANSIENT', count: 1 },
+            { error_category: 'STRUCTURAL', count: 1 },
+          ],
+          oldest: new Date(Date.now() - 172800000).toISOString(),
+          newest: new Date(Date.now() - 1800000).toISOString(),
+        } as T;
+      case 'sync:restoreFromDeadLetter':
+        return { restored: true, id: (params as { id: string }).id } as T;
+      case 'sync:restoreFromDeadLetterMany':
+        return {
+          requested: (params as { ids: string[] }).ids.length,
+          restored: (params as { ids: string[] }).ids.length,
+        } as T;
+      case 'sync:deleteDeadLetterItem':
+        return { deleted: true, id: (params as { id: string }).id } as T;
+      case 'sync:cleanupDeadLetter':
+        return { deletedCount: 0, cutoffDate: new Date().toISOString() } as T;
+      case 'sync:manualDeadLetter':
+        return { deadLettered: true, id: (params as { id: string }).id } as T;
+
       default:
         console.warn(`[MockIPC] Unknown channel: ${channel}`);
         return {} as T;
@@ -749,6 +882,13 @@ export const storesAPI = {
   isConfigured: () => ipcClient.invoke<boolean>('stores:isConfigured'),
 };
 
+// Settings API
+export const settingsAPI = {
+  /** Get the current POS connection type (MANUAL, FILE, API, etc.) */
+  getPOSConnectionType: () =>
+    ipcClient.invoke<POSConnectionTypeResponse>('settings:getPOSConnectionType'),
+};
+
 // Dashboard API
 export const dashboardAPI = {
   getStats: () => ipcClient.invoke<DashboardStats>('dashboard:getStats'),
@@ -763,6 +903,9 @@ export const shiftsAPI = {
   getSummary: (shiftId: string) => ipcClient.invoke<ShiftSummary>('shifts:getSummary', shiftId),
   findOpenShifts: () => ipcClient.invoke<Shift[]>('shifts:findOpenShifts'),
   close: (shiftId: string) => ipcClient.invoke<Shift>('shifts:close', shiftId),
+  /** Manually start a shift (MANUAL mode only) */
+  manualStart: (params: ManualStartShiftParams) =>
+    ipcClient.invoke<Shift>('shifts:manualStart', params),
 };
 
 // Day Summaries API
@@ -795,6 +938,8 @@ export const reportsAPI = {
 // Employees API
 export const employeesAPI = {
   list: () => ipcClient.invoke<EmployeeListResponse>('employees:list'),
+  /** List active employees for shift selection (shift_manager+ access) */
+  listActive: () => ipcClient.invoke<EmployeeListResponse>('employees:listActive'),
   create: (data: CreateEmployeeRequest) =>
     ipcClient.invoke<CreateEmployeeResponse>('employees:create', data),
   update: (data: UpdateEmployeeRequest) =>
@@ -817,6 +962,17 @@ export const terminalsAPI = {
   /** Update a register's description */
   update: (params: UpdateRegisterParams) =>
     ipcClient.invoke<RegisterResponse>('terminals:update', params),
+  /**
+   * Get business day status for day close availability
+   *
+   * Returns authoritative day status information for UI rendering.
+   * The frontend MUST use this to determine whether to show day close controls.
+   *
+   * BUSINESS RULE:
+   * - Day Close button should ONLY be visible when hasOpenShifts === true
+   * - DO NOT compute this locally; ALWAYS use this backend endpoint
+   */
+  getDayStatus: () => ipcClient.invoke<DayStatusResponse>('terminals:getDayStatus'),
   /**
    * Subscribe to shift closed events
    * Emitted when POS closes a shift (detected via XML file polling)
@@ -877,6 +1033,82 @@ export const syncAPI = {
   /** Force sync games from cloud (bypasses rate limit) */
   syncGames: () =>
     ipcClient.invoke<{ pulled: number; conflicts: number; errors: string[] }>('sync:syncGames'),
+  /** Resync ACTIVE packs to cloud (when sync queue was cleared) */
+  resyncActivePacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalActive: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncActivePacks'),
+  /** Resync DEPLETED packs to cloud (when sync queue was cleared) */
+  resyncDepletedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalDepleted: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncDepletedPacks'),
+  /** Resync RETURNED packs to cloud (when sync queue was cleared) */
+  resyncReturnedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalReturned: number;
+      enqueuedCount: number;
+      skippedCount: number;
+    }>('sync:resyncReturnedPacks'),
+  /** Resync ALL packs (ACTIVE, DEPLETED, RETURNED) to cloud */
+  resyncAllPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      results: {
+        active: { total: number; enqueued: number; skipped: number };
+        depleted: { total: number; enqueued: number; skipped: number };
+        returned: { total: number; enqueued: number; skipped: number };
+      };
+      totalEnqueued: number;
+      totalSkipped: number;
+    }>('sync:resyncAllPacks'),
+  /** Backfill RECEIVED packs to sync queue */
+  backfillReceivedPacks: () =>
+    ipcClient.invoke<{
+      message: string;
+      totalReceived?: number;
+      enqueuedCount: number;
+      alreadyQueuedCount?: number;
+      skippedCount?: number;
+    }>('sync:backfillReceivedPacks'),
+
+  // ============================================================================
+  // Dead Letter Queue API (v046: MQ-002 Compliance)
+  // ============================================================================
+
+  /** Get paginated Dead Letter Queue items */
+  getDeadLetterItems: (params?: DeadLetterParams) =>
+    ipcClient.invoke<DeadLetterListResponse>('sync:getDeadLetterItems', params),
+
+  /** Get Dead Letter Queue statistics */
+  getDeadLetterStats: () => ipcClient.invoke<DeadLetterStats>('sync:getDeadLetterStats'),
+
+  /** Restore an item from Dead Letter Queue for retry */
+  restoreFromDeadLetter: (id: string) =>
+    ipcClient.invoke<DeadLetterRestoreResponse>('sync:restoreFromDeadLetter', { id }),
+
+  /** Restore multiple items from Dead Letter Queue */
+  restoreFromDeadLetterMany: (ids: string[]) =>
+    ipcClient.invoke<DeadLetterRestoreManyResponse>('sync:restoreFromDeadLetterMany', { ids }),
+
+  /** Delete an item from Dead Letter Queue permanently */
+  deleteDeadLetterItem: (id: string) =>
+    ipcClient.invoke<DeadLetterDeleteResponse>('sync:deleteDeadLetterItem', { id }),
+
+  /** Cleanup old Dead Letter Queue items (default: 30 days) */
+  cleanupDeadLetter: (olderThanDays?: number) =>
+    ipcClient.invoke<DeadLetterCleanupResponse>('sync:cleanupDeadLetter', { olderThanDays }),
+
+  /** Manually move an item to Dead Letter Queue */
+  manualDeadLetter: (id: string, reason?: string) =>
+    ipcClient.invoke<DeadLetterManualResponse>('sync:manualDeadLetter', { id, reason }),
 };
 
 // ============================================================================
@@ -1129,6 +1361,10 @@ export interface DateRangeReportResponse {
 // Employee Types
 export type EmployeeRole = 'store_manager' | 'shift_manager' | 'cashier';
 
+/**
+ * Employee interface
+ * Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
+ */
 export interface Employee {
   user_id: string;
   store_id: string;
@@ -1136,7 +1372,6 @@ export interface Employee {
   name: string;
   active: number;
   last_login_at: string | null;
-  cloud_user_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -1277,10 +1512,13 @@ export interface SyncActivityResponse {
 // Paginated Sync Activity Types (Full Sync Monitor Page)
 export type SyncStatusFilter = 'all' | 'queued' | 'failed' | 'synced';
 
+export type SyncDirectionFilter = SyncDirection | 'all';
+
 export interface SyncActivityPaginatedParams {
   status?: SyncStatusFilter;
   entityType?: string;
   operation?: SyncOperation;
+  direction?: SyncDirectionFilter;
   limit?: number;
   offset?: number;
 }
@@ -1309,6 +1547,15 @@ export interface SyncDetailedStats {
     queued: number;
     failed: number;
     synced: number;
+  }>;
+  /** Breakdown by sync direction (PUSH to cloud, PULL from cloud) */
+  byDirection: Array<{
+    direction: SyncDirection;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+    syncedToday: number;
   }>;
 }
 
@@ -1373,6 +1620,29 @@ export interface RegisterResponse {
   updated_at: string;
 }
 
+/**
+ * Day status response for determining day close availability
+ *
+ * This is the authoritative source for UI rendering decisions
+ * related to day close functionality. The frontend MUST use this
+ * backend-provided status rather than computing it locally.
+ *
+ * BUSINESS RULE:
+ * - Day Close button should ONLY be visible when hasOpenShifts === true
+ */
+export interface DayStatusResponse {
+  /** Whether any shifts exist for this date (day has started) */
+  dayStarted: boolean;
+  /** Whether there are open shifts (day close is available) */
+  hasOpenShifts: boolean;
+  /** Count of currently open shifts */
+  openShiftCount: number;
+  /** Total shift count for the business date */
+  totalShiftCount: number;
+  /** Business date checked (YYYY-MM-DD) */
+  businessDate: string;
+}
+
 // ============================================================================
 // Shift Close Event Types (SEC-014 compliant)
 // ============================================================================
@@ -1383,6 +1653,35 @@ export interface RegisterResponse {
  * - DAY_CLOSE: This is the last shift of the business day
  */
 export type ShiftCloseType = 'SHIFT_CLOSE' | 'DAY_CLOSE';
+
+/**
+ * POS Connection Type
+ * Determines how the store connects to POS system
+ * - MANUAL: No automated connection, user enters data manually
+ */
+export type POSConnectionType = 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
+
+/**
+ * Response from getPOSConnectionType
+ */
+export interface POSConnectionTypeResponse {
+  connectionType: POSConnectionType | null;
+}
+
+/**
+ * Parameters for manually starting a shift
+ * SEC-001: Employee identified by unique PIN
+ */
+export interface ManualStartShiftParams {
+  /** Cashier PIN for authentication (4-6 digits) - uniquely identifies the employee */
+  pin: string;
+  /** External register ID (e.g., "1", "2") */
+  externalRegisterId: string;
+  /** Business date in YYYY-MM-DD format (defaults to today) */
+  businessDate?: string;
+  /** Start time as ISO timestamp (defaults to now) */
+  startTime?: string;
+}
 
 /**
  * Payload emitted when a shift is closed via POS XML detection
@@ -1407,4 +1706,133 @@ export interface ShiftClosedEvent {
   isLastShiftOfDay: boolean;
   /** Count of shifts still open after this close (0 for day close) */
   remainingOpenShifts: number;
+}
+
+// ============================================================================
+// Dead Letter Queue Types (v046: MQ-002 Compliance)
+// ============================================================================
+
+/**
+ * Error category for sync queue items
+ * Used to determine retry behavior
+ */
+export type DeadLetterErrorCategory = 'TRANSIENT' | 'PERMANENT' | 'STRUCTURAL' | 'UNKNOWN';
+
+/**
+ * Reason for dead-lettering an item
+ */
+export type DeadLetterReason =
+  | 'MAX_ATTEMPTS_EXCEEDED'
+  | 'PERMANENT_ERROR'
+  | 'STRUCTURAL_FAILURE'
+  | 'MANUAL';
+
+/**
+ * Dead Letter Queue item for display
+ * API-008: Only safe display fields exposed
+ */
+export interface DeadLetterItem {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  operation: SyncOperation;
+  sync_direction: SyncDirection;
+  sync_attempts: number;
+  max_attempts: number;
+  last_sync_error: string | null;
+  dead_letter_reason: DeadLetterReason;
+  error_category: DeadLetterErrorCategory | null;
+  dead_lettered_at: string;
+  created_at: string;
+  api_endpoint: string | null;
+  http_status: number | null;
+  response_body: string | null;
+  /** Parsed summary from payload - only safe display fields */
+  summary: {
+    pack_number?: string;
+    game_code?: string;
+    status?: string;
+  } | null;
+}
+
+/**
+ * Dead Letter Queue statistics
+ */
+export interface DeadLetterStats {
+  total: number;
+  byReason: {
+    MAX_ATTEMPTS_EXCEEDED: number;
+    PERMANENT_ERROR: number;
+    STRUCTURAL_FAILURE: number;
+    MANUAL: number;
+  };
+  byEntityType: Array<{
+    entity_type: string;
+    count: number;
+  }>;
+  byErrorCategory: Array<{
+    error_category: DeadLetterErrorCategory | null;
+    count: number;
+  }>;
+  oldest: string | null;
+  newest: string | null;
+}
+
+/**
+ * Paginated Dead Letter Queue response
+ */
+export interface DeadLetterListResponse {
+  items: DeadLetterItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
+}
+
+/**
+ * Parameters for Dead Letter Queue queries
+ */
+export interface DeadLetterParams {
+  limit?: number;
+  offset?: number;
+}
+
+/**
+ * Response for restore operations
+ */
+export interface DeadLetterRestoreResponse {
+  restored: boolean;
+  id: string;
+}
+
+/**
+ * Response for batch restore operations
+ */
+export interface DeadLetterRestoreManyResponse {
+  requested: number;
+  restored: number;
+}
+
+/**
+ * Response for delete operations
+ */
+export interface DeadLetterDeleteResponse {
+  deleted: boolean;
+  id: string;
+}
+
+/**
+ * Response for manual dead-letter operation
+ */
+export interface DeadLetterManualResponse {
+  deadLettered: boolean;
+  id: string;
+}
+
+/**
+ * Response for cleanup operation
+ */
+export interface DeadLetterCleanupResponse {
+  deletedCount: number;
+  cutoffDate: string;
 }

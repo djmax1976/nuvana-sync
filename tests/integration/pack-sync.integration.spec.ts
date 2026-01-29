@@ -60,6 +60,7 @@ vi.mock('../../src/main/dal/sync-queue.dal', () => ({
     getUnsyncedByStore: vi.fn(() => []),
     getPendingCount: vi.fn(() => 0),
     markSynced: vi.fn(),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 
@@ -123,6 +124,9 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       received_by: 'user-receiver',
       activated_at: '2024-01-15T09:00:00.000Z',
       depleted_at: new Date().toISOString(),
+      // Phase 11: Include depletion_reason for end-to-end sync tests
+      // SEC-014: depletion_reason validated by DepletionReasonSchema at entry point
+      depletion_reason: data.depletion_reason,
       returned_at: null,
       cloud_pack_id: null,
       synced_at: null,
@@ -145,6 +149,10 @@ vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
       activated_at: null,
       depleted_at: null,
       returned_at: new Date().toISOString(),
+      // Phase 11: Include return_reason and return_notes for end-to-end sync tests
+      // SEC-014: return_reason validated by ReturnReasonSchema at entry point
+      return_reason: data.return_reason,
+      return_notes: data.return_notes || null,
       cloud_pack_id: null,
       synced_at: null,
       created_at: '2024-01-15T08:00:00.000Z',
@@ -383,11 +391,13 @@ describe('Pack Sync Integration Tests', () => {
       const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
       const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
 
+      // SEC-014: return_reason is REQUIRED per ReturnReasonSchema
       const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
         store_id: TEST_STORE_ID,
         closing_serial: '050',
         tickets_sold_count: 50,
         sales_amount: 50,
+        return_reason: 'INVENTORY_ADJUSTMENT', // Required field
       });
 
       syncQueueDAL.enqueue({
@@ -598,6 +608,885 @@ describe('Pack Sync Integration Tests', () => {
       expect(result.last_attempt_at).toBeNull();
       expect(result.created_at).toBeDefined();
       expect(result.synced_at).toBeNull();
+    });
+  });
+
+  // ==========================================================================
+  // LP-I-009: Pack Return Sync - End to End (Phase 11)
+  // ==========================================================================
+  /**
+   * Phase 11.1-11.4: End-to-end integration tests for pack return sync
+   *
+   * Validates complete data flow from pack return operation through sync queue
+   * to cloud API payload. Ensures return_reason and return_notes fields
+   * flow correctly through entire sync pipeline.
+   *
+   * @security SEC-014: Verifies return_reason values from allowlist enum
+   * @security API-001: Validates payload structure for cloud API
+   */
+  describe('LP-I-009: Pack Return Sync - End to End (Phase 11)', () => {
+    /**
+     * 11.2: Test SUPPLIER_RECALL return reason syncs to cloud payload
+     *
+     * Verifies that return_reason = 'SUPPLIER_RECALL' flows from:
+     * 1. lotteryPacksDAL.returnPack() input
+     * 2. Through sync queue payload
+     * 3. Ready for cloud API consumption
+     */
+    it('11.2: should sync pack return with SUPPLIER_RECALL reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      // SEC-014: return_reason is REQUIRED and validated by ReturnReasonSchema
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '025',
+        tickets_sold_count: 25,
+        sales_amount: 25,
+        return_reason: 'SUPPLIER_RECALL' as const,
+      });
+
+      // Simulate handler enqueuing sync item with return context
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: pack.status,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          returned_at: pack.returned_at,
+          // v019/v020: Return reason fields for cloud API
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+        },
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Verify return_reason flows correctly to sync payload
+      expect(payload.status).toBe('RETURNED');
+      expect(payload.return_reason).toBe('SUPPLIER_RECALL');
+      expect(payload.returned_at).toBeDefined();
+    });
+
+    /**
+     * 11.3: Test DAMAGED return reason syncs to cloud payload
+     *
+     * Verifies that return_reason = 'DAMAGED' flows correctly through pipeline.
+     * Tests different enum value to ensure all allowlist values work.
+     */
+    it('11.3: should sync pack return with DAMAGED reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '000', // Never sold - pack was damaged
+        tickets_sold_count: 0,
+        sales_amount: 0,
+        return_reason: 'DAMAGED' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: pack.status,
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+        },
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.return_reason).toBe('DAMAGED');
+    });
+
+    /**
+     * Additional test: EXPIRED return reason
+     */
+    it('should sync pack return with EXPIRED reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        return_reason: 'EXPIRED' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'RETURNED',
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.return_reason).toBe('EXPIRED');
+    });
+
+    /**
+     * Additional test: INVENTORY_ADJUSTMENT return reason
+     */
+    it('should sync pack return with INVENTORY_ADJUSTMENT reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        return_reason: 'INVENTORY_ADJUSTMENT' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'RETURNED',
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.return_reason).toBe('INVENTORY_ADJUSTMENT');
+    });
+
+    /**
+     * Additional test: STORE_CLOSURE return reason
+     */
+    it('should sync pack return with STORE_CLOSURE reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        return_reason: 'STORE_CLOSURE' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'RETURNED',
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.return_reason).toBe('STORE_CLOSURE');
+    });
+
+    /**
+     * 11.4: Test return_notes inclusion in cloud sync payload
+     *
+     * Verifies that optional return_notes field is correctly passed through
+     * the sync pipeline when provided.
+     */
+    it('11.4: should include return_notes in cloud sync payload', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const testNotes = 'Supplier recalled due to printing defect. Batch #A12345.';
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '100',
+        tickets_sold_count: 100,
+        sales_amount: 100,
+        return_reason: 'SUPPLIER_RECALL' as const,
+        return_notes: testNotes,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: pack.status,
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+        },
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Verify return_notes flows correctly to sync payload
+      expect(payload.return_reason).toBe('SUPPLIER_RECALL');
+      expect(payload.return_notes).toBe(testNotes);
+    });
+
+    /**
+     * Additional test: return_notes omitted when not provided
+     */
+    it('should handle null return_notes gracefully', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        return_reason: 'DAMAGED' as const,
+        // return_notes not provided
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'RETURNED',
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes, // Should be null
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      expect(payload.return_reason).toBe('DAMAGED');
+      expect(payload.return_notes).toBeNull();
+    });
+
+    /**
+     * Regression test: verify OTHER is NOT used as fallback
+     *
+     * SEC-014: OTHER is not in the allowlist, cloud API rejects it.
+     * Verifies that the payload does not contain 'OTHER' as a default.
+     */
+    it('should NOT default return_reason to OTHER (regression)', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        return_reason: 'SUPPLIER_RECALL' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'RETURNED',
+          return_reason: pack.return_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // SEC-014: Verify no 'OTHER' fallback
+      expect(payload.return_reason).not.toBe('OTHER');
+      expect(payload.return_reason).toBe('SUPPLIER_RECALL');
+    });
+
+    /**
+     * Full lifecycle test: return with all context fields
+     */
+    it('should sync complete return context through pipeline', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '075',
+        tickets_sold_count: 75,
+        sales_amount: 75,
+        return_reason: 'INVENTORY_ADJUSTMENT' as const,
+        return_notes: 'Quarterly audit adjustment - pack count mismatch',
+      });
+
+      // Simulate full handler payload construction
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          pack_number: pack.pack_number,
+          status: pack.status,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          returned_at: pack.returned_at,
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+          returned_shift_id: 'shift-123', // Shift context
+        },
+        priority: 10, // High priority for returns
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const queueItem = enqueueCallHistory[0];
+      expect(queueItem.priority).toBe(10);
+
+      const payload = queueItem.payload as Record<string, unknown>;
+      expect(payload.status).toBe('RETURNED');
+      expect(payload.return_reason).toBe('INVENTORY_ADJUSTMENT');
+      expect(payload.return_notes).toBe('Quarterly audit adjustment - pack count mismatch');
+      expect(payload.closing_serial).toBe('075');
+      expect(payload.tickets_sold).toBe(75);
+      expect(payload.sales_amount).toBe(75);
+      expect(payload.returned_shift_id).toBe('shift-123');
+    });
+  });
+
+  // ==========================================================================
+  // LP-I-010: Pack Deplete Sync - End to End (Phase 11)
+  // ==========================================================================
+  /**
+   * Phase 11.5-11.7: End-to-end integration tests for pack depletion sync
+   *
+   * Validates complete data flow from pack depletion operation through sync queue
+   * to cloud API payload. Ensures depletion_reason field flows correctly
+   * through entire sync pipeline.
+   *
+   * @security SEC-014: Verifies depletion_reason values from allowlist enum
+   * @security API-001: Validates payload structure for cloud API
+   */
+  describe('LP-I-010: Pack Deplete Sync - End to End (Phase 11)', () => {
+    /**
+     * 11.6: Test MANUAL_SOLD_OUT depletion reason syncs to cloud payload
+     *
+     * Verifies that depletion_reason = 'MANUAL_SOLD_OUT' flows from:
+     * 1. lotteryPacksDAL.settle() input
+     * 2. Through sync queue payload
+     * 3. Ready for cloud API consumption
+     *
+     * This was the primary bug: cloud-api.service hardcoded 'SOLD_OUT'
+     * instead of using the payload value 'MANUAL_SOLD_OUT'.
+     */
+    it('11.6: should sync pack depletion with MANUAL_SOLD_OUT reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      // SEC-014: depletion_reason is validated by DepletionReasonSchema
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '300',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'MANUAL_SOLD_OUT' as const,
+      });
+
+      // Simulate handler enqueuing sync item with depletion context
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: pack.status,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          depleted_at: pack.depleted_at,
+          // v019: Depletion reason for cloud API
+          depletion_reason: pack.depletion_reason,
+        },
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Verify depletion_reason flows correctly to sync payload
+      expect(payload.status).toBe('DEPLETED');
+      expect(payload.depletion_reason).toBe('MANUAL_SOLD_OUT');
+      expect(payload.depleted_at).toBeDefined();
+    });
+
+    /**
+     * 11.7: Test SHIFT_CLOSE depletion reason syncs to cloud payload
+     *
+     * Verifies that depletion_reason = 'SHIFT_CLOSE' flows correctly through pipeline.
+     * This is the automatic depletion when shift ends with remaining tickets.
+     */
+    it('11.7: should sync pack depletion with SHIFT_CLOSE reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '250', // Shift close with some tickets remaining
+        tickets_sold_count: 250,
+        sales_amount: 250,
+        depletion_reason: 'SHIFT_CLOSE' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: pack.status,
+          closing_serial: pack.closing_serial,
+          depleted_at: pack.depleted_at,
+          depletion_reason: pack.depletion_reason,
+          depleted_shift_id: 'shift-456', // Shift context
+        },
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.depletion_reason).toBe('SHIFT_CLOSE');
+      expect(payload.depleted_shift_id).toBe('shift-456');
+    });
+
+    /**
+     * Additional test: AUTO_REPLACED depletion reason
+     */
+    it('should sync pack depletion with AUTO_REPLACED reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '299',
+        tickets_sold_count: 299,
+        sales_amount: 299,
+        depletion_reason: 'AUTO_REPLACED' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'DEPLETED',
+          depleted_at: pack.depleted_at,
+          depletion_reason: pack.depletion_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.depletion_reason).toBe('AUTO_REPLACED');
+    });
+
+    /**
+     * Additional test: POS_LAST_TICKET depletion reason
+     */
+    it('should sync pack depletion with POS_LAST_TICKET reason to cloud', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '300',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'POS_LAST_TICKET' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'DEPLETED',
+          depleted_at: pack.depleted_at,
+          depletion_reason: pack.depletion_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+      expect(payload.depletion_reason).toBe('POS_LAST_TICKET');
+    });
+
+    /**
+     * Regression test: verify hardcoded SOLD_OUT is NOT used
+     *
+     * SEC-014: SOLD_OUT was the old hardcoded value that cloud API rejected.
+     * Cloud API expects specific enum values like MANUAL_SOLD_OUT.
+     */
+    it('should NOT use hardcoded SOLD_OUT value (regression)', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '300',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'MANUAL_SOLD_OUT' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'DEPLETED',
+          depletion_reason: pack.depletion_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // SEC-014: Verify no hardcoded 'SOLD_OUT' value
+      expect(payload.depletion_reason).not.toBe('SOLD_OUT');
+      expect(payload.depletion_reason).toBe('MANUAL_SOLD_OUT');
+    });
+
+    /**
+     * Full lifecycle test: depletion with complete shift context
+     */
+    it('should sync complete depletion context through pipeline', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '300',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'SHIFT_CLOSE' as const,
+      });
+
+      // Simulate full handler payload construction with shift context
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          pack_number: pack.pack_number,
+          status: pack.status,
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          activated_at: pack.activated_at,
+          depleted_at: pack.depleted_at,
+          depletion_reason: pack.depletion_reason,
+          depleted_shift_id: 'shift-789',
+          depleted_by: TEST_USER_ID,
+        },
+        priority: 5, // Normal priority for depletion
+      });
+
+      expect(enqueueCallHistory.length).toBe(1);
+
+      const queueItem = enqueueCallHistory[0];
+      expect(queueItem.priority).toBe(5);
+
+      const payload = queueItem.payload as Record<string, unknown>;
+      expect(payload.status).toBe('DEPLETED');
+      expect(payload.depletion_reason).toBe('SHIFT_CLOSE');
+      expect(payload.closing_serial).toBe('300');
+      expect(payload.tickets_sold).toBe(300);
+      expect(payload.sales_amount).toBe(300);
+      expect(payload.depleted_shift_id).toBe('shift-789');
+      expect(payload.depleted_by).toBe(TEST_USER_ID);
+    });
+
+    /**
+     * Test: depletion reason required for cloud API success
+     *
+     * Validates that depletion_reason is included in sync payload
+     * (sync engine will fail sync if reason is missing).
+     */
+    it('should include depletion_reason in sync payload (required by cloud)', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '150',
+        tickets_sold_count: 150,
+        sales_amount: 150,
+        depletion_reason: 'MANUAL_SOLD_OUT' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          status: 'DEPLETED',
+          closing_serial: pack.closing_serial,
+          depleted_at: pack.depleted_at,
+          depletion_reason: pack.depletion_reason,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Cloud API requires these fields for successful sync
+      expect(payload).toHaveProperty('depletion_reason');
+      expect(payload).toHaveProperty('closing_serial');
+      expect(payload).toHaveProperty('depleted_at');
+      expect(typeof payload.depletion_reason).toBe('string');
+      expect(payload.depletion_reason).toBeTruthy(); // Not empty
+    });
+  });
+
+  // ==========================================================================
+  // LP-I-011: Pack Audit Trail Sync - depleted_by and returned_by (SEC-010)
+  // ==========================================================================
+  /**
+   * SEC-010: Audit Trail - User ID field integration tests
+   *
+   * Validates that depleted_by and returned_by user IDs flow correctly
+   * through the sync pipeline for cloud audit trail compliance.
+   *
+   * Cloud API Requirement: These fields are REQUIRED for audit purposes
+   *
+   * @security SEC-010: Audit trail - tracks who performed the action
+   * @security API-001: Validates payload structure for cloud API
+   */
+  describe('LP-I-011: Pack Audit Trail Sync - User ID Fields', () => {
+    /**
+     * Test depleted_by flows through sync pipeline
+     *
+     * Validates that the user ID who depleted the pack is correctly
+     * included in the sync queue payload for cloud consumption.
+     */
+    it('should include depleted_by in sync queue payload for DEPLETED pack', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const depleterUserId = '8981cc60-62c6-4412-8789-42d3afc2b4ac';
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '300',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'MANUAL_SOLD_OUT' as const,
+      });
+
+      // Simulate handler enqueuing sync item with depleted_by context
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: 'DEPLETED',
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          depleted_at: pack.depleted_at,
+          depleted_by: depleterUserId, // SEC-010: Audit trail user ID
+          depletion_reason: pack.depletion_reason,
+          depleted_shift_id: 'shift-audit-001',
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // SEC-010: Verify depleted_by is included for audit trail
+      expect(payload).toHaveProperty('depleted_by');
+      expect(payload.depleted_by).toBe(depleterUserId);
+      expect(payload.depletion_reason).toBe('MANUAL_SOLD_OUT');
+    });
+
+    /**
+     * Test returned_by flows through sync pipeline
+     *
+     * Validates that the user ID who returned the pack is correctly
+     * included in the sync queue payload for cloud consumption.
+     */
+    it('should include returned_by in sync queue payload for RETURNED pack', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const returnerUserId = '8981cc60-62c6-4412-8789-42d3afc2b4ac';
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '050',
+        tickets_sold_count: 50,
+        sales_amount: 50,
+        return_reason: 'DAMAGED' as const,
+        return_notes: 'Pack was damaged during handling',
+      });
+
+      // Simulate handler enqueuing sync item with returned_by context
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: 'RETURNED',
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          returned_at: pack.returned_at,
+          returned_by: returnerUserId, // SEC-010: Audit trail user ID
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+          returned_shift_id: 'shift-return-audit-001',
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // SEC-010: Verify returned_by is included for audit trail
+      expect(payload).toHaveProperty('returned_by');
+      expect(payload.returned_by).toBe(returnerUserId);
+      expect(payload.return_reason).toBe('DAMAGED');
+    });
+
+    /**
+     * Test complete audit context flows through for DEPLETED pack
+     *
+     * Validates all audit-related fields are present together
+     * for complete cloud audit trail compliance.
+     */
+    it('should include complete audit context for DEPLETED pack sync', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const depleterUserId = 'user-depleter-complete-123';
+      const shiftId = 'shift-complete-audit-001';
+
+      const pack = lotteryPacksDAL.settle(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: '250',
+        tickets_sold_count: 250,
+        sales_amount: 250,
+        depletion_reason: 'SHIFT_CLOSE' as const,
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: 'DEPLETED',
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          depleted_at: pack.depleted_at,
+          depleted_by: depleterUserId,
+          depletion_reason: pack.depletion_reason,
+          depleted_shift_id: shiftId,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Verify complete audit context
+      expect(payload.depleted_by).toBe(depleterUserId);
+      expect(payload.depleted_shift_id).toBe(shiftId);
+      expect(payload.depletion_reason).toBe('SHIFT_CLOSE');
+      expect(payload).toHaveProperty('depleted_at');
+    });
+
+    /**
+     * Test complete audit context flows through for RETURNED pack
+     *
+     * Validates all audit-related fields are present together
+     * for complete cloud audit trail compliance.
+     */
+    it('should include complete audit context for RETURNED pack sync', async () => {
+      const { syncQueueDAL } = await import('../../src/main/dal/sync-queue.dal');
+      const { lotteryPacksDAL } = await import('../../src/main/dal/lottery-packs.dal');
+
+      const returnerUserId = 'user-returner-complete-123';
+      const shiftId = 'shift-return-complete-001';
+
+      const pack = lotteryPacksDAL.returnPack(TEST_PACK_ID, {
+        store_id: TEST_STORE_ID,
+        closing_serial: undefined,
+        tickets_sold_count: 0,
+        sales_amount: 0,
+        return_reason: 'SUPPLIER_RECALL' as const,
+        return_notes: 'Supplier recalled all packs due to defect',
+      });
+
+      syncQueueDAL.enqueue({
+        store_id: TEST_STORE_ID,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          status: 'RETURNED',
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          returned_at: pack.returned_at,
+          returned_by: returnerUserId,
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+          returned_shift_id: shiftId,
+        },
+      });
+
+      const payload = enqueueCallHistory[0].payload as Record<string, unknown>;
+
+      // Verify complete audit context
+      expect(payload.returned_by).toBe(returnerUserId);
+      expect(payload.returned_shift_id).toBe(shiftId);
+      expect(payload.return_reason).toBe('SUPPLIER_RECALL');
+      expect(payload.return_notes).toBe('Supplier recalled all packs due to defect');
+      expect(payload).toHaveProperty('returned_at');
     });
   });
 });

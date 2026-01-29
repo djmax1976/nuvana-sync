@@ -28,6 +28,31 @@ export type SyncOperation = 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE';
 export type SyncDirection = 'PUSH' | 'PULL';
 
 /**
+ * Error category for classification (per ERR-007)
+ * Used to determine retry vs dead-letter routing
+ *
+ * - TRANSIENT: Network errors, 5xx, rate limits - retry with exponential backoff
+ * - PERMANENT: 400, 404, 422 - dead letter immediately (no retry will succeed)
+ * - STRUCTURAL: Missing required fields - dead letter immediately
+ * - UNKNOWN: Unclassified errors - retry with extended backoff, then dead letter
+ */
+export type ErrorCategory = 'TRANSIENT' | 'PERMANENT' | 'STRUCTURAL' | 'UNKNOWN';
+
+/**
+ * Dead letter reason - why item was moved to DLQ (per MQ-002)
+ *
+ * - MAX_ATTEMPTS_EXCEEDED: Hit max_attempts with non-transient error
+ * - PERMANENT_ERROR: Cloud returned permanent error (400, 404, 422)
+ * - STRUCTURAL_FAILURE: Missing required fields, invalid payload structure
+ * - MANUAL: Manually dead-lettered by operator
+ */
+export type DeadLetterReason =
+  | 'MAX_ATTEMPTS_EXCEEDED'
+  | 'PERMANENT_ERROR'
+  | 'STRUCTURAL_FAILURE'
+  | 'MANUAL';
+
+/**
  * Sync queue item entity
  */
 export interface SyncQueueItem extends StoreEntity {
@@ -50,6 +75,12 @@ export interface SyncQueueItem extends StoreEntity {
   api_endpoint: string | null;
   http_status: number | null;
   response_body: string | null;
+  // Dead Letter Queue fields (v046 migration)
+  dead_lettered: number; // SQLite boolean: 0 = active, 1 = dead lettered
+  dead_letter_reason: DeadLetterReason | null;
+  dead_lettered_at: string | null;
+  error_category: ErrorCategory | null;
+  retry_after: string | null;
 }
 
 /**
@@ -122,6 +153,7 @@ export interface SyncActivityListParams {
   status?: 'all' | 'queued' | 'failed' | 'synced';
   entityType?: string;
   operation?: SyncOperation;
+  direction?: SyncDirection | 'all';
   limit?: number;
   offset?: number;
 }
@@ -174,6 +206,82 @@ export interface SyncDetailedStats {
     failed: number;
     synced: number;
   }>;
+  /** Breakdown by sync direction (PUSH/PULL) */
+  byDirection: Array<{
+    direction: SyncDirection;
+    pending: number;
+    queued: number;
+    failed: number;
+    synced: number;
+    syncedToday: number;
+  }>;
+}
+
+/**
+ * Dead Letter Queue item for UI display
+ * API-008: Only safe, non-sensitive fields exposed for troubleshooting
+ */
+export interface DeadLetterItem {
+  id: string;
+  entity_type: string;
+  entity_id: string;
+  operation: SyncOperation;
+  sync_attempts: number;
+  max_attempts: number;
+  last_sync_error: string | null;
+  dead_letter_reason: DeadLetterReason;
+  dead_lettered_at: string;
+  error_category: ErrorCategory | null;
+  api_endpoint: string | null;
+  http_status: number | null;
+  created_at: string;
+  /** Parsed summary from payload - only safe display fields */
+  summary: {
+    pack_number?: string;
+    game_code?: string;
+    status?: string;
+  } | null;
+}
+
+/**
+ * Dead Letter Queue statistics
+ * MQ-002: Monitor DLQ depth and alert on growth
+ */
+export interface DeadLetterStats {
+  /** Total items in DLQ */
+  total: number;
+  /** Breakdown by reason */
+  byReason: Record<DeadLetterReason, number>;
+  /** Breakdown by entity type */
+  byEntityType: Record<string, number>;
+  /** Breakdown by error category */
+  byErrorCategory: Record<ErrorCategory, number>;
+  /** Oldest item timestamp (for alerting on stale items) */
+  oldestItem: string | null;
+  /** Newest item timestamp */
+  newestItem: string | null;
+}
+
+/**
+ * Parameters for dead-lettering an item
+ * MQ-002: Include original message and error in DLQ message
+ */
+export interface DeadLetterParams {
+  id: string;
+  reason: DeadLetterReason;
+  errorCategory: ErrorCategory;
+  error?: string;
+}
+
+/**
+ * Paginated Dead Letter Queue response
+ */
+export interface DeadLetterListResponse {
+  items: DeadLetterItem[];
+  total: number;
+  limit: number;
+  offset: number;
+  hasMore: boolean;
 }
 
 // ============================================================================
@@ -1123,6 +1231,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
         ? params.operation
         : undefined;
 
+    // SEC-006: Validate direction against allowlist
+    const ALLOWED_DIRECTIONS: SyncDirection[] = ['PUSH', 'PULL'];
+    const direction =
+      params.direction && ALLOWED_DIRECTIONS.includes(params.direction as SyncDirection)
+        ? (params.direction as SyncDirection)
+        : undefined;
+
     // Build WHERE clause based on filters
     const conditions: string[] = ['store_id = ?'];
     const queryParams: (string | number)[] = [storeId];
@@ -1147,6 +1262,17 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     if (operation) {
       conditions.push('operation = ?');
       queryParams.push(operation);
+    }
+
+    // Direction filter (SEC-006: validated above)
+    if (direction) {
+      // Handle NULL values: treat NULL as 'PUSH' for backward compatibility
+      if (direction === 'PUSH') {
+        conditions.push('(sync_direction = ? OR sync_direction IS NULL)');
+      } else {
+        conditions.push('sync_direction = ?');
+      }
+      queryParams.push(direction);
     }
 
     const whereClause = conditions.join(' AND ');
@@ -1312,12 +1438,51 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       synced: number;
     }>;
 
+    // Breakdown by sync direction (PUSH/PULL) with synced today counts
+    // SEC-006: Parameterized query with store_id scoping
+    // Treats NULL sync_direction as 'PUSH' for backward compatibility
+    const byDirectionStmt = this.db.prepare(`
+      SELECT
+        COALESCE(sync_direction, 'PUSH') as direction,
+        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced,
+        SUM(CASE WHEN synced = 1 AND synced_at >= date('now', 'localtime') THEN 1 ELSE 0 END) as synced_today
+      FROM sync_queue
+      WHERE store_id = ?
+      GROUP BY COALESCE(sync_direction, 'PUSH')
+      ORDER BY direction
+    `);
+    const byDirectionRaw = byDirectionStmt.all(storeId) as Array<{
+      direction: string;
+      pending: number;
+      queued: number;
+      failed: number;
+      synced: number;
+      synced_today: number;
+    }>;
+
+    // Ensure we always have both PUSH and PULL entries, even with 0 counts
+    const byDirection: SyncDetailedStats['byDirection'] = ['PUSH', 'PULL'].map((dir) => {
+      const found = byDirectionRaw.find((d) => d.direction === dir);
+      return {
+        direction: dir as SyncDirection,
+        pending: found?.pending ?? 0,
+        queued: found?.queued ?? 0,
+        failed: found?.failed ?? 0,
+        synced: found?.synced ?? 0,
+        syncedToday: found?.synced_today ?? 0,
+      };
+    });
+
     return {
       ...basicStats,
       syncedTotal: syncedTotalResult.count,
       newestSync: newestSyncResult?.synced_at || null,
       byEntityType,
       byOperation,
+      byDirection,
     };
   }
 
@@ -1364,6 +1529,665 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       syncedToday: exclusiveCounts.syncedToday,
       oldestPending: oldestResult?.created_at || null,
     };
+  }
+
+  /**
+   * Cleanup stale PULL tracking items for a specific action type
+   *
+   * PULL tracking items are created each time a PULL operation runs with unique
+   * entity_ids (e.g., "pull-1706537000000"). If a PULL fails and gets auto-reset,
+   * the old item sits forever because subsequent PULL operations create NEW items.
+   *
+   * This method removes old pending PULL items of a specific action type after
+   * a successful PULL, preventing accumulation of stale tracking items.
+   *
+   * SEC-006: Parameterized DELETE query - no string concatenation with user input
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_direction index (store_id, sync_direction, created_at)
+   * SAFETY: Excludes the current PULL item and only deletes items older than 5 seconds
+   *         to prevent race conditions with concurrent operations
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param actionPattern - Action to match in payload (e.g., 'pull_bins', 'pull_games')
+   * @param excludeId - ID of current PULL item to exclude from cleanup
+   * @returns Number of stale items deleted
+   */
+  cleanupStalePullTracking(storeId: string, actionPattern: string, excludeId: string): number {
+    // SEC-006: Allowlist validation for actionPattern to prevent injection via JSON LIKE
+    const ALLOWED_ACTIONS = [
+      'pull_bins',
+      'pull_games',
+      'pull_received_packs',
+      'pull_activated_packs',
+    ];
+
+    if (!ALLOWED_ACTIONS.includes(actionPattern)) {
+      log.warn('Invalid actionPattern for PULL cleanup - rejected', {
+        storeId,
+        actionPattern,
+        allowed: ALLOWED_ACTIONS,
+      });
+      return 0;
+    }
+
+    // Calculate cutoff time (5 seconds ago) to prevent race conditions
+    // with items being created/processed concurrently
+    const cutoffTime = new Date(Date.now() - 5000).toISOString();
+
+    // SEC-006: Parameterized query with validated actionPattern
+    // PERF: Uses idx_sync_queue_direction (store_id, sync_direction, created_at)
+    // Query plan: Index scan on (store_id, sync_direction) then filter by conditions
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND id != ?
+        AND created_at < ?
+        AND payload LIKE ?
+    `);
+
+    // Build LIKE pattern: matches JSON containing the action
+    // Example: '%"action":"pull_bins"%' matches {"action":"pull_bins",...}
+    const likePattern = `%"action":"${actionPattern}"%`;
+
+    const result = stmt.run(storeId, excludeId, cutoffTime, likePattern);
+
+    if (result.changes > 0) {
+      log.info('Cleaned up stale PULL tracking items', {
+        storeId,
+        actionPattern,
+        deletedCount: result.changes,
+        excludedId: excludeId,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
+   * Cleanup ALL stale PULL tracking items for a store
+   *
+   * Called at startup to clear accumulated PULL tracking items that will never
+   * be retried. This is a one-time bulk cleanup that removes all pending PULL
+   * items older than the specified age.
+   *
+   * SEC-006: Parameterized DELETE query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_direction index (store_id, sync_direction, created_at)
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param maxAgeMinutes - Delete PULL items older than this (default: 10 minutes)
+   * @returns Number of stale items deleted
+   */
+  cleanupAllStalePullTracking(storeId: string, maxAgeMinutes: number = 10): number {
+    // Calculate cutoff time
+    const cutoffTime = new Date(Date.now() - maxAgeMinutes * 60 * 1000).toISOString();
+
+    // SEC-006: Parameterized query
+    // Delete all pending PULL tracking items older than cutoff
+    // These are tracking-only items that will never be retried
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND created_at < ?
+    `);
+
+    const result = stmt.run(storeId, cutoffTime);
+
+    if (result.changes > 0) {
+      log.info('Cleaned up all stale PULL tracking items at startup', {
+        storeId,
+        maxAgeMinutes,
+        deletedCount: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  // ==========================================================================
+  // Dead Letter Queue Methods (v046 migration - MQ-002 compliance)
+  // ==========================================================================
+
+  /**
+   * Move an item to the Dead Letter Queue
+   *
+   * Per MQ-002: Configure DLQ after N retry attempts, include original message
+   * and error in DLQ message.
+   *
+   * SEC-006: Parameterized UPDATE query
+   * DB-006: Item ID uniquely identifies the record (store_id verified on read)
+   * API-003: Error message truncated to prevent storage of sensitive data
+   *
+   * @param params - Dead letter parameters including reason and error category
+   * @returns true if item was dead-lettered, false if not found
+   */
+  deadLetter(params: DeadLetterParams): boolean {
+    const now = this.now();
+
+    // API-003: Truncate error message to safe length
+    const truncatedError = params.error ? params.error.substring(0, 500) : null;
+
+    // SEC-006: Parameterized query - no string concatenation
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        dead_lettered = 1,
+        dead_letter_reason = ?,
+        dead_lettered_at = ?,
+        error_category = ?,
+        last_sync_error = COALESCE(?, last_sync_error)
+      WHERE id = ? AND dead_lettered = 0 AND synced = 0
+    `);
+
+    const result = stmt.run(params.reason, now, params.errorCategory, truncatedError, params.id);
+
+    if (result.changes > 0) {
+      log.warn('Sync item moved to Dead Letter Queue', {
+        id: params.id,
+        reason: params.reason,
+        errorCategory: params.errorCategory,
+      });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Move multiple items to the Dead Letter Queue (batch operation)
+   *
+   * SEC-006: Uses parameterized queries in a transaction
+   * PERF: Batched updates for efficiency
+   *
+   * @param items - Array of dead letter parameters
+   * @returns Number of items dead-lettered
+   */
+  deadLetterMany(items: DeadLetterParams[]): number {
+    if (items.length === 0) return 0;
+
+    const now = this.now();
+    let deadLetteredCount = 0;
+
+    // Use transaction for atomic batch operation
+    const transaction = this.db.transaction(() => {
+      const stmt = this.db.prepare(`
+        UPDATE sync_queue SET
+          dead_lettered = 1,
+          dead_letter_reason = ?,
+          dead_lettered_at = ?,
+          error_category = ?,
+          last_sync_error = COALESCE(?, last_sync_error)
+        WHERE id = ? AND dead_lettered = 0 AND synced = 0
+      `);
+
+      for (const params of items) {
+        const truncatedError = params.error ? params.error.substring(0, 500) : null;
+        const result = stmt.run(
+          params.reason,
+          now,
+          params.errorCategory,
+          truncatedError,
+          params.id
+        );
+        if (result.changes > 0) {
+          deadLetteredCount++;
+        }
+      }
+    });
+
+    transaction();
+
+    if (deadLetteredCount > 0) {
+      log.warn('Batch dead letter operation completed', {
+        requested: items.length,
+        deadLettered: deadLetteredCount,
+      });
+    }
+
+    return deadLetteredCount;
+  }
+
+  /**
+   * Restore an item from the Dead Letter Queue for retry
+   *
+   * Resets the item to active queue state with zero attempts.
+   * Use after fixing the underlying issue that caused the failure.
+   *
+   * SEC-006: Parameterized UPDATE query
+   *
+   * @param id - Queue item ID
+   * @returns true if item was restored, false if not found in DLQ
+   */
+  restoreFromDeadLetter(id: string): boolean {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        dead_lettered = 0,
+        dead_letter_reason = NULL,
+        dead_lettered_at = NULL,
+        error_category = NULL,
+        sync_attempts = 0,
+        last_sync_error = NULL,
+        last_attempt_at = NULL,
+        retry_after = NULL
+      WHERE id = ? AND dead_lettered = 1
+    `);
+
+    const result = stmt.run(id);
+
+    if (result.changes > 0) {
+      log.info('Sync item restored from Dead Letter Queue', { id });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Restore multiple items from the Dead Letter Queue (batch operation)
+   *
+   * SEC-006: Parameterized query with IN clause
+   *
+   * @param ids - Array of queue item IDs
+   * @returns Number of items restored
+   */
+  restoreFromDeadLetterMany(ids: string[]): number {
+    if (ids.length === 0) return 0;
+
+    // SEC-006: Build parameterized IN clause
+    const placeholders = ids.map(() => '?').join(', ');
+
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        dead_lettered = 0,
+        dead_letter_reason = NULL,
+        dead_lettered_at = NULL,
+        error_category = NULL,
+        sync_attempts = 0,
+        last_sync_error = NULL,
+        last_attempt_at = NULL,
+        retry_after = NULL
+      WHERE id IN (${placeholders}) AND dead_lettered = 1
+    `);
+
+    const result = stmt.run(...ids);
+
+    if (result.changes > 0) {
+      log.info('Batch restore from Dead Letter Queue completed', {
+        requested: ids.length,
+        restored: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
+   * Get paginated Dead Letter Queue items for a store
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_dead_letter index
+   * API-008: Only safe display fields returned
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param limit - Maximum items per page (default 50, max 100)
+   * @param offset - Pagination offset (default 0)
+   * @returns Paginated list of dead letter items
+   */
+  getDeadLetterItems(
+    storeId: string,
+    limit: number = 50,
+    offset: number = 0
+  ): DeadLetterListResponse {
+    // API-001: Bound pagination parameters
+    const safeLimit = Math.min(Math.max(1, limit), 100);
+    const safeOffset = Math.max(0, offset);
+
+    // Get total count first
+    // SEC-006: Parameterized count query
+    // PERF: Uses idx_sync_queue_dead_letter index (store_id, dead_lettered)
+    const countStmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+    `);
+    const countResult = countStmt.get(storeId) as { count: number };
+    const total = countResult.count;
+
+    // Get paginated items
+    // SEC-006: Parameterized SELECT query
+    // PERF: Index scan on idx_sync_queue_dead_letter, then sort by created_at DESC
+    const stmt = this.db.prepare(`
+      SELECT
+        id, entity_type, entity_id, operation, sync_attempts, max_attempts,
+        last_sync_error, dead_letter_reason, dead_lettered_at, error_category,
+        api_endpoint, http_status, created_at, payload
+      FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+      ORDER BY dead_lettered_at DESC
+      LIMIT ? OFFSET ?
+    `);
+
+    const rows = stmt.all(storeId, safeLimit, safeOffset) as Array<{
+      id: string;
+      entity_type: string;
+      entity_id: string;
+      operation: SyncOperation;
+      sync_attempts: number;
+      max_attempts: number;
+      last_sync_error: string | null;
+      dead_letter_reason: DeadLetterReason;
+      dead_lettered_at: string;
+      error_category: ErrorCategory | null;
+      api_endpoint: string | null;
+      http_status: number | null;
+      created_at: string;
+      payload: string;
+    }>;
+
+    // API-008: Transform to safe display format, extract summary from payload
+    const items: DeadLetterItem[] = rows.map((row) => {
+      let summary: DeadLetterItem['summary'] = null;
+      try {
+        const payload = JSON.parse(row.payload);
+        // Only extract safe display fields
+        if (payload.pack_number || payload.game_code || payload.status) {
+          summary = {
+            pack_number: payload.pack_number,
+            game_code: payload.game_code,
+            status: payload.status,
+          };
+        }
+      } catch {
+        // Invalid JSON payload - leave summary null
+      }
+
+      return {
+        id: row.id,
+        entity_type: row.entity_type,
+        entity_id: row.entity_id,
+        operation: row.operation,
+        sync_attempts: row.sync_attempts,
+        max_attempts: row.max_attempts,
+        last_sync_error: row.last_sync_error ? row.last_sync_error.substring(0, 200) : null,
+        dead_letter_reason: row.dead_letter_reason,
+        dead_lettered_at: row.dead_lettered_at,
+        error_category: row.error_category,
+        api_endpoint: row.api_endpoint,
+        http_status: row.http_status,
+        created_at: row.created_at,
+        summary,
+      };
+    });
+
+    return {
+      items,
+      total,
+      limit: safeLimit,
+      offset: safeOffset,
+      hasMore: safeOffset + items.length < total,
+    };
+  }
+
+  /**
+   * Get Dead Letter Queue statistics for a store
+   *
+   * MQ-002: Monitor DLQ depth and alert on growth
+   * SEC-006: Parameterized aggregation queries
+   * DB-006: TENANT_ISOLATION - All queries scoped to store_id
+   * PERF: Single-pass aggregation queries with appropriate indexes
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns DLQ statistics with breakdowns
+   */
+  getDeadLetterStats(storeId: string): DeadLetterStats {
+    // Main aggregation query - single pass for all breakdowns
+    // SEC-006: Parameterized query
+    // PERF: Uses idx_sync_queue_dead_letter for filtering
+    const stmt = this.db.prepare(`
+      SELECT
+        COUNT(*) as total,
+        MIN(dead_lettered_at) as oldest_item,
+        MAX(dead_lettered_at) as newest_item
+      FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+    `);
+
+    const mainResult = stmt.get(storeId) as {
+      total: number;
+      oldest_item: string | null;
+      newest_item: string | null;
+    };
+
+    // Breakdown by reason
+    // SEC-006: Parameterized query
+    const byReasonStmt = this.db.prepare(`
+      SELECT dead_letter_reason, COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+      GROUP BY dead_letter_reason
+    `);
+
+    const reasonRows = byReasonStmt.all(storeId) as Array<{
+      dead_letter_reason: DeadLetterReason;
+      count: number;
+    }>;
+
+    const byReason: Record<DeadLetterReason, number> = {
+      MAX_ATTEMPTS_EXCEEDED: 0,
+      PERMANENT_ERROR: 0,
+      STRUCTURAL_FAILURE: 0,
+      MANUAL: 0,
+    };
+    for (const row of reasonRows) {
+      if (row.dead_letter_reason) {
+        byReason[row.dead_letter_reason] = row.count;
+      }
+    }
+
+    // Breakdown by entity type
+    // SEC-006: Parameterized query
+    const byEntityTypeStmt = this.db.prepare(`
+      SELECT entity_type, COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+      GROUP BY entity_type
+    `);
+
+    const entityTypeRows = byEntityTypeStmt.all(storeId) as Array<{
+      entity_type: string;
+      count: number;
+    }>;
+
+    const byEntityType: Record<string, number> = {};
+    for (const row of entityTypeRows) {
+      byEntityType[row.entity_type] = row.count;
+    }
+
+    // Breakdown by error category
+    // SEC-006: Parameterized query
+    const byErrorCategoryStmt = this.db.prepare(`
+      SELECT error_category, COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+      GROUP BY error_category
+    `);
+
+    const errorCategoryRows = byErrorCategoryStmt.all(storeId) as Array<{
+      error_category: ErrorCategory | null;
+      count: number;
+    }>;
+
+    const byErrorCategory: Record<ErrorCategory, number> = {
+      TRANSIENT: 0,
+      PERMANENT: 0,
+      STRUCTURAL: 0,
+      UNKNOWN: 0,
+    };
+    for (const row of errorCategoryRows) {
+      if (row.error_category) {
+        byErrorCategory[row.error_category] = row.count;
+      }
+    }
+
+    return {
+      total: mainResult.total,
+      byReason,
+      byEntityType,
+      byErrorCategory,
+      oldestItem: mainResult.oldest_item,
+      newestItem: mainResult.newest_item,
+    };
+  }
+
+  /**
+   * Get count of items in Dead Letter Queue
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_dead_letter index
+   *
+   * @param storeId - Store identifier
+   * @returns Count of dead-lettered items
+   */
+  getDeadLetterCount(storeId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1
+    `);
+    const result = stmt.get(storeId) as { count: number };
+    return result.count;
+  }
+
+  /**
+   * Delete items from Dead Letter Queue permanently
+   *
+   * Use for cleanup of old DLQ items that are no longer needed.
+   * CAUTION: This is irreversible.
+   *
+   * SEC-006: Parameterized DELETE query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier
+   * @param beforeDate - Delete items dead-lettered before this date (ISO 8601)
+   * @returns Number of items deleted
+   */
+  deleteDeadLetterItems(storeId: string, beforeDate: string): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ? AND dead_lettered = 1 AND dead_lettered_at < ?
+    `);
+
+    const result = stmt.run(storeId, beforeDate);
+
+    if (result.changes > 0) {
+      log.warn('Dead letter items permanently deleted', {
+        storeId,
+        beforeDate,
+        count: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
+   * Delete a specific item from the Dead Letter Queue
+   *
+   * SEC-006: Parameterized DELETE query
+   *
+   * @param id - Queue item ID
+   * @returns true if deleted, false if not found
+   */
+  deleteDeadLetterItem(id: string): boolean {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE id = ? AND dead_lettered = 1
+    `);
+
+    const result = stmt.run(id);
+
+    if (result.changes > 0) {
+      log.warn('Dead letter item permanently deleted', { id });
+      return true;
+    }
+
+    return false;
+  }
+
+  /**
+   * Update error category for an item
+   *
+   * Used during sync processing to classify errors for routing decisions.
+   *
+   * SEC-006: Parameterized UPDATE query
+   *
+   * @param id - Queue item ID
+   * @param errorCategory - Error classification
+   */
+  updateErrorCategory(id: string, errorCategory: ErrorCategory): void {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET error_category = ?
+      WHERE id = ? AND synced = 0 AND dead_lettered = 0
+    `);
+
+    stmt.run(errorCategory, id);
+  }
+
+  /**
+   * Set retry_after timestamp for rate-limited items
+   *
+   * Per ERR-007: Respect rate limit backoff (429 Retry-After)
+   *
+   * SEC-006: Parameterized UPDATE query
+   *
+   * @param id - Queue item ID
+   * @param retryAfter - ISO 8601 timestamp when retry is allowed
+   */
+  setRetryAfter(id: string, retryAfter: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET retry_after = ?
+      WHERE id = ? AND synced = 0 AND dead_lettered = 0
+    `);
+
+    stmt.run(retryAfter, id);
+  }
+
+  /**
+   * Get items that should be auto-dead-lettered
+   *
+   * Returns items that have:
+   * - Exceeded max_attempts AND have a PERMANENT or STRUCTURAL error category
+   * - OR exceeded max_attempts * 2 (grace period) regardless of error category
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier
+   * @returns Array of items eligible for dead lettering
+   */
+  getItemsForAutoDeadLetter(storeId: string): SyncQueueItem[] {
+    // SEC-006: Parameterized query
+    // Logic: Dead letter if:
+    //   1. sync_attempts >= max_attempts AND error_category IN (PERMANENT, STRUCTURAL)
+    //   2. sync_attempts >= max_attempts * 2 (absolute limit, any error category)
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND (
+          (sync_attempts >= max_attempts AND error_category IN ('PERMANENT', 'STRUCTURAL'))
+          OR sync_attempts >= max_attempts * 2
+        )
+      ORDER BY created_at ASC
+      LIMIT 100
+    `);
+
+    return stmt.all(storeId) as SyncQueueItem[];
   }
 }
 

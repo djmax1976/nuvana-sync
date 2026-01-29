@@ -99,6 +99,7 @@ vi.mock('../../src/main/dal/sync-queue.dal', () => ({
       syncedToday: 0,
       oldestPending: null,
     })),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 
@@ -127,7 +128,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: data.name,
       pin_hash: '$2b$12$mockedHashValue',
       active: 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: new Date().toISOString(),
@@ -140,7 +140,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: data.name || 'Updated User',
       pin_hash: '$2b$12$mockedHashValue',
       active: data.active !== undefined ? (data.active ? 1 : 0) : 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: '2024-01-01T00:00:00.000Z',
@@ -153,7 +152,6 @@ vi.mock('../../src/main/dal/users.dal', () => ({
       name: 'Test User',
       pin_hash: '$2b$12$mockedHashValue',
       active: 1,
-      cloud_user_id: null,
       synced_at: null,
       last_login_at: null,
       created_at: '2024-01-01T00:00:00.000Z',
@@ -265,9 +263,10 @@ vi.mock('../../src/main/services/cloud-api.service', () => ({
       success: true,
       results: [],
     }),
+    // Note: After cloud_id consolidation, user_id IS the cloud ID
     pushEmployees: vi.fn().mockResolvedValue({
       success: true,
-      results: [{ user_id: 'user-123', cloud_user_id: 'cloud-456', status: 'synced' }],
+      results: [{ user_id: 'user-123', status: 'synced' }],
     }),
     startSyncSession: vi.fn().mockResolvedValue({
       sessionId: 'session-e2e-123',
@@ -498,6 +497,7 @@ describe('Sync E2E Integration Tests', () => {
 
       // Step 2: Enqueue for sync (simulating handler behavior)
       // Note: PIN must NOT be included
+      // Note: After cloud_id consolidation, user_id IS the cloud ID
       syncQueueDAL.enqueue({
         store_id: E2E_STORE_ID,
         entity_type: 'employee',
@@ -506,7 +506,6 @@ describe('Sync E2E Integration Tests', () => {
         payload: {
           user_id: employee.user_id,
           store_id: employee.store_id,
-          cloud_user_id: employee.cloud_user_id,
           role: employee.role,
           name: employee.name,
           active: employee.active === 1,

@@ -651,6 +651,10 @@ export function getMockParsedBarcode(raw: string): {
 // Employee Mock Data
 // ============================================================================
 
+/**
+ * MockEmployee interface
+ * Note: After cloud_id consolidation (v043), user_id IS the cloud user ID
+ */
 export interface MockEmployee {
   user_id: string;
   store_id: string;
@@ -658,7 +662,6 @@ export interface MockEmployee {
   name: string;
   active: number;
   last_login_at: string | null;
-  cloud_user_id: string | null;
   synced_at: string | null;
   created_at: string;
   updated_at: string;
@@ -672,7 +675,6 @@ export const mockEmployees: MockEmployee[] = [
     name: 'John Manager',
     active: 1,
     last_login_at: new Date().toISOString(),
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-01-01T00:00:00.000Z',
     updated_at: '2024-01-01T00:00:00.000Z',
@@ -684,7 +686,6 @@ export const mockEmployees: MockEmployee[] = [
     name: 'Sarah Shift',
     active: 1,
     last_login_at: '2024-06-15T08:30:00.000Z',
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-02-01T00:00:00.000Z',
     updated_at: '2024-02-01T00:00:00.000Z',
@@ -696,7 +697,6 @@ export const mockEmployees: MockEmployee[] = [
     name: 'Mike Cashier',
     active: 1,
     last_login_at: '2024-06-14T14:20:00.000Z',
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-03-01T00:00:00.000Z',
     updated_at: '2024-03-01T00:00:00.000Z',
@@ -708,7 +708,6 @@ export const mockEmployees: MockEmployee[] = [
     name: 'Emily Register',
     active: 1,
     last_login_at: null,
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-04-01T00:00:00.000Z',
     updated_at: '2024-04-01T00:00:00.000Z',
@@ -720,7 +719,6 @@ export const mockEmployees: MockEmployee[] = [
     name: 'Tom Inactive',
     active: 0,
     last_login_at: '2024-05-01T10:00:00.000Z',
-    cloud_user_id: null,
     synced_at: null,
     created_at: '2024-01-15T00:00:00.000Z',
     updated_at: '2024-05-15T00:00:00.000Z',

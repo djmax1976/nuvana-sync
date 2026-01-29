@@ -134,6 +134,19 @@ export class BidirectionalSyncService {
 
       if (cloudBins.length === 0) {
         log.info('No bins to sync from cloud');
+        // BUG FIX: Mark PULL queue item as synced even when no bins returned
+        // Previously this early return left queue items permanently pending
+        const apiContext: SyncApiContext = {
+          api_endpoint: apiEndpoint,
+          http_status: 200,
+          response_body: JSON.stringify({ pulled: 0, message: 'No bins to sync' }),
+        };
+        syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
+        // Cleanup stale PULL tracking items from previous failed/reset operations
+        // Prevents accumulation of pending items that will never be retried
+        syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
+
         return result;
       }
 
@@ -226,6 +239,10 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
 
       return result;
     } catch (error: unknown) {
@@ -408,6 +425,10 @@ export class BidirectionalSyncService {
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
 
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_games', pullQueueItem.id);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -584,6 +605,10 @@ export class BidirectionalSyncService {
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
 
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_received_packs', pullQueueItem.id);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -754,6 +779,10 @@ export class BidirectionalSyncService {
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
 
+      // Cleanup stale PULL tracking items from previous failed/reset operations
+      // Prevents accumulation of pending items that will never be retried
+      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_activated_packs', pullQueueItem.id);
+
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -817,7 +846,7 @@ export class BidirectionalSyncService {
     cloudPack: CloudPack,
     storeId: string
   ): {
-    cloud_pack_id: string;
+    pack_id: string; // After cloud_id consolidation, pack_id IS the cloud ID
     store_id: string;
     game_id: string;
     pack_number: string;
@@ -872,8 +901,9 @@ export class BidirectionalSyncService {
     //
     // After v037 migration: bin_id IS the cloud's UUID (no cloud_bin_id mapping needed)
     // After v036 migration: game_id IS the cloud's UUID (no cloud_game_id mapping needed)
+    // After v045 migration: pack_id IS the cloud's UUID (no cloud_pack_id mapping needed)
     return {
-      cloud_pack_id: cloudPack.pack_id,
+      pack_id: cloudPack.pack_id, // pack_id IS the cloud ID after consolidation
       store_id: storeId, // DB-006: Always use configured store ID for tenant isolation
       game_id: cloudPack.game_id,
       pack_number: cloudPack.pack_number,

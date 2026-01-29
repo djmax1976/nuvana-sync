@@ -165,6 +165,7 @@ registerHandler(
           status?: 'all' | 'queued' | 'failed' | 'synced';
           entityType?: string;
           operation?: string;
+          direction?: 'PUSH' | 'PULL' | 'all';
           limit?: number;
           offset?: number;
         }
@@ -175,6 +176,7 @@ registerHandler(
       status: params?.status,
       entityType: params?.entityType,
       operation: params?.operation as 'CREATE' | 'UPDATE' | 'DELETE' | 'ACTIVATE' | undefined,
+      direction: params?.direction,
       limit: params?.limit,
       offset: params?.offset,
     });
@@ -1071,6 +1073,346 @@ registerHandler(
 );
 
 /**
+ * Resync DEPLETED packs to cloud
+ *
+ * Used when:
+ * - Sync queue was accidentally cleared
+ * - DEPLETED packs were not pushed to cloud
+ * - Troubleshooting sync issues
+ *
+ * Strategy: Use UPDATE operation which routes to pushPackDeplete endpoint
+ */
+registerHandler(
+  'sync:resyncDepletedPacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+
+    // Get all packs in DEPLETED status
+    const depletedPacks = lotteryPacksDAL.findByStatus(storeId, 'DEPLETED');
+
+    if (depletedPacks.length === 0) {
+      return createSuccessResponse({
+        message: 'No packs in DEPLETED status to resync',
+        enqueuedCount: 0,
+      });
+    }
+
+    let enqueuedCount = 0;
+    let skippedCount = 0;
+
+    for (const pack of depletedPacks) {
+      // Get game to get game_code and tickets_per_pack
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        log.warn('Skipping pack resync: game not found', {
+          packId: pack.pack_id,
+          gameId: pack.game_id,
+        });
+        skippedCount++;
+        continue;
+      }
+
+      // Calculate serial_start and serial_end
+      const serialStart = '000';
+      const serialEnd = game.tickets_per_pack
+        ? String(game.tickets_per_pack - 1).padStart(3, '0')
+        : '299';
+
+      // Enqueue UPDATE operation - routes to pushPackDeplete endpoint
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          game_code: game.game_code,
+          pack_number: pack.pack_number,
+          status: 'DEPLETED',
+          bin_id: pack.current_bin_id,
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          received_at: pack.received_at || pack.created_at,
+          received_by: pack.received_by,
+          activated_at: pack.activated_at,
+          activated_by: pack.activated_by,
+          depleted_at: pack.depleted_at,
+          depleted_by: pack.depleted_by,
+          depleted_shift_id: pack.depleted_shift_id,
+          depletion_reason: pack.depletion_reason || 'SOLD_OUT',
+          returned_at: null,
+          serial_start: serialStart,
+          serial_end: serialEnd,
+        },
+      });
+      enqueuedCount++;
+    }
+
+    log.info('Resyncing DEPLETED packs to cloud', {
+      storeId,
+      totalDepleted: depletedPacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+
+    return createSuccessResponse({
+      message: `Queued ${enqueuedCount} DEPLETED packs for resync`,
+      totalDepleted: depletedPacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+  },
+  { description: 'Resync DEPLETED packs to cloud' }
+);
+
+/**
+ * Resync RETURNED packs to cloud
+ *
+ * Used when:
+ * - Sync queue was accidentally cleared
+ * - RETURNED packs were not pushed to cloud
+ * - Troubleshooting sync issues
+ *
+ * Strategy: Use UPDATE operation which routes to pushPackReturn endpoint
+ */
+registerHandler(
+  'sync:resyncReturnedPacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+
+    // Get all packs in RETURNED status
+    const returnedPacks = lotteryPacksDAL.findByStatus(storeId, 'RETURNED');
+
+    if (returnedPacks.length === 0) {
+      return createSuccessResponse({
+        message: 'No packs in RETURNED status to resync',
+        enqueuedCount: 0,
+      });
+    }
+
+    let enqueuedCount = 0;
+    let skippedCount = 0;
+
+    for (const pack of returnedPacks) {
+      // Get game to get game_code and tickets_per_pack
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        log.warn('Skipping pack resync: game not found', {
+          packId: pack.pack_id,
+          gameId: pack.game_id,
+        });
+        skippedCount++;
+        continue;
+      }
+
+      // Calculate serial_start and serial_end
+      const serialStart = '000';
+      const serialEnd = game.tickets_per_pack
+        ? String(game.tickets_per_pack - 1).padStart(3, '0')
+        : '299';
+
+      // Enqueue UPDATE operation - routes to pushPackReturn endpoint
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation: 'UPDATE',
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          game_code: game.game_code,
+          pack_number: pack.pack_number,
+          status: 'RETURNED',
+          bin_id: pack.current_bin_id,
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          received_at: pack.received_at || pack.created_at,
+          received_by: pack.received_by,
+          activated_at: pack.activated_at,
+          activated_by: pack.activated_by,
+          depleted_at: null,
+          returned_at: pack.returned_at,
+          returned_by: pack.returned_by,
+          returned_shift_id: pack.returned_shift_id,
+          return_reason: pack.return_reason || 'OTHER',
+          return_notes: pack.return_notes,
+          serial_start: serialStart,
+          serial_end: serialEnd,
+        },
+      });
+      enqueuedCount++;
+    }
+
+    log.info('Resyncing RETURNED packs to cloud', {
+      storeId,
+      totalReturned: returnedPacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+
+    return createSuccessResponse({
+      message: `Queued ${enqueuedCount} RETURNED packs for resync`,
+      totalReturned: returnedPacks.length,
+      enqueuedCount,
+      skippedCount,
+    });
+  },
+  { description: 'Resync RETURNED packs to cloud' }
+);
+
+/**
+ * Resync ALL packs to cloud (ACTIVE, DEPLETED, RETURNED)
+ *
+ * Comprehensive resync for all pack statuses. Use when:
+ * - Sync queue was cleared or corrupted
+ * - Initial data migration to cloud
+ * - Troubleshooting major sync issues
+ *
+ * This combines: resyncActivePacks + resyncDepletedPacks + resyncReturnedPacks
+ */
+registerHandler(
+  'sync:resyncAllPacks',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+    const results = {
+      active: { total: 0, enqueued: 0, skipped: 0 },
+      depleted: { total: 0, enqueued: 0, skipped: 0 },
+      returned: { total: 0, enqueued: 0, skipped: 0 },
+    };
+
+    // Helper to enqueue a pack with the right payload
+    const enqueuePack = (
+      pack: ReturnType<typeof lotteryPacksDAL.findByStatus>[number],
+      status: 'ACTIVE' | 'DEPLETED' | 'RETURNED'
+    ): boolean => {
+      const game = lotteryGamesDAL.findById(pack.game_id);
+      if (!game) {
+        return false;
+      }
+
+      const serialStart = '000';
+      const serialEnd = game.tickets_per_pack
+        ? String(game.tickets_per_pack - 1).padStart(3, '0')
+        : '299';
+
+      const operation = status === 'ACTIVE' ? 'ACTIVATE' : 'UPDATE';
+
+      syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: pack.pack_id,
+        operation,
+        payload: {
+          pack_id: pack.pack_id,
+          store_id: pack.store_id,
+          game_id: pack.game_id,
+          game_code: game.game_code,
+          pack_number: pack.pack_number,
+          status,
+          bin_id: pack.current_bin_id,
+          opening_serial: pack.opening_serial,
+          closing_serial: pack.closing_serial,
+          tickets_sold: pack.tickets_sold_count,
+          sales_amount: pack.sales_amount,
+          received_at: pack.received_at || pack.created_at,
+          received_by: pack.received_by,
+          activated_at: pack.activated_at,
+          activated_by: pack.activated_by,
+          shift_id: pack.activated_shift_id,
+          depleted_at: pack.depleted_at,
+          depleted_by: pack.depleted_by,
+          depleted_shift_id: pack.depleted_shift_id,
+          depletion_reason: pack.depletion_reason,
+          returned_at: pack.returned_at,
+          returned_by: pack.returned_by,
+          returned_shift_id: pack.returned_shift_id,
+          return_reason: pack.return_reason,
+          return_notes: pack.return_notes,
+          serial_start: serialStart,
+          serial_end: serialEnd,
+        },
+      });
+      return true;
+    };
+
+    // Process ACTIVE packs
+    const activePacks = lotteryPacksDAL.findByStatus(storeId, 'ACTIVE');
+    results.active.total = activePacks.length;
+    for (const pack of activePacks) {
+      if (enqueuePack(pack, 'ACTIVE')) {
+        results.active.enqueued++;
+      } else {
+        results.active.skipped++;
+      }
+    }
+
+    // Process DEPLETED packs
+    const depletedPacks = lotteryPacksDAL.findByStatus(storeId, 'DEPLETED');
+    results.depleted.total = depletedPacks.length;
+    for (const pack of depletedPacks) {
+      if (enqueuePack(pack, 'DEPLETED')) {
+        results.depleted.enqueued++;
+      } else {
+        results.depleted.skipped++;
+      }
+    }
+
+    // Process RETURNED packs
+    const returnedPacks = lotteryPacksDAL.findByStatus(storeId, 'RETURNED');
+    results.returned.total = returnedPacks.length;
+    for (const pack of returnedPacks) {
+      if (enqueuePack(pack, 'RETURNED')) {
+        results.returned.enqueued++;
+      } else {
+        results.returned.skipped++;
+      }
+    }
+
+    const totalEnqueued =
+      results.active.enqueued + results.depleted.enqueued + results.returned.enqueued;
+    const totalSkipped =
+      results.active.skipped + results.depleted.skipped + results.returned.skipped;
+
+    log.info('Resyncing ALL packs to cloud', {
+      storeId,
+      results,
+      totalEnqueued,
+      totalSkipped,
+    });
+
+    return createSuccessResponse({
+      message: `Queued ${totalEnqueued} packs for resync (${totalSkipped} skipped due to missing game)`,
+      results,
+      totalEnqueued,
+      totalSkipped,
+    });
+  },
+  { description: 'Resync ALL packs (ACTIVE, DEPLETED, RETURNED) to cloud' }
+);
+
+/**
  * DEBUG: Fix missing timestamps on active packs
  * Sets received_at to 1 hour before now, activated_at to now
  */
@@ -1638,6 +1980,226 @@ registerHandler(
     });
   },
   { description: 'Reset fuel data and reprocess FGM files' }
+);
+
+// ============================================================================
+// Dead Letter Queue Handlers (MQ-002 Compliance)
+// ============================================================================
+
+/**
+ * Get Dead Letter Queue items (paginated)
+ *
+ * MQ-002: Implement DLQ processor for investigation/replay
+ * SEC-006: Uses parameterized queries
+ * DB-006: TENANT_ISOLATION - Query scoped to store
+ * API-008: Only safe display fields returned
+ */
+registerHandler(
+  'sync:getDeadLetterItems',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // API-001: Validate and bound input parameters
+    const params = input as { limit?: number; offset?: number } | undefined;
+    const limit = Math.min(Math.max(1, params?.limit || 50), 100);
+    const offset = Math.max(0, params?.offset || 0);
+
+    const result = syncQueueDAL.getDeadLetterItems(store.store_id, limit, offset);
+
+    return createSuccessResponse(result);
+  },
+  { requiresAuth: false, description: 'Get paginated Dead Letter Queue items' }
+);
+
+/**
+ * Get Dead Letter Queue statistics
+ *
+ * MQ-002: Monitor DLQ depth and alert on growth
+ * SEC-006: Parameterized queries
+ * DB-006: TENANT_ISOLATION - All queries scoped to store_id
+ */
+registerHandler(
+  'sync:getDeadLetterStats',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const stats = syncQueueDAL.getDeadLetterStats(store.store_id);
+
+    return createSuccessResponse(stats);
+  },
+  { requiresAuth: false, description: 'Get Dead Letter Queue statistics' }
+);
+
+/**
+ * Restore an item from Dead Letter Queue for retry
+ *
+ * MQ-002: Allow replay of DLQ items after fixing issues
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:restoreFromDeadLetter',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const restored = syncQueueDAL.restoreFromDeadLetter(params.id);
+
+    if (restored) {
+      log.info('Item restored from Dead Letter Queue', { id: params.id });
+      return createSuccessResponse({ restored: true, id: params.id });
+    }
+
+    return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
+  },
+  { requiresAuth: true, description: 'Restore item from Dead Letter Queue' }
+);
+
+/**
+ * Restore multiple items from Dead Letter Queue
+ *
+ * MQ-002: Batch restore for efficient recovery
+ * SEC-006: Parameterized queries
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:restoreFromDeadLetterMany',
+  async (_event, input: unknown) => {
+    const params = input as { ids: string[] } | undefined;
+    if (!params?.ids || !Array.isArray(params.ids) || params.ids.length === 0) {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item IDs');
+    }
+
+    // API-001: Bound batch size to prevent abuse
+    const safeIds = params.ids.slice(0, 100).filter((id) => typeof id === 'string');
+    if (safeIds.length === 0) {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'No valid item IDs');
+    }
+
+    const restoredCount = syncQueueDAL.restoreFromDeadLetterMany(safeIds);
+
+    log.info('Batch restore from Dead Letter Queue', {
+      requested: safeIds.length,
+      restored: restoredCount,
+    });
+
+    return createSuccessResponse({
+      requested: safeIds.length,
+      restored: restoredCount,
+    });
+  },
+  { requiresAuth: true, description: 'Restore multiple items from Dead Letter Queue' }
+);
+
+/**
+ * Delete an item from Dead Letter Queue permanently
+ *
+ * CAUTION: This is irreversible
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:deleteDeadLetterItem',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const deleted = syncQueueDAL.deleteDeadLetterItem(params.id);
+
+    if (deleted) {
+      log.warn('Item permanently deleted from Dead Letter Queue', { id: params.id });
+      return createSuccessResponse({ deleted: true, id: params.id });
+    }
+
+    return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
+  },
+  { requiresAuth: true, description: 'Delete item from Dead Letter Queue permanently' }
+);
+
+/**
+ * Cleanup old Dead Letter Queue items
+ *
+ * MQ-002: Periodic cleanup of old DLQ items
+ * SEC-006: Parameterized query
+ * DB-006: TENANT_ISOLATION - Scoped to store
+ */
+registerHandler(
+  'sync:cleanupDeadLetter',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const params = input as { olderThanDays?: number } | undefined;
+    // API-001: Validate and bound days parameter (min 7 days, max 365 days)
+    const days = Math.min(Math.max(7, params?.olderThanDays || 30), 365);
+
+    // Calculate cutoff date
+    const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const deletedCount = syncQueueDAL.deleteDeadLetterItems(store.store_id, cutoffDate);
+
+    log.info('Dead Letter Queue cleanup completed', {
+      storeId: store.store_id,
+      olderThanDays: days,
+      deletedCount,
+    });
+
+    return createSuccessResponse({
+      deletedCount,
+      cutoffDate,
+    });
+  },
+  { requiresAuth: true, description: 'Cleanup old Dead Letter Queue items' }
+);
+
+/**
+ * Manually dead-letter a specific item
+ *
+ * Use when an item is known to be unfixable
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:manualDeadLetter',
+  async (_event, input: unknown) => {
+    const params = input as { id: string; reason?: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const deadLettered = syncQueueDAL.deadLetter({
+      id: params.id,
+      reason: 'MANUAL',
+      errorCategory: 'UNKNOWN',
+      error: params.reason || 'Manually moved to Dead Letter Queue',
+    });
+
+    if (deadLettered) {
+      log.warn('Item manually moved to Dead Letter Queue', {
+        id: params.id,
+        reason: params.reason,
+      });
+      return createSuccessResponse({ deadLettered: true, id: params.id });
+    }
+
+    return createErrorResponse(
+      IPCErrorCodes.NOT_FOUND,
+      'Item not found or already dead-lettered/synced'
+    );
+  },
+  { requiresAuth: true, description: 'Manually move item to Dead Letter Queue' }
 );
 
 log.info('Sync IPC handlers registered');

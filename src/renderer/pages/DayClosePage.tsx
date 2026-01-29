@@ -13,7 +13,7 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { formatDateTime } from '../utils/date-format.utils';
 import { useStoreTimezone } from '../contexts/StoreContext';
@@ -45,8 +45,10 @@ import {
   formatBusinessDate,
   type MoneyReceivedState,
   type MoneyReceivedReportsState,
+  type MoneyReceivedPOSState,
   type SalesBreakdownState,
   type SalesBreakdownReportsState,
+  type SalesBreakdownPOSState,
   DEFAULT_MONEY_RECEIVED_STATE,
   DEFAULT_SALES_BREAKDOWN_STATE,
 } from '../components/shift-closing';
@@ -151,8 +153,12 @@ function StepIndicator({
 export default function DayCloseWizardPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const { toast } = useToast();
   const shiftId = searchParams.get('shiftId');
+
+  // Check if we're in manual mode (passed from TerminalsPage)
+  const isManualMode = (location.state as { isManualMode?: boolean } | null)?.isManualMode ?? false;
 
   // ========================================================================
   // HOOKS
@@ -456,6 +462,21 @@ export default function DayCloseWizardPage() {
     setSalesBreakdownState((prev) => ({
       ...prev,
       reports: { ...prev.reports, ...changes },
+    }));
+  }, []);
+
+  // Manual Mode: POS data change handlers (only used when isManualMode is true)
+  const handleMoneyPOSChange = useCallback((changes: Partial<MoneyReceivedPOSState>) => {
+    setMoneyReceivedState((prev) => ({
+      ...prev,
+      pos: { ...prev.pos, ...changes },
+    }));
+  }, []);
+
+  const handleSalesPOSChange = useCallback((changes: Partial<SalesBreakdownPOSState>) => {
+    setSalesBreakdownState((prev) => ({
+      ...prev,
+      pos: { ...prev.pos, ...changes },
     }));
   }, []);
 
@@ -782,12 +803,16 @@ export default function DayCloseWizardPage() {
               <MoneyReceivedCard
                 state={moneyReceivedState}
                 onReportsChange={handleMoneyReportsChange}
+                editablePOS={isManualMode}
+                onPOSChange={isManualMode ? handleMoneyPOSChange : undefined}
               />
 
               {/* Right Column - Department Sales */}
               <SalesBreakdownCard
                 state={salesBreakdownState}
                 onReportsChange={handleSalesReportsChange}
+                editablePOS={isManualMode}
+                onPOSChange={isManualMode ? handleSalesPOSChange : undefined}
               />
             </div>
 

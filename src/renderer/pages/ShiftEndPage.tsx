@@ -14,7 +14,7 @@
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { useSearchParams, useNavigate } from 'react-router-dom';
+import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge as _Badge } from '../components/ui/badge';
@@ -47,8 +47,10 @@ import {
   formatBusinessDate,
   type MoneyReceivedState,
   type MoneyReceivedReportsState,
+  type MoneyReceivedPOSState,
   type SalesBreakdownState,
   type SalesBreakdownReportsState,
+  type SalesBreakdownPOSState,
   type LotteryStatus,
   DEFAULT_MONEY_RECEIVED_STATE,
   DEFAULT_SALES_BREAKDOWN_STATE,
@@ -91,7 +93,11 @@ function determineLotteryStatus(
 export default function ShiftEndWizardPage() {
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const location = useLocation();
   const shiftId = searchParams.get('shiftId');
+
+  // Check if we're in manual mode (passed from TerminalsPage)
+  const isManualMode = (location.state as { isManualMode?: boolean } | null)?.isManualMode ?? false;
 
   // ============ AUTH & DATA HOOKS ============
   const { isLoading: authLoading } = useClientAuth();
@@ -235,6 +241,21 @@ export default function ShiftEndWizardPage() {
     setSalesBreakdownState((prev) => ({
       ...prev,
       reports: { ...prev.reports, ...changes },
+    }));
+  }, []);
+
+  // Manual Mode: POS data change handlers (only used when isManualMode is true)
+  const handleMoneyPOSChange = useCallback((changes: Partial<MoneyReceivedPOSState>) => {
+    setMoneyReceivedState((prev) => ({
+      ...prev,
+      pos: { ...prev.pos, ...changes },
+    }));
+  }, []);
+
+  const handleSalesPOSChange = useCallback((changes: Partial<SalesBreakdownPOSState>) => {
+    setSalesBreakdownState((prev) => ({
+      ...prev,
+      pos: { ...prev.pos, ...changes },
     }));
   }, []);
 
@@ -410,12 +431,16 @@ export default function ShiftEndWizardPage() {
               <MoneyReceivedCard
                 state={moneyReceivedState}
                 onReportsChange={handleMoneyReportsChange}
+                editablePOS={isManualMode}
+                onPOSChange={isManualMode ? handleMoneyPOSChange : undefined}
               />
 
               {/* Right Column - Department Sales */}
               <SalesBreakdownCard
                 state={salesBreakdownState}
                 onReportsChange={handleSalesReportsChange}
+                editablePOS={isManualMode}
+                onPOSChange={isManualMode ? handleSalesPOSChange : undefined}
               />
             </div>
 

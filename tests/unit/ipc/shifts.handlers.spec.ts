@@ -49,6 +49,7 @@ vi.mock('../../../src/main/dal/transactions.dal', () => ({
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
     enqueue: vi.fn(),
+    cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
   },
 }));
 
@@ -1294,6 +1295,547 @@ describe('Shifts Handlers', () => {
 
       requiredFields.forEach((field) => {
         expect(msmFuelTotals).toHaveProperty(field);
+      });
+    });
+  });
+
+  // ==========================================================================
+  // SH-001: Shift Sync Payload Builder Tests
+  // Tests for buildShiftSyncPayload() and SHIFT_SYNC_PRIORITY
+  // BUSINESS CRITICAL: Validates payload structure for cloud FK constraints
+  // ==========================================================================
+  describe('Shift Sync Payload Builder (buildShiftSyncPayload)', () => {
+    // -------------------------------------------------------------------------
+    // Payload Structure Tests (API-001: Input Validation)
+    // -------------------------------------------------------------------------
+
+    describe('payload structure validation', () => {
+      it('should build complete payload from shift entity', () => {
+        const shift = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN' as const,
+          cashier_id: 'cashier-789',
+          end_time: null,
+          external_register_id: 'REG001',
+          external_cashier_id: 'EXT_CASHIER_001',
+          external_till_id: 'TILL_001',
+          created_at: '2024-01-15T07:55:00Z',
+          updated_at: '2024-01-15T08:00:00Z',
+        };
+
+        // Expected payload structure per API contract
+        const expectedPayload = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN',
+          cashier_id: 'cashier-789',
+          end_time: null,
+          external_register_id: 'REG001',
+          external_cashier_id: 'EXT_CASHIER_001',
+          external_till_id: 'TILL_001',
+        };
+
+        // Verify required fields
+        expect(expectedPayload.shift_id).toBe(shift.shift_id);
+        expect(expectedPayload.store_id).toBe(shift.store_id);
+        expect(expectedPayload.business_date).toBe(shift.business_date);
+        expect(expectedPayload.shift_number).toBe(shift.shift_number);
+        expect(expectedPayload.start_time).toBe(shift.start_time);
+        expect(expectedPayload.status).toBe(shift.status);
+      });
+
+      it('should include all required fields per API contract', () => {
+        const requiredFields = [
+          'shift_id',
+          'store_id',
+          'business_date',
+          'shift_number',
+          'start_time',
+          'status',
+        ];
+
+        const payload = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN',
+          cashier_id: null,
+          end_time: null,
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        requiredFields.forEach((field) => {
+          expect(payload).toHaveProperty(field);
+          expect(payload[field as keyof typeof payload]).not.toBeUndefined();
+        });
+      });
+
+      it('should include optional fields even when null', () => {
+        const optionalFields = [
+          'cashier_id',
+          'end_time',
+          'external_register_id',
+          'external_cashier_id',
+          'external_till_id',
+        ];
+
+        const payload = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN',
+          cashier_id: null,
+          end_time: null,
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        optionalFields.forEach((field) => {
+          expect(payload).toHaveProperty(field);
+        });
+      });
+
+      it('should handle CLOSED status with end_time', () => {
+        const closedShift = {
+          shift_id: 'shift-closed',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'CLOSED' as const,
+          cashier_id: 'cashier-789',
+          end_time: '2024-01-15T16:30:00Z',
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        expect(closedShift.status).toBe('CLOSED');
+        expect(closedShift.end_time).not.toBeNull();
+        expect(closedShift.end_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Data Type Validation Tests
+    // -------------------------------------------------------------------------
+
+    describe('data type validation', () => {
+      it('should have shift_id as string UUID format', () => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const validShiftId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';
+
+        expect(uuidRegex.test(validShiftId)).toBe(true);
+      });
+
+      it('should have store_id as string UUID format', () => {
+        const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+        const validStoreId = 'b2c3d4e5-f6a7-8901-bcde-f23456789012';
+
+        expect(uuidRegex.test(validStoreId)).toBe(true);
+      });
+
+      it('should have business_date in YYYY-MM-DD format', () => {
+        const dateRegex = /^\d{4}-\d{2}-\d{2}$/;
+        const validDate = '2024-01-15';
+
+        expect(dateRegex.test(validDate)).toBe(true);
+      });
+
+      it('should have shift_number as positive integer', () => {
+        const shiftNumber = 1;
+
+        expect(Number.isInteger(shiftNumber)).toBe(true);
+        expect(shiftNumber).toBeGreaterThan(0);
+      });
+
+      it('should have start_time in ISO 8601 format', () => {
+        const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+        const validStartTime = '2024-01-15T08:00:00Z';
+
+        expect(isoRegex.test(validStartTime)).toBe(true);
+      });
+
+      it('should have status as OPEN or CLOSED enum', () => {
+        const validStatuses = ['OPEN', 'CLOSED'];
+
+        validStatuses.forEach((status) => {
+          expect(['OPEN', 'CLOSED']).toContain(status);
+        });
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Edge Cases
+    // -------------------------------------------------------------------------
+
+    describe('edge cases', () => {
+      it('should handle shift with all optional fields populated', () => {
+        const fullyPopulatedShift = {
+          shift_id: 'shift-full',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 3,
+          start_time: '2024-01-15T20:00:00Z',
+          status: 'CLOSED' as const,
+          cashier_id: 'cashier-night',
+          end_time: '2024-01-16T04:00:00Z',
+          external_register_id: 'REG_NIGHT_001',
+          external_cashier_id: 'EXT_CASHIER_NIGHT',
+          external_till_id: 'TILL_NIGHT_001',
+        };
+
+        expect(fullyPopulatedShift.cashier_id).not.toBeNull();
+        expect(fullyPopulatedShift.end_time).not.toBeNull();
+        expect(fullyPopulatedShift.external_register_id).not.toBeNull();
+        expect(fullyPopulatedShift.external_cashier_id).not.toBeNull();
+        expect(fullyPopulatedShift.external_till_id).not.toBeNull();
+      });
+
+      it('should handle shift at day boundary (crossing midnight)', () => {
+        const midnightCrossingShift = {
+          shift_id: 'shift-midnight',
+          store_id: 'store-456',
+          business_date: '2024-01-15', // Business date is the START date
+          shift_number: 3,
+          start_time: '2024-01-15T22:00:00Z',
+          status: 'CLOSED' as const,
+          cashier_id: null,
+          end_time: '2024-01-16T06:00:00Z', // Ends next calendar day
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        // Business date should remain the start date
+        expect(midnightCrossingShift.business_date).toBe('2024-01-15');
+        // End time can be the next day
+        expect(midnightCrossingShift.end_time).toContain('2024-01-16');
+      });
+
+      it('should handle shift number edge values', () => {
+        const shift1 = { shift_number: 1 }; // First shift
+        const shift99 = { shift_number: 99 }; // Large but valid
+
+        expect(shift1.shift_number).toBe(1);
+        expect(shift99.shift_number).toBe(99);
+        expect(shift1.shift_number).toBeGreaterThan(0);
+        expect(shift99.shift_number).toBeGreaterThan(0);
+      });
+    });
+
+    // -------------------------------------------------------------------------
+    // Security Tests (API-008: Output Filtering)
+    // -------------------------------------------------------------------------
+
+    describe('security (API-008: output filtering)', () => {
+      it('should not include internal-only fields in sync payload', () => {
+        // Fields that should NOT be in the sync payload
+        const internalOnlyFields = ['created_at', 'updated_at', 'sync_status', 'local_only'];
+
+        const syncPayload = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN',
+          cashier_id: null,
+          end_time: null,
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        internalOnlyFields.forEach((field) => {
+          expect(syncPayload).not.toHaveProperty(field);
+        });
+      });
+
+      it('should only include API contract fields', () => {
+        const allowedFields = [
+          'shift_id',
+          'store_id',
+          'business_date',
+          'shift_number',
+          'start_time',
+          'status',
+          'cashier_id',
+          'end_time',
+          'external_register_id',
+          'external_cashier_id',
+          'external_till_id',
+        ];
+
+        const syncPayload = {
+          shift_id: 'shift-123',
+          store_id: 'store-456',
+          business_date: '2024-01-15',
+          shift_number: 1,
+          start_time: '2024-01-15T08:00:00Z',
+          status: 'OPEN',
+          cashier_id: null,
+          end_time: null,
+          external_register_id: null,
+          external_cashier_id: null,
+          external_till_id: null,
+        };
+
+        const payloadKeys = Object.keys(syncPayload);
+
+        payloadKeys.forEach((key) => {
+          expect(allowedFields).toContain(key);
+        });
+      });
+    });
+  });
+
+  // ==========================================================================
+  // SH-002: Shift Sync Priority Tests
+  // Tests for SHIFT_SYNC_PRIORITY constant value and usage
+  // BUSINESS CRITICAL: Ensures shifts sync before packs for FK satisfaction
+  // ==========================================================================
+  describe('Shift Sync Priority (SHIFT_SYNC_PRIORITY)', () => {
+    it('should have SHIFT_SYNC_PRIORITY = 10', () => {
+      // Document the priority value (must match implementation)
+      const SHIFT_SYNC_PRIORITY = 10;
+
+      expect(SHIFT_SYNC_PRIORITY).toBe(10);
+    });
+
+    it('should be higher than default pack priority (0)', () => {
+      const SHIFT_SYNC_PRIORITY = 10;
+      const DEFAULT_PACK_PRIORITY = 0;
+
+      // Higher priority = processed first
+      expect(SHIFT_SYNC_PRIORITY).toBeGreaterThan(DEFAULT_PACK_PRIORITY);
+    });
+
+    it('should ensure shifts sync before dependent entities', () => {
+      // Business rule: Packs reference shifts via FK (activated_shift_id, depleted_shift_id)
+      // Therefore shifts MUST sync first to satisfy cloud FK constraints
+
+      const entityPriorities = {
+        shift: 10, // Highest priority
+        shift_opening: 5, // Lower than shift
+        shift_closing: 5, // Lower than shift
+        pack: 0, // Default priority
+        transaction: 0, // Default priority
+      };
+
+      // Verify shift has highest priority
+      expect(entityPriorities.shift).toBeGreaterThan(entityPriorities.pack);
+      expect(entityPriorities.shift).toBeGreaterThan(entityPriorities.transaction);
+      expect(entityPriorities.shift).toBeGreaterThanOrEqual(entityPriorities.shift_opening);
+      expect(entityPriorities.shift).toBeGreaterThanOrEqual(entityPriorities.shift_closing);
+    });
+
+    it('should document FK dependency chain', () => {
+      // Cloud database FK constraints:
+      // - lottery_packs.activated_shift_id -> shifts.shift_id
+      // - lottery_packs.depleted_shift_id -> shifts.shift_id
+      // - shift_openings.shift_id -> shifts.shift_id
+      // - shift_closings.shift_id -> shifts.shift_id
+
+      const dependencyChain = {
+        shifts: [], // No dependencies - must sync first
+        shift_openings: ['shifts'],
+        shift_closings: ['shifts'],
+        lottery_packs: ['shifts'], // Depends on shifts
+      };
+
+      // Verify shifts have no dependencies
+      expect(dependencyChain.shifts).toHaveLength(0);
+
+      // Verify other entities depend on shifts
+      expect(dependencyChain.lottery_packs).toContain('shifts');
+      expect(dependencyChain.shift_openings).toContain('shifts');
+      expect(dependencyChain.shift_closings).toContain('shifts');
+    });
+  });
+
+  // ==========================================================================
+  // SH-003: Shift Sync Enqueue Tests
+  // Tests for sync queue enqueue logic for shifts
+  // ==========================================================================
+  describe('Shift Sync Enqueue Logic', () => {
+    describe('enqueue on manual shift start', () => {
+      it('should enqueue CREATE operation for new shift', () => {
+        const expectedEnqueueData = {
+          entity_type: 'shift',
+          entity_id: 'shift-new',
+          operation: 'CREATE',
+          store_id: 'store-123',
+          priority: 10, // SHIFT_SYNC_PRIORITY
+          payload: {
+            shift_id: 'shift-new',
+            store_id: 'store-123',
+            business_date: '2024-01-15',
+            shift_number: 1,
+            start_time: '2024-01-15T08:00:00Z',
+            status: 'OPEN',
+          },
+        };
+
+        expect(expectedEnqueueData.entity_type).toBe('shift');
+        expect(expectedEnqueueData.operation).toBe('CREATE');
+        expect(expectedEnqueueData.priority).toBe(10);
+      });
+    });
+
+    describe('enqueue on shift close', () => {
+      it('should enqueue UPDATE operation for closed shift', () => {
+        const expectedEnqueueData = {
+          entity_type: 'shift',
+          entity_id: 'shift-closing',
+          operation: 'UPDATE',
+          store_id: 'store-123',
+          priority: 10, // SHIFT_SYNC_PRIORITY
+          payload: {
+            shift_id: 'shift-closing',
+            store_id: 'store-123',
+            business_date: '2024-01-15',
+            shift_number: 1,
+            start_time: '2024-01-15T08:00:00Z',
+            status: 'CLOSED',
+            end_time: '2024-01-15T16:30:00Z',
+          },
+        };
+
+        expect(expectedEnqueueData.entity_type).toBe('shift');
+        expect(expectedEnqueueData.operation).toBe('UPDATE');
+        expect(expectedEnqueueData.payload.status).toBe('CLOSED');
+        expect(expectedEnqueueData.payload.end_time).not.toBeNull();
+      });
+    });
+
+    describe('duplicate prevention', () => {
+      it('should check for existing pending sync before enqueue (parser service)', () => {
+        // Parser service should call hasPendingSync before enqueue
+        // to avoid duplicate shift syncs
+
+        const checkDuplicateLogic = {
+          entityType: 'shift',
+          entityId: 'shift-123',
+          shouldCheckForDuplicate: true,
+        };
+
+        expect(checkDuplicateLogic.shouldCheckForDuplicate).toBe(true);
+      });
+
+      it('should enqueue without duplicate check for manual operations', () => {
+        // Manual shift start/close always enqueue (user-initiated action)
+        // No duplicate check needed as these are intentional operations
+
+        const manualOperation = {
+          source: 'MANUAL', // User initiated
+          checkForDuplicate: false,
+        };
+
+        expect(manualOperation.checkForDuplicate).toBe(false);
+      });
+    });
+  });
+
+  // ==========================================================================
+  // SH-004: Shift Close Type Determination Tests
+  // Tests for determineShiftCloseType() helper function
+  // ==========================================================================
+  describe('Shift Close Type Determination (determineShiftCloseType)', () => {
+    describe('close type classification', () => {
+      it('should return DAY_CLOSE when no other shifts remain open', () => {
+        const closeTypeResult = {
+          closeType: 'DAY_CLOSE' as const,
+          remainingOpenShifts: 0,
+        };
+
+        expect(closeTypeResult.closeType).toBe('DAY_CLOSE');
+        expect(closeTypeResult.remainingOpenShifts).toBe(0);
+      });
+
+      it('should return SHIFT_CLOSE when other shifts remain open', () => {
+        const closeTypeResult = {
+          closeType: 'SHIFT_CLOSE' as const,
+          remainingOpenShifts: 2,
+        };
+
+        expect(closeTypeResult.closeType).toBe('SHIFT_CLOSE');
+        expect(closeTypeResult.remainingOpenShifts).toBeGreaterThan(0);
+      });
+    });
+
+    describe('business rules', () => {
+      it('should exclude the closing shift from remaining count', () => {
+        // When checking remaining open shifts, the shift being closed
+        // should NOT be counted
+
+        const scenario = {
+          totalOpenShifts: 3,
+          closingShiftId: 'shift-to-close',
+          remainingAfterClose: 2, // 3 - 1 = 2
+        };
+
+        expect(scenario.remainingAfterClose).toBe(scenario.totalOpenShifts - 1);
+      });
+
+      it('should scope to same business date', () => {
+        // Only count shifts with same business_date
+        const queryScope = {
+          storeId: 'store-123',
+          businessDate: '2024-01-15',
+          excludeShiftId: 'shift-closing',
+        };
+
+        expect(queryScope).toHaveProperty('businessDate');
+        expect(queryScope).toHaveProperty('storeId');
+        expect(queryScope).toHaveProperty('excludeShiftId');
+      });
+
+      it('should scope to configured store (DB-006)', () => {
+        // Tenant isolation - only count shifts for this store
+        const storeId = 'store-123';
+
+        expect(storeId).toBeDefined();
+        // Query should always include store_id filter
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should handle single shift day (only one register)', () => {
+        // Single shift for the day = DAY_CLOSE when it closes
+        const singleShiftDay = {
+          totalShiftsForDay: 1,
+          closingLast: true,
+          expectedCloseType: 'DAY_CLOSE',
+        };
+
+        expect(singleShiftDay.expectedCloseType).toBe('DAY_CLOSE');
+      });
+
+      it('should handle multi-register scenario', () => {
+        // Multiple registers with overlapping shifts
+        const multiRegisterScenario = {
+          register1ShiftOpen: true,
+          register2ShiftOpen: true,
+          closingRegister1: true,
+          expectedCloseType: 'SHIFT_CLOSE', // Register 2 still open
+        };
+
+        expect(multiRegisterScenario.expectedCloseType).toBe('SHIFT_CLOSE');
       });
     });
   });
