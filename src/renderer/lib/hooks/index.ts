@@ -56,3 +56,15 @@ export {
   useDeleteSyncItem,
   useInvalidateSyncActivity,
 } from './useSyncActivity';
+
+// Dead Letter Queue hooks (v046: MQ-002 Compliance)
+export {
+  deadLetterKeys,
+  useDeadLetterItems,
+  useDeadLetterStats,
+  useRestoreFromDeadLetter,
+  useRestoreFromDeadLetterMany,
+  useDeleteDeadLetterItem,
+  useManualDeadLetter,
+  useInvalidateDeadLetter,
+} from './useSyncActivity';

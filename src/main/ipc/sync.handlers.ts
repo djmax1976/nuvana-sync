@@ -1982,4 +1982,224 @@ registerHandler(
   { description: 'Reset fuel data and reprocess FGM files' }
 );
 
+// ============================================================================
+// Dead Letter Queue Handlers (MQ-002 Compliance)
+// ============================================================================
+
+/**
+ * Get Dead Letter Queue items (paginated)
+ *
+ * MQ-002: Implement DLQ processor for investigation/replay
+ * SEC-006: Uses parameterized queries
+ * DB-006: TENANT_ISOLATION - Query scoped to store
+ * API-008: Only safe display fields returned
+ */
+registerHandler(
+  'sync:getDeadLetterItems',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    // API-001: Validate and bound input parameters
+    const params = input as { limit?: number; offset?: number } | undefined;
+    const limit = Math.min(Math.max(1, params?.limit || 50), 100);
+    const offset = Math.max(0, params?.offset || 0);
+
+    const result = syncQueueDAL.getDeadLetterItems(store.store_id, limit, offset);
+
+    return createSuccessResponse(result);
+  },
+  { requiresAuth: false, description: 'Get paginated Dead Letter Queue items' }
+);
+
+/**
+ * Get Dead Letter Queue statistics
+ *
+ * MQ-002: Monitor DLQ depth and alert on growth
+ * SEC-006: Parameterized queries
+ * DB-006: TENANT_ISOLATION - All queries scoped to store_id
+ */
+registerHandler(
+  'sync:getDeadLetterStats',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const stats = syncQueueDAL.getDeadLetterStats(store.store_id);
+
+    return createSuccessResponse(stats);
+  },
+  { requiresAuth: false, description: 'Get Dead Letter Queue statistics' }
+);
+
+/**
+ * Restore an item from Dead Letter Queue for retry
+ *
+ * MQ-002: Allow replay of DLQ items after fixing issues
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:restoreFromDeadLetter',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const restored = syncQueueDAL.restoreFromDeadLetter(params.id);
+
+    if (restored) {
+      log.info('Item restored from Dead Letter Queue', { id: params.id });
+      return createSuccessResponse({ restored: true, id: params.id });
+    }
+
+    return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
+  },
+  { requiresAuth: true, description: 'Restore item from Dead Letter Queue' }
+);
+
+/**
+ * Restore multiple items from Dead Letter Queue
+ *
+ * MQ-002: Batch restore for efficient recovery
+ * SEC-006: Parameterized queries
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:restoreFromDeadLetterMany',
+  async (_event, input: unknown) => {
+    const params = input as { ids: string[] } | undefined;
+    if (!params?.ids || !Array.isArray(params.ids) || params.ids.length === 0) {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item IDs');
+    }
+
+    // API-001: Bound batch size to prevent abuse
+    const safeIds = params.ids.slice(0, 100).filter((id) => typeof id === 'string');
+    if (safeIds.length === 0) {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'No valid item IDs');
+    }
+
+    const restoredCount = syncQueueDAL.restoreFromDeadLetterMany(safeIds);
+
+    log.info('Batch restore from Dead Letter Queue', {
+      requested: safeIds.length,
+      restored: restoredCount,
+    });
+
+    return createSuccessResponse({
+      requested: safeIds.length,
+      restored: restoredCount,
+    });
+  },
+  { requiresAuth: true, description: 'Restore multiple items from Dead Letter Queue' }
+);
+
+/**
+ * Delete an item from Dead Letter Queue permanently
+ *
+ * CAUTION: This is irreversible
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:deleteDeadLetterItem',
+  async (_event, input: unknown) => {
+    const params = input as { id: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const deleted = syncQueueDAL.deleteDeadLetterItem(params.id);
+
+    if (deleted) {
+      log.warn('Item permanently deleted from Dead Letter Queue', { id: params.id });
+      return createSuccessResponse({ deleted: true, id: params.id });
+    }
+
+    return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
+  },
+  { requiresAuth: true, description: 'Delete item from Dead Letter Queue permanently' }
+);
+
+/**
+ * Cleanup old Dead Letter Queue items
+ *
+ * MQ-002: Periodic cleanup of old DLQ items
+ * SEC-006: Parameterized query
+ * DB-006: TENANT_ISOLATION - Scoped to store
+ */
+registerHandler(
+  'sync:cleanupDeadLetter',
+  async (_event, input: unknown) => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const params = input as { olderThanDays?: number } | undefined;
+    // API-001: Validate and bound days parameter (min 7 days, max 365 days)
+    const days = Math.min(Math.max(7, params?.olderThanDays || 30), 365);
+
+    // Calculate cutoff date
+    const cutoffDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    const deletedCount = syncQueueDAL.deleteDeadLetterItems(store.store_id, cutoffDate);
+
+    log.info('Dead Letter Queue cleanup completed', {
+      storeId: store.store_id,
+      olderThanDays: days,
+      deletedCount,
+    });
+
+    return createSuccessResponse({
+      deletedCount,
+      cutoffDate,
+    });
+  },
+  { requiresAuth: true, description: 'Cleanup old Dead Letter Queue items' }
+);
+
+/**
+ * Manually dead-letter a specific item
+ *
+ * Use when an item is known to be unfixable
+ * SEC-006: Parameterized query
+ * API-001: Input validation
+ */
+registerHandler(
+  'sync:manualDeadLetter',
+  async (_event, input: unknown) => {
+    const params = input as { id: string; reason?: string } | undefined;
+    if (!params?.id || typeof params.id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid item ID');
+    }
+
+    const deadLettered = syncQueueDAL.deadLetter({
+      id: params.id,
+      reason: 'MANUAL',
+      errorCategory: 'UNKNOWN',
+      error: params.reason || 'Manually moved to Dead Letter Queue',
+    });
+
+    if (deadLettered) {
+      log.warn('Item manually moved to Dead Letter Queue', {
+        id: params.id,
+        reason: params.reason,
+      });
+      return createSuccessResponse({ deadLettered: true, id: params.id });
+    }
+
+    return createErrorResponse(
+      IPCErrorCodes.NOT_FOUND,
+      'Item not found or already dead-lettered/synced'
+    );
+  },
+  { requiresAuth: true, description: 'Manually move item to Dead Letter Queue' }
+);
+
 log.info('Sync IPC handlers registered');

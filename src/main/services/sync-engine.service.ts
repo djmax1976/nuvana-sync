@@ -16,11 +16,17 @@
  */
 
 import { BrowserWindow } from 'electron';
-import { syncQueueDAL, type SyncQueueItem, type SyncApiContext } from '../dal/sync-queue.dal';
+import {
+  syncQueueDAL,
+  type SyncQueueItem,
+  type SyncApiContext,
+  type ErrorCategory,
+  type DeadLetterReason,
+} from '../dal/sync-queue.dal';
+import { classifyError } from './error-classifier.service';
 import { syncLogDAL } from '../dal/sync-log.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
-import { lotteryPacksDAL } from '../dal/lottery-packs.dal';
 import { usersDAL } from '../dal/users.dal';
 import { createLogger } from '../utils/logger';
 import { cloudApiService } from './cloud-api.service';
@@ -98,6 +104,8 @@ export interface SyncStatus {
   lastErrorAt: string | null;
   /** Current sync progress (when isRunning is true) */
   progress: SyncProgress | null;
+  /** Number of items in the Dead Letter Queue (MQ-002) */
+  deadLetterCount: number;
 }
 
 /**
@@ -471,6 +479,7 @@ export class SyncEngineService {
     let queuedCount = 0;
     let backoffCount = 0;
     let retryableNowCount = 0;
+    let deadLetterCount = 0;
     const store = storesDAL.getConfiguredStore();
     if (store) {
       const stats = syncQueueDAL.getStats(store.store_id);
@@ -481,6 +490,8 @@ export class SyncEngineService {
       backoffCount = syncQueueDAL.getBackoffCount(store.store_id);
       // Retryable now = queued items minus those in backoff
       retryableNowCount = Math.max(0, queuedCount - backoffCount);
+      // MQ-002: Get Dead Letter Queue count for monitoring
+      deadLetterCount = syncQueueDAL.getDeadLetterCount(store.store_id);
     }
 
     return {
@@ -507,6 +518,8 @@ export class SyncEngineService {
       lastErrorAt: this.lastErrorAt?.toISOString() || null,
       // Real-time sync progress
       progress: this.currentProgress,
+      // MQ-002: Dead Letter Queue count for monitoring
+      deadLetterCount,
     };
   }
 
@@ -754,21 +767,34 @@ export class SyncEngineService {
       this.notifyStatusChange();
     }
 
-    // Auto-reset failed items so they can be retried
-    // This ensures items that exceeded max_attempts get another chance
-    const failedCount = syncQueueDAL.getFailedCount(storeId);
-    if (failedCount > 0) {
-      const failedItems = syncQueueDAL.getFailedItems(storeId, 100);
-      if (failedItems.length > 0) {
-        const failedIds = failedItems.map((item) => item.id);
-        syncQueueDAL.retryFailed(failedIds);
-        log.info('Auto-reset failed items for retry', {
+    // MQ-002: Process items for Dead Letter Queue
+    // Items that have exceeded max attempts with PERMANENT/STRUCTURAL errors
+    // or have exceeded the absolute limit (max_attempts * 2) are dead-lettered
+    // NOTE: We no longer auto-reset failed items - they go to DLQ instead
+    const itemsForDLQ = syncQueueDAL.getItemsForAutoDeadLetter(storeId);
+    if (itemsForDLQ.length > 0) {
+      const dlqParams = itemsForDLQ.map((item) => ({
+        id: item.id,
+        reason: (item.error_category === 'STRUCTURAL'
+          ? 'STRUCTURAL_FAILURE'
+          : item.error_category === 'PERMANENT'
+            ? 'PERMANENT_ERROR'
+            : 'MAX_ATTEMPTS_EXCEEDED') as DeadLetterReason,
+        errorCategory: (item.error_category || 'UNKNOWN') as ErrorCategory,
+        error: item.last_sync_error || undefined,
+      }));
+
+      const deadLetteredCount = syncQueueDAL.deadLetterMany(dlqParams);
+      if (deadLetteredCount > 0) {
+        log.warn('Items moved to Dead Letter Queue', {
           storeId,
-          count: failedIds.length,
+          count: deadLetteredCount,
+          byCategory: {
+            structural: dlqParams.filter((p) => p.reason === 'STRUCTURAL_FAILURE').length,
+            permanent: dlqParams.filter((p) => p.reason === 'PERMANENT_ERROR').length,
+            maxAttempts: dlqParams.filter((p) => p.reason === 'MAX_ATTEMPTS_EXCEEDED').length,
+          },
         });
-        // Immediately broadcast status change after auto-reset
-        // This ensures UI reflects the reset state before items are retried
-        // Fixes discrepancy where sidebar shows stale failedCount
         this.updatePendingCount();
         this.notifyStatusChange();
       }
@@ -836,12 +862,31 @@ export class SyncEngineService {
             this.currentProgress.succeededItems = succeeded;
           } else {
             const error = result?.error || 'Unknown error';
+            const httpStatus = result?.apiContext?.http_status || null;
+
+            // ERR-007/MQ-002: Classify error to determine retry vs dead-letter routing
+            const classification = classifyError(httpStatus, error);
+            syncQueueDAL.updateErrorCategory(item.id, classification.category);
+
+            // Handle rate limit retry-after
+            if (classification.retryAfter) {
+              syncQueueDAL.setRetryAfter(item.id, classification.retryAfter);
+            }
+
             // v040: Pass API context for troubleshooting display
             syncQueueDAL.incrementAttempts(item.id, error, result?.apiContext);
             failed++;
             this.currentProgress.failedItems = failed;
             // Track error for display
             this.addRecentError(entityType, this.sanitizeErrorMessage(error));
+
+            // Log classification for debugging
+            log.debug('Error classified for sync item', {
+              itemId: item.id,
+              errorCategory: classification.category,
+              action: classification.action,
+              httpStatus,
+            });
           }
 
           // Update completed count and broadcast progress
@@ -864,8 +909,18 @@ export class SyncEngineService {
           response_body: errorMessage.substring(0, 500),
         };
 
-        // Mark all items in batch as failed with API context
+        // ERR-007/MQ-002: Classify the batch error
+        const batchClassification = classifyError(httpStatus, errorMessage);
+
+        // Mark all items in batch as failed with API context and error classification
         for (const item of batchItems) {
+          syncQueueDAL.updateErrorCategory(item.id, batchClassification.category);
+
+          // Handle rate limit retry-after for entire batch
+          if (batchClassification.retryAfter) {
+            syncQueueDAL.setRetryAfter(item.id, batchClassification.retryAfter);
+          }
+
           syncQueueDAL.incrementAttempts(item.id, errorMessage, batchApiContext);
           failed++;
           this.currentProgress.failedItems = failed;
