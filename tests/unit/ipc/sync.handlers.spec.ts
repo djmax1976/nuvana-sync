@@ -166,6 +166,9 @@ describe('Sync IPC Handlers', () => {
     } as ReturnType<typeof storesDAL.getConfiguredStore>);
   });
 
+  // Note: Handler registries (__syncHandlers) persist throughout the test file
+  // as they are registered once at module import time. Do not clear them in afterEach.
+
   describe('sync:getStatus', () => {
     it('should return sync status', async () => {
       const status = {

@@ -5,6 +5,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { clearMockStoreData } from '../../setup';
 
 // Use global for shared state to avoid hoisting issues
 declare global {
@@ -119,6 +120,8 @@ describe('CloudApiService', () => {
 
   afterEach(() => {
     vi.restoreAllMocks();
+    // TEST-003: TEST_ISOLATION - Clear shared mock store data after each test
+    clearMockStoreData();
   });
 
   describe('healthCheck', () => {
