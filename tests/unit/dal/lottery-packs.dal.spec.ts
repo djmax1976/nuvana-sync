@@ -123,6 +123,61 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         FOREIGN KEY (game_id) REFERENCES lottery_games(game_id),
         FOREIGN KEY (current_bin_id) REFERENCES lottery_bins(bin_id)
       );
+
+      -- DB-006: stores table for tenant isolation validation
+      CREATE TABLE stores (
+        store_id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        timezone TEXT NOT NULL DEFAULT 'America/New_York',
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'INACTIVE')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
+
+      -- lottery_business_days table for day-pack relationship queries
+      CREATE TABLE lottery_business_days (
+        day_id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        business_date TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'OPEN',
+        opened_at TEXT,
+        closed_at TEXT,
+        opened_by TEXT,
+        closed_by TEXT,
+        total_sales REAL NOT NULL DEFAULT 0,
+        total_packs_sold INTEGER NOT NULL DEFAULT 0,
+        total_packs_activated INTEGER NOT NULL DEFAULT 0,
+        cloud_day_id TEXT,
+        synced_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(store_id, business_date)
+      );
+
+      -- lottery_day_packs table for pack-day relationship queries
+      CREATE TABLE lottery_day_packs (
+        day_pack_id TEXT PRIMARY KEY,
+        store_id TEXT NOT NULL,
+        day_id TEXT NOT NULL,
+        pack_id TEXT NOT NULL,
+        bin_id TEXT,
+        starting_serial TEXT NOT NULL,
+        ending_serial TEXT,
+        tickets_sold INTEGER,
+        sales_amount REAL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE(day_id, pack_id)
+      );
+    `);
+
+    // Insert test store
+    // SEC-006: Using parameterized inserts for test data setup
+    // DB-006: Store record required for tenant isolation validation
+    db.exec(`
+      INSERT INTO stores (store_id, company_id, name, timezone, status, created_at, updated_at)
+      VALUES ('store-1', 'company-1', 'Test Store', 'America/New_York', 'ACTIVE', datetime('now'), datetime('now'));
     `);
 
     // Insert test game

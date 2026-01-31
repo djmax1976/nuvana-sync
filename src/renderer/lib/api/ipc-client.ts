@@ -1109,6 +1109,49 @@ export const syncAPI = {
   /** Manually move an item to Dead Letter Queue */
   manualDeadLetter: (id: string, reason?: string) =>
     ipcClient.invoke<DeadLetterManualResponse>('sync:manualDeadLetter', { id, reason }),
+
+  // ============================================================================
+  // Debug & Cleanup API (for fixing stuck queue issues)
+  // ============================================================================
+
+  /** Force process auto-dead-letter for all eligible items */
+  forceProcessDeadLetter: () =>
+    ipcClient.invoke<{ eligible: number; deadLettered: number; message: string }>(
+      'sync:forceProcessDeadLetter'
+    ),
+
+  /** Debug: Get detailed queue state breakdown */
+  debugQueueState: () =>
+    ipcClient.invoke<{
+      byDirection: Array<{ direction: string; status: string; count: number }>;
+      byErrorCategory: Array<{
+        category: string;
+        sync_attempts: number;
+        max_attempts: number;
+        count: number;
+      }>;
+      eligibleForDLQ: number;
+      stuckItemsSample: Array<{
+        id: string;
+        entity_type: string;
+        sync_direction: string;
+        sync_attempts: number;
+        max_attempts: number;
+        error_category: string | null;
+        last_sync_error: string | null;
+        created_at: string;
+      }>;
+    }>('sync:debugQueueState'),
+
+  /** Force dead-letter ALL stuck PUSH items (nuclear option) */
+  forceDeadLetterAllStuck: () =>
+    ipcClient.invoke<{ found: number; deadLettered: number; message: string }>(
+      'sync:forceDeadLetterAllStuck'
+    ),
+
+  /** Cleanup stale PULL tracking items */
+  cleanupStalePullItems: () =>
+    ipcClient.invoke<{ deleted: number; message: string }>('sync:cleanupStalePullItems'),
 };
 
 // ============================================================================

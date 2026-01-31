@@ -355,7 +355,8 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         bin_display_order: pack.bin_display_order || 0,
         pack_number: pack.pack_number,
         game_name: pack.game_name || 'Unknown',
-        starting_serial: pack.opening_serial || '000',
+        // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
+        starting_serial: pack.prev_ending_serial || pack.opening_serial || '000',
         closing_serial: closing.closing_serial,
         game_price: pack.game_price || 0,
         tickets_sold: ticketsSold,
@@ -454,20 +455,38 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
           closing.closing_serial
         );
 
-        // Settle the pack
-        // DB-006: Pass store_id for tenant isolation validation
-        // v029 API Alignment: Uses tickets_sold_count
-        lotteryPacksDAL.settle(closing.pack_id, {
-          store_id: day.store_id,
-          closing_serial: closing.closing_serial,
-          tickets_sold_count: ticketsSold,
-          sales_amount: salesAmount,
-        });
+        // Only settle (mark as DEPLETED) if pack is sold out
+        // Packs that continue to next day remain ACTIVE - their closing is recorded in lottery_day_packs
+        if (closing.is_sold_out) {
+          // Settle the pack - marks as DEPLETED
+          // DB-006: Pass store_id for tenant isolation validation
+          // v029 API Alignment: Uses tickets_sold_count
+          lotteryPacksDAL.settle(closing.pack_id, {
+            store_id: day.store_id,
+            closing_serial: closing.closing_serial,
+            tickets_sold_count: ticketsSold,
+            sales_amount: salesAmount,
+          });
+          log.info('Pack settled (sold out)', {
+            packId: closing.pack_id,
+            closingSerial: closing.closing_serial,
+          });
+        } else {
+          log.info('Pack remains active (not sold out)', {
+            packId: closing.pack_id,
+            closingSerial: closing.closing_serial,
+          });
+        }
 
         // Create day pack record
         // v029 API Alignment: Uses current_bin_id from pack
-        this.createDayPack(day.store_id, dayId, closing.pack_id, pack.current_bin_id, {
-          starting_serial: pack.opening_serial || '000',
+        // FK-SAFETY: Only pass bin_id if the bin exists locally (bin_name is set by LEFT JOIN)
+        // This handles cases where pack was synced with bin_id but bin hasn't been synced yet
+        const validBinId = pack.bin_name ? pack.current_bin_id : null;
+        // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
+        const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
+        this.createDayPack(day.store_id, dayId, closing.pack_id, validBinId, {
+          starting_serial: effectiveStartingSerial,
           ending_serial: closing.closing_serial,
           tickets_sold: ticketsSold,
           sales_amount: salesAmount,
@@ -479,7 +498,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
           bin_display_order: pack.bin_display_order || 0,
           pack_number: pack.pack_number,
           game_name: pack.game_name || 'Unknown',
-          starting_serial: pack.opening_serial || '000',
+          starting_serial: effectiveStartingSerial,
           closing_serial: closing.closing_serial,
           game_price: pack.game_price || 0,
           tickets_sold: ticketsSold,
@@ -585,6 +604,46 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
   ): LotteryDayPack {
     const dayPackId = this.generateId();
     const now = this.now();
+
+    // FK-DEBUG: Log all FK values to identify which one fails
+    log.debug('Creating day pack record - FK values', {
+      dayPackId,
+      storeId,
+      dayId,
+      packId,
+      binId,
+    });
+
+    // FK-DEBUG: Verify each FK exists before INSERT
+    const storeExists = this.db.prepare('SELECT 1 FROM stores WHERE store_id = ?').get(storeId);
+    const dayExists = this.db
+      .prepare('SELECT 1 FROM lottery_business_days WHERE day_id = ?')
+      .get(dayId);
+    const packExists = this.db.prepare('SELECT 1 FROM lottery_packs WHERE pack_id = ?').get(packId);
+    const binExists = binId
+      ? this.db.prepare('SELECT 1 FROM lottery_bins WHERE bin_id = ?').get(binId)
+      : 'N/A (null)';
+
+    log.debug('FK existence check results', {
+      storeExists: !!storeExists,
+      dayExists: !!dayExists,
+      packExists: !!packExists,
+      binExists: binId ? !!binExists : 'skipped (null)',
+    });
+
+    if (!storeExists) {
+      throw new Error(`FK validation failed: store_id ${storeId} does not exist`);
+    }
+    if (!dayExists) {
+      throw new Error(`FK validation failed: day_id ${dayId} does not exist`);
+    }
+    if (!packExists) {
+      throw new Error(`FK validation failed: pack_id ${packId} does not exist`);
+    }
+    if (binId && !binExists) {
+      log.warn('Bin does not exist, setting bin_id to null', { binId });
+      binId = null;
+    }
 
     const stmt = this.db.prepare(`
       INSERT INTO lottery_day_packs (

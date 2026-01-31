@@ -14,7 +14,7 @@
  * @module tests/unit/ipc/dead-letter-queue.handlers.spec
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ============================================================================
 // Mocks (before imports to support hoisting)
@@ -248,6 +248,9 @@ describe('Dead Letter Queue IPC Handlers', () => {
       name: 'Test Store',
     } as ReturnType<typeof storesDAL.getConfiguredStore>);
   });
+
+  // Note: Handler registries (__dlqHandlers) persist throughout the test file
+  // as they are registered once at module import time. Do not clear them in afterEach.
 
   // ==========================================================================
   // sync:getDeadLetterItems Tests

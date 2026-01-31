@@ -150,7 +150,9 @@ export function MarkSoldOutDialog({
   const packNumber = packData?.pack_number || 'Unknown';
   const gameName = packData?.game?.name || 'Unknown';
   const binName = packData?.bin?.name || 'N/A';
-  const serialEnd = packData?.closing_serial || 'N/A';
+  // serial_end is the calculated last ticket number (opening_serial + tickets_per_pack - 1)
+  // closing_serial is only set after depletion, so use serial_end for ACTIVE packs
+  const serialEnd = packData?.serial_end || packData?.closing_serial || 'N/A';
 
   return (
     <Dialog open={open} onOpenChange={handleOpenChange}>

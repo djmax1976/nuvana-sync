@@ -126,6 +126,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'lottery:getConfigValues',
   'lottery:lookupGameByCode',
   'lottery:createGame',
+  'lottery:getPackDetails', // Pack detail modal (MarkSoldOutDialog)
   // Settings
   'settings:get',
   'settings:update',

@@ -148,10 +148,26 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
         updated_at TEXT NOT NULL,
         UNIQUE(day_id, pack_id)
       );
+
+      -- DB-006: stores table for tenant isolation validation
+      CREATE TABLE stores (
+        store_id TEXT PRIMARY KEY,
+        company_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        timezone TEXT NOT NULL DEFAULT 'America/New_York',
+        status TEXT NOT NULL DEFAULT 'ACTIVE' CHECK(status IN ('ACTIVE', 'INACTIVE')),
+        created_at TEXT NOT NULL DEFAULT (datetime('now')),
+        updated_at TEXT NOT NULL DEFAULT (datetime('now'))
+      );
     `);
 
     // Insert test data
+    // SEC-006: Using parameterized inserts for test data setup
+    // DB-006: Store record required for tenant isolation validation
     db.exec(`
+      INSERT INTO stores (store_id, company_id, name, timezone, status, created_at, updated_at)
+      VALUES ('store-1', 'company-1', 'Test Store', 'America/New_York', 'ACTIVE', datetime('now'), datetime('now'));
+
       INSERT INTO lottery_games (game_id, store_id, game_code, name, price, tickets_per_pack, created_at, updated_at)
       VALUES ('game-1', 'store-1', '1001', 'Lucky 7s', 1, 300, datetime('now'), datetime('now'));
 
@@ -378,7 +394,11 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
         VALUES ('pack-1', 'store-1', 'game-1', 'bin-1', 'PKG001', '000', 'ACTIVE', datetime('now'), datetime('now'), datetime('now'));
       `);
 
-      const closings: PackClosingData[] = [{ pack_id: 'pack-1', closing_serial: '150' }];
+      // NOTE: is_sold_out must be true for pack to be settled (DEPLETED) per business logic
+      // Packs without is_sold_out remain ACTIVE and continue to next day
+      const closings: PackClosingData[] = [
+        { pack_id: 'pack-1', closing_serial: '150', is_sold_out: true },
+      ];
 
       dal.prepareClose(day.day_id, closings);
       dal.commitClose(day.day_id, 'user-123');

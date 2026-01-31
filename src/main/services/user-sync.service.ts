@@ -20,7 +20,7 @@
 import { cloudApiService, type CloudUser } from './cloud-api.service';
 import { usersDAL, type CloudUserData, type User } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
-import { syncQueueDAL, type SyncApiContext } from '../dal/sync-queue.dal';
+import { syncQueueDAL, type SyncApiContext, type ErrorCategory } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -97,15 +97,20 @@ export class UserSyncService {
 
     log.info('Starting user sync', { storeId });
 
-    // Create PULL queue entry for sync monitor tracking
-    const pullQueueItem = syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'user',
-      entity_id: `pull-${Date.now()}`,
-      operation: 'UPDATE',
-      payload: { action: 'pull_users', timestamp: new Date().toISOString() },
-      sync_direction: 'PULL',
-    });
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // This allows error history to accumulate on a single item for DLQ visibility
+    // instead of creating garbage tracking items every cycle
+    let pullQueueItem = syncQueueDAL.getPendingPullItem(storeId, 'user');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'user',
+        entity_id: `pull-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_users', timestamp: new Date().toISOString() },
+        sync_direction: 'PULL',
+      });
+    }
 
     const apiEndpoint = '/api/v1/sync/users';
 
@@ -113,7 +118,10 @@ export class UserSyncService {
       // Step 1: Pull users from cloud (unified endpoint with proper roles)
       const response = await cloudApiService.pullUsers();
 
-      if (response.users.length === 0) {
+      // Defensive: Handle undefined/null users array
+      const users = response?.users || [];
+
+      if (users.length === 0) {
         log.info('No users to sync from cloud');
         // BUG FIX: Mark PULL queue item as synced even when no users returned
         // Previously this early return left queue items permanently pending
@@ -127,12 +135,12 @@ export class UserSyncService {
       }
 
       // Step 2: Separate active and inactive users
-      const activeUsers = response.users.filter((u) => u.active);
-      const inactiveUsers = response.users.filter((u) => !u.active);
+      const activeUsers = users.filter((u) => u.active);
+      const inactiveUsers = users.filter((u) => !u.active);
 
       // Track cloud user IDs for deactivation check
       const activeCloudIds = new Set<string>(activeUsers.map((u) => u.userId));
-      const allCloudIds = new Set<string>(response.users.map((u) => u.userId));
+      const allCloudIds = new Set<string>(users.map((u) => u.userId));
 
       // Step 3: Batch upsert active users
       // Note: After cloud_id consolidation, user_id IS the cloud ID
@@ -239,13 +247,13 @@ export class UserSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       log.error('User sync failed', { error: message });
 
-      // Record PULL failure in sync queue with API context
+      // Record failure - item will be retried on next sync cycle
+      // Only permanent errors (4xx) should eventually go to DLQ via normal retry exhaustion
       const httpStatus = this.extractHttpStatusFromError(message);
       const apiContext: SyncApiContext = {
         api_endpoint: apiEndpoint,
@@ -328,6 +336,61 @@ export class UserSyncService {
     }
 
     return 0; // Unknown
+  }
+
+  /**
+   * Classify error for DLQ routing
+   *
+   * Error categories per ERR-007:
+   * - PERMANENT: 4xx errors (except 429) - client errors, won't succeed on retry
+   * - TRANSIENT: 5xx, network errors, timeouts - may succeed on retry
+   * - STRUCTURAL: Missing required fields, invalid payload
+   * - UNKNOWN: Unclassified errors
+   *
+   * Note: For Users PULL sync, all errors go to DLQ immediately regardless of
+   * category. Category is for troubleshooting visibility only.
+   *
+   * @param httpStatus - HTTP status code (0 if unknown)
+   * @param message - Error message for pattern matching
+   * @returns Error category for DLQ
+   */
+  private classifyError(httpStatus: number, message: string): ErrorCategory {
+    // 5xx server errors and rate limits are transient
+    if (httpStatus >= 500 || httpStatus === 429) {
+      return 'TRANSIENT';
+    }
+
+    // 408 Request Timeout is transient (network issue, may succeed on retry)
+    if (httpStatus === 408) {
+      return 'TRANSIENT';
+    }
+
+    // 4xx client errors (except 429 and 408) are permanent
+    if (httpStatus >= 400 && httpStatus < 500) {
+      return 'PERMANENT';
+    }
+
+    // Network-related errors
+    if (
+      message.includes('ECONNREFUSED') ||
+      message.includes('ENOTFOUND') ||
+      message.includes('ETIMEDOUT') ||
+      message.includes('timeout') ||
+      message.includes('network')
+    ) {
+      return 'TRANSIENT';
+    }
+
+    // Structural errors
+    if (
+      message.includes('missing') ||
+      message.includes('required') ||
+      message.includes('invalid')
+    ) {
+      return 'STRUCTURAL';
+    }
+
+    return 'UNKNOWN';
   }
 }
 

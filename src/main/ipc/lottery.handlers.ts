@@ -679,14 +679,18 @@ registerHandler(
       // Enterprise Close-to-Close Model Implementation
       // ========================================================================
       // The business period starts from the day AFTER the last closed day.
-      // If no day has ever been closed, we use today as the start.
-      // This ensures packs activated across multiple calendar days (before day close)
-      // remain visible in the UI until the next day close.
+      // If no day has ever been closed, we query for the earliest pack action
+      // to ensure ALL historical data is visible (not just today's data).
       //
-      // Example: Last close was Jan 15. Today is Jan 17.
+      // Example 1: Last close was Jan 15. Today is Jan 17.
       // - sinceDate = Jan 16 (day after last close)
       // - Shows all packs activated on Jan 16 and Jan 17
       // - Includes packs that were activated then returned/settled
+      //
+      // Example 2: No day close ever done. First pack activated Jan 10. Today is Jan 17.
+      // - sinceDate = Jan 10 (earliest pack action date)
+      // - Shows ALL packs ever activated/returned/settled
+      // - This is the correct behavior for "first-ever business period"
       // ========================================================================
 
       let periodStartDate: string;
@@ -696,8 +700,11 @@ registerHandler(
         lastCloseDate.setDate(lastCloseDate.getDate() + 1);
         periodStartDate = lastCloseDate.toISOString().split('T')[0];
       } else {
-        // No previous close - use today as start (first-ever business period)
-        periodStartDate = today;
+        // No previous close - first-ever business period
+        // Query for the earliest pack action date to show ALL historical data
+        const earliestPackDate = lotteryPacksDAL.findEarliestPackActionDate(storeId);
+        // Use earliest pack date if packs exist, otherwise today (new store with no packs yet)
+        periodStartDate = earliestPackDate ?? today;
       }
 
       // ========================================================================
@@ -896,6 +903,100 @@ registerHandler(
   },
   {
     description: 'Get lottery packs with optional filters',
+  }
+);
+
+/**
+ * Get pack details schema
+ * API-001: Input validation with Zod schema
+ */
+const GetPackDetailsSchema = z.object({
+  pack_id: UUIDSchema,
+});
+
+/**
+ * Get detailed pack information by ID
+ * Channel: lottery:getPackDetails
+ *
+ * Returns pack data with game, bin, and sales information for display
+ * in modals and detail views (e.g., MarkSoldOutDialog).
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-003: Sanitized error responses - no stack traces or DB info leaked
+ * @security DB-006: TENANT_ISOLATION - Pack must belong to configured store
+ * @security SEC-006: Parameterized queries via DAL
+ */
+registerHandler(
+  'lottery:getPackDetails',
+  async (_event, input: unknown) => {
+    // API-001: Validate input with Zod schema
+    const parseResult = GetPackDetailsSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      log.warn('getPackDetails validation failed', { errors: errorMessage });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const { pack_id } = parseResult.data;
+      // DB-006: TENANT_ISOLATION - Get store from session, not client input
+      const storeId = getStoreId();
+
+      // DB-006: Use tenant-isolated query method
+      const pack = lotteryPacksDAL.getPackWithDetailsForStore(storeId, pack_id);
+
+      if (!pack) {
+        // API-003: Generic error - don't reveal if pack exists in other store
+        log.warn('Pack not found or not accessible', { packId: pack_id, storeId });
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
+      }
+
+      // API-008: Transform flat DAL response to nested API contract
+      const response = transformPackToResponse(pack);
+
+      // Calculate serial_end: opening_serial + tickets_per_pack - 1
+      // This is the last ticket number in the pack (0-based index)
+      let serialEnd: string | undefined;
+      if (pack.opening_serial && pack.game_tickets_per_pack) {
+        const openingNum = parseInt(pack.opening_serial, 10);
+        if (!isNaN(openingNum) && pack.game_tickets_per_pack > 0) {
+          const lastTicketNum = openingNum + pack.game_tickets_per_pack - 1;
+          // Format as 3-digit string (e.g., "299")
+          serialEnd = lastTicketNum.toString().padStart(3, '0');
+        }
+      }
+
+      // Add extended detail fields for LotteryPackDetailResponse
+      const detailResponse = {
+        ...response,
+        tickets_sold: pack.tickets_sold_count,
+        sales_amount: pack.sales_amount,
+        serial_end: serialEnd,
+      };
+
+      log.debug('Pack details retrieved', { packId: pack_id, status: pack.status, serialEnd });
+      return createSuccessResponse(detailResponse);
+    } catch (error) {
+      // API-003: Log full error server-side, return generic message to client
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      const errorStack = error instanceof Error ? error.stack : undefined;
+
+      log.error('Failed to get pack details', {
+        error: errorMessage,
+        stack: errorStack,
+      });
+
+      // API-003: Never leak internal error details to client
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        'Failed to retrieve pack details. Please try again.'
+      );
+    }
+  },
+  {
+    description: 'Get detailed pack information by ID',
   }
 );
 
@@ -1766,8 +1867,15 @@ registerHandler(
     try {
       const { day_id } = parseResult.data;
 
-      // TODO: Get current user ID from session
-      const userId = 'system'; // Placeholder until auth context is integrated
+      // SEC-010: Get user ID from authenticated session
+      const currentUser = getCurrentUser();
+      if (!currentUser) {
+        return createErrorResponse(
+          IPCErrorCodes.NOT_AUTHENTICATED,
+          'No authenticated user session'
+        );
+      }
+      const userId = currentUser.user_id;
 
       const result = lotteryBusinessDaysDAL.commitClose(day_id, userId);
 

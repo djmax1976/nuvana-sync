@@ -40,24 +40,44 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
   },
 }));
 
+// Hoist sync queue mocks for assertion in tests
+const {
+  mockSyncQueueEnqueue,
+  mockSyncQueueMarkSynced,
+  mockSyncQueueIncrementAttempts,
+  mockSyncQueueDeadLetter,
+  mockSyncQueueGetPendingPullItem,
+} = vi.hoisted(() => ({
+  mockSyncQueueEnqueue: vi.fn().mockReturnValue({
+    id: 'mock-queue-id-users',
+    store_id: 'store-123',
+    entity_type: 'user',
+    entity_id: 'pull-1234567890',
+    operation: 'UPDATE',
+    payload: JSON.stringify({ action: 'pull_users' }),
+    sync_direction: 'PULL',
+    synced: 0,
+    sync_attempts: 0,
+    created_at: new Date().toISOString(),
+  }),
+  mockSyncQueueMarkSynced: vi.fn(),
+  mockSyncQueueIncrementAttempts: vi.fn(),
+  mockSyncQueueDeadLetter: vi.fn().mockReturnValue(true),
+  mockSyncQueueGetPendingPullItem: vi.fn().mockReturnValue(null),
+}));
+
 // Mock sync queue DAL (used by UserSyncService for PULL tracking)
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
-    enqueue: vi.fn().mockReturnValue({
-      id: 'mock-queue-id',
-      store_id: 'store-123',
-      entity_type: 'user_sync',
-      entity_id: 'user-sync-batch',
-      operation: 'PULL',
-      payload: '{}',
-      synced: 0,
-      sync_attempts: 0,
-      created_at: new Date().toISOString(),
-    }),
-    markSynced: vi.fn(),
-    incrementAttempts: vi.fn(),
+    enqueue: mockSyncQueueEnqueue,
+    markSynced: mockSyncQueueMarkSynced,
+    incrementAttempts: mockSyncQueueIncrementAttempts,
+    deadLetter: mockSyncQueueDeadLetter,
     getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
     cleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
+    cleanupStalePullTracking: vi.fn().mockReturnValue(0),
+    getPendingPullItem: mockSyncQueueGetPendingPullItem,
+    getPendingPullItemByAction: vi.fn().mockReturnValue(null),
   },
 }));
 
@@ -339,6 +359,102 @@ describe('UserSyncService', () => {
       mockPullUsers.mockRejectedValue(new Error('Network error'));
 
       await expect(service.syncUsers()).rejects.toThrow('Network error');
+    });
+
+    // =========================================================================
+    // Enterprise-Grade DLQ Tests for Users PULL Sync
+    // Business requirement: Users PULL errors go directly to DLQ (no retries)
+    // =========================================================================
+
+    describe('sync queue DLQ tracking (users PULL sync - no retries)', () => {
+      it('should record API failure for retry on users sync', async () => {
+        // API failures should be recorded for retry on next sync cycle
+        mockPullUsers.mockRejectedValue(new Error('HTTP 503: Service Unavailable'));
+
+        await expect(service.syncUsers()).rejects.toThrow('HTTP 503: Service Unavailable');
+
+        // incrementAttempts called to record error context
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-users',
+          'HTTP 503: Service Unavailable',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/users',
+            http_status: 503,
+          })
+        );
+
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
+
+      it('CRITICAL: should mark queue item as synced when no users to sync', async () => {
+        // Empty response should still mark as synced (not leave pending)
+        mockPullUsers.mockResolvedValue({ users: [] });
+
+        await service.syncUsers();
+
+        // Queue item must be marked synced even with empty response
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledWith(
+          'mock-queue-id-users',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/users',
+            http_status: 200,
+          })
+        );
+        // No dead-letter on success
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
+
+      it('should handle HTTP 401 unauthorized and record for retry', async () => {
+        mockPullUsers.mockRejectedValue(new Error('HTTP 401: Unauthorized'));
+
+        await expect(service.syncUsers()).rejects.toThrow('HTTP 401: Unauthorized');
+
+        // Should record failure for retry, not immediately dead-letter
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalled();
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
+
+      it('should handle network timeout and record for retry', async () => {
+        mockPullUsers.mockRejectedValue(new Error('ETIMEDOUT: Connection timed out'));
+
+        await expect(service.syncUsers()).rejects.toThrow('ETIMEDOUT: Connection timed out');
+
+        // Should record failure for retry, not immediately dead-letter
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalled();
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
+
+      it('CRITICAL: should mark queue item as synced after successful user sync', async () => {
+        mockPullUsers.mockResolvedValue({
+          users: [
+            {
+              userId: 'cloud-user-1',
+              role: 'cashier',
+              name: 'John Doe',
+              pinHash: '$2b$10$abcdef',
+              active: true,
+            },
+          ],
+        });
+        mockBatchUpsertFromCloud.mockReturnValue({ created: 1, updated: 0, errors: [] });
+
+        await service.syncUsers();
+
+        // Queue item must be marked synced after successful processing
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledWith(
+          'mock-queue-id-users',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/users',
+            http_status: 200,
+          })
+        );
+        // No dead-letter on success
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
     });
 
     it('should handle batch upsert failure gracefully', async () => {

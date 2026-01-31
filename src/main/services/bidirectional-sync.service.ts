@@ -4,13 +4,14 @@
  * Handles synchronization for reference data and pack entities:
  * - Bins: Pull-only from cloud (no push endpoint in API spec)
  * - Games: Bidirectional sync (push and pull)
- * - Packs: Pull-only for RECEIVED and ACTIVATED states (push via sync-queue)
+ * - Packs: Pull-only for RECEIVED, ACTIVATED, and RETURNED states (push via sync-queue)
  *
  * API spec reference:
  * - GET /api/v1/sync/lottery/bins (pull only - no POST endpoint)
  * - GET/POST /api/v1/sync/lottery/games (bidirectional)
  * - GET /api/v1/sync/lottery/packs/received (pull only)
  * - GET /api/v1/sync/lottery/packs/activated (pull only)
+ * - GET /api/v1/sync/lottery/packs/returned (pull only)
  *
  * @module main/services/bidirectional-sync
  * @security DB-006: Store-scoped for tenant isolation
@@ -24,8 +25,10 @@ import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { lotteryPacksDAL, type LotteryPackStatus } from '../dal/lottery-packs.dal';
 import { syncTimestampsDAL } from '../dal/sync-timestamps.dal';
-import { syncQueueDAL, type SyncApiContext } from '../dal/sync-queue.dal';
+import { syncQueueDAL, type SyncApiContext, type ErrorCategory } from '../dal/sync-queue.dal';
 import { storesDAL } from '../dal/stores.dal';
+import { usersDAL } from '../dal/users.dal';
+import { shiftsDAL } from '../dal/shifts.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -108,15 +111,19 @@ export class BidirectionalSyncService {
 
     log.info('Starting bins sync (pull-only)', { storeId, lastPull: lastPull || 'full' });
 
-    // Create PULL queue entry for sync monitor tracking
-    const pullQueueItem = syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'bin',
-      entity_id: `pull-${Date.now()}`,
-      operation: 'UPDATE',
-      payload: { action: 'pull_bins', timestamp: new Date().toISOString(), lastPull },
-      sync_direction: 'PULL',
-    });
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // This allows error history to accumulate on a single item for DLQ visibility
+    let pullQueueItem = syncQueueDAL.getPendingPullItem(storeId, 'bin');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'bin',
+        entity_id: `pull-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_bins', timestamp: new Date().toISOString(), lastPull },
+        sync_direction: 'PULL',
+      });
+    }
 
     const apiEndpoint = '/api/v1/sync/lottery/bins';
 
@@ -142,11 +149,6 @@ export class BidirectionalSyncService {
           response_body: JSON.stringify({ pulled: 0, message: 'No bins to sync' }),
         };
         syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
-        // Cleanup stale PULL tracking items from previous failed/reset operations
-        // Prevents accumulation of pending items that will never be retried
-        syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
-
         return result;
       }
 
@@ -239,18 +241,13 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
-      // Cleanup stale PULL tracking items from previous failed/reset operations
-      // Prevents accumulation of pending items that will never be retried
-      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_bins', pullQueueItem.id);
-
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       result.errors.push(`Pull failed: ${message}`);
       log.error('Bins sync failed', { error: message });
 
-      // Record PULL failure in sync queue with API context
+      // Record failure - item will be retried on next sync cycle
       const httpStatus = this.extractHttpStatusFromError(message);
       const apiContext: SyncApiContext = {
         api_endpoint: apiEndpoint,
@@ -292,15 +289,19 @@ export class BidirectionalSyncService {
 
     log.info('Starting games sync', { storeId, stateId, lastPull: lastPull || 'full' });
 
-    // Create PULL queue entry for sync monitor tracking
-    const pullQueueItem = syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'game',
-      entity_id: `pull-${Date.now()}`,
-      operation: 'UPDATE',
-      payload: { action: 'pull_games', timestamp: new Date().toISOString(), lastPull, stateId },
-      sync_direction: 'PULL',
-    });
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // This allows error history to accumulate on a single item for DLQ visibility
+    let pullQueueItem = syncQueueDAL.getPendingPullItem(storeId, 'game');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'game',
+        entity_id: `pull-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_games', timestamp: new Date().toISOString(), lastPull, stateId },
+        sync_direction: 'PULL',
+      });
+    }
 
     const apiEndpoint = '/api/v1/sync/lottery/games';
 
@@ -345,8 +346,24 @@ export class BidirectionalSyncService {
       try {
         const pullResponse = await cloudApiService.pullLotteryGames(stateId, lastPull || undefined);
 
+        const cloudGames = pullResponse.games || [];
+
+        // BUG FIX: If no local changes to push AND no cloud changes to pull,
+        // mark the PULL item as synced immediately and return
+        if (localChanges.length === 0 && cloudGames.length === 0) {
+          log.info('No games to sync (no local changes, no cloud changes)');
+          syncTimestampsDAL.setLastPullAt(storeId, 'games', new Date().toISOString());
+          const apiContext: SyncApiContext = {
+            api_endpoint: apiEndpoint,
+            http_status: 200,
+            response_body: JSON.stringify({ pushed: 0, pulled: 0, message: 'No games to sync' }),
+          };
+          syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+          return result;
+        }
+
         // Step 4: Apply cloud changes with last-write-wins
-        for (const cloudGame of pullResponse.games) {
+        for (const cloudGame of cloudGames) {
           try {
             // Use findById since game_id now matches cloud's ID directly
             const localGame = lotteryGamesDAL.findById(cloudGame.game_id);
@@ -394,16 +411,29 @@ export class BidirectionalSyncService {
             });
           }
         }
+
+        // Mark synced even if cloudGames was empty but we got here (API returned successfully)
+        log.debug('Games pull completed', { gamesCount: cloudGames.length });
       } catch (error: unknown) {
         const message = error instanceof Error ? error.message : 'Unknown pull error';
         result.errors.push(`Pull failed: ${message}`);
         log.error('Failed to pull games', { error: message });
+
+        // Record failure - item will be retried on next sync cycle
+        const httpStatus = this.extractHttpStatusFromError(message);
+        const apiContext: SyncApiContext = {
+          api_endpoint: apiEndpoint,
+          http_status: httpStatus,
+          response_body: message.substring(0, 500),
+        };
+        syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+
+        // Return early - do not mark as synced after failure
+        return result;
       }
 
-      // Step 5: Update sync timestamp
-      if (result.errors.length === 0) {
-        syncTimestampsDAL.setLastPullAt(storeId, 'games', new Date().toISOString());
-      }
+      // Step 5: Update sync timestamp (only if no errors)
+      syncTimestampsDAL.setLastPullAt(storeId, 'games', new Date().toISOString());
 
       log.info('Games sync completed', {
         pushed: result.pushed,
@@ -424,17 +454,12 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
-      // Cleanup stale PULL tracking items from previous failed/reset operations
-      // Prevents accumulation of pending items that will never be retried
-      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_games', pullQueueItem.id);
-
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
       log.error('Games sync failed', { error: message });
 
-      // Record PULL failure in sync queue with API context
+      // Record failure - item will be retried on next sync cycle
       const httpStatus = this.extractHttpStatusFromError(message);
       const apiContext: SyncApiContext = {
         api_endpoint: apiEndpoint,
@@ -488,15 +513,19 @@ export class BidirectionalSyncService {
       lastPull: lastPull || 'full',
     });
 
-    // Create PULL queue entry for sync monitor tracking
-    const pullQueueItem = syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'pack',
-      entity_id: `pull-received-${Date.now()}`,
-      operation: 'UPDATE',
-      payload: { action: 'pull_received_packs', timestamp: new Date().toISOString(), lastPull },
-      sync_direction: 'PULL',
-    });
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // Use action-based search since both received and activated use entity_type 'pack'
+    let pullQueueItem = syncQueueDAL.getPendingPullItemByAction(storeId, 'pull_received_packs');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: `pull-received-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_received_packs', timestamp: new Date().toISOString(), lastPull },
+        sync_direction: 'PULL',
+      });
+    }
 
     const apiEndpoint = '/api/v1/sync/lottery/packs/received';
 
@@ -538,9 +567,13 @@ export class BidirectionalSyncService {
         }
 
         // Map cloud packs to local format and upsert
-        const packData = cloudPacks.map((cloudPack) =>
+        const mappedPacks = cloudPacks.map((cloudPack) =>
           this.mapCloudPackToLocal(cloudPack, storeId)
         );
+
+        // API-001: Validate user FK references exist locally before DB operation
+        // Cloud may have user IDs (returned_by, etc.) that don't exist in local store
+        const packData = this.validateUserForeignKeysBatch(mappedPacks);
 
         if (packData.length > 0) {
           let upsertResult = lotteryPacksDAL.batchUpsertFromCloud(packData, storeId);
@@ -604,11 +637,6 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
-      // Cleanup stale PULL tracking items from previous failed/reset operations
-      // Prevents accumulation of pending items that will never be retried
-      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_received_packs', pullQueueItem.id);
-
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -623,7 +651,6 @@ export class BidirectionalSyncService {
         response_body: message.substring(0, 500),
       };
       syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
-
       return result;
     }
   }
@@ -662,15 +689,19 @@ export class BidirectionalSyncService {
       lastPull: lastPull || 'full',
     });
 
-    // Create PULL queue entry for sync monitor tracking
-    const pullQueueItem = syncQueueDAL.enqueue({
-      store_id: storeId,
-      entity_type: 'pack',
-      entity_id: `pull-activated-${Date.now()}`,
-      operation: 'UPDATE',
-      payload: { action: 'pull_activated_packs', timestamp: new Date().toISOString(), lastPull },
-      sync_direction: 'PULL',
-    });
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // Use action-based search since both received and activated use entity_type 'pack'
+    let pullQueueItem = syncQueueDAL.getPendingPullItemByAction(storeId, 'pull_activated_packs');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: `pull-activated-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_activated_packs', timestamp: new Date().toISOString(), lastPull },
+        sync_direction: 'PULL',
+      });
+    }
 
     const apiEndpoint = '/api/v1/sync/lottery/packs/activated';
 
@@ -712,9 +743,13 @@ export class BidirectionalSyncService {
         }
 
         // Map cloud packs to local format and upsert
-        const packData = cloudPacks.map((cloudPack) =>
+        const mappedPacks = cloudPacks.map((cloudPack) =>
           this.mapCloudPackToLocal(cloudPack, storeId)
         );
+
+        // API-001: Validate user FK references exist locally before DB operation
+        // Cloud may have user IDs (activated_by, etc.) that don't exist in local store
+        const packData = this.validateUserForeignKeysBatch(mappedPacks);
 
         if (packData.length > 0) {
           let upsertResult = lotteryPacksDAL.batchUpsertFromCloud(packData, storeId);
@@ -778,11 +813,6 @@ export class BidirectionalSyncService {
         }),
       };
       syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
-
-      // Cleanup stale PULL tracking items from previous failed/reset operations
-      // Prevents accumulation of pending items that will never be retried
-      syncQueueDAL.cleanupStalePullTracking(storeId, 'pull_activated_packs', pullQueueItem.id);
-
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
@@ -797,31 +827,228 @@ export class BidirectionalSyncService {
         response_body: message.substring(0, 500),
       };
       syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
-
       return result;
     }
   }
 
   /**
-   * Sync all packs (received and activated) from cloud
+   * Sync returned packs from cloud (PULL-ONLY)
+   *
+   * Enterprise-grade implementation for multi-device pack synchronization.
+   * Retrieves packs that have been marked as returned from other devices/systems.
+   *
+   * This method is CRITICAL for multi-device return sync:
+   * - When a return is marked on another device (or cloud UI), this pulls that data
+   * - Without this, returns marked elsewhere never sync to this device
+   *
+   * @security SEC-006: Parameterized queries via DAL batch methods
+   * @security DB-006: Store-scoped operations for tenant isolation
+   * @security API-003: Centralized error handling
+   * @security API-002: Bounded pagination to prevent unbounded reads
+   *
+   * @returns Sync result with counts (pushed will always be 0)
+   */
+  async syncReturnedPacks(): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = {
+      pushed: 0, // Always 0 - packs are pull-only (push via sync-queue)
+      pulled: 0,
+      conflicts: 0,
+      errors: [],
+    };
+
+    const storeId = store.store_id;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'packs_returned');
+
+    log.info('Starting returned packs sync (pull-only)', {
+      storeId,
+      lastPull: lastPull || 'full',
+    });
+
+    // REUSE existing PULL tracking item if one exists, otherwise create new
+    // Use action-based search since received, activated, and returned all use entity_type 'pack'
+    let pullQueueItem = syncQueueDAL.getPendingPullItemByAction(storeId, 'pull_returned_packs');
+    if (!pullQueueItem) {
+      pullQueueItem = syncQueueDAL.enqueue({
+        store_id: storeId,
+        entity_type: 'pack',
+        entity_id: `pull-returned-${Date.now()}`,
+        operation: 'UPDATE',
+        payload: { action: 'pull_returned_packs', timestamp: new Date().toISOString(), lastPull },
+        sync_direction: 'PULL',
+      });
+    }
+
+    const apiEndpoint = '/api/v1/sync/lottery/packs/returned';
+
+    try {
+      // Pull returned packs from cloud with pagination
+      let hasMore = true;
+      let sinceSequence: number | undefined;
+      let pageCount = 0;
+      const MAX_PAGES = 100; // Safety limit per API-002
+
+      while (hasMore && pageCount < MAX_PAGES) {
+        pageCount++;
+
+        const pullResponse = await cloudApiService.pullReturnedPacks({
+          since: lastPull || undefined,
+          sinceSequence,
+          limit: 500,
+        });
+
+        const cloudPacks = pullResponse.packs || [];
+
+        // SEC-017: Audit log what we received from cloud
+        log.info('Returned packs pull response', {
+          page: pageCount,
+          packsReceived: cloudPacks.length,
+          packDetails: cloudPacks.map((p) => ({
+            pack_id: p.pack_id,
+            pack_number: p.pack_number,
+            status: p.status,
+            returned_at: p.returned_at,
+            return_reason: p.return_reason,
+          })),
+          syncMetadata: pullResponse.syncMetadata,
+        });
+
+        if (cloudPacks.length === 0 && pageCount === 1) {
+          log.info('No returned packs to sync from cloud');
+          break;
+        }
+
+        // Map cloud packs to local format and upsert
+        const mappedPacks = cloudPacks.map((cloudPack) =>
+          this.mapCloudPackToLocal(cloudPack, storeId)
+        );
+
+        // API-001: Validate user FK references exist locally before DB operation
+        // Cloud may have user IDs (returned_by, etc.) that don't exist in local store
+        const fkValidatedPacks = this.validateUserForeignKeysBatch(mappedPacks);
+
+        // API-001: Validate pack data integrity (sales_amount, tickets_sold_count)
+        // CRITICAL: Returned packs MUST have valid sales data - DO NOT mask with defaults
+        const { validPacks: packData, errors: validationErrors } = this.validatePackDataIntegrity(
+          fkValidatedPacks,
+          'returned'
+        );
+
+        // Collect validation errors for reporting
+        result.errors.push(...validationErrors);
+
+        if (packData.length > 0) {
+          let upsertResult = lotteryPacksDAL.batchUpsertFromCloud(packData, storeId);
+
+          // If there are missing games, sync games and retry
+          if (upsertResult.missingGames.length > 0) {
+            log.warn('Missing games detected during returned pack sync, triggering game sync', {
+              missingGames: upsertResult.missingGames,
+            });
+
+            // Sync games from cloud
+            await this.syncGames();
+
+            // Retry pack upsert with fresh game data
+            log.info('Retrying returned pack upsert after game sync');
+            upsertResult = lotteryPacksDAL.batchUpsertFromCloud(packData, storeId);
+          }
+
+          result.pulled += upsertResult.created + upsertResult.updated;
+          result.errors.push(...upsertResult.errors);
+
+          log.debug('Returned packs page synced', {
+            page: pageCount,
+            created: upsertResult.created,
+            updated: upsertResult.updated,
+            errors: upsertResult.errors.length,
+          });
+        }
+
+        // Update pagination state
+        hasMore = pullResponse.syncMetadata.hasMore;
+        sinceSequence = pullResponse.syncMetadata.lastSequence;
+      }
+
+      if (pageCount >= MAX_PAGES) {
+        log.warn('Returned packs pagination hit safety limit', {
+          maxPages: MAX_PAGES,
+          pulled: result.pulled,
+        });
+      }
+
+      // Update sync timestamp on success
+      if (result.errors.length === 0) {
+        syncTimestampsDAL.setLastPullAt(storeId, 'packs_returned', new Date().toISOString());
+      }
+
+      log.info('Returned packs sync completed (pull-only)', {
+        pulled: result.pulled,
+        pages: pageCount,
+        errors: result.errors.length,
+      });
+
+      // Mark PULL queue item as synced with API context
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: 200,
+        response_body: JSON.stringify({
+          pulled: result.pulled,
+          pages: pageCount,
+          errors: result.errors.length,
+        }),
+      };
+      syncQueueDAL.markSynced(pullQueueItem.id, apiContext);
+      return result;
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull returned packs failed: ${message}`);
+      log.error('Returned packs sync failed', { error: message });
+
+      // Record PULL failure in sync queue with API context
+      const httpStatus = this.extractHttpStatusFromError(message);
+      const apiContext: SyncApiContext = {
+        api_endpoint: apiEndpoint,
+        http_status: httpStatus,
+        response_body: message.substring(0, 500),
+      };
+      syncQueueDAL.incrementAttempts(pullQueueItem.id, message, apiContext);
+      return result;
+    }
+  }
+
+  /**
+   * Sync all packs (received, activated, and returned) from cloud
+   *
+   * Sync order is intentional:
+   * 1. Received packs - initial pack receipt
+   * 2. Activated packs - packs put into bins for sale
+   * 3. Returned packs - packs returned to vendor (terminal state)
    *
    * @returns Combined sync results for all pack types
    */
   async syncPacks(): Promise<{
     received: BidirectionalSyncResult;
     activated: BidirectionalSyncResult;
+    returned: BidirectionalSyncResult;
   }> {
     log.info('Starting full packs sync');
 
     const received = await this.syncReceivedPacks();
     const activated = await this.syncActivatedPacks();
+    const returned = await this.syncReturnedPacks();
 
     log.info('Full packs sync completed', {
       received: { pulled: received.pulled, errors: received.errors.length },
       activated: { pulled: activated.pulled, errors: activated.errors.length },
+      returned: { pulled: returned.pulled, errors: returned.errors.length },
     });
 
-    return { received, activated };
+    return { received, activated, returned };
   }
 
   // ==========================================================================
@@ -949,12 +1176,450 @@ export class BidirectionalSyncService {
     };
   }
 
+  /**
+   * Validate FK references exist locally for a single pack, nullify those that don't
+   *
+   * Cloud data may contain references from:
+   * - Cloud admin users who don't sync to stores
+   * - Users from other devices that haven't synced
+   * - Bins that were deleted or not yet synced
+   *
+   * Per API-001 (VALIDATION): Validate data before database operations.
+   * Per DB-006 (TENANT_ISOLATION): Only accept FKs that exist in local store context.
+   *
+   * @security API-001: Input validation before DB operations
+   * @security DB-006: Tenant isolation - only local FKs allowed
+   *
+   * @param packData - Mapped pack data with potential invalid FKs
+   * @returns Pack data with validated FKs (invalid ones set to null)
+   */
+  private validateUserForeignKeys<
+    T extends {
+      current_bin_id: string | null;
+      received_by: string | null;
+      activated_by: string | null;
+      depleted_by: string | null;
+      returned_by: string | null;
+      serial_override_approved_by: string | null;
+      mark_sold_approved_by: string | null;
+    },
+  >(packData: T): T {
+    // Cache validated IDs to avoid repeated DB lookups (performance optimization)
+    const userExistsCache = new Map<string, boolean>();
+
+    const userExists = (userId: string | null): boolean => {
+      if (!userId) return true; // null is valid (no FK reference)
+
+      // Check cache first
+      if (userExistsCache.has(userId)) {
+        return userExistsCache.get(userId)!;
+      }
+
+      // Query DB - SEC-006: Uses parameterized query via DAL
+      // FIX: Use != null to catch both null AND undefined (DAL returns undefined for not found)
+      const exists = usersDAL.findById(userId) != null;
+      userExistsCache.set(userId, exists);
+
+      if (!exists) {
+        log.warn('User FK reference not found locally, will be nullified', {
+          userId,
+          auditNote: 'Cloud user does not exist in local store context',
+        });
+      }
+
+      return exists;
+    };
+
+    const binExists = (binId: string | null): boolean => {
+      if (!binId) return true; // null is valid (no FK reference)
+      // FIX: Use != null to catch both null AND undefined (DAL returns undefined for not found)
+      const exists = lotteryBinsDAL.findById(binId) != null;
+      if (!exists) {
+        log.warn('Bin FK reference not found locally, will be nullified', {
+          binId,
+          auditNote: 'Cloud bin does not exist in local store context',
+        });
+      }
+      return exists;
+    };
+
+    // Validate and nullify invalid FKs
+    return {
+      ...packData,
+      current_bin_id: binExists(packData.current_bin_id) ? packData.current_bin_id : null,
+      received_by: userExists(packData.received_by) ? packData.received_by : null,
+      activated_by: userExists(packData.activated_by) ? packData.activated_by : null,
+      depleted_by: userExists(packData.depleted_by) ? packData.depleted_by : null,
+      returned_by: userExists(packData.returned_by) ? packData.returned_by : null,
+      serial_override_approved_by: userExists(packData.serial_override_approved_by)
+        ? packData.serial_override_approved_by
+        : null,
+      mark_sold_approved_by: userExists(packData.mark_sold_approved_by)
+        ? packData.mark_sold_approved_by
+        : null,
+    };
+  }
+
+  /**
+   * Validate all FK references for a batch of packs
+   *
+   * Optimized batch validation with shared caches to minimize DB queries.
+   * Validates:
+   * - User FKs: received_by, activated_by, depleted_by, returned_by, approval fields
+   * - Bin FKs: current_bin_id
+   *
+   * Note: game_id is validated by DAL (missingGames check)
+   * Note: shift_ids are already nulled in mapCloudPackToLocal
+   *
+   * @security SEC-006: Parameterized queries via DAL
+   * @security API-002: Bounded operation (batch size controlled by caller)
+   *
+   * @param packDataArray - Array of mapped pack data
+   * @returns Array with validated FKs (invalid ones set to null)
+   */
+  private validateUserForeignKeysBatch<
+    T extends {
+      current_bin_id: string | null;
+      received_by: string | null;
+      activated_by: string | null;
+      depleted_by: string | null;
+      returned_by: string | null;
+      serial_override_approved_by: string | null;
+      mark_sold_approved_by: string | null;
+    },
+  >(packDataArray: T[]): T[] {
+    // Collect all unique IDs from the batch
+    const allUserIds = new Set<string>();
+    const allBinIds = new Set<string>();
+
+    for (const pack of packDataArray) {
+      // User FKs
+      if (pack.received_by) allUserIds.add(pack.received_by);
+      if (pack.activated_by) allUserIds.add(pack.activated_by);
+      if (pack.depleted_by) allUserIds.add(pack.depleted_by);
+      if (pack.returned_by) allUserIds.add(pack.returned_by);
+      if (pack.serial_override_approved_by) allUserIds.add(pack.serial_override_approved_by);
+      if (pack.mark_sold_approved_by) allUserIds.add(pack.mark_sold_approved_by);
+      // Bin FKs
+      if (pack.current_bin_id) allBinIds.add(pack.current_bin_id);
+    }
+
+    // DEBUG: Log all user IDs being validated with pack details
+    log.info('DEBUG: validateUserForeignKeysBatch - input packs', {
+      userIdsToCheck: [...allUserIds],
+      binIdsToCheck: [...allBinIds],
+      packCount: packDataArray.length,
+      packDetails: packDataArray.map((p) => ({
+        pack_number: (p as { pack_number?: string }).pack_number,
+        status: (p as { status?: string }).status,
+        received_by: p.received_by,
+        activated_by: p.activated_by,
+        depleted_by: p.depleted_by,
+        returned_by: p.returned_by,
+        serial_override_approved_by: p.serial_override_approved_by,
+        mark_sold_approved_by: p.mark_sold_approved_by,
+        current_bin_id: p.current_bin_id,
+      })),
+    });
+
+    // Build user existence cache
+    // SEC-006: Each findById uses parameterized query
+    const userExistsCache = new Map<string, boolean>();
+    const missingUsers: string[] = [];
+
+    for (const userId of allUserIds) {
+      const user = usersDAL.findById(userId);
+      // FIX: Use != null to catch both null AND undefined (DAL returns undefined for not found)
+      const exists = user != null;
+      log.info('DEBUG: User existence check', {
+        userId,
+        exists,
+        userName: user?.name ?? 'N/A',
+      });
+      userExistsCache.set(userId, exists);
+      if (!exists) {
+        missingUsers.push(userId);
+      }
+    }
+
+    // Build bin existence cache
+    const binExistsCache = new Map<string, boolean>();
+    const missingBins: string[] = [];
+
+    for (const binId of allBinIds) {
+      // FIX: Use != null to catch both null AND undefined (DAL returns undefined for not found)
+      const exists = lotteryBinsDAL.findById(binId) != null;
+      binExistsCache.set(binId, exists);
+      if (!exists) {
+        missingBins.push(binId);
+      }
+    }
+
+    // Log missing references once (audit trail)
+    if (missingUsers.length > 0) {
+      log.warn('User FK references not found locally, will be nullified', {
+        missingUserIds: missingUsers,
+        count: missingUsers.length,
+        auditNote: 'Cloud users do not exist in local store context',
+      });
+    }
+
+    if (missingBins.length > 0) {
+      log.warn('Bin FK references not found locally, will be nullified', {
+        missingBinIds: missingBins,
+        count: missingBins.length,
+        auditNote: 'Cloud bins do not exist in local store context',
+      });
+    }
+
+    // Early return if nothing to validate
+    if (allUserIds.size === 0 && allBinIds.size === 0) {
+      return packDataArray;
+    }
+
+    // Apply validation using caches
+    const validatedPacks = packDataArray.map((pack) => {
+      // Calculate validated values
+      const validatedReturnedBy =
+        userExistsCache.get(pack.returned_by!) !== false ? pack.returned_by : null;
+
+      // DEBUG: Log each pack's returned_by validation
+      if (pack.returned_by) {
+        const cacheResult = userExistsCache.get(pack.returned_by);
+        log.info('DEBUG: returned_by validation', {
+          pack_number: (pack as { pack_number?: string }).pack_number,
+          original_returned_by: pack.returned_by,
+          cacheResult,
+          cacheResultType: typeof cacheResult,
+          conditionResult: cacheResult !== false,
+          validated_returned_by: validatedReturnedBy,
+        });
+      }
+
+      return {
+        ...pack,
+        // Bin FK
+        current_bin_id:
+          binExistsCache.get(pack.current_bin_id!) !== false ? pack.current_bin_id : null,
+        // User FKs
+        received_by: userExistsCache.get(pack.received_by!) !== false ? pack.received_by : null,
+        activated_by: userExistsCache.get(pack.activated_by!) !== false ? pack.activated_by : null,
+        depleted_by: userExistsCache.get(pack.depleted_by!) !== false ? pack.depleted_by : null,
+        returned_by: validatedReturnedBy,
+        serial_override_approved_by:
+          userExistsCache.get(pack.serial_override_approved_by!) !== false
+            ? pack.serial_override_approved_by
+            : null,
+        mark_sold_approved_by:
+          userExistsCache.get(pack.mark_sold_approved_by!) !== false
+            ? pack.mark_sold_approved_by
+            : null,
+      };
+    });
+
+    // DEBUG: Log final validated packs
+    log.info('DEBUG: validateUserForeignKeysBatch - output packs', {
+      packCount: validatedPacks.length,
+      packDetails: validatedPacks.map((p) => ({
+        pack_number: (p as { pack_number?: string }).pack_number,
+        status: (p as { status?: string }).status,
+        received_by: p.received_by,
+        activated_by: p.activated_by,
+        depleted_by: p.depleted_by,
+        returned_by: p.returned_by,
+        serial_override_approved_by: p.serial_override_approved_by,
+        mark_sold_approved_by: p.mark_sold_approved_by,
+        current_bin_id: p.current_bin_id,
+      })),
+    });
+
+    return validatedPacks;
+  }
+
+  /**
+   * Validate pack data integrity for RETURNED packs
+   *
+   * CRITICAL: For returned packs, return-specific sales data MUST be present.
+   * This validation ensures we don't silently mask data integrity issues.
+   * NULL means there is an ERROR - we do NOT mask it, we REJECT and LOG.
+   *
+   * IMPORTANT FIELD DISTINCTION:
+   * - sales_amount / tickets_sold_count: Running totals for ACTIVE packs
+   * - return_sales_amount / tickets_sold_on_return: Captured at RETURN time
+   *
+   * For RETURNED packs, cloud should provide return_sales_amount (not sales_amount)
+   *
+   * Cloud handles all calculations - our job is just to validate:
+   * - return_sales_amount: MUST NOT be null for RETURNED packs (null = error)
+   * - return_sales_amount: MUST be >= 0
+   * - tickets_sold_on_return: MUST NOT be null for RETURNED packs (null = error)
+   * - tickets_sold_on_return: MUST be >= 0
+   *
+   * @security API-001: Input validation before DB operations
+   * @security DB-002: Data integrity checks
+   *
+   * @param packDataArray - Array of mapped pack data
+   * @param context - Sync context for error reporting ('received' | 'activated' | 'returned')
+   * @returns Object with validated packs and validation errors
+   */
+  private validatePackDataIntegrity<
+    T extends {
+      pack_id: string;
+      pack_number: string;
+      game_id: string;
+      status: LotteryPackStatus;
+      sales_amount: number | null;
+      tickets_sold_count: number | null;
+      return_sales_amount: number | null;
+      tickets_sold_on_return: number | null;
+    },
+  >(
+    packDataArray: T[],
+    context: 'received' | 'activated' | 'returned'
+  ): { validPacks: T[]; errors: string[] } {
+    const errors: string[] = [];
+    const validPacks: T[] = [];
+
+    for (const pack of packDataArray) {
+      const packRef = `Pack ${pack.pack_number} (${pack.pack_id})`;
+      let isValid = true;
+
+      // RETURNED packs have stricter validation requirements
+      // For RETURNED packs, we check return_sales_amount (not sales_amount)
+      // NULL means there is an ERROR from cloud - DO NOT MASK IT
+      if (context === 'returned' || pack.status === 'RETURNED') {
+        // CRITICAL: return_sales_amount MUST NOT be null for returned packs
+        // This is the $180 sales captured at return time
+        if (pack.return_sales_amount === null || pack.return_sales_amount === undefined) {
+          const errorMsg = `${packRef}: DATA_INTEGRITY_ERROR - return_sales_amount is null for RETURNED pack. Cloud API must provide this value.`;
+          log.error('CRITICAL: Returned pack missing return_sales_amount', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            status: pack.status,
+            returnSalesAmount: pack.return_sales_amount,
+            salesAmount: pack.sales_amount,
+            ticketsSoldOnReturn: pack.tickets_sold_on_return,
+            context,
+            severity: 'CRITICAL',
+            errorType: 'DATA_INTEGRITY_ERROR',
+            resolution:
+              'Investigate cloud API response - return_sales_amount must not be null for returned packs',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+
+        // CRITICAL: tickets_sold_on_return MUST NOT be null for returned packs
+        if (pack.tickets_sold_on_return === null || pack.tickets_sold_on_return === undefined) {
+          const errorMsg = `${packRef}: DATA_INTEGRITY_ERROR - tickets_sold_on_return is null for RETURNED pack. Cloud API must provide this value.`;
+          log.error('CRITICAL: Returned pack missing tickets_sold_on_return', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            status: pack.status,
+            ticketsSoldOnReturn: pack.tickets_sold_on_return,
+            ticketsSoldCount: pack.tickets_sold_count,
+            context,
+            severity: 'CRITICAL',
+            errorType: 'DATA_INTEGRITY_ERROR',
+            resolution:
+              'Investigate cloud API response - tickets_sold_on_return must not be null for returned packs',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+      }
+
+      // Universal validation: return_sales_amount must be >= 0 if present
+      if (pack.return_sales_amount !== null && pack.return_sales_amount !== undefined) {
+        if (pack.return_sales_amount < 0) {
+          const errorMsg = `${packRef}: return_sales_amount cannot be negative (${pack.return_sales_amount})`;
+          log.error('Pack has negative return_sales_amount', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            returnSalesAmount: pack.return_sales_amount,
+            errorType: 'VALIDATION_ERROR',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+      }
+
+      // Universal validation: sales_amount must be >= 0 if present
+      if (pack.sales_amount !== null && pack.sales_amount !== undefined) {
+        if (pack.sales_amount < 0) {
+          const errorMsg = `${packRef}: sales_amount cannot be negative (${pack.sales_amount})`;
+          log.error('Pack has negative sales_amount', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            salesAmount: pack.sales_amount,
+            errorType: 'VALIDATION_ERROR',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+      }
+
+      // Universal validation: tickets_sold_on_return must be >= 0 if present
+      if (pack.tickets_sold_on_return !== null && pack.tickets_sold_on_return !== undefined) {
+        if (pack.tickets_sold_on_return < 0) {
+          const errorMsg = `${packRef}: tickets_sold_on_return cannot be negative (${pack.tickets_sold_on_return})`;
+          log.error('Pack has negative tickets_sold_on_return', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            ticketsSoldOnReturn: pack.tickets_sold_on_return,
+            errorType: 'VALIDATION_ERROR',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+      }
+
+      // Universal validation: tickets_sold_count must be >= 0 if present
+      if (pack.tickets_sold_count !== null && pack.tickets_sold_count !== undefined) {
+        if (pack.tickets_sold_count < 0) {
+          const errorMsg = `${packRef}: tickets_sold_count cannot be negative (${pack.tickets_sold_count})`;
+          log.error('Pack has negative tickets_sold_count', {
+            packId: pack.pack_id,
+            packNumber: pack.pack_number,
+            ticketsSoldCount: pack.tickets_sold_count,
+            errorType: 'VALIDATION_ERROR',
+          });
+          errors.push(errorMsg);
+          isValid = false;
+        }
+      }
+
+      if (isValid) {
+        validPacks.push(pack);
+      }
+    }
+
+    // Summary log for validation results
+    if (errors.length > 0) {
+      log.warn('Pack data integrity validation completed with errors', {
+        context,
+        totalPacks: packDataArray.length,
+        validPacks: validPacks.length,
+        rejectedPacks: packDataArray.length - validPacks.length,
+        errorCount: errors.length,
+      });
+    }
+
+    return { validPacks, errors };
+  }
+
   // ==========================================================================
   // Full Sync
   // ==========================================================================
 
   /**
    * Sync all bidirectional entities (bins, games, and packs)
+   *
+   * Sync order is intentional for FK dependencies:
+   * 1. Users - packs reference users (received_by, activated_by, etc.)
+   * 2. Bins - packs reference bins (current_bin_id)
+   * 3. Games - packs reference games (game_id)
+   * 4. Packs (received → activated → returned)
    *
    * @returns Combined sync results
    */
@@ -964,6 +1629,7 @@ export class BidirectionalSyncService {
     packs: {
       received: BidirectionalSyncResult;
       activated: BidirectionalSyncResult;
+      returned: BidirectionalSyncResult;
     };
   }> {
     log.info('Starting full bidirectional sync');
@@ -989,6 +1655,7 @@ export class BidirectionalSyncService {
       packs: {
         received: { pulled: packs.received.pulled },
         activated: { pulled: packs.activated.pulled },
+        returned: { pulled: packs.returned.pulled },
       },
     });
 
@@ -1007,6 +1674,7 @@ export class BidirectionalSyncService {
     packs: {
       received: BidirectionalSyncResult;
       activated: BidirectionalSyncResult;
+      returned: BidirectionalSyncResult;
     };
   }> {
     const store = storesDAL.getConfiguredStore();
@@ -1021,6 +1689,7 @@ export class BidirectionalSyncService {
     syncTimestampsDAL.reset(store.store_id, 'games');
     syncTimestampsDAL.reset(store.store_id, 'packs_received');
     syncTimestampsDAL.reset(store.store_id, 'packs_activated');
+    syncTimestampsDAL.reset(store.store_id, 'packs_returned');
 
     return this.syncAll();
   }
@@ -1054,6 +1723,61 @@ export class BidirectionalSyncService {
     }
 
     return 0; // Unknown
+  }
+
+  /**
+   * Classify error for DLQ routing
+   *
+   * Error categories per ERR-007:
+   * - PERMANENT: 4xx errors (except 429) - client errors, won't succeed on retry
+   * - TRANSIENT: 5xx, network errors, timeouts - may succeed on retry
+   * - STRUCTURAL: Missing required fields, invalid payload
+   * - UNKNOWN: Unclassified errors
+   *
+   * Note: For Bins/Games PULL sync, all errors go to DLQ immediately regardless
+   * of category. Category is for troubleshooting visibility only.
+   *
+   * @param httpStatus - HTTP status code (0 if unknown)
+   * @param message - Error message for pattern matching
+   * @returns Error category for DLQ
+   */
+  private classifyError(httpStatus: number, message: string): ErrorCategory {
+    // 5xx server errors and rate limits are transient
+    if (httpStatus >= 500 || httpStatus === 429) {
+      return 'TRANSIENT';
+    }
+
+    // 408 Request Timeout is transient (network issue, may succeed on retry)
+    if (httpStatus === 408) {
+      return 'TRANSIENT';
+    }
+
+    // 4xx client errors (except 429 and 408) are permanent
+    if (httpStatus >= 400 && httpStatus < 500) {
+      return 'PERMANENT';
+    }
+
+    // Network-related errors
+    if (
+      message.includes('ECONNREFUSED') ||
+      message.includes('ENOTFOUND') ||
+      message.includes('ETIMEDOUT') ||
+      message.includes('timeout') ||
+      message.includes('network')
+    ) {
+      return 'TRANSIENT';
+    }
+
+    // Structural errors
+    if (
+      message.includes('missing') ||
+      message.includes('required') ||
+      message.includes('invalid')
+    ) {
+      return 'STRUCTURAL';
+    }
+
+    return 'UNKNOWN';
   }
 }
 

@@ -484,7 +484,8 @@ export default function DayCloseWizardPage() {
     if (pendingLotteryDayId && storeId) {
       setIsCommittingLottery(true);
       try {
-        const result = await commitLotteryDayClose();
+        // Pass day_id from prepare response to commit
+        const result = await commitLotteryDayClose({ day_id: pendingLotteryDayId });
 
         if (result.success) {
           toast({

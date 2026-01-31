@@ -30,8 +30,11 @@ const {
   mockSyncQueueEnqueue,
   mockSyncQueueMarkSynced,
   mockSyncQueueIncrementAttempts,
+  mockSyncQueueDeadLetter,
   mockSyncQueueCleanupStalePullTracking,
   mockSyncQueueCleanupAllStalePullTracking,
+  mockSyncQueueGetPendingPullItem,
+  mockSyncQueueGetPendingPullItemByAction,
 } = vi.hoisted(() => ({
   mockPullBins: vi.fn(),
   mockPullLotteryGames: vi.fn(),
@@ -55,8 +58,11 @@ const {
   mockSyncQueueEnqueue: vi.fn(),
   mockSyncQueueMarkSynced: vi.fn(),
   mockSyncQueueIncrementAttempts: vi.fn(),
+  mockSyncQueueDeadLetter: vi.fn().mockReturnValue(true),
   mockSyncQueueCleanupStalePullTracking: vi.fn(),
   mockSyncQueueCleanupAllStalePullTracking: vi.fn().mockReturnValue(0),
+  mockSyncQueueGetPendingPullItem: vi.fn().mockReturnValue(null),
+  mockSyncQueueGetPendingPullItemByAction: vi.fn().mockReturnValue(null),
 }));
 
 // Mock cloud API service
@@ -110,8 +116,11 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
     enqueue: mockSyncQueueEnqueue,
     markSynced: mockSyncQueueMarkSynced,
     incrementAttempts: mockSyncQueueIncrementAttempts,
+    deadLetter: mockSyncQueueDeadLetter,
     cleanupStalePullTracking: mockSyncQueueCleanupStalePullTracking,
     cleanupAllStalePullTracking: mockSyncQueueCleanupAllStalePullTracking,
+    getPendingPullItem: mockSyncQueueGetPendingPullItem,
+    getPendingPullItemByAction: mockSyncQueueGetPendingPullItemByAction,
     getBatch: vi.fn().mockReturnValue({ items: [], totalPending: 0 }),
   },
 }));
@@ -370,23 +379,28 @@ describe('BidirectionalSyncService', () => {
         );
       });
 
-      it('CRITICAL: should increment attempts (not mark synced) on API failure', async () => {
-        // Error handling - queue item should track failure for retry logic
+      it('should record API failure for retry on bins sync', async () => {
+        // Error handling - failures recorded for retry on next cycle
         mockGetLastPullAt.mockReturnValue(null);
         mockPullBins.mockRejectedValue(new Error('HTTP 503: Service Unavailable'));
 
         await service.syncBins();
 
-        // On failure: incrementAttempts called, markSynced NOT called
+        // On failure: incrementAttempts called to record error context
         expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledTimes(1);
         expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
           'mock-queue-id-bins',
           'HTTP 503: Service Unavailable',
           expect.objectContaining({
             api_endpoint: '/api/v1/sync/lottery/bins',
-            http_status: 503, // Extracted from error message
+            http_status: 503,
           })
         );
+
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+
+        // markSynced should NOT be called on failure
         expect(mockSyncQueueMarkSynced).not.toHaveBeenCalled();
       });
 
@@ -414,8 +428,8 @@ describe('BidirectionalSyncService', () => {
         );
       });
 
-      it('should handle network timeout errors with proper queue tracking', async () => {
-        // Network resilience - timeout errors should be tracked for retry
+      it('should handle network timeout errors and record for retry', async () => {
+        // Network timeout - recorded for retry on next sync cycle
         mockGetLastPullAt.mockReturnValue(null);
         mockPullBins.mockRejectedValue(new Error('ETIMEDOUT: Connection timed out'));
 
@@ -429,10 +443,12 @@ describe('BidirectionalSyncService', () => {
             api_endpoint: '/api/v1/sync/lottery/bins',
           })
         );
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
       });
 
-      it('should handle HTTP 401 unauthorized with proper queue tracking', async () => {
-        // Security scenario - auth failures tracked for alerting
+      it('should handle HTTP 401 unauthorized and record for retry', async () => {
+        // Auth failure - recorded for retry (may succeed after re-auth)
         mockGetLastPullAt.mockReturnValue(null);
         mockPullBins.mockRejectedValue(new Error('HTTP 401: Unauthorized'));
 
@@ -445,10 +461,12 @@ describe('BidirectionalSyncService', () => {
             http_status: 401,
           })
         );
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
       });
 
-      it('should handle HTTP 500 server error with proper queue tracking', async () => {
-        // Server error scenario - should be tracked for retry
+      it('should handle HTTP 500 server error and record for retry', async () => {
+        // Server error - transient, should be retried
         mockGetLastPullAt.mockReturnValue(null);
         mockPullBins.mockRejectedValue(new Error('HTTP 500: Internal Server Error'));
 
@@ -461,6 +479,8 @@ describe('BidirectionalSyncService', () => {
             http_status: 500,
           })
         );
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
       });
     });
   });
@@ -520,6 +540,103 @@ describe('BidirectionalSyncService', () => {
 
       expect(result.pushed).toBe(1);
       expect(mockPushGames).toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // Enterprise-Grade DLQ Tests for Games PULL Sync
+    // Business requirement: Games PULL errors go directly to DLQ (no retries)
+    // =========================================================================
+
+    describe('sync queue DLQ tracking (games PULL sync - no retries)', () => {
+      beforeEach(() => {
+        // Reset sync queue mocks and configure for games
+        vi.clearAllMocks();
+        mockGetConfiguredStore.mockReturnValue({
+          store_id: 'store-123',
+          name: 'Test Store',
+          state_id: 'CA',
+        });
+        mockSyncQueueEnqueue.mockReturnValue({
+          id: 'mock-queue-id-games',
+          store_id: 'store-123',
+          entity_type: 'game',
+          entity_id: 'pull-1234567890',
+          operation: 'UPDATE',
+          payload: JSON.stringify({ action: 'pull_games' }),
+          sync_direction: 'PULL',
+          synced: 0,
+          sync_attempts: 0,
+          created_at: '2024-01-01T00:00:00.000Z',
+        });
+      });
+
+      it('should record API failure for retry on games sync', async () => {
+        // API failures should be recorded for retry on next sync cycle
+        mockGetLastPullAt.mockReturnValue(null);
+        mockGamesFindAllByStore.mockReturnValue([]);
+        mockPullLotteryGames.mockRejectedValue(new Error('HTTP 503: Service Unavailable'));
+
+        const result = await service.syncGames();
+
+        // Verify error was captured in result
+        expect(result.errors).toContain('Pull failed: HTTP 503: Service Unavailable');
+
+        // incrementAttempts called to record error context
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalledWith(
+          'mock-queue-id-games',
+          'HTTP 503: Service Unavailable',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/games',
+            http_status: 503,
+          })
+        );
+
+        // Should NOT immediately dead-letter - allow retry
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+
+        // markSynced should NOT be called on error
+        expect(mockSyncQueueMarkSynced).not.toHaveBeenCalled();
+      });
+
+      it('CRITICAL: should mark queue item as synced when no games to sync', async () => {
+        // Empty response should still mark as synced (not leave pending)
+        mockGetLastPullAt.mockReturnValue('2024-01-01T00:00:00Z');
+        mockGamesFindAllByStore.mockReturnValue([]); // No local changes
+        mockPullLotteryGames.mockResolvedValue({ games: [] }); // No cloud changes
+
+        await service.syncGames();
+
+        // Queue item must be marked synced even with empty response
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledTimes(1);
+        expect(mockSyncQueueMarkSynced).toHaveBeenCalledWith(
+          'mock-queue-id-games',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/games',
+            http_status: 200,
+          })
+        );
+        // No dead-letter on success
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+      });
+
+      it('should handle HTTP 404 and record for retry', async () => {
+        mockGetLastPullAt.mockReturnValue(null);
+        mockGamesFindAllByStore.mockReturnValue([]);
+        mockPullLotteryGames.mockRejectedValue(new Error('HTTP 404: Not Found'));
+
+        const result = await service.syncGames();
+
+        // Verify error was captured
+        expect(result.errors).toContain('Pull failed: HTTP 404: Not Found');
+
+        // Should record failure for retry, not immediately dead-letter
+        expect(mockSyncQueueIncrementAttempts).toHaveBeenCalled();
+        expect(mockSyncQueueDeadLetter).not.toHaveBeenCalled();
+
+        // markSynced should NOT be called on error
+        expect(mockSyncQueueMarkSynced).not.toHaveBeenCalled();
+      });
     });
   });
 

@@ -187,6 +187,8 @@ export interface LotteryPackResponse {
 export interface LotteryPackDetailResponse extends LotteryPackResponse {
   tickets_sold?: number;
   sales_amount?: number;
+  /** Calculated last ticket serial: opening_serial + tickets_per_pack - 1 */
+  serial_end?: string;
 }
 
 /**
@@ -642,6 +644,14 @@ export interface PrepareLotteryDayCloseResponse {
     tickets_sold: number;
     sales_amount: number;
   }>;
+}
+
+/**
+ * Commit day close input
+ * Required: day_id from prepareClose response
+ */
+export interface CommitLotteryDayCloseInput {
+  day_id: string;
 }
 
 /**
@@ -1210,10 +1220,16 @@ export async function closeLotteryDay(
 ): Promise<ApiResponse<CommitLotteryDayCloseResponse>> {
   try {
     // Two-phase close for backward compatibility
-    await ipcClient.invoke<PrepareLotteryDayCloseResponse>('lottery:prepareDayClose', {
-      closings: data.closings,
+    // Phase 1: Prepare - get day_id
+    const prepareResult = await ipcClient.invoke<PrepareLotteryDayCloseResponse>(
+      'lottery:prepareDayClose',
+      { closings: data.closings }
+    );
+
+    // Phase 2: Commit - pass day_id from prepare response
+    const result = await ipcClient.invoke<CommitLotteryDayCloseResponse>('lottery:commitDayClose', {
+      day_id: prepareResult.day_id,
     });
-    const result = await ipcClient.invoke<CommitLotteryDayCloseResponse>('lottery:commitDayClose');
     return wrapSuccess(result);
   } catch (error) {
     return handleIPCError(error);
@@ -1253,11 +1269,17 @@ export async function prepareLotteryDayClose(
  * Atomically commits both lottery close and day close.
  * Must be called after prepareLotteryDayClose and before pending close expires.
  *
+ * @param data - Input containing day_id from prepareClose response
  * @returns Commit response with final lottery totals
  */
-export async function commitLotteryDayClose(): Promise<ApiResponse<CommitLotteryDayCloseResponse>> {
+export async function commitLotteryDayClose(
+  data: CommitLotteryDayCloseInput
+): Promise<ApiResponse<CommitLotteryDayCloseResponse>> {
   try {
-    const result = await ipcClient.invoke<CommitLotteryDayCloseResponse>('lottery:commitDayClose');
+    const result = await ipcClient.invoke<CommitLotteryDayCloseResponse>(
+      'lottery:commitDayClose',
+      data
+    );
     return wrapSuccess(result);
   } catch (error) {
     return handleIPCError(error);
@@ -1338,7 +1360,8 @@ export const lotteryAPI = {
   prepareDayClose: (data: PrepareLotteryDayCloseInput) =>
     ipcClient.invoke<PrepareLotteryDayCloseResponse>('lottery:prepareDayClose', data),
 
-  commitDayClose: () => ipcClient.invoke<CommitLotteryDayCloseResponse>('lottery:commitDayClose'),
+  commitDayClose: (data: CommitLotteryDayCloseInput) =>
+    ipcClient.invoke<CommitLotteryDayCloseResponse>('lottery:commitDayClose', data),
 
   cancelDayClose: () => ipcClient.invoke<CancelLotteryDayCloseResponse>('lottery:cancelDayClose'),
 
