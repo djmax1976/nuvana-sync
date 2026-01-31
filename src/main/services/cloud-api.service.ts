@@ -2559,32 +2559,43 @@ export class CloudApiService {
    * @returns CloudUser array with cashier role
    */
   private async pullUsersFromCashiersEndpoint(sessionId: string): Promise<CloudUser[]> {
-    const allCashiers: CloudCashier[] = [];
-    let hasMore = true;
-    let sinceSequence: number | undefined;
+    try {
+      const allCashiers: CloudCashier[] = [];
+      let hasMore = true;
+      let sinceSequence: number | undefined;
 
-    while (hasMore) {
-      const response = await this.pullCashiers(sessionId, {
-        sinceSequence,
-        limit: 500,
-      });
+      while (hasMore) {
+        const response = await this.pullCashiers(sessionId, {
+          sinceSequence,
+          limit: 500,
+        });
 
-      allCashiers.push(...response.cashiers);
-      hasMore = response.syncMetadata.hasMore;
-      sinceSequence = response.syncMetadata.lastSequence;
+        allCashiers.push(...response.cashiers);
+        hasMore = response.syncMetadata.hasMore;
+        sinceSequence = response.syncMetadata.lastSequence;
+      }
+
+      // Legacy mapping - all as cashier role
+      // NOTE: This is intentionally kept for backwards compatibility
+      // When backend provides unified endpoint, pullUsersFromEmployeesEndpoint
+      // will be used instead with proper role mapping
+      return allCashiers.map((cashier) => ({
+        userId: cashier.cashierId,
+        name: cashier.name,
+        role: 'cashier' as StoreRole,
+        pinHash: cashier.pinHash,
+        active: cashier.isActive,
+      }));
+    } catch (error) {
+      // BUG FIX: If cashiers endpoint also doesn't exist (404), return empty array
+      // instead of throwing. This prevents infinite retries when store has no users.
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      if (errorMessage.includes('404') || errorMessage.includes('not found')) {
+        log.info('Cashiers endpoint not available, returning empty user list');
+        return [];
+      }
+      throw error;
     }
-
-    // Legacy mapping - all as cashier role
-    // NOTE: This is intentionally kept for backwards compatibility
-    // When backend provides unified endpoint, pullUsersFromEmployeesEndpoint
-    // will be used instead with proper role mapping
-    return allCashiers.map((cashier) => ({
-      userId: cashier.cashierId,
-      name: cashier.name,
-      role: 'cashier' as StoreRole,
-      pinHash: cashier.pinHash,
-      active: cashier.isActive,
-    }));
   }
 
   /**
@@ -5221,6 +5232,22 @@ export class CloudApiService {
       // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
       const rawPacks = (data.packs || data.records || []) as Array<Record<string, unknown>>;
+
+      // DEBUG: Log raw API response to diagnose sales_amount mapping issue
+      if (rawPacks.length > 0) {
+        log.info('DEBUG: Raw returned pack response from cloud', {
+          packNumber: rawPacks[0].packNumber || rawPacks[0].pack_number,
+          allFields: Object.keys(rawPacks[0]),
+          salesFields: {
+            salesAmount: rawPacks[0].salesAmount,
+            sales_amount: rawPacks[0].sales_amount,
+            saleAmount: rawPacks[0].saleAmount,
+            sale_amount: rawPacks[0].sale_amount,
+            totalSales: rawPacks[0].totalSales,
+            total_sales: rawPacks[0].total_sales,
+          },
+        });
+      }
 
       // Transform camelCase to snake_case (API may use either format)
       const packs: CloudPack[] = rawPacks.map((r) => ({

@@ -294,8 +294,11 @@ const DEFAULT_BATCH_SIZE = 100;
 /** Maximum batch size to prevent memory issues */
 const MAX_BATCH_SIZE = 500;
 
-/** Default maximum retry attempts */
+/** Default maximum retry attempts for PUSH items (actual data to sync) */
 const DEFAULT_MAX_ATTEMPTS = 5;
+
+/** Maximum retry attempts for PULL tracking items (visibility only, fail fast) */
+const PULL_MAX_ATTEMPTS = 2;
 
 // ============================================================================
 // Logger
@@ -354,6 +357,10 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?)
     `);
 
+    // PULL items are tracking-only for visibility, use lower retry count
+    // PUSH items contain actual data that needs to sync, use higher retry count
+    const maxAttempts = direction === 'PULL' ? PULL_MAX_ATTEMPTS : DEFAULT_MAX_ATTEMPTS;
+
     stmt.run(
       id,
       data.store_id,
@@ -362,7 +369,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       data.operation,
       JSON.stringify(data.payload),
       data.priority || 0,
-      DEFAULT_MAX_ATTEMPTS,
+      maxAttempts,
       now,
       direction
     );
@@ -821,6 +828,139 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Check if there's already a pending PULL operation for an entity type
+   *
+   * Used to prevent creating duplicate PULL tracking items every sync cycle.
+   * If a PULL item already exists (pending or in backoff), don't create another one.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param entityType - Entity type (e.g., 'user', 'bin', 'game', 'pack')
+   * @returns true if there's already a pending PULL item
+   */
+  hasPendingPullForEntityType(storeId: string, entityType: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT 1 FROM sync_queue
+      WHERE store_id = ?
+        AND entity_type = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND dead_lettered = 0
+      LIMIT 1
+    `);
+
+    return stmt.get(storeId, entityType) !== undefined;
+  }
+
+  /**
+   * Get existing pending PULL item for an entity type, or null if none exists
+   *
+   * Used to REUSE existing PULL tracking items instead of creating new ones each cycle.
+   * This allows error history to accumulate on a single item, which can then be
+   * dead-lettered when max_attempts is reached for visibility into failures.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param entityType - Entity type (e.g., 'user', 'bin', 'game', 'pack')
+   * @returns Existing pending PULL item or null
+   */
+  getPendingPullItem(storeId: string, entityType: string): SyncQueueItem | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND entity_type = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND dead_lettered = 0
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
+    const result = stmt.get(storeId, entityType) as SyncQueueItem | undefined;
+    return result || null;
+  }
+
+  /**
+   * Get existing pending PULL item by action pattern in payload
+   *
+   * Used when multiple PULL operations share the same entity_type (e.g., packs).
+   * Searches payload JSON for the specific action to distinguish between operations.
+   *
+   * SEC-006: Parameterized query with allowlist validation
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param action - Action pattern to match in payload (e.g., 'pull_received_packs')
+   * @returns Existing pending PULL item or null
+   */
+  getPendingPullItemByAction(storeId: string, action: string): SyncQueueItem | null {
+    // SEC-006: Allowlist validation for action to prevent injection via JSON LIKE
+    const ALLOWED_ACTIONS = [
+      'pull_bins',
+      'pull_games',
+      'pull_users',
+      'pull_received_packs',
+      'pull_activated_packs',
+    ];
+
+    if (!ALLOWED_ACTIONS.includes(action)) {
+      log.warn('Invalid action for getPendingPullItemByAction - rejected', {
+        storeId,
+        action,
+        allowed: ALLOWED_ACTIONS,
+      });
+      return null;
+    }
+
+    const likePattern = `%"action":"${action}"%`;
+
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND sync_direction = 'PULL'
+        AND synced = 0
+        AND dead_lettered = 0
+        AND payload LIKE ?
+      ORDER BY created_at DESC
+      LIMIT 1
+    `);
+
+    const result = stmt.get(storeId, likePattern) as SyncQueueItem | undefined;
+    return result || null;
+  }
+
+  /**
+   * Get all PULL items that have at least one sync attempt
+   *
+   * Used at startup to clean up PULL tracking items that failed in previous sessions.
+   * These items should be dead-lettered since PULL operations create fresh tracking
+   * items each cycle - old failed ones are stale.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Array of PULL items with sync_attempts >= 1
+   */
+  getPullItemsWithAttempts(storeId: string): SyncQueueItem[] {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND sync_attempts >= 1
+        AND (sync_direction = 'PULL' OR entity_id LIKE 'pull-%')
+      ORDER BY created_at ASC
+    `);
+
+    return stmt.all(storeId) as SyncQueueItem[];
+  }
+
+  /**
    * Get retryable items with exponential backoff
    * Items are eligible for retry based on their attempt count and time since last attempt
    *
@@ -846,14 +986,27 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const now = new Date();
 
     // SQLite doesn't have POWER function, so we calculate backoff in application layer
-    // Get ALL unsynced items that haven't exceeded max attempts (no artificial limit)
+    // Get ALL unsynced items that haven't exceeded their retry limit (no artificial limit)
     // This ensures we don't miss items buried deep in the queue due to backoff filtering
-    // IMPORTANT: Only return PUSH items (sync_direction IS NULL or 'PUSH')
-    // PULL tracking items are handled separately by bidirectional-sync.service
+    //
+    // IMPORTANT: Only return PUSH items - exclude PULL tracking items by TWO methods:
+    // 1. sync_direction = 'PULL' (new items with proper direction set)
+    // 2. entity_id LIKE 'pull-%' (old items from before sync_direction was added/fixed)
+    // PULL tracking items are handled by their respective services, not the sync engine
+    //
+    // Retry limits per error category (ERR-007 compliance):
+    // - TRANSIENT errors: retry up to max_attempts * 2 (extended retry for network issues)
+    // - All other errors: retry up to max_attempts
+    // - Items NOT dead_lettered (already in DLQ should not be retried)
     const stmt = this.db.prepare(`
       SELECT * FROM sync_queue
-      WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+      WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
         AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND entity_id NOT LIKE 'pull-%'
+        AND (
+          sync_attempts < max_attempts
+          OR (error_category = 'TRANSIENT' AND sync_attempts < max_attempts * 2)
+        )
       ORDER BY priority DESC, created_at ASC
     `);
 
@@ -894,7 +1047,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   /**
    * Get count of items currently in backoff (waiting for retry delay)
    * These are items that:
-   * - Have not exceeded max_attempts (still retryable)
+   * - Are still retryable (within their retry limit based on error category)
    * - Have a last_attempt_at within the backoff window
    *
    * SEC-006: Parameterized query
@@ -907,17 +1060,26 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const now = new Date();
 
     // Get all retryable PUSH items to count those in backoff
-    // Excludes PULL tracking items which are handled separately
+    // Excludes PULL tracking items by sync_direction AND entity_id pattern
+    // Excludes dead_lettered items
+    // Includes TRANSIENT items in extended retry window (max_attempts to max_attempts * 2)
     const stmt = this.db.prepare(`
-      SELECT sync_attempts, last_attempt_at FROM sync_queue
-      WHERE store_id = ? AND synced = 0 AND sync_attempts < max_attempts
+      SELECT sync_attempts, last_attempt_at, error_category, max_attempts FROM sync_queue
+      WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
         AND sync_attempts > 0 AND last_attempt_at IS NOT NULL
         AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND entity_id NOT LIKE 'pull-%'
+        AND (
+          sync_attempts < max_attempts
+          OR (error_category = 'TRANSIENT' AND sync_attempts < max_attempts * 2)
+        )
     `);
 
     const items = stmt.all(storeId) as Array<{
       sync_attempts: number;
       last_attempt_at: string;
+      error_category: string | null;
+      max_attempts: number;
     }>;
 
     let inBackoff = 0;
@@ -951,10 +1113,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     // Reset PUSH items that:
     // 1. Are not synced
-    // 2. Haven't exceeded max attempts (still retryable)
-    // 3. Have sync_attempts > 0 (have been tried)
-    // 4. Last attempt was before the cutoff time
-    // 5. Are PUSH items (not PULL tracking items)
+    // 2. Are not dead_lettered
+    // 3. Are still within their retry limit (based on error category)
+    // 4. Have sync_attempts > 0 (have been tried)
+    // 5. Last attempt was before the cutoff time
+    // 6. Are PUSH items (not PULL tracking items) - check both sync_direction AND entity_id
+    //
+    // Note: This includes TRANSIENT items in extended retry window
     const stmt = this.db.prepare(`
       UPDATE sync_queue SET
         sync_attempts = 0,
@@ -962,11 +1127,16 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
         last_sync_error = NULL
       WHERE store_id = ?
         AND synced = 0
-        AND sync_attempts < max_attempts
+        AND dead_lettered = 0
         AND sync_attempts > 0
         AND last_attempt_at IS NOT NULL
         AND last_attempt_at < ?
         AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND entity_id NOT LIKE 'pull-%'
+        AND (
+          sync_attempts < max_attempts
+          OR (error_category = 'TRANSIENT' AND sync_attempts < max_attempts * 2)
+        )
     `);
 
     const result = stmt.run(storeId, cutoffTime.toISOString());
@@ -1557,6 +1727,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const ALLOWED_ACTIONS = [
       'pull_bins',
       'pull_games',
+      'pull_users',
       'pull_received_packs',
       'pull_activated_packs',
     ];
@@ -2158,9 +2329,18 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   /**
    * Get items that should be auto-dead-lettered
    *
-   * Returns items that have:
-   * - Exceeded max_attempts AND have a PERMANENT or STRUCTURAL error category
-   * - OR exceeded max_attempts * 2 (grace period) regardless of error category
+   * Returns items based on error category and attempt counts:
+   * - PERMANENT/STRUCTURAL/UNKNOWN/NULL: Dead letter at max_attempts
+   * - TRANSIENT: Dead letter at max_attempts * 2 (extended retry window)
+   *
+   * This ensures items don't get stuck in the queue forever. Previously,
+   * items with UNKNOWN or NULL error_category would be stuck because:
+   * - getRetryableItems stopped returning them at max_attempts
+   * - But this query required max_attempts * 2 to dead-letter them
+   *
+   * NOTE: PULL items (users, bins, games) are handled by their respective services
+   * which explicitly dead-letter on failure. We do NOT auto-DLQ PULL items here
+   * because that would race with the service-level DLQ logic.
    *
    * SEC-006: Parameterized query
    * DB-006: TENANT_ISOLATION - Query scoped to store_id
@@ -2170,17 +2350,21 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
    */
   getItemsForAutoDeadLetter(storeId: string): SyncQueueItem[] {
     // SEC-006: Parameterized query
-    // Logic: Dead letter if:
-    //   1. sync_attempts >= max_attempts AND error_category IN (PERMANENT, STRUCTURAL)
-    //   2. sync_attempts >= max_attempts * 2 (absolute limit, any error category)
+    // Logic: Dead letter PUSH items if:
+    //   1. Non-TRANSIENT errors (PERMANENT, STRUCTURAL, UNKNOWN, or NULL): at max_attempts
+    //   2. TRANSIENT errors: at max_attempts * 2 (extended retry for network issues)
+    //
+    // PULL items are excluded - their services handle DLQ explicitly on failure.
+    // This prevents race conditions where auto-DLQ runs before the service
+    // has a chance to mark the item as synced or dead-lettered.
     const stmt = this.db.prepare(`
       SELECT * FROM sync_queue
       WHERE store_id = ?
         AND synced = 0
         AND dead_lettered = 0
-        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND entity_id NOT LIKE 'pull-%'
         AND (
-          (sync_attempts >= max_attempts AND error_category IN ('PERMANENT', 'STRUCTURAL'))
+          (sync_attempts >= max_attempts AND (error_category IS NULL OR error_category != 'TRANSIENT'))
           OR sync_attempts >= max_attempts * 2
         )
       ORDER BY created_at ASC

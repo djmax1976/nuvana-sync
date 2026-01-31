@@ -164,6 +164,8 @@ export interface PackWithDetails extends LotteryPack {
   bin_name: string | null;
   /** Cloud-aligned: bin display order (replaces bin_number) */
   bin_display_order: number | null;
+  /** Serial carryforward: Previous day's ending_serial becomes today's starting */
+  prev_ending_serial: string | null;
 }
 
 /**
@@ -622,22 +624,76 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
-   * Get pack with game and bin details
+   * Get pack with game and bin details for a specific store
    * SEC-006: Parameterized query with JOINs
+   * DB-006: TENANT_ISOLATION - Requires store_id to prevent cross-tenant data access
    *
+   * @param storeId - Store identifier for tenant isolation (REQUIRED)
    * @param packId - Pack identifier
    * @returns Pack with details or undefined
    */
-  getPackWithDetails(packId: string): PackWithDetails | undefined {
+  getPackWithDetailsForStore(storeId: string, packId: string): PackWithDetails | undefined {
     // v029 API Alignment: JOIN on current_bin_id
+    // DB-006: TENANT_ISOLATION - store_id in WHERE clause prevents cross-tenant access
+    // SEC-006: Fully parameterized query prevents SQL injection
+    // SERIAL CARRYFORWARD: Include previous day's ending_serial as today's starting
     const stmt = this.db.prepare(`
       SELECT
         p.*,
         g.game_code,
         g.name as game_name,
         g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
         b.name as bin_name,
-        b.display_order as bin_display_order
+        b.display_order as bin_display_order,
+        -- Get the most recent ending_serial from the last CLOSED day for this pack
+        (SELECT ldp.ending_serial
+         FROM lottery_day_packs ldp
+         JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
+         WHERE ldp.pack_id = p.pack_id
+           AND lbd.status = 'CLOSED'
+         ORDER BY lbd.closed_at DESC
+         LIMIT 1) AS prev_ending_serial
+      FROM lottery_packs p
+      LEFT JOIN lottery_games g ON p.game_id = g.game_id
+      LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
+      WHERE p.store_id = ? AND p.pack_id = ?
+    `);
+    return stmt.get(storeId, packId) as PackWithDetails | undefined;
+  }
+
+  /**
+   * @deprecated Use getPackWithDetailsForStore instead for tenant isolation compliance
+   * Get pack with game and bin details (LEGACY - lacks tenant isolation)
+   * SEC-006: Parameterized query with JOINs
+   * WARNING: DB-006 NON-COMPLIANT - No store_id check. Only use for internal operations
+   * where pack ownership has been pre-validated.
+   *
+   * @param packId - Pack identifier
+   * @returns Pack with details or undefined
+   */
+  getPackWithDetails(packId: string): PackWithDetails | undefined {
+    // v029 API Alignment: JOIN on current_bin_id
+    // SERIAL CARRYFORWARD: Include previous day's ending_serial as today's starting
+    const stmt = this.db.prepare(`
+      SELECT
+        p.*,
+        g.game_code,
+        g.name as game_name,
+        g.price as game_price,
+        g.tickets_per_pack as game_tickets_per_pack,
+        g.status as game_status,
+        b.name as bin_name,
+        b.display_order as bin_display_order,
+        -- Get the most recent ending_serial from the last CLOSED day for this pack
+        (SELECT ldp.ending_serial
+         FROM lottery_day_packs ldp
+         JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
+         WHERE ldp.pack_id = p.pack_id
+           AND lbd.status = 'CLOSED'
+         ORDER BY lbd.closed_at DESC
+         LIMIT 1) AS prev_ending_serial
       FROM lottery_packs p
       LEFT JOIN lottery_games g ON p.game_id = g.game_id
       LEFT JOIN lottery_bins b ON p.current_bin_id = b.bin_id
@@ -861,7 +917,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
 
   /**
    * Calculate sales for a pack given closing serial
-   * Uses opening_serial and game price for calculation
+   * Uses effective starting serial (prev day's ending or opening) and game price
    *
    * @param packId - Pack identifier
    * @param closingSerial - Ending serial number
@@ -877,7 +933,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Pack not found: ${packId}`);
     }
 
-    if (!pack.opening_serial) {
+    // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
+    const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial;
+    if (!effectiveStartingSerial) {
       throw new Error(`Pack has no opening serial: ${packId}`);
     }
 
@@ -885,18 +943,18 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       throw new Error(`Game has no price: ${pack.game_id}`);
     }
 
-    // Calculate tickets sold (closing - opening)
-    const openingNum = parseInt(pack.opening_serial, 10);
+    // Calculate tickets sold (closing - effective starting)
+    const startingNum = parseInt(effectiveStartingSerial, 10);
     const closingNum = parseInt(closingSerial, 10);
 
-    if (isNaN(openingNum) || isNaN(closingNum)) {
+    if (isNaN(startingNum) || isNaN(closingNum)) {
       throw new Error('Invalid serial number format');
     }
 
-    const ticketsSold = closingNum - openingNum;
+    const ticketsSold = closingNum - startingNum;
 
     if (ticketsSold < 0) {
-      throw new Error('Closing serial cannot be less than opening serial');
+      throw new Error('Closing serial cannot be less than starting serial');
     }
 
     const salesAmount = ticketsSold * pack.game_price;
@@ -1116,24 +1174,30 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       // SEC-006: Parameterized UPDATE - all values bound, no string concatenation
       // Field names match cloud API exactly per replica_end_points.md
       //
-      // LOTTERY-SYNC-001 FIX: Status protection logic
+      // LOTTERY-SYNC-002 FIX: Status protection logic (updated for cross-device returns)
       // Business rules:
-      //   Rule 1: Terminal states (DEPLETED/RETURNED) are locked - cannot change
+      //   Rule 1: Terminal states (DEPLETED/RETURNED) are locked locally - cannot change
       //   Rule 2: ACTIVE cannot regress to RECEIVED (prevents sync race condition)
-      //   Rule 3: For valid transitions, only accept if cloud data is newer (timestamp comparison)
+      //   Rule 3: ACTIVE can progress to terminal states (RETURNED/DEPLETED) - always accept from cloud
+      //           This handles cross-device returns where cloud marks pack returned but local has newer timestamp
+      //   Rule 4: For other valid transitions, only accept if cloud data is newer (timestamp comparison)
       const stmt = this.db.prepare(`
         UPDATE lottery_packs SET
           status = CASE
-            -- Rule 1: Terminal states (DEPLETED/RETURNED) are locked - cannot change
+            -- Rule 1: Terminal states (DEPLETED/RETURNED) are locked locally - cannot change
             WHEN status IN ('DEPLETED', 'RETURNED') THEN status
             -- Rule 2: ACTIVE cannot regress to RECEIVED (business rule - prevents sync race condition)
             WHEN status = 'ACTIVE' AND ? = 'RECEIVED' THEN status
-            -- Rule 3: For valid transitions, only accept if cloud data is newer
+            -- Rule 3: ACTIVE can always progress to terminal states from cloud (cross-device returns/depletions)
+            WHEN status = 'ACTIVE' AND ? IN ('RETURNED', 'DEPLETED') THEN ?
+            -- Rule 4: For other valid transitions, only accept if cloud data is newer
             WHEN ? > updated_at THEN ?
             -- Otherwise keep existing status (stale cloud data)
             ELSE status
           END,
-          current_bin_id = COALESCE(?, current_bin_id),
+          -- FK columns: Use validated value directly (don't COALESCE to preserve invalid FKs)
+          -- API-001: FKs validated before upsert, null means entity doesn't exist locally
+          current_bin_id = ?,
           opening_serial = COALESCE(?, opening_serial),
           closing_serial = COALESCE(?, closing_serial),
           serial_start = COALESCE(?, serial_start),
@@ -1142,26 +1206,26 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           last_sold_at = COALESCE(?, last_sold_at),
           sales_amount = COALESCE(?, sales_amount),
           received_at = COALESCE(?, received_at),
-          received_by = COALESCE(?, received_by),
+          received_by = ?,
           activated_at = COALESCE(?, activated_at),
-          activated_by = COALESCE(?, activated_by),
-          activated_shift_id = COALESCE(?, activated_shift_id),
+          activated_by = ?,
+          activated_shift_id = ?,
           depleted_at = COALESCE(?, depleted_at),
-          depleted_by = COALESCE(?, depleted_by),
-          depleted_shift_id = COALESCE(?, depleted_shift_id),
+          depleted_by = ?,
+          depleted_shift_id = ?,
           depletion_reason = COALESCE(?, depletion_reason),
           returned_at = COALESCE(?, returned_at),
-          returned_by = COALESCE(?, returned_by),
-          returned_shift_id = COALESCE(?, returned_shift_id),
+          returned_by = ?,
+          returned_shift_id = ?,
           return_reason = COALESCE(?, return_reason),
           return_notes = COALESCE(?, return_notes),
           last_sold_serial = COALESCE(?, last_sold_serial),
           tickets_sold_on_return = COALESCE(?, tickets_sold_on_return),
           return_sales_amount = COALESCE(?, return_sales_amount),
-          serial_override_approved_by = COALESCE(?, serial_override_approved_by),
+          serial_override_approved_by = ?,
           serial_override_reason = COALESCE(?, serial_override_reason),
           serial_override_approved_at = COALESCE(?, serial_override_approved_at),
-          mark_sold_approved_by = COALESCE(?, mark_sold_approved_by),
+          mark_sold_approved_by = ?,
           mark_sold_reason = COALESCE(?, mark_sold_reason),
           mark_sold_approved_at = COALESCE(?, mark_sold_approved_at),
           synced_at = ?,
@@ -1170,10 +1234,12 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       `);
 
       stmt.run(
-        // LOTTERY-SYNC-001: Status protection CASE parameters
+        // LOTTERY-SYNC-002: Status protection CASE parameters
         data.status, // Rule 2: ACTIVE regression check (? = 'RECEIVED')
-        data.updated_at ?? null, // Rule 3: timestamp comparison (? > updated_at)
-        data.status, // Rule 3: THEN value (new status if newer)
+        data.status, // Rule 3: Terminal state check (? IN ('RETURNED', 'DEPLETED'))
+        data.status, // Rule 3: THEN value (accept terminal state from cloud)
+        data.updated_at ?? null, // Rule 4: timestamp comparison (? > updated_at)
+        data.status, // Rule 4: THEN value (new status if newer)
         data.current_bin_id ?? null,
         data.opening_serial ?? null,
         data.closing_serial ?? null,
@@ -1214,7 +1280,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       // Retrieve updated pack to check final status
       const updated = this.findById(existing.pack_id);
 
-      // LOTTERY-SYNC-001: Audit logging for blocked status updates
+      // LOTTERY-SYNC-002: Audit logging for blocked status updates
       if (updated && updated.status !== data.status) {
         // Status update was blocked - determine reason for audit trail
         let blockReason: string;
@@ -1223,6 +1289,8 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         } else if (['DEPLETED', 'RETURNED'].includes(existingStatus)) {
           blockReason = 'TERMINAL_STATE_LOCKED';
         } else {
+          // Note: ACTIVE→RETURNED/DEPLETED should now be allowed via Rule 3
+          // If we hit this, it means cloud sent a different non-terminal status
           blockReason = 'STALE_CLOUD_DATA';
         }
 
@@ -1277,9 +1345,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
         data.closing_serial ?? null,
         data.serial_start ?? null,
         data.serial_end ?? null,
-        data.tickets_sold_count ?? null,
+        data.tickets_sold_count ?? 0, // NOT NULL DEFAULT 0
         data.last_sold_at ?? null,
-        data.sales_amount ?? null,
+        data.sales_amount ?? 0, // NOT NULL DEFAULT 0
         data.received_at ?? null,
         data.received_by ?? null,
         data.activated_at ?? null,
@@ -1437,7 +1505,37 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           }
 
           const existing = this.findById(pack.pack_id);
-          this.upsertFromCloud(pack, storeId);
+
+          try {
+            this.upsertFromCloud(pack, storeId);
+          } catch (upsertError) {
+            // FK constraint failures can occur if existing record has corrupt FKs
+            // from before validation was added. Delete and retry INSERT.
+            const upsertMsg = upsertError instanceof Error ? upsertError.message : 'Unknown error';
+            if (upsertMsg.includes('FOREIGN KEY constraint failed') && existing) {
+              log.warn('FK constraint failed on existing pack, deleting and re-inserting', {
+                packId: pack.pack_id,
+                packNumber: pack.pack_number,
+                existingStatus: existing.status,
+                incomingStatus: pack.status,
+              });
+
+              // Delete corrupt record
+              const deleteStmt = this.db.prepare('DELETE FROM lottery_packs WHERE pack_id = ?');
+              deleteStmt.run(pack.pack_id);
+
+              // Re-try insert (not upsert - we know it doesn't exist now)
+              this.upsertFromCloud(pack, storeId);
+              result.updated++; // Count as update since we replaced existing
+
+              log.info('Pack recovered via delete-and-reinsert', {
+                packId: pack.pack_id,
+                packNumber: pack.pack_number,
+              });
+              continue;
+            }
+            throw upsertError; // Re-throw if not FK constraint or no existing record
+          }
 
           if (existing) {
             result.updated++;
@@ -1448,12 +1546,37 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           const message = error instanceof Error ? error.message : 'Unknown error';
           const errorDetail = `Pack ${pack.pack_number}: ${message}`;
           result.errors.push(errorDetail);
-          log.error('Pack upsert failed', {
-            packNumber: pack.pack_number,
-            packId: pack.pack_id,
-            gameId: pack.game_id,
-            error: message,
-          });
+
+          // DEBUG: Log ALL FK values to identify which one is failing
+          if (message.includes('FOREIGN KEY constraint failed')) {
+            log.error('FK CONSTRAINT DEBUG - Pack upsert failed with FK error', {
+              packNumber: pack.pack_number,
+              packId: pack.pack_id,
+              status: pack.status,
+              // All FK fields - one of these is invalid
+              fkFields: {
+                game_id: pack.game_id,
+                current_bin_id: pack.current_bin_id,
+                received_by: pack.received_by,
+                activated_by: pack.activated_by,
+                activated_shift_id: pack.activated_shift_id,
+                depleted_by: pack.depleted_by,
+                depleted_shift_id: pack.depleted_shift_id,
+                returned_by: pack.returned_by,
+                returned_shift_id: pack.returned_shift_id,
+                serial_override_approved_by: pack.serial_override_approved_by,
+                mark_sold_approved_by: pack.mark_sold_approved_by,
+              },
+              error: message,
+            });
+          } else {
+            log.error('Pack upsert failed', {
+              packNumber: pack.pack_number,
+              packId: pack.pack_id,
+              gameId: pack.game_id,
+              error: message,
+            });
+          }
         }
       }
     });
@@ -1508,6 +1631,52 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   // ==========================================================================
   // Statistics Operations
   // ==========================================================================
+
+  /**
+   * Find the earliest pack action date for a store
+   *
+   * Returns the minimum date among all pack actions (activation, return, depletion).
+   * Used to determine the start of the "first-ever business period" when no day close
+   * has ever been performed.
+   *
+   * @security SEC-006: Parameterized query prevents SQL injection
+   * @security DB-006: store_id in WHERE clause enforces tenant isolation
+   * @performance Uses MIN aggregation on indexed timestamp columns
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns ISO date string (YYYY-MM-DD) of earliest action, or null if no packs exist
+   */
+  findEarliestPackActionDate(storeId: string): string | null {
+    // SEC-006: Fully parameterized query
+    // DB-006: store_id enforces tenant isolation in all subqueries
+    // Performance: Uses indexed columns (store_id, activated_at, returned_at, depleted_at)
+    //              with MIN aggregation for efficient single-row result
+    const stmt = this.db.prepare(`
+      SELECT MIN(earliest_date) as earliest
+      FROM (
+        SELECT MIN(activated_at) as earliest_date
+        FROM lottery_packs
+        WHERE store_id = ? AND activated_at IS NOT NULL
+        UNION ALL
+        SELECT MIN(returned_at)
+        FROM lottery_packs
+        WHERE store_id = ? AND returned_at IS NOT NULL
+        UNION ALL
+        SELECT MIN(depleted_at)
+        FROM lottery_packs
+        WHERE store_id = ? AND depleted_at IS NOT NULL
+      )
+    `);
+
+    const result = stmt.get(storeId, storeId, storeId) as { earliest: string | null } | undefined;
+
+    if (!result?.earliest) {
+      return null;
+    }
+
+    // Extract date portion (YYYY-MM-DD) from ISO timestamp
+    return result.earliest.split('T')[0];
+  }
 
   /**
    * Count packs by status for a store

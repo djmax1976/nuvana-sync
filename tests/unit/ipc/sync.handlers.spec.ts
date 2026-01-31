@@ -311,6 +311,7 @@ describe('Sync IPC Handlers', () => {
         packs: {
           received: { pulled: 3, pushed: 0, conflicts: 0, errors: [] },
           activated: { pulled: 2, pushed: 0, conflicts: 0, errors: [] },
+          returned: { pulled: 1, pushed: 0, conflicts: 0, errors: [] },
         },
       };
 

@@ -312,7 +312,8 @@ registerHandler(
 
 /**
  * Force full sync (reset timestamps)
- * Requires ADMIN role due to potentially heavy operation
+ * No auth required - matches sync:triggerNow behavior for manual refresh
+ * This is an operational sync trigger that should be accessible from the UI
  */
 registerHandler(
   'sync:forceFullSync',
@@ -323,7 +324,7 @@ registerHandler(
 
     return createSuccessResponse(result);
   },
-  { requiresAuth: true, requiredRole: 'store_manager', description: 'Force full sync' }
+  { requiresAuth: false, description: 'Force full sync (reset timestamps and pull all data)' }
 );
 
 /**
@@ -2200,6 +2201,255 @@ registerHandler(
     );
   },
   { requiresAuth: true, description: 'Manually move item to Dead Letter Queue' }
+);
+
+/**
+ * Force process auto-dead-letter for all stuck items
+ *
+ * Runs the same logic as processSyncQueue but ONLY the DLQ processing part.
+ * Use when items are stuck and not being automatically dead-lettered.
+ *
+ * SEC-006: Uses parameterized queries via DAL
+ * DB-006: TENANT_ISOLATION - Query scoped to store
+ */
+registerHandler(
+  'sync:forceProcessDeadLetter',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+
+    // Get items that should be auto-dead-lettered
+    const itemsForDLQ = syncQueueDAL.getItemsForAutoDeadLetter(storeId);
+
+    if (itemsForDLQ.length === 0) {
+      return createSuccessResponse({
+        processed: 0,
+        message: 'No items eligible for auto-dead-letter',
+      });
+    }
+
+    // Build DLQ params with proper reason mapping
+    const dlqParams = itemsForDLQ.map((item) => ({
+      id: item.id,
+      reason: (item.error_category === 'STRUCTURAL'
+        ? 'STRUCTURAL_FAILURE'
+        : item.error_category === 'PERMANENT'
+          ? 'PERMANENT_ERROR'
+          : 'MAX_ATTEMPTS_EXCEEDED') as
+        | 'STRUCTURAL_FAILURE'
+        | 'PERMANENT_ERROR'
+        | 'MAX_ATTEMPTS_EXCEEDED',
+      errorCategory: (item.error_category || 'UNKNOWN') as
+        | 'TRANSIENT'
+        | 'PERMANENT'
+        | 'STRUCTURAL'
+        | 'UNKNOWN',
+      error: item.last_sync_error || undefined,
+    }));
+
+    const deadLetteredCount = syncQueueDAL.deadLetterMany(dlqParams);
+
+    log.warn('Force processed auto-dead-letter', {
+      storeId,
+      eligible: itemsForDLQ.length,
+      deadLettered: deadLetteredCount,
+    });
+
+    return createSuccessResponse({
+      eligible: itemsForDLQ.length,
+      deadLettered: deadLetteredCount,
+      message: `Moved ${deadLetteredCount} items to Dead Letter Queue`,
+    });
+  },
+  { requiresAuth: true, description: 'Force process auto-dead-letter for stuck items' }
+);
+
+/**
+ * Debug: Get queue state breakdown
+ *
+ * Returns detailed breakdown of what's in the queue to help diagnose issues.
+ * Shows counts by direction, status, error category, and sync attempts.
+ */
+registerHandler(
+  'sync:debugQueueState',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+    const db = getDatabase();
+
+    // Get breakdown by sync_direction and status
+    const byDirection = db
+      .prepare(
+        `
+      SELECT
+        COALESCE(sync_direction, 'PUSH') as direction,
+        CASE
+          WHEN synced = 1 THEN 'synced'
+          WHEN dead_lettered = 1 THEN 'dead_lettered'
+          WHEN sync_attempts >= max_attempts THEN 'failed'
+          ELSE 'queued'
+        END as status,
+        COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ?
+      GROUP BY direction, status
+    `
+      )
+      .all(storeId);
+
+    // Get breakdown by error_category for unsynced items
+    const byErrorCategory = db
+      .prepare(
+        `
+      SELECT
+        COALESCE(error_category, 'NULL') as category,
+        sync_attempts,
+        max_attempts,
+        COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
+      GROUP BY category, sync_attempts, max_attempts
+      ORDER BY count DESC
+      LIMIT 50
+    `
+      )
+      .all(storeId);
+
+    // Get items eligible for auto-dead-letter
+    const eligibleForDLQ = syncQueueDAL.getItemsForAutoDeadLetter(storeId);
+
+    // Get sample of stuck items (failed but not dead-lettered)
+    const stuckItems = db
+      .prepare(
+        `
+      SELECT id, entity_type, sync_direction, sync_attempts, max_attempts,
+             error_category, last_sync_error, created_at
+      FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND sync_attempts >= max_attempts
+      ORDER BY created_at ASC
+      LIMIT 20
+    `
+      )
+      .all(storeId);
+
+    return createSuccessResponse({
+      byDirection,
+      byErrorCategory,
+      eligibleForDLQ: eligibleForDLQ.length,
+      stuckItemsSample: stuckItems,
+    });
+  },
+  { requiresAuth: false, description: 'Debug: Get queue state breakdown' }
+);
+
+/**
+ * Force dead-letter ALL stuck PUSH items
+ *
+ * Nuclear option: Dead-letters ALL unsynced PUSH items that have exceeded max_attempts,
+ * regardless of error_category. Use when normal auto-dead-letter isn't working.
+ */
+registerHandler(
+  'sync:forceDeadLetterAllStuck',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const storeId = store.store_id;
+    const db = getDatabase();
+
+    // Get ALL stuck PUSH items (sync_attempts >= max_attempts, not synced, not dead-lettered)
+    const stuckItems = db
+      .prepare(
+        `
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND sync_attempts >= max_attempts
+    `
+      )
+      .all(storeId) as Array<{
+      id: string;
+      error_category: string | null;
+      last_sync_error: string | null;
+    }>;
+
+    if (stuckItems.length === 0) {
+      return createSuccessResponse({
+        deadLettered: 0,
+        message: 'No stuck PUSH items found',
+      });
+    }
+
+    // Dead-letter all of them
+    const dlqParams = stuckItems.map((item) => ({
+      id: item.id,
+      reason: 'MAX_ATTEMPTS_EXCEEDED' as const,
+      errorCategory: (item.error_category || 'UNKNOWN') as
+        | 'TRANSIENT'
+        | 'PERMANENT'
+        | 'STRUCTURAL'
+        | 'UNKNOWN',
+      error: item.last_sync_error || 'Force dead-lettered',
+    }));
+
+    const deadLetteredCount = syncQueueDAL.deadLetterMany(dlqParams);
+
+    log.warn('Force dead-lettered ALL stuck PUSH items', {
+      storeId,
+      found: stuckItems.length,
+      deadLettered: deadLetteredCount,
+    });
+
+    return createSuccessResponse({
+      found: stuckItems.length,
+      deadLettered: deadLetteredCount,
+      message: `Force dead-lettered ${deadLetteredCount} stuck items`,
+    });
+  },
+  { requiresAuth: true, description: 'Force dead-letter ALL stuck PUSH items' }
+);
+
+/**
+ * Cleanup stale PULL tracking items
+ *
+ * Removes old pending PULL items that accumulated before the reuse logic was added.
+ */
+registerHandler(
+  'sync:cleanupStalePullItems',
+  async () => {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    const deleted = syncQueueDAL.cleanupAllStalePullTracking(store.store_id, 1); // 1 minute old
+
+    log.info('Cleaned up stale PULL tracking items', {
+      storeId: store.store_id,
+      deleted,
+    });
+
+    return createSuccessResponse({
+      deleted,
+      message: `Deleted ${deleted} stale PULL tracking items`,
+    });
+  },
+  { requiresAuth: true, description: 'Cleanup stale PULL tracking items' }
 );
 
 log.info('Sync IPC handlers registered');

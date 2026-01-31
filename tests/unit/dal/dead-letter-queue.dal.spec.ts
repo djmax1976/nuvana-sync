@@ -865,13 +865,20 @@ describe('SyncQueueDAL - Dead Letter Queue Operations', () => {
       expect(result).toHaveLength(3);
     });
 
-    it('should exclude PULL tracking items', () => {
+    it('should include PULL tracking items for DLQ visibility', () => {
+      // BUG FIX: PULL items ARE included in auto-dead-letter
+      // Previously excluded PULL items would stay stuck forever with no visibility
+      // Now PULL items go to DLQ when they exceed retry attempts for troubleshooting
       mockPrepare.mockReturnValue({ all: vi.fn().mockReturnValue([]) });
 
       dal.getItemsForAutoDeadLetter('store-123');
 
       const query = mockPrepare.mock.calls[0][0];
-      expect(query).toContain("(sync_direction IS NULL OR sync_direction = 'PUSH')");
+      // Query should NOT exclude PULL items - all sync directions should be included
+      expect(query).not.toContain("sync_direction = 'PUSH'");
+      // Should still filter for unsynced, non-dead-lettered items
+      expect(query).toContain('synced = 0');
+      expect(query).toContain('dead_lettered = 0');
     });
 
     it('should only return unsynced, non-dead-lettered items', () => {

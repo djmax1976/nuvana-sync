@@ -754,6 +754,8 @@ export class SyncEngineService {
    * @returns Sync result statistics
    */
   private async processSyncQueue(storeId: string): Promise<SyncResult> {
+    log.info('Processing sync queue - checking for DLQ candidates', { storeId });
+
     // Reset items stuck in backoff for more than 2 minutes
     // This prevents items from being perpetually delayed when cloud recovers
     // Runs every sync cycle, not just at startup
@@ -772,6 +774,23 @@ export class SyncEngineService {
     // or have exceeded the absolute limit (max_attempts * 2) are dead-lettered
     // NOTE: We no longer auto-reset failed items - they go to DLQ instead
     const itemsForDLQ = syncQueueDAL.getItemsForAutoDeadLetter(storeId);
+
+    // DEBUG: Log PULL items specifically for troubleshooting
+    const pullItems = itemsForDLQ.filter((item) => item.entity_id.startsWith('pull-'));
+    if (pullItems.length > 0) {
+      log.info('PULL items found for auto-DLQ', {
+        count: pullItems.length,
+        items: pullItems.map((item) => ({
+          id: item.id,
+          entity_id: item.entity_id,
+          entity_type: item.entity_type,
+          sync_attempts: item.sync_attempts,
+          max_attempts: item.max_attempts,
+          error_category: item.error_category,
+        })),
+      });
+    }
+
     if (itemsForDLQ.length > 0) {
       const dlqParams = itemsForDLQ.map((item) => ({
         id: item.id,
@@ -785,6 +804,20 @@ export class SyncEngineService {
       }));
 
       const deadLetteredCount = syncQueueDAL.deadLetterMany(dlqParams);
+
+      // DEBUG: Log the result of deadLetterMany including PULL items
+      log.info('DLQ processing result', {
+        storeId,
+        itemsFound: itemsForDLQ.length,
+        itemsDeadLettered: deadLetteredCount,
+        pullItemsCount: pullItems.length,
+        dlqParams: dlqParams.map((p) => ({
+          id: p.id,
+          reason: p.reason,
+          errorCategory: p.errorCategory,
+        })),
+      });
+
       if (deadLetteredCount > 0) {
         log.warn('Items moved to Dead Letter Queue', {
           storeId,
@@ -2324,21 +2357,59 @@ export class SyncEngineService {
    * entity_ids. If previous sessions had failed PULLs or the app crashed, these
    * items accumulate and appear as stuck "pending" items in the UI.
    *
-   * This cleanup removes all PULL tracking items older than 10 minutes since
-   * they are purely for UI tracking and will never be retried (PULL operations
-   * always create new tracking items).
+   * This method:
+   * 1. Dead-letters ALL PULL items with sync_attempts >= 1 (they already failed)
+   * 2. Deletes old PULL items with sync_attempts = 0 (never tried, stale)
+   *
+   * Business rule: Users, Bins, Games PULL sync items should immediately
+   * go to DLQ on any error (no retry attempts).
    */
   private cleanupStalePullTrackingAtStartup(): void {
     try {
       const store = storesDAL.getConfiguredStore();
-      if (store) {
-        const deleted = syncQueueDAL.cleanupAllStalePullTracking(store.store_id, 10);
-        if (deleted > 0) {
-          log.info('Cleaned up stale PULL tracking items at startup', {
-            storeId: store.store_id,
-            deletedCount: deleted,
-          });
-        }
+      if (!store) return;
+
+      const storeId = store.store_id;
+
+      // CRITICAL FIX: Dead-letter ALL PULL items with sync_attempts >= 1
+      // These are items that already failed but weren't dead-lettered
+      // (from before the DLQ fix was implemented)
+      const pullItemsToDeadLetter = syncQueueDAL.getPullItemsWithAttempts(storeId);
+
+      if (pullItemsToDeadLetter.length > 0) {
+        log.info('Found PULL items with attempts to dead-letter at startup', {
+          storeId,
+          count: pullItemsToDeadLetter.length,
+          items: pullItemsToDeadLetter.map((item) => ({
+            id: item.id,
+            entity_type: item.entity_type,
+            entity_id: item.entity_id,
+            sync_attempts: item.sync_attempts,
+          })),
+        });
+
+        const dlqParams = pullItemsToDeadLetter.map((item) => ({
+          id: item.id,
+          reason: 'MAX_ATTEMPTS_EXCEEDED' as DeadLetterReason,
+          errorCategory: (item.error_category || 'UNKNOWN') as ErrorCategory,
+          error: item.last_sync_error || 'PULL item dead-lettered at startup',
+        }));
+
+        const deadLetteredCount = syncQueueDAL.deadLetterMany(dlqParams);
+        log.warn('Dead-lettered PULL items at startup (no retries for PULL sync)', {
+          storeId,
+          requested: pullItemsToDeadLetter.length,
+          deadLettered: deadLetteredCount,
+        });
+      }
+
+      // Also clean up stale PULL items with 0 attempts (never tried, just cruft)
+      const deleted = syncQueueDAL.cleanupAllStalePullTracking(storeId, 10);
+      if (deleted > 0) {
+        log.info('Cleaned up stale PULL tracking items at startup', {
+          storeId,
+          deletedCount: deleted,
+        });
       }
     } catch (error) {
       log.warn('Failed to cleanup stale PULL tracking items', {

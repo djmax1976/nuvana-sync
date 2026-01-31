@@ -866,11 +866,28 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
       bins: bins,
     });
 
+    // SERIAL CARRYFORWARD DEBUG: Check what's in lottery_day_packs
+    const dayPacksDebug = this.db.prepare(`
+      SELECT ldp.pack_id, ldp.starting_serial, ldp.ending_serial, lbd.status as day_status, lbd.business_date
+      FROM lottery_day_packs ldp
+      JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
+      WHERE lbd.store_id = ?
+      ORDER BY lbd.business_date DESC
+      LIMIT 10
+    `);
+    const dayPacks = dayPacksDebug.all(storeId);
+    log.info('[DAYBINS DEBUG] Recent day packs (carryforward source)', {
+      storeId,
+      count: dayPacks.length,
+      dayPacks: dayPacks,
+    });
+
     // SEC-006: Parameterized query prevents SQL injection
     // DB-006: Tenant isolation enforced by store_id filter on both bins AND packs
     // Performance: Single query with indexed JOINs, bounded result set
     // v029 API Alignment: Uses current_bin_id for JOIN
     // Cloud-aligned: uses name, display_order, is_active
+    // SERIAL CARRYFORWARD: Subquery gets previous day's ending_serial as today's starting
     const stmt = this.db.prepare(`
       SELECT
         b.bin_id,
@@ -885,7 +902,16 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
         p.activated_at,
         g.name as game_name,
         COALESCE(g.price, 0) as game_price,
-        COALESCE(g.tickets_per_pack, 300) as tickets_per_pack
+        COALESCE(g.tickets_per_pack, 300) as tickets_per_pack,
+        -- Get the most recent ending_serial from the last CLOSED day for this pack
+        -- This becomes today's starting_serial (serial carryforward)
+        (SELECT ldp.ending_serial
+         FROM lottery_day_packs ldp
+         JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
+         WHERE ldp.pack_id = p.pack_id
+           AND lbd.status = 'CLOSED'
+         ORDER BY lbd.closed_at DESC
+         LIMIT 1) AS prev_ending_serial
       FROM lottery_bins b
       LEFT JOIN lottery_packs p ON p.current_bin_id = b.bin_id
         AND p.status = 'ACTIVE'
@@ -910,7 +936,24 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
       game_name: string | null;
       game_price: number;
       tickets_per_pack: number;
+      prev_ending_serial: string | null; // From last CLOSED day's lottery_day_packs
     }>;
+
+    // SERIAL CARRYFORWARD DEBUG: Log what the query found for each pack
+    const packsWithSerials = rows
+      .filter((r) => r.pack_id)
+      .map((r) => ({
+        pack_id: r.pack_id,
+        pack_number: r.pack_number,
+        opening_serial: r.opening_serial,
+        prev_ending_serial: r.prev_ending_serial,
+        effective_starting: r.prev_ending_serial || r.opening_serial || '000',
+      }));
+    if (packsWithSerials.length > 0) {
+      log.info('[DAYBINS DEBUG] Serial carryforward lookup results', {
+        packsWithSerials,
+      });
+    }
 
     // Transform to structured response
     return rows.map((row) => {
@@ -930,12 +973,13 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
               pack_number: row.pack_number || '',
               game_name: row.game_name || 'Unknown Game',
               game_price: row.game_price,
-              // Use actual opening_serial from pack, fallback to '000' only if null
-              starting_serial: row.opening_serial || '000',
+              // SERIAL CARRYFORWARD: Use previous day's ending_serial as today's starting
+              // Priority: prev_ending_serial (from last closed day) > opening_serial > '000'
+              starting_serial: row.prev_ending_serial || row.opening_serial || '000',
               ending_serial: row.closing_serial,
               serial_end: serialEnd,
-              // First period if no prior closing serial exists
-              is_first_period: row.closing_serial === null,
+              // First period if no prior closed day exists for this pack
+              is_first_period: row.prev_ending_serial === null,
               status: row.pack_status || 'ACTIVE',
               activated_at: row.activated_at,
             }
