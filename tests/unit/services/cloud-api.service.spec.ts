@@ -10,7 +10,7 @@ import { clearMockStoreData } from '../../setup';
 // Use global for shared state to avoid hoisting issues
 declare global {
   // eslint-disable-next-line no-var
-  var __mockStoreData: Map<string, unknown>;
+  var __mockStoreData: Map<string, unknown> | undefined;
 }
 
 globalThis.__mockStoreData = new Map<string, unknown>();
@@ -45,7 +45,7 @@ vi.mock('electron-store', () => {
       private store: Map<string, unknown>;
 
       constructor() {
-        this.store = globalThis.__mockStoreData;
+        this.store = globalThis.__mockStoreData!;
       }
 
       get(key: string) {
@@ -111,9 +111,9 @@ describe('CloudApiService', () => {
     mockFetch.mockReset();
 
     // Set up mock store data
-    globalThis.__mockStoreData.clear();
-    globalThis.__mockStoreData.set('apiUrl', 'https://api.nuvanaapp.com');
-    globalThis.__mockStoreData.set('encryptedApiKey', Array.from(Buffer.from('encrypted-key')));
+    globalThis.__mockStoreData!.clear();
+    globalThis.__mockStoreData!.set('apiUrl', 'https://api.nuvanaapp.com');
+    globalThis.__mockStoreData!.set('encryptedApiKey', Array.from(Buffer.from('encrypted-key')));
 
     service = new CloudApiService();
   });
@@ -733,9 +733,9 @@ describe('CloudApiService', () => {
   describe('HTTPS enforcement', () => {
     it('should allow HTTPS URL', async () => {
       // Verify HTTPS URLs work normally
-      globalThis.__mockStoreData.clear();
-      globalThis.__mockStoreData.set('apiUrl', 'https://api.nuvanaapp.com');
-      globalThis.__mockStoreData.set('encryptedApiKey', Array.from(Buffer.from('encrypted-key')));
+      globalThis.__mockStoreData!.clear();
+      globalThis.__mockStoreData!.set('apiUrl', 'https://api.nuvanaapp.com');
+      globalThis.__mockStoreData!.set('encryptedApiKey', Array.from(Buffer.from('encrypted-key')));
 
       mockFetch.mockResolvedValue({
         ok: true,
