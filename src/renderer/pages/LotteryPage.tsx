@@ -1,7 +1,7 @@
-import { useState, useMemo, useCallback } from 'react';
+import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useClientAuth } from '@/contexts/ClientAuthContext';
 import { useClientDashboard } from '@/lib/api/client-dashboard';
-import { Loader2, AlertCircle, Plus, Zap, PenLine, X, Save } from 'lucide-react';
+import { Loader2, AlertCircle, Plus, Zap, PenLine, X, Save, CalendarCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   useLotteryPacks,
@@ -9,6 +9,8 @@ import {
   usePackDetails,
   useInvalidateLottery,
   useLotteryDayBins,
+  useDayStatus,
+  useInitializeBusinessDay,
 } from '@/hooks/useLottery';
 import { DayBinsTable, type BinValidationError } from '@/components/lottery/DayBinsTable';
 import { validateManualEntryEnding } from '@/lib/services/lottery-closing-validation';
@@ -149,13 +151,101 @@ export default function LotteryManagementPage() {
     dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
     dashboardData?.stores[0]?.store_id;
 
+  // Check day status FIRST - determines if initialization is needed
+  const {
+    data: dayStatus,
+    isLoading: dayStatusLoading,
+    isError: dayStatusError,
+  } = useDayStatus({ enabled: !!storeId });
+
+  // Mutation for initializing business day
+  const initializeBusinessDayMutation = useInitializeBusinessDay();
+
+  // Ref to prevent duplicate auto-initialization calls
+  const autoInitTriggeredRef = useRef(false);
+
+  /**
+   * Auto-initialization effect for subsequent days (after day close)
+   *
+   * Enterprise workflow:
+   * - First ever day: Show initialization screen (user must click button)
+   * - Subsequent days: Auto-create when navigating to lottery page
+   *
+   * This effect triggers when:
+   * 1. No OPEN day exists (needs_initialization: true)
+   * 2. Previous days exist (is_first_ever: false)
+   * 3. Prerequisites are met (bins and games configured)
+   * 4. User is authenticated
+   * 5. Not already in progress
+   *
+   * @security SEC-010: Requires authenticated user (checked via isAuthenticated)
+   * @security SEC-017: Audit trail maintained by initializeBusinessDay mutation
+   */
+  useEffect(() => {
+    // Guard: Only proceed if we have day status data
+    if (!dayStatus) return;
+
+    // Guard: Only auto-initialize when:
+    // - Initialization is needed (no OPEN day)
+    // - This is NOT the first-ever day (has history)
+    // - Prerequisites are met
+    // - User is authenticated
+    // - Not already triggered or in progress
+    const shouldAutoInit =
+      dayStatus.needs_initialization &&
+      dayStatus.is_first_ever === false &&
+      dayStatus.prerequisites.has_bins &&
+      dayStatus.prerequisites.has_games &&
+      isAuthenticated &&
+      !autoInitTriggeredRef.current &&
+      !initializeBusinessDayMutation.isPending;
+
+    if (shouldAutoInit) {
+      // Mark as triggered to prevent duplicate calls
+      autoInitTriggeredRef.current = true;
+
+      // Auto-initialize the business day
+      initializeBusinessDayMutation.mutate(undefined, {
+        onSuccess: (response) => {
+          if (response.success && response.data) {
+            toast({
+              title: 'Business Day Started',
+              description: `Business day for ${response.data.day.business_date} has been initialized automatically.`,
+            });
+          }
+        },
+        onError: (error) => {
+          // Reset the ref so user can retry manually
+          autoInitTriggeredRef.current = false;
+          toast({
+            title: 'Auto-initialization Failed',
+            description:
+              error instanceof Error ? error.message : 'Failed to initialize business day.',
+            variant: 'destructive',
+          });
+        },
+      });
+    }
+  }, [dayStatus, isAuthenticated, initializeBusinessDayMutation, toast]);
+
+  // Reset auto-init ref when day status changes to has_open_day
+  // This ensures the ref is fresh for the next day cycle
+  useEffect(() => {
+    if (dayStatus?.has_open_day) {
+      autoInitTriggeredRef.current = false;
+    }
+  }, [dayStatus?.has_open_day]);
+
+  // Only fetch day bins if a day exists (not needs_initialization)
+  const shouldFetchDayBins = !!storeId && dayStatus?.has_open_day === true;
+
   // Fetch day bins data for the new table view
   const {
     data: dayBinsData,
     isLoading: dayBinsLoading,
     isError: dayBinsError,
     error: dayBinsErrorObj,
-  } = useLotteryDayBins(storeId);
+  } = useLotteryDayBins(storeId, undefined, { enabled: shouldFetchDayBins });
 
   // Fetch lottery packs for checking if there are RECEIVED packs (for button state)
   const { data: packs } = useLotteryPacks(storeId, { status: 'RECEIVED' });
@@ -522,6 +612,50 @@ export default function LotteryManagementPage() {
   }, [manualEntryState.isActive, dayBinsData?.bins, manualEndingValues, validationErrors]);
 
   /**
+   * Format the day started timestamp for display
+   * SEC-014: Validates date format before processing
+   * FE-001: Uses React JSX for safe rendering (auto-escaping)
+   * API-008: Only displays whitelisted fields (opened_at)
+   */
+  const formattedDayStarted = useMemo(() => {
+    // Get opened_at from dayStatus (available after initialization check passes)
+    const openedAt = dayStatus?.day?.opened_at;
+
+    // SEC-014: Strict validation - must be a non-empty string
+    if (!openedAt || typeof openedAt !== 'string') {
+      return null;
+    }
+
+    // SEC-014: Validate ISO 8601 date format before parsing
+    const isoDatePattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
+    if (!isoDatePattern.test(openedAt)) {
+      return null;
+    }
+
+    try {
+      const date = new Date(openedAt);
+
+      // Validate the parsed date is valid
+      if (isNaN(date.getTime())) {
+        return null;
+      }
+
+      // Format: "Feb 1, 2026 7:32 PM"
+      return date.toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+        hour: 'numeric',
+        minute: '2-digit',
+        hour12: true,
+      });
+    } catch {
+      // Defensive: return null on any parsing error
+      return null;
+    }
+  }, [dayStatus?.day?.opened_at]);
+
+  /**
    * Handle Close Day in manual entry mode
    * Submits the manually entered ending serial numbers
    */
@@ -579,6 +713,45 @@ export default function LotteryManagementPage() {
       setIsSubmittingManualClose(false);
     }
   }, [canCloseManualEntry, storeId, dayBinsData?.bins, manualEndingValues, invalidateAll, toast]);
+
+  /**
+   * Handle Initialize Business Day button click
+   * Requires authentication via PIN if not already logged in
+   */
+  const handleInitializeBusinessDay = useCallback(() => {
+    executeWithAuth(
+      () => {
+        // Session valid - initialize the day
+        initializeBusinessDayMutation.mutate(undefined, {
+          onSuccess: (response) => {
+            if (response.success && response.data) {
+              toast({
+                title: 'Business Day Started',
+                description: `Business day for ${response.data.day.business_date} has been initialized.`,
+              });
+              setSuccessMessage(
+                'Business day initialized successfully. You can now receive and activate lottery packs.'
+              );
+              setTimeout(() => setSuccessMessage(null), 5000);
+            }
+          },
+          onError: (error) => {
+            toast({
+              title: 'Initialization Failed',
+              description:
+                error instanceof Error ? error.message : 'Failed to initialize business day.',
+              variant: 'destructive',
+            });
+          },
+        });
+      },
+      () => {
+        // Session invalid - show PIN dialog for initialization
+        // For now, use the reception PIN dialog pattern
+        setReceptionPinDialogOpen(true);
+      }
+    );
+  }, [executeWithAuth, initializeBusinessDayMutation, toast]);
 
   // ============ RENDER ============
   // Loading state - waiting for auth or dashboard data
@@ -638,6 +811,198 @@ export default function LotteryManagementPage() {
     );
   }
 
+  // Day status loading
+  if (dayStatusLoading) {
+    return (
+      <div className="space-y-6" data-testid="lottery-management-page">
+        <div className="space-y-1">
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
+          <p className="text-muted-foreground">Checking business day status...</p>
+        </div>
+        <div className="flex items-center justify-center p-8">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
+  }
+
+  // Day status error
+  if (dayStatusError) {
+    return (
+      <div className="space-y-6" data-testid="lottery-management-page">
+        <div className="space-y-1">
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
+          <p className="text-destructive">Failed to check business day status</p>
+        </div>
+        <div className="rounded-lg border border-destructive bg-destructive/10 p-4">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="h-5 w-5 text-destructive" />
+            <p className="text-sm font-medium text-destructive">Error loading day status</p>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  // Auto-initializing state: Show loading when auto-initialization is in progress
+  // This happens when needs_initialization is true but is_first_ever is false
+  // The useEffect above handles the actual auto-initialization
+  if (
+    dayStatus?.needs_initialization &&
+    dayStatus?.is_first_ever === false &&
+    dayStatus?.prerequisites.has_bins &&
+    dayStatus?.prerequisites.has_games
+  ) {
+    return (
+      <div className="space-y-6" data-testid="lottery-management-page">
+        <div className="space-y-1">
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
+          <p className="text-muted-foreground">Starting new business day...</p>
+        </div>
+        <div className="flex flex-col items-center justify-center p-8 space-y-4">
+          <Loader2 className="h-8 w-8 animate-spin text-primary" />
+          <p className="text-sm text-muted-foreground">
+            Automatically starting the next business day...
+          </p>
+        </div>
+      </div>
+    );
+  }
+
+  // First-ever Business Day Initialization Required
+  // This screen only shows when is_first_ever is true (no lottery history exists)
+  if (dayStatus?.needs_initialization && dayStatus?.is_first_ever === true) {
+    const { prerequisites } = dayStatus;
+
+    return (
+      <div className="space-y-6" data-testid="lottery-management-page">
+        <div className="space-y-1">
+          <h1 className="text-heading-2 font-bold text-foreground">Lottery Management</h1>
+          <p className="text-muted-foreground">
+            Initialize your first business day to start lottery operations
+          </p>
+        </div>
+
+        {/* Success Message */}
+        {successMessage && (
+          <Alert
+            className="border-green-500/50 bg-green-50 dark:bg-green-950/20"
+            data-testid="success-message"
+          >
+            <CheckCircle2 className="h-4 w-4 text-green-600" />
+            <AlertDescription>{successMessage}</AlertDescription>
+          </Alert>
+        )}
+
+        <div className="rounded-lg border bg-card p-8">
+          <div className="flex flex-col items-center justify-center space-y-6">
+            <div className="rounded-full bg-primary/10 p-4">
+              <CalendarCheck className="h-12 w-12 text-primary" />
+            </div>
+
+            <div className="text-center space-y-2">
+              <h2 className="text-xl font-semibold">Start Your First Business Day</h2>
+              <p className="text-muted-foreground max-w-md">
+                Welcome to lottery management! Before you can receive or activate lottery packs, you
+                need to initialize your first business day. This is a one-time setup that creates an
+                official record of when lottery operations began at this store.
+              </p>
+            </div>
+
+            {/* Prerequisites Status */}
+            <div className="w-full max-w-sm space-y-2">
+              <div className="flex items-center justify-between text-sm">
+                <span>Lottery Bins Configured</span>
+                <span className={prerequisites.has_bins ? 'text-green-600' : 'text-destructive'}>
+                  {prerequisites.has_bins ? `✓ ${prerequisites.bins_count} bins` : '✗ No bins'}
+                </span>
+              </div>
+              <div className="flex items-center justify-between text-sm">
+                <span>Lottery Games Configured</span>
+                <span className={prerequisites.has_games ? 'text-green-600' : 'text-destructive'}>
+                  {prerequisites.has_games ? `✓ ${prerequisites.games_count} games` : '✗ No games'}
+                </span>
+              </div>
+            </div>
+
+            {/* Initialization Button */}
+            <Button
+              size="lg"
+              onClick={handleInitializeBusinessDay}
+              disabled={
+                !prerequisites.has_bins ||
+                !prerequisites.has_games ||
+                initializeBusinessDayMutation.isPending
+              }
+              className="min-w-[200px]"
+            >
+              {initializeBusinessDayMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Initializing...
+                </>
+              ) : (
+                <>
+                  <CalendarCheck className="mr-2 h-4 w-4" />
+                  Start First Business Day
+                </>
+              )}
+            </Button>
+
+            {/* Missing Prerequisites Warning */}
+            {(!prerequisites.has_bins || !prerequisites.has_games) && (
+              <Alert className="max-w-md">
+                <AlertCircle className="h-4 w-4" />
+                <AlertDescription>
+                  {!prerequisites.has_bins && !prerequisites.has_games
+                    ? 'No lottery bins or games are configured. Please sync from cloud first.'
+                    : !prerequisites.has_bins
+                      ? 'No lottery bins are configured. Please sync bins from cloud first.'
+                      : 'No lottery games are configured. Please sync games from cloud first.'}
+                </AlertDescription>
+              </Alert>
+            )}
+          </div>
+        </div>
+
+        {/* PIN Verification Dialog for Initialization */}
+        <PinVerificationDialog
+          open={receptionPinDialogOpen}
+          onClose={() => setReceptionPinDialogOpen(false)}
+          onVerified={(user) => {
+            setReceptionPinDialogOpen(false);
+            // After PIN verification, trigger initialization
+            initializeBusinessDayMutation.mutate(undefined, {
+              onSuccess: (response) => {
+                if (response.success && response.data) {
+                  toast({
+                    title: 'Business Day Started',
+                    description: `Business day for ${response.data.day.business_date} has been initialized.`,
+                  });
+                  setSuccessMessage(
+                    'Business day initialized successfully. You can now receive and activate lottery packs.'
+                  );
+                  setTimeout(() => setSuccessMessage(null), 5000);
+                }
+              },
+              onError: (error) => {
+                toast({
+                  title: 'Initialization Failed',
+                  description:
+                    error instanceof Error ? error.message : 'Failed to initialize business day.',
+                  variant: 'destructive',
+                });
+              },
+            });
+          }}
+          requiredRole="cashier"
+          title="Verify PIN to Start Business Day"
+          description="Enter your PIN to initialize today's business day."
+        />
+      </div>
+    );
+  }
+
   // Convert pack details to modal format
   // Note: Map from API response types to modal types
   // LotteryPackDetailResponse uses opening_serial/closing_serial, depleted_at
@@ -673,8 +1038,19 @@ export default function LotteryManagementPage() {
 
   return (
     <div className="space-y-6" data-testid="lottery-management-page">
-      {/* Header */}
-      <div className="flex items-center justify-end">
+      {/* Header - Day info on left, action buttons on right */}
+      <div className="flex items-center justify-between">
+        {/* Left side: Day started info */}
+        <div className="flex items-center gap-2 text-sm text-muted-foreground">
+          {formattedDayStarted && (
+            <>
+              <CalendarCheck className="h-4 w-4" />
+              <span data-testid="day-started-info">Day started: {formattedDayStarted}</span>
+            </>
+          )}
+        </div>
+
+        {/* Right side: Action buttons */}
         <div className="flex flex-wrap gap-2">
           <Button
             onClick={handleReceivePackClick}

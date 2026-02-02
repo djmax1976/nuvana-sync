@@ -1,0 +1,56 @@
+-- ============================================================================
+-- Migration v047: Add day_open entity type to sync queue whitelist
+-- ============================================================================
+--
+-- Purpose: Document the addition of 'day_open' as a valid sync entity type.
+-- This enables the sync engine to push day open events to the cloud API.
+--
+-- Background:
+-- The day close sync was failing because the cloud had no business day to close.
+-- The cloud implemented a new endpoint POST /api/v1/sync/lottery/day/open that
+-- the desktop must call to create/open a day on the cloud BEFORE attempting
+-- to close it.
+--
+-- Required Flow:
+--   Local: Open Day -> Queue day_open sync -> Cloud creates OPEN day
+--   Local: Close Day -> Queue day_close sync -> Cloud closes the day (SUCCESS)
+--
+-- Cloud API Endpoint:
+--   POST /api/v1/sync/lottery/day/open
+--   See: myfiles/replica_end_points.md lines 2408-2465
+--
+-- Changes:
+-- NO DATABASE SCHEMA CHANGES REQUIRED.
+-- The entity_type column in sync_queue is TEXT, not an enum.
+-- Validation is performed in the TypeScript application layer:
+--   - src/shared/types/sync.types.ts: ValidSyncEntityTypeSchema enum
+--   - src/shared/types/sync.types.ts: VALID_SYNC_ENTITY_TYPES array
+--
+-- Application Layer Changes (not in this SQL file):
+-- 1. Added 'day_open' to ValidSyncEntityTypeSchema in sync.types.ts
+-- 2. Added 'day_open' to VALID_SYNC_ENTITY_TYPES array in sync.types.ts
+-- 3. Added routing case in sync-engine.service.ts pushBatch() method
+-- 4. Implemented pushDayOpenBatch() method in sync-engine.service.ts
+-- 5. Added endpoint mapping in getEndpointForEntityType()
+--
+-- Security Compliance:
+-- - SEC-006: No SQL injection risk (no user input in this migration)
+-- - DB-006: Tenant isolation maintained via store_id in sync_queue
+-- - API-001: Input validation via Zod schemas in TypeScript layer
+-- - SEC-017: Audit logging for sync operations in cloud-api.service.ts
+--
+-- Priority:
+-- day_open items should be queued with priority 2 (same as day_close)
+-- to ensure days are opened on cloud before any operations that reference them.
+--
+-- ============================================================================
+
+-- This migration is documentation-only.
+-- No SQL statements are executed.
+-- The entity_type column accepts any TEXT value; validation is in TypeScript.
+
+SELECT 1; -- No-op statement to satisfy migration runner
+
+-- ============================================================================
+-- End of Migration v047
+-- ============================================================================

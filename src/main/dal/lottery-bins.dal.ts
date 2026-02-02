@@ -976,7 +976,10 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
               // SERIAL CARRYFORWARD: Use previous day's ending_serial as today's starting
               // Priority: prev_ending_serial (from last closed day) > opening_serial > '000'
               starting_serial: row.prev_ending_serial || row.opening_serial || '000',
-              ending_serial: row.closing_serial,
+              // ending_serial should be null for ACTIVE packs during open day
+              // Users enter the ending serial during day close - don't pre-populate
+              // lottery_packs.closing_serial is only set when pack is depleted
+              ending_serial: row.pack_status === 'ACTIVE' ? null : row.closing_serial,
               serial_end: serialEnd,
               // First period if no prior closed day exists for this pack
               is_first_period: row.prev_ending_serial === null,

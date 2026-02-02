@@ -193,6 +193,7 @@ export function validateSyncStats(data: unknown): SyncStats {
  * - pack: /api/v1/sync/lottery/packs/receive, activate, deplete, return, move
  * - shift_opening: /api/v1/sync/lottery/shift/open
  * - shift_closing: /api/v1/sync/lottery/shift/close
+ * - day_open: /api/v1/sync/lottery/day/open
  * - day_close: /api/v1/sync/lottery/day/prepare-close, commit-close, cancel-close
  * - variance_approval: /api/v1/sync/lottery/variances/approve
  *
@@ -208,6 +209,7 @@ export const ValidSyncEntityTypeSchema = z.enum([
   'pack',
   'shift_opening',
   'shift_closing',
+  'day_open',
   'day_close',
   'variance_approval',
   'transaction',
@@ -223,6 +225,7 @@ export const VALID_SYNC_ENTITY_TYPES: readonly ValidSyncEntityType[] = [
   'pack',
   'shift_opening',
   'shift_closing',
+  'day_open',
   'day_close',
   'variance_approval',
   'transaction',

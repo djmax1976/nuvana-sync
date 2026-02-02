@@ -165,20 +165,42 @@ vi.mock('electron-store', () => ({
 }));
 
 // Hoist mock for pushShift and pack operations to enable test control
-const { mockPushShift, mockPushEmployees, mockPushPackDeplete, mockPushPackReturn } = vi.hoisted(
-  () => ({
-    mockPushShift: vi.fn(),
-    mockPushEmployees: vi.fn(),
-    // Phase 10: Controllable pack operation mocks
-    mockPushPackDeplete: vi.fn(),
-    mockPushPackReturn: vi.fn(),
-  })
-);
+const {
+  mockPushShift,
+  mockPushEmployees,
+  mockPushPackDeplete,
+  mockPushPackReturn,
+  // v047: Day close two-phase commit mocks
+  mockPrepareDayClose,
+  mockCommitDayClose,
+  mockCancelDayClose,
+  // v048: Cloud day_id resolution mocks
+  mockPullDayStatus,
+  mockDayFindById,
+  // day_open_push: Day open push mock
+  mockPushDayOpen,
+} = vi.hoisted(() => ({
+  mockPushShift: vi.fn(),
+  mockPushEmployees: vi.fn(),
+  // Phase 10: Controllable pack operation mocks
+  mockPushPackDeplete: vi.fn(),
+  mockPushPackReturn: vi.fn(),
+  // v047: Day close two-phase commit mocks
+  mockPrepareDayClose: vi.fn(),
+  mockCommitDayClose: vi.fn(),
+  mockCancelDayClose: vi.fn(),
+  // v048: Cloud day_id resolution mocks
+  mockPullDayStatus: vi.fn(),
+  mockDayFindById: vi.fn(),
+  // day_open_push: Day open push mock
+  mockPushDayOpen: vi.fn(),
+}));
 
 // Mock cloud-api.service to prevent real API calls during tests
 // Pack sync operations use cloudApiService directly, this mock enables
 // testing pack routing and failure handling without API configuration
 // Phase 10: pushPackDeplete and pushPackReturn now use controllable mocks
+// v047: Day close two-phase commit mocks added
 vi.mock('../../../src/main/services/cloud-api.service', () => ({
   cloudApiService: {
     pushPackReceive: vi.fn().mockRejectedValue(new Error('API key not configured')),
@@ -189,6 +211,21 @@ vi.mock('../../../src/main/services/cloud-api.service', () => ({
     healthCheck: vi.fn().mockResolvedValue({ success: true }),
     pushShift: mockPushShift,
     pushEmployees: mockPushEmployees,
+    // v047: Day close two-phase commit methods
+    prepareDayClose: mockPrepareDayClose,
+    commitDayClose: mockCommitDayClose,
+    cancelDayClose: mockCancelDayClose,
+    // v048: Cloud day_id resolution
+    pullDayStatus: mockPullDayStatus,
+    // day_open_push: Day open push method
+    pushDayOpen: mockPushDayOpen,
+  },
+}));
+
+// v048: Mock lotteryBusinessDaysDAL for cloud day_id resolution
+vi.mock('../../../src/main/dal/lottery-business-days.dal', () => ({
+  lotteryBusinessDaysDAL: {
+    findById: mockDayFindById,
   },
 }));
 
@@ -244,6 +281,15 @@ describe('SyncEngineService', () => {
       ticket_price: 1.0,
       active: true,
     });
+    // v047: Default mocks for day close two-phase commit
+    // Default to rejection to simulate "API not configured" for non-day-close tests
+    mockPrepareDayClose.mockRejectedValue(new Error('API key not configured'));
+    mockCommitDayClose.mockRejectedValue(new Error('API key not configured'));
+    mockCancelDayClose.mockRejectedValue(new Error('API key not configured'));
+    // v048: Default mocks for cloud day_id resolution
+    // By default, return null (no cloud day) for non-day-close tests
+    mockDayFindById.mockReturnValue(null);
+    mockPullDayStatus.mockRejectedValue(new Error('API key not configured'));
     service = new SyncEngineService();
   });
 
@@ -2526,8 +2572,11 @@ describe('SyncEngineService', () => {
       service.start();
       await vi.advanceTimersByTimeAsync(100);
 
-      // Should be marked as synced
-      expect(mockMarkSynced).toHaveBeenCalledWith('queue-pack-success', undefined);
+      // Should be marked as synced with apiContext
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-pack-success', {
+        api_endpoint: '/api/v1/sync/lottery/packs/deplete',
+        http_status: 200,
+      });
     });
 
     it('should NOT use hardcoded SOLD_OUT value', async () => {
@@ -3173,8 +3222,11 @@ describe('SyncEngineService', () => {
       service.start();
       await vi.advanceTimersByTimeAsync(100);
 
-      // Should be marked as synced
-      expect(mockMarkSynced).toHaveBeenCalledWith('queue-pack-return-success', undefined);
+      // Should be marked as synced with apiContext
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-pack-return-success', {
+        api_endpoint: '/api/v1/sync/lottery/packs/return',
+        http_status: 200,
+      });
     });
 
     it('should increment attempts on API failure', async () => {
@@ -3668,6 +3720,1190 @@ describe('SyncEngineService', () => {
 
           service.stop();
         }
+      });
+    });
+  });
+
+  // ==========================================================================
+  // T3.2.1: Day Close Two-Phase Commit Sync Tests (v047 - Phase 3)
+  // Tests for pushDayCloseBatch processing of day_close entity type
+  // ==========================================================================
+  describe('T3.2.1: pushDayCloseBatch processes queued items', () => {
+    it('should call prepareDayClose for PREPARE operation', async () => {
+      // v048: Set up cloud day_id resolution mocks
+      mockDayFindById.mockReturnValue({
+        day_id: 'local-day-123',
+        business_date: '2024-01-15',
+        store_id: 'store-123',
+        status: 'CLOSED',
+      });
+      mockPullDayStatus.mockResolvedValue({
+        dayStatus: {
+          day_id: 'cloud-day-abc', // Cloud's day_id
+          business_date: '2024-01-15',
+          status: 'OPEN', // Must be OPEN for prepare-close
+        },
+        syncMetadata: { lastSequence: 1, hasMore: false, totalCount: 1 },
+      });
+      mockPrepareDayClose.mockResolvedValue({
+        success: true,
+        day_id: 'cloud-day-abc',
+        status: 'PENDING_CLOSE',
+        expires_at: '2024-01-15T21:00:00Z',
+        warnings: [],
+        server_time: '2024-01-15T20:00:00Z',
+      });
+
+      const dayCloseItem = {
+        id: 'queue-day-close-1',
+        entity_id: 'local-day-123',
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'CREATE',
+        payload: JSON.stringify({
+          operation_type: 'PREPARE',
+          day_id: 'local-day-123', // Local day_id - will be resolved to cloud's day_id
+          store_id: 'store-123',
+          closings: [
+            { pack_id: 'pack-1', ending_serial: '150', bin_id: 'bin-1' },
+            { pack_id: 'pack-2', ending_serial: '200', bin_id: 'bin-2' },
+          ],
+          initiated_by: 'user-123',
+          closed_by: 'user-123',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // v048: Should call pullDayStatus to resolve cloud's day_id
+      expect(mockPullDayStatus).toHaveBeenCalledWith('2024-01-15');
+      // v048: Should call prepareDayClose with cloud's day_id
+      expect(mockPrepareDayClose).toHaveBeenCalledWith({
+        day_id: 'cloud-day-abc', // Cloud's day_id, not local
+        closings: [
+          { pack_id: 'pack-1', ending_serial: '150', bin_id: 'bin-1' },
+          { pack_id: 'pack-2', ending_serial: '200', bin_id: 'bin-2' },
+        ],
+        initiated_by: 'user-123',
+        manual_entry_authorized_by: undefined,
+        expire_minutes: undefined,
+      });
+      // Note: day_close operations don't return apiContext in pushDayCloseBatch
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-day-close-1', undefined);
+    });
+
+    it('should call commitDayClose for COMMIT operation', async () => {
+      // v048: COMMIT operation uses cloud's day_id directly (already resolved during PREPARE)
+      mockCommitDayClose.mockResolvedValue({
+        success: true,
+        day_id: 'cloud-day-abc',
+        status: 'CLOSED',
+        closed_at: '2024-01-15T20:05:00Z',
+        day_summary_id: 'summary-456',
+        server_time: '2024-01-15T20:05:00Z',
+        summary: {
+          total_packs: 5,
+          total_tickets_sold: 500,
+          total_sales: 1500.0,
+        },
+      });
+
+      const dayCloseItem = {
+        id: 'queue-day-close-2',
+        entity_id: 'cloud-day-abc', // Cloud's day_id (from PREPARE response)
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'UPDATE', // COMMIT is UPDATE
+        payload: JSON.stringify({
+          operation_type: 'COMMIT',
+          day_id: 'cloud-day-abc', // Cloud's day_id
+          store_id: 'store-123',
+          closed_by: 'user-manager',
+        }),
+        priority: 2, // Higher priority for COMMIT
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:05:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockCommitDayClose).toHaveBeenCalledWith({
+        day_id: 'cloud-day-abc',
+        closed_by: 'user-manager',
+        notes: undefined,
+      });
+      // Note: day_close operations don't return apiContext in pushDayCloseBatch
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-day-close-2', undefined);
+    });
+
+    it('should call cancelDayClose for CANCEL operation', async () => {
+      // v048: CANCEL operation uses cloud's day_id
+      mockCancelDayClose.mockResolvedValue({
+        success: true,
+        day_id: 'cloud-day-abc',
+        status: 'OPEN',
+        server_time: '2024-01-15T20:10:00Z',
+      });
+
+      const dayCloseItem = {
+        id: 'queue-day-close-3',
+        entity_id: 'cloud-day-abc', // Cloud's day_id
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'DELETE', // CANCEL is DELETE
+        payload: JSON.stringify({
+          operation_type: 'CANCEL',
+          day_id: 'cloud-day-abc', // Cloud's day_id
+          store_id: 'store-123',
+          reason: 'Employee requested redo',
+          cancelled_by: 'user-supervisor',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:10:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockCancelDayClose).toHaveBeenCalledWith({
+        day_id: 'cloud-day-abc',
+        reason: 'Employee requested redo',
+        cancelled_by: 'user-supervisor',
+      });
+      // Note: day_close operations don't return apiContext in pushDayCloseBatch
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-day-close-3', undefined);
+    });
+
+    it('should fail sync for missing required fields', async () => {
+      const invalidDayCloseItem = {
+        id: 'queue-day-close-invalid',
+        entity_id: 'day-invalid',
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'CREATE',
+        payload: JSON.stringify({
+          // Missing operation_type and store_id
+          business_date: '2024-01-15',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([invalidDayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should NOT call any day close API methods
+      expect(mockPrepareDayClose).not.toHaveBeenCalled();
+      expect(mockCommitDayClose).not.toHaveBeenCalled();
+      expect(mockCancelDayClose).not.toHaveBeenCalled();
+
+      // Should increment attempts with error
+      // Note: day_close operations don't return apiContext in pushDayCloseBatch
+      // v048: Updated error message format
+      expect(mockIncrementAttempts).toHaveBeenCalledWith(
+        'queue-day-close-invalid',
+        'Missing required fields in day close payload (operation_type, day_id)',
+        undefined
+      );
+    });
+
+    it('should return synced status on successful PREPARE', async () => {
+      // v048: Set up cloud day_id resolution mocks
+      mockDayFindById.mockReturnValue({
+        day_id: 'day-success',
+        business_date: '2024-01-15',
+        store_id: 'store-123',
+        status: 'CLOSED',
+      });
+      mockPullDayStatus.mockResolvedValue({
+        dayStatus: {
+          day_id: 'cloud-day-success',
+          business_date: '2024-01-15',
+          status: 'OPEN',
+        },
+        syncMetadata: { lastSequence: 1, hasMore: false, totalCount: 1 },
+      });
+      mockPrepareDayClose.mockResolvedValue({
+        success: true,
+        day_id: 'cloud-day-success',
+        status: 'PENDING_CLOSE',
+        expires_at: '2024-01-15T21:00:00Z',
+        warnings: [],
+        server_time: '2024-01-15T20:00:00Z',
+      });
+
+      const dayCloseItem = {
+        id: 'queue-day-close-success',
+        entity_id: 'day-success',
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'CREATE',
+        payload: JSON.stringify({
+          operation_type: 'PREPARE',
+          day_id: 'day-success',
+          store_id: 'store-123',
+          closings: [{ pack_id: 'pack-1', ending_serial: '100', bin_id: 'bin-1' }],
+          initiated_by: 'user-123',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Note: day_close operations don't return apiContext in pushDayCloseBatch
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-day-close-success', undefined);
+    });
+  });
+
+  // ==========================================================================
+  // T3.2.2: Pack DEPLETED Status Sync via pushPackBatch (v047 - Phase 3)
+  // Tests for pack depletion sync with DAY_CLOSE reason
+  // ==========================================================================
+  describe('T3.2.2: Pack DEPLETED status sync via pushPackBatch', () => {
+    it('should call pushPackDeplete for pack with status DEPLETED', async () => {
+      mockPushPackDeplete.mockResolvedValue({ success: true });
+
+      const depletedPackItem = {
+        id: 'queue-pack-depleted-1',
+        entity_id: 'pack-depleted-1',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-depleted-1',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-DEPLETED-001',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: '150',
+          tickets_sold: 150,
+          sales_amount: 150.0,
+          received_at: '2024-01-15T08:00:00Z',
+          received_by: 'user-receiver',
+          activated_at: '2024-01-15T09:00:00Z',
+          activated_by: 'user-activator',
+          depleted_at: '2024-01-15T20:00:00Z',
+          depleted_by: 'user-closer',
+          depletion_reason: 'DAY_CLOSE',
+          returned_at: null,
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([depletedPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      expect(mockPushPackDeplete).toHaveBeenCalledWith(
+        expect.objectContaining({
+          pack_id: 'pack-depleted-1',
+          store_id: 'store-123',
+          closing_serial: '150',
+          tickets_sold: 150,
+          sales_amount: 150.0,
+          depleted_at: '2024-01-15T20:00:00Z',
+          depletion_reason: 'DAY_CLOSE',
+          depleted_by: 'user-closer',
+        })
+      );
+    });
+
+    it('should fail sync for missing closing_serial in DEPLETED pack', async () => {
+      const invalidPackItem = {
+        id: 'queue-pack-invalid-closing',
+        entity_id: 'pack-invalid-1',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-invalid-1',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-INVALID',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: null, // Missing!
+          tickets_sold: 100,
+          sales_amount: 100.0,
+          depleted_at: '2024-01-15T20:00:00Z',
+          depletion_reason: 'DAY_CLOSE',
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([invalidPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should NOT call pushPackDeplete
+      expect(mockPushPackDeplete).not.toHaveBeenCalled();
+
+      // Should increment attempts with error
+      expect(mockIncrementAttempts).toHaveBeenCalled();
+    });
+
+    it('should fail sync for missing depleted_at in DEPLETED pack', async () => {
+      const invalidPackItem = {
+        id: 'queue-pack-no-depleted-at',
+        entity_id: 'pack-no-time',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-no-time',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-NO-TIME',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: '150',
+          tickets_sold: 150,
+          sales_amount: 150.0,
+          depleted_at: null, // Missing!
+          depletion_reason: 'DAY_CLOSE',
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([invalidPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should NOT call pushPackDeplete
+      expect(mockPushPackDeplete).not.toHaveBeenCalled();
+    });
+
+    it('should fail sync for missing depletion_reason in DEPLETED pack', async () => {
+      const invalidPackItem = {
+        id: 'queue-pack-no-reason',
+        entity_id: 'pack-no-reason',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-no-reason',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-NO-REASON',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: '150',
+          tickets_sold: 150,
+          sales_amount: 150.0,
+          depleted_at: '2024-01-15T20:00:00Z',
+          depletion_reason: null, // Missing! Required by cloud API
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([invalidPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should NOT call pushPackDeplete
+      expect(mockPushPackDeplete).not.toHaveBeenCalled();
+    });
+
+    it('should return synced status on successful pack depletion', async () => {
+      mockPushPackDeplete.mockResolvedValue({ success: true });
+
+      const depletedPackItem = {
+        id: 'queue-pack-success',
+        entity_id: 'pack-success',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-success',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-SUCCESS',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: '299',
+          tickets_sold: 299,
+          sales_amount: 299.0,
+          depleted_at: '2024-01-15T23:59:00Z',
+          depleted_by: 'user-success',
+          depletion_reason: 'DAY_CLOSE',
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T23:59:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([depletedPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // All pack operations now return apiContext with the actual endpoint used
+      expect(mockMarkSynced).toHaveBeenCalledWith('queue-pack-success', {
+        api_endpoint: '/api/v1/sync/lottery/packs/deplete',
+        http_status: 200,
+      });
+    });
+  });
+
+  // ==========================================================================
+  // T3.2.3: Error handling and retry for day close sync (v047 - Phase 3)
+  // Tests for error handling when cloud API fails
+  // ==========================================================================
+  describe('T3.2.3: Error handling and retry', () => {
+    it('should mark item as failed on network failure', async () => {
+      // v048: Set up cloud day_id resolution mocks
+      mockDayFindById.mockReturnValue({
+        day_id: 'day-network-fail',
+        business_date: '2024-01-15',
+        store_id: 'store-123',
+        status: 'CLOSED',
+      });
+      mockPullDayStatus.mockResolvedValue({
+        dayStatus: {
+          day_id: 'cloud-day-network',
+          business_date: '2024-01-15',
+          status: 'OPEN',
+        },
+        syncMetadata: { lastSequence: 1, hasMore: false, totalCount: 1 },
+      });
+      mockPrepareDayClose.mockRejectedValue(new Error('Network connection timeout'));
+
+      const dayCloseItem = {
+        id: 'queue-day-close-network-fail',
+        entity_id: 'day-network-fail',
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'CREATE',
+        payload: JSON.stringify({
+          operation_type: 'PREPARE',
+          day_id: 'day-network-fail',
+          store_id: 'store-123',
+          closings: [{ pack_id: 'pack-1', ending_serial: '100', bin_id: 'bin-1' }],
+          initiated_by: 'user-123',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should increment attempts with error
+      // Note: Batch-level errors in pushBatch DO include apiContext (see lines 939-943 of sync-engine)
+      // But this test is for pushDayCloseBatch which catches the error and returns it in results
+      // The processSyncQueue then passes result?.apiContext which is undefined for this case
+      expect(mockIncrementAttempts).toHaveBeenCalledWith(
+        'queue-day-close-network-fail',
+        'Network connection timeout',
+        undefined
+      );
+    });
+
+    it('should capture API error response in sync result', async () => {
+      // v048: Set up cloud day_id resolution mocks
+      mockDayFindById.mockReturnValue({
+        day_id: 'day-api-fail',
+        business_date: '2024-01-15',
+        store_id: 'store-123',
+        status: 'CLOSED',
+      });
+      mockPullDayStatus.mockResolvedValue({
+        dayStatus: {
+          day_id: 'cloud-day-api',
+          business_date: '2024-01-15',
+          status: 'OPEN',
+        },
+        syncMetadata: { lastSequence: 1, hasMore: false, totalCount: 1 },
+      });
+      mockPrepareDayClose.mockResolvedValue({
+        success: false,
+        error: 'Store inventory mismatch',
+      });
+
+      const dayCloseItem = {
+        id: 'queue-day-close-api-fail',
+        entity_id: 'day-api-fail',
+        entity_type: 'day_close',
+        store_id: 'store-123',
+        operation: 'CREATE',
+        payload: JSON.stringify({
+          operation_type: 'PREPARE',
+          day_id: 'day-api-fail',
+          store_id: 'store-123',
+          closings: [{ pack_id: 'pack-1', ending_serial: '100', bin_id: 'bin-1' }],
+          initiated_by: 'user-123',
+        }),
+        priority: 1,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([dayCloseItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should increment attempts - API returned success: false
+      expect(mockIncrementAttempts).toHaveBeenCalled();
+    });
+
+    it('should handle pack depletion API failure gracefully', async () => {
+      mockPushPackDeplete.mockRejectedValue(new Error('Cloud API unavailable'));
+
+      const depletedPackItem = {
+        id: 'queue-pack-api-fail',
+        entity_id: 'pack-api-fail',
+        entity_type: 'pack',
+        store_id: 'store-123',
+        operation: 'UPDATE',
+        payload: JSON.stringify({
+          pack_id: 'pack-api-fail',
+          store_id: 'store-123',
+          game_id: 'game-123',
+          game_code: 'GAME001',
+          pack_number: 'PKG-API-FAIL',
+          status: 'DEPLETED',
+          bin_id: 'bin-1',
+          opening_serial: '000',
+          closing_serial: '200',
+          tickets_sold: 200,
+          sales_amount: 200.0,
+          depleted_at: '2024-01-15T20:00:00Z',
+          depleted_by: 'user-123',
+          depletion_reason: 'DAY_CLOSE',
+        }),
+        priority: 0,
+        synced: 0,
+        sync_attempts: 0,
+        max_attempts: 5,
+        last_sync_error: null,
+        last_attempt_at: null,
+        created_at: '2024-01-15T20:00:00Z',
+        synced_at: null,
+      };
+
+      mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+      mockGetPendingCount.mockReturnValue(1);
+      mockStartSync.mockReturnValue('log-1');
+      mockGetRetryableItems.mockReturnValue([depletedPackItem]);
+
+      service.start();
+      await vi.advanceTimersByTimeAsync(100);
+
+      // Should increment attempts with error
+      expect(mockIncrementAttempts).toHaveBeenCalledWith(
+        'queue-pack-api-fail',
+        expect.stringContaining('Cloud API unavailable'),
+        expect.anything()
+      );
+
+      // Engine should still be running
+      expect(service.isStarted()).toBe(true);
+    });
+  });
+
+  // ==========================================================================
+  // Phase 5: Day Open Push Tests (day_open_push plan Task 5.2)
+  // ==========================================================================
+  // T5.2.1 - T5.2.4: pushDayOpenBatch tests per test traceability matrix
+  // SEC-006: Parameterized queries / structured data
+  // SEC-017: Audit logging without sensitive data
+  // DB-006: Tenant isolation via store_id
+  // SEC-010: User identity for audit (opened_by)
+  // ==========================================================================
+
+  describe('Phase 5: Day Open Push - pushDayOpenBatch', () => {
+    // Helper to create a valid day open sync queue item
+    const createDayOpenItem = (overrides?: {
+      id?: string;
+      day_id?: string;
+      store_id?: string;
+      business_date?: string;
+      opened_by?: string;
+      opened_at?: string;
+      notes?: string;
+    }) => ({
+      id: overrides?.id ?? 'queue-day-open-1',
+      entity_id: overrides?.day_id ?? 'day-uuid-001',
+      entity_type: 'day_open' as const,
+      store_id: overrides?.store_id ?? 'store-123',
+      operation: 'CREATE' as const,
+      payload: JSON.stringify({
+        day_id: overrides?.day_id ?? 'day-uuid-001',
+        store_id: overrides?.store_id ?? 'store-123',
+        business_date: overrides?.business_date ?? '2026-02-01',
+        opened_by: overrides?.opened_by ?? 'user-uuid-001',
+        opened_at: overrides?.opened_at ?? '2026-02-01T08:00:00.000Z',
+        ...(overrides?.notes && { notes: overrides.notes }),
+      }),
+      priority: 2,
+      synced: 0,
+      sync_attempts: 0,
+      max_attempts: 5,
+      last_sync_error: null,
+      last_attempt_at: null,
+      created_at: '2026-02-01T08:00:00Z',
+      synced_at: null,
+    });
+
+    beforeEach(() => {
+      // Reset pushDayOpen mock to default success behavior
+      mockPushDayOpen.mockReset();
+      mockPushDayOpen.mockResolvedValue({
+        success: true,
+        day_id: 'day-uuid-001',
+        status: 'OPEN',
+        opened_at: '2026-02-01T08:00:00.000Z',
+        server_time: '2026-02-01T08:00:05.000Z',
+        idempotent: false,
+      });
+    });
+
+    // =======================================================================
+    // T5.2.1: day_open entity routing
+    // =======================================================================
+    describe('T5.2.1: day_open entity routing', () => {
+      it('should route day_open entity type to pushDayOpenBatch', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify pushDayOpen was called
+        expect(mockPushDayOpen).toHaveBeenCalledWith({
+          day_id: 'day-uuid-001',
+          business_date: '2026-02-01',
+          opened_by: 'user-uuid-001',
+          opened_at: '2026-02-01T08:00:00.000Z',
+          notes: undefined,
+          local_id: undefined,
+          external_day_id: undefined,
+        });
+      });
+
+      it('should not route other entity types to pushDayOpenBatch', async () => {
+        // Create a pack entity type item
+        const packItem = {
+          id: 'queue-pack-1',
+          entity_id: 'pack-1',
+          entity_type: 'pack',
+          store_id: 'store-123',
+          operation: 'CREATE',
+          payload: JSON.stringify({
+            pack_id: 'pack-1',
+            store_id: 'store-123',
+            game_id: 'game-1',
+            game_code: '1234',
+            pack_number: '1234567',
+            status: 'RECEIVED',
+            received_at: '2026-02-01T08:00:00Z',
+            received_by: 'user-1',
+          }),
+          priority: 0,
+          synced: 0,
+          sync_attempts: 0,
+          max_attempts: 5,
+          last_sync_error: null,
+          last_attempt_at: null,
+          created_at: '2026-02-01T08:00:00Z',
+          synced_at: null,
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([packItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify pushDayOpen was NOT called
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+      });
+    });
+
+    // =======================================================================
+    // T5.2.2: pushDayOpenBatch processing
+    // =======================================================================
+    describe('T5.2.2: pushDayOpenBatch processing', () => {
+      it('should process single item successfully', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify item was marked as synced
+        expect(mockMarkSynced).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.objectContaining({
+            api_endpoint: '/api/v1/sync/lottery/day/open',
+            http_status: 200,
+          })
+        );
+      });
+
+      it('should process multiple items in order', async () => {
+        const item1 = createDayOpenItem({ id: 'queue-1', day_id: 'day-1' });
+        const item2 = createDayOpenItem({ id: 'queue-2', day_id: 'day-2' });
+        const item3 = createDayOpenItem({ id: 'queue-3', day_id: 'day-3' });
+
+        // Set up responses for each item
+        mockPushDayOpen
+          .mockResolvedValueOnce({
+            success: true,
+            day_id: 'day-1',
+            status: 'OPEN',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            server_time: '2026-02-01T08:00:05.000Z',
+            idempotent: false,
+          })
+          .mockResolvedValueOnce({
+            success: true,
+            day_id: 'day-2',
+            status: 'OPEN',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            server_time: '2026-02-01T08:00:06.000Z',
+            idempotent: false,
+          })
+          .mockResolvedValueOnce({
+            success: true,
+            day_id: 'day-3',
+            status: 'OPEN',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            server_time: '2026-02-01T08:00:07.000Z',
+            idempotent: false,
+          });
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(3);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([item1, item2, item3]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify all items were processed
+        expect(mockPushDayOpen).toHaveBeenCalledTimes(3);
+        expect(mockMarkSynced).toHaveBeenCalledTimes(3);
+      });
+
+      it('should return synced status on success', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify markSynced was called (not incrementAttempts)
+        expect(mockMarkSynced).toHaveBeenCalled();
+        expect(mockIncrementAttempts).not.toHaveBeenCalled();
+      });
+
+      it('should return failed status with error on failure', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockPushDayOpen.mockRejectedValue(new Error('Cloud API unavailable'));
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Verify incrementAttempts was called with error
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('Cloud API unavailable'),
+          undefined
+        );
+      });
+    });
+
+    // =======================================================================
+    // T5.2.3: pushDayOpenBatch payload validation
+    // =======================================================================
+    describe('T5.2.3: pushDayOpenBatch payload validation', () => {
+      it('should fail when day_id is missing', async () => {
+        const itemWithMissingDayId = {
+          ...createDayOpenItem(),
+          payload: JSON.stringify({
+            store_id: 'store-123',
+            business_date: '2026-02-01',
+            opened_by: 'user-uuid-001',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            // day_id intentionally omitted
+          }),
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([itemWithMissingDayId]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Should not call cloud API
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+        // Should record failure
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('day_id'),
+          undefined
+        );
+      });
+
+      it('should fail when store_id is missing - DB-006', async () => {
+        const itemWithMissingStoreId = {
+          ...createDayOpenItem(),
+          payload: JSON.stringify({
+            day_id: 'day-uuid-001',
+            business_date: '2026-02-01',
+            opened_by: 'user-uuid-001',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            // store_id intentionally omitted - DB-006 violation
+          }),
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([itemWithMissingStoreId]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Should not call cloud API
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+        // Should record failure with tenant isolation error
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('store_id'),
+          undefined
+        );
+      });
+
+      it('should fail when business_date is missing', async () => {
+        const itemWithMissingDate = {
+          ...createDayOpenItem(),
+          payload: JSON.stringify({
+            day_id: 'day-uuid-001',
+            store_id: 'store-123',
+            opened_by: 'user-uuid-001',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            // business_date intentionally omitted
+          }),
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([itemWithMissingDate]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('business_date'),
+          undefined
+        );
+      });
+
+      it('should fail when opened_by is missing - SEC-010 required field', async () => {
+        // opened_by is REQUIRED by cloud API - must have valid user UUID
+        const itemWithMissingOpenedBy = {
+          ...createDayOpenItem(),
+          payload: JSON.stringify({
+            day_id: 'day-uuid-001',
+            store_id: 'store-123',
+            business_date: '2026-02-01',
+            opened_at: '2026-02-01T08:00:00.000Z',
+            // opened_by intentionally omitted - should fail validation
+          }),
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([itemWithMissingOpenedBy]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Should NOT proceed - missing required field
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('opened_by'),
+          undefined
+        );
+      });
+
+      it('should fail when opened_at is missing', async () => {
+        const itemWithMissingOpenedAt = {
+          ...createDayOpenItem(),
+          payload: JSON.stringify({
+            day_id: 'day-uuid-001',
+            store_id: 'store-123',
+            business_date: '2026-02-01',
+            opened_by: 'user-uuid-001',
+            // opened_at intentionally omitted
+          }),
+        };
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([itemWithMissingOpenedAt]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(mockPushDayOpen).not.toHaveBeenCalled();
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('opened_at'),
+          undefined
+        );
+      });
+    });
+
+    // =======================================================================
+    // T5.2.4: pushDayOpenBatch error classification
+    // =======================================================================
+    describe('T5.2.4: pushDayOpenBatch error classification', () => {
+      it('should classify network errors as transient', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockPushDayOpen.mockRejectedValue(new Error('Network connection failed'));
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // Should increment attempts (transient errors are retried)
+        expect(mockIncrementAttempts).toHaveBeenCalled();
+        // Should NOT be permanently failed
+        expect(mockMarkSynced).not.toHaveBeenCalled();
+      });
+
+      it('should handle 400 errors', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockPushDayOpen.mockRejectedValue(new Error('HTTP 400: Invalid request'));
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(mockIncrementAttempts).toHaveBeenCalledWith(
+          'queue-day-open-1',
+          expect.stringContaining('400'),
+          undefined
+        );
+      });
+
+      it('should handle 500 errors as transient', async () => {
+        const dayOpenItem = createDayOpenItem();
+
+        mockPushDayOpen.mockRejectedValue(new Error('HTTP 500: Internal server error'));
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        // 500 errors should be retried
+        expect(mockIncrementAttempts).toHaveBeenCalled();
+      });
+
+      it('should pass optional notes to cloud API when provided', async () => {
+        const dayOpenItem = createDayOpenItem({ notes: 'Morning shift opening' });
+
+        mockGetConfiguredStore.mockReturnValue({ store_id: 'store-123' });
+        mockGetPendingCount.mockReturnValue(1);
+        mockStartSync.mockReturnValue('log-1');
+        mockGetRetryableItems.mockReturnValue([dayOpenItem]);
+
+        service.start();
+        await vi.advanceTimersByTimeAsync(100);
+
+        expect(mockPushDayOpen).toHaveBeenCalledWith(
+          expect.objectContaining({
+            notes: 'Morning shift opening',
+          })
+        );
       });
     });
   });

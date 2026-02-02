@@ -28,6 +28,8 @@ import {
   updateGame,
   depletePack,
   returnPack,
+  getDayStatus,
+  initializeBusinessDay,
   type ReceivePackInput,
   type UpdatePackInput,
   type UpdateGameInput,
@@ -60,6 +62,7 @@ export const lotteryKeys = {
   dayBins: () => [...lotteryKeys.all, 'dayBins'] as const,
   dayBinsList: (storeId: string | undefined, date?: string) =>
     [...lotteryKeys.dayBins(), storeId, date] as const,
+  dayStatus: () => [...lotteryKeys.all, 'dayStatus'] as const,
   games: () => [...lotteryKeys.all, 'games'] as const,
   gameList: () => [...lotteryKeys.games(), 'list'] as const,
   /** Query key for paginated games listing with filters */
@@ -289,6 +292,44 @@ export function useLotteryDayBins(
 }
 
 /**
+ * Hook to check business day status without creating one
+ * Use this to determine if initialization is needed before showing lottery UI.
+ *
+ * @param options - Query options (enabled, etc.)
+ * @returns TanStack Query result with day status
+ */
+export function useDayStatus(options?: { enabled?: boolean }) {
+  return useQuery({
+    queryKey: lotteryKeys.dayStatus(),
+    queryFn: () => getDayStatus(),
+    enabled: options?.enabled !== false,
+    refetchOnMount: 'always',
+    staleTime: 5000, // Check status every 5 seconds
+    select: (response) => response.data,
+  });
+}
+
+/**
+ * Hook to initialize business day explicitly
+ * Creates a new OPEN business day for the store.
+ *
+ * @returns Mutation hook for business day initialization
+ */
+export function useInitializeBusinessDay() {
+  const queryClient = useQueryClient();
+
+  return useMutation({
+    mutationFn: () => initializeBusinessDay(),
+    onSuccess: () => {
+      // Invalidate day status to refresh
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.dayStatus() });
+      // Also invalidate day bins (will now return data)
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
+    },
+  });
+}
+
+/**
  * Hook to close lottery day
  * Records ending serials for all active packs
  * Story: Lottery Day Closing Feature
@@ -311,10 +352,14 @@ export function useLotteryDayClose() {
 
 /**
  * Input for the mark pack as sold out mutation
+ *
+ * SEC-014: INPUT_VALIDATION - data.closing_serial is REQUIRED
+ * No hardcoded defaults allowed - caller must provide pack's serial_end
  */
 export interface MarkPackAsSoldOutMutationInput {
   packId: string;
-  data?: MarkPackAsSoldOutInput;
+  /** Required: Must include closing_serial (pack's serial_end) */
+  data: MarkPackAsSoldOutInput;
 }
 
 /**
@@ -322,7 +367,8 @@ export interface MarkPackAsSoldOutMutationInput {
  * Story: Lottery Pack Auto-Depletion Feature
  *
  * MCP Guidance Applied:
- * - API-001: VALIDATION - Always send valid JSON body for POST requests
+ * - API-001: VALIDATION - Requires closing_serial in mutation input
+ * - SEC-014: INPUT_VALIDATION - No hardcoded defaults, caller must provide serial_end
  * - FE-001: STATE_MANAGEMENT - Proper cache invalidation after mutation
  *
  * @returns Mutation hook for marking pack as sold out
@@ -331,7 +377,7 @@ export function useMarkPackAsSoldOut() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ packId, data = {} }: MarkPackAsSoldOutMutationInput) =>
+    mutationFn: ({ packId, data }: MarkPackAsSoldOutMutationInput) =>
       markPackAsSoldOut(packId, data),
     onSuccess: () => {
       // Invalidate day bins to refresh the bin display (pack removed from bin)
@@ -571,12 +617,20 @@ export function useUpdateGame() {
  *
  * @returns Mutation hook for pack depletion
  */
+/**
+ * Hook to deplete a pack (mark as sold out)
+ *
+ * SEC-014: INPUT_VALIDATION - closingSerial is REQUIRED (no hardcoded defaults)
+ * API-001: VALIDATION - Strict schema enforcement
+ *
+ * @returns Mutation hook for depleting a pack
+ */
 export function useDepletePack() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ packId, closingSerial }: { packId: string; closingSerial?: string }) =>
-      depletePack(packId, closingSerial),
+    mutationFn: ({ packId, closingSerial }: { packId: string; closingSerial: string }) =>
+      depletePack({ pack_id: packId, closing_serial: closingSerial }),
     onSuccess: (_, { packId }) => {
       // Invalidate packs list to refresh after depletion
       queryClient.invalidateQueries({ queryKey: lotteryKeys.packs() });

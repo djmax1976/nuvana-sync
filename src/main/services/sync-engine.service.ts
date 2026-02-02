@@ -27,6 +27,7 @@ import { classifyError } from './error-classifier.service';
 import { syncLogDAL } from '../dal/sync-log.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
+import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { usersDAL } from '../dal/users.dal';
 import { createLogger } from '../utils/logger';
 import { cloudApiService } from './cloud-api.service';
@@ -1101,6 +1102,13 @@ export class SyncEngineService {
       return this.pushShiftClosingBatch(items);
     }
 
+    // Route day_open entity type to specialized endpoint
+    // day_open MUST sync BEFORE day_close to satisfy cloud dependency
+    // (cloud requires an OPEN day before it can be closed)
+    if (entityType === 'day_open') {
+      return this.pushDayOpenBatch(items);
+    }
+
     // Route day_close entity type to specialized two-phase commit endpoints
     if (entityType === 'day_close') {
       return this.pushDayCloseBatch(items);
@@ -1145,6 +1153,9 @@ export class SyncEngineService {
     const results: BatchSyncResponse['results'] = [];
 
     for (const item of items) {
+      // Track pack status for accurate endpoint reporting in catch block
+      let packStatus: string | undefined;
+
       try {
         // Parse payload - check if this is actual pack data or a pull tracking marker
         const rawPayload = JSON.parse(item.payload);
@@ -1202,6 +1213,9 @@ export class SyncEngineService {
           mark_sold_reason?: string;
           mark_sold_approved_by?: string | null;
         };
+
+        // Track status for accurate endpoint reporting in catch block
+        packStatus = payload.status;
 
         // Look up game_code if not in payload (legacy queue items)
         let gameCode = payload.game_code;
@@ -1448,6 +1462,10 @@ export class SyncEngineService {
             id: item.id, // Use queue item ID, not entity_id
             status: success ? 'synced' : 'failed',
             error: success ? undefined : `Failed to sync pack with status: ${payload.status}`,
+            apiContext: {
+              api_endpoint: this.getPackEndpoint(item.operation, payload.status),
+              http_status: success ? 200 : 500,
+            },
           });
         } else if (item.operation === 'ACTIVATE') {
           // Direct activation - calls POST /api/v1/sync/lottery/packs/activate
@@ -1498,6 +1516,10 @@ export class SyncEngineService {
                 id: item.id,
                 status: activateResponse.success ? 'synced' : 'failed',
                 error: activateResponse.success ? undefined : 'Activation failed',
+                apiContext: {
+                  api_endpoint: '/api/v1/sync/lottery/packs/activate',
+                  http_status: activateResponse.success ? 200 : 500,
+                },
               });
             } catch (activateError) {
               const errorMsg =
@@ -1506,10 +1528,16 @@ export class SyncEngineService {
                 packId: payload.pack_id,
                 error: errorMsg,
               });
+              const httpStatus = this.extractHttpStatusFromError(errorMsg);
               results.push({
                 id: item.id,
                 status: 'failed',
                 error: errorMsg,
+                apiContext: {
+                  api_endpoint: '/api/v1/sync/lottery/packs/activate',
+                  http_status: httpStatus,
+                  response_body: errorMsg.substring(0, 500),
+                },
               });
             }
           } else {
@@ -1525,6 +1553,10 @@ export class SyncEngineService {
               id: item.id,
               status: 'failed',
               error: 'Missing required fields for activation',
+              apiContext: {
+                api_endpoint: '/api/v1/sync/lottery/packs/activate',
+                http_status: 400,
+              },
             });
           }
         } else if (item.operation === 'DELETE') {
@@ -1536,6 +1568,10 @@ export class SyncEngineService {
             id: item.id, // Use queue item ID, not entity_id
             status: 'failed',
             error: 'DELETE operation not supported for packs',
+            apiContext: {
+              api_endpoint: '/api/v1/sync/lottery/packs',
+              http_status: 501, // Not Implemented
+            },
           });
         }
       } catch (error) {
@@ -1548,12 +1584,14 @@ export class SyncEngineService {
         });
         // v040: Extract HTTP status from error and include API context
         const httpStatus = this.extractHttpStatusFromError(errorMessage);
+        // Use actual endpoint based on operation and status instead of generic fallback
+        const actualEndpoint = this.getPackEndpoint(item.operation, packStatus);
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
           apiContext: {
-            api_endpoint: '/api/v1/sync/lottery/packs',
+            api_endpoint: actualEndpoint,
             http_status: httpStatus,
             response_body: errorMessage.substring(0, 500),
           },
@@ -2239,11 +2277,42 @@ export class SyncEngineService {
       pack: '/api/v1/sync/lottery/packs',
       shift_opening: '/api/v1/sync/shifts/openings',
       shift_closing: '/api/v1/sync/shifts/closings',
+      day_open: '/api/v1/sync/lottery/day/open',
       day_close: '/api/v1/sync/day-close',
       variance_approval: '/api/v1/sync/variances/approve',
       employee: '/api/v1/sync/employees',
     };
     return endpointMap[entityType] || `/api/v1/sync/${entityType}`;
+  }
+
+  /**
+   * Get the actual API endpoint for a pack operation based on operation type and pack status
+   * v040: Returns the specific endpoint that was/would be called for accurate error display
+   *
+   * @param operation - The sync operation (CREATE, UPDATE, ACTIVATE, DELETE)
+   * @param status - The pack status (RECEIVED, ACTIVE, DEPLETED, RETURNED)
+   * @returns The actual API endpoint path
+   */
+  private getPackEndpoint(operation: string, status?: string): string {
+    if (operation === 'CREATE') {
+      return '/api/v1/sync/lottery/packs/receive';
+    }
+    if (operation === 'ACTIVATE') {
+      return '/api/v1/sync/lottery/packs/activate';
+    }
+    if (operation === 'UPDATE' && status) {
+      switch (status) {
+        case 'ACTIVE':
+          return '/api/v1/sync/lottery/packs/activate';
+        case 'DEPLETED':
+          return '/api/v1/sync/lottery/packs/deplete';
+        case 'RETURNED':
+          return '/api/v1/sync/lottery/packs/return';
+        default:
+          return '/api/v1/sync/lottery/packs';
+      }
+    }
+    return '/api/v1/sync/lottery/packs';
   }
 
   /**
@@ -2478,35 +2547,39 @@ export class SyncEngineService {
     for (const item of items) {
       try {
         // API-001: Parse and validate payload structure
+        // Per replica_end_points.md: day_id is the primary identifier (not store_id + business_date)
         const payload = JSON.parse(item.payload) as {
           operation_type: 'PREPARE' | 'COMMIT' | 'CANCEL';
-          store_id: string;
-          business_date: string;
-          // For PREPARE operation
-          expected_inventory?: Array<{
-            bin_id: string;
+          day_id: string;
+          store_id: string; // Keep for logging and queue operations
+          // For PREPARE operation (replica_end_points.md lines 2374-2386)
+          closings?: Array<{
             pack_id: string;
-            closing_serial: string;
+            ending_serial: string;
+            entry_method?: 'SCAN' | 'MANUAL';
+            bin_id?: string;
           }>;
-          prepared_by?: string | null;
-          // For COMMIT operation
-          validation_token?: string;
-          closed_by?: string | null;
-          // For CANCEL operation
-          reason?: string | null;
-          cancelled_by?: string | null;
+          initiated_by?: string;
+          manual_entry_authorized_by?: string;
+          expire_minutes?: number;
+          // For COMMIT operation (replica_end_points.md lines 2415-2420)
+          closed_by?: string;
+          notes?: string;
+          // For CANCEL operation (replica_end_points.md lines 2453-2458)
+          cancelled_by?: string;
+          reason?: string;
         };
 
-        // API-001: Validate required fields based on operation type
-        if (!payload.operation_type || !payload.store_id) {
+        // API-001: Validate required fields - day_id is always required
+        if (!payload.operation_type || !payload.day_id) {
           log.warn('Day close payload missing required fields', {
             hasOperationType: Boolean(payload.operation_type),
-            hasStoreId: Boolean(payload.store_id),
+            hasDayId: Boolean(payload.day_id),
           });
           results.push({
             id: item.id,
             status: 'failed',
-            error: 'Missing required fields in day close payload',
+            error: 'Missing required fields in day close payload (operation_type, day_id)',
           });
           continue;
         }
@@ -2515,59 +2588,180 @@ export class SyncEngineService {
 
         switch (payload.operation_type) {
           case 'PREPARE': {
-            // API-001: Validate PREPARE-specific fields
-            if (!payload.business_date || !payload.expected_inventory) {
-              log.warn('Day close PREPARE missing required fields', {
-                hasBusinessDate: Boolean(payload.business_date),
-                hasInventory: Boolean(payload.expected_inventory),
+            // API-001: Validate PREPARE-specific fields per API contract
+            if (!payload.closings || payload.closings.length === 0) {
+              log.warn('Day close PREPARE missing required closings array', {
+                dayId: payload.day_id,
+                hasClosings: Boolean(payload.closings),
               });
               results.push({
                 id: item.id,
                 status: 'failed',
-                error: 'Missing business_date or expected_inventory for PREPARE',
+                error: 'Missing or empty closings array for PREPARE (min 1 item required)',
+              });
+              continue;
+            }
+
+            if (!payload.initiated_by) {
+              log.warn('Day close PREPARE missing initiated_by', {
+                dayId: payload.day_id,
+              });
+              results.push({
+                id: item.id,
+                status: 'failed',
+                error: 'Missing initiated_by for PREPARE',
+              });
+              continue;
+            }
+
+            // API-001: Resolve cloud day_id before calling prepare-close
+            // The cloud API requires day_id that exists on cloud with status OPEN.
+            // Local day_id may not exist on cloud - we need to look up the cloud's day by business_date.
+            let cloudDayId = payload.day_id;
+
+            try {
+              // Look up local day to get business_date
+              const localDay = lotteryBusinessDaysDAL.findById(payload.day_id);
+              if (localDay) {
+                // Pull day-status from cloud for this business_date
+                const cloudDayStatus = await cloudApiService.pullDayStatus(localDay.business_date);
+
+                if (cloudDayStatus.dayStatus) {
+                  // Cloud has a day for this date - use cloud's day_id
+                  cloudDayId = cloudDayStatus.dayStatus.day_id;
+                  log.info('Resolved cloud day_id for day close', {
+                    localDayId: payload.day_id,
+                    cloudDayId,
+                    businessDate: localDay.business_date,
+                    cloudStatus: cloudDayStatus.dayStatus.status,
+                  });
+
+                  // Verify cloud day is OPEN (required by API)
+                  if (cloudDayStatus.dayStatus.status !== 'OPEN') {
+                    log.warn('Cloud day is not OPEN - cannot prepare close', {
+                      cloudDayId,
+                      cloudStatus: cloudDayStatus.dayStatus.status,
+                    });
+                    results.push({
+                      id: item.id,
+                      status: 'failed',
+                      error: `Cloud day has status ${cloudDayStatus.dayStatus.status}, expected OPEN`,
+                    });
+                    continue;
+                  }
+                } else {
+                  // Cloud has no day for this date
+                  log.warn('No day found on cloud for business_date', {
+                    localDayId: payload.day_id,
+                    businessDate: localDay.business_date,
+                  });
+                  results.push({
+                    id: item.id,
+                    status: 'failed',
+                    error: `No business day found on cloud for date ${localDay.business_date}. Day must exist on cloud with status OPEN.`,
+                  });
+                  continue;
+                }
+              } else {
+                log.warn('Local day not found for day close', {
+                  dayId: payload.day_id,
+                });
+                results.push({
+                  id: item.id,
+                  status: 'failed',
+                  error: `Local day not found: ${payload.day_id}`,
+                });
+                continue;
+              }
+            } catch (lookupError) {
+              log.error('Failed to resolve cloud day_id', {
+                localDayId: payload.day_id,
+                error: lookupError instanceof Error ? lookupError.message : 'Unknown error',
+              });
+              results.push({
+                id: item.id,
+                status: 'failed',
+                error: `Failed to resolve cloud day: ${lookupError instanceof Error ? lookupError.message : 'Unknown error'}`,
               });
               continue;
             }
 
             const prepareResponse = await cloudApiService.prepareDayClose({
-              store_id: payload.store_id,
-              business_date: payload.business_date,
-              expected_inventory: payload.expected_inventory,
-              prepared_by: payload.prepared_by || null,
+              day_id: cloudDayId,
+              closings: payload.closings,
+              initiated_by: payload.initiated_by,
+              manual_entry_authorized_by: payload.manual_entry_authorized_by,
+              expire_minutes: payload.expire_minutes,
             });
 
             success = prepareResponse.success;
 
-            // SEC-017: Log with validation token info (not the token itself)
+            // SEC-017: Log preparation result
             if (success) {
               log.info('Day close PREPARE synced', {
-                storeId: payload.store_id,
-                businessDate: payload.business_date,
-                inventoryCount: payload.expected_inventory.length,
-                hasDiscrepancies: Boolean(prepareResponse.discrepancies?.length),
+                dayId: prepareResponse.day_id,
+                status: prepareResponse.status,
+                closingsCount: payload.closings.length,
+                hasWarnings: Boolean(prepareResponse.warnings?.length),
+                expiresAt: prepareResponse.expires_at,
               });
+
+              // Auto-queue COMMIT after successful PREPARE
+              // The two-phase commit flow: PREPARE -> COMMIT
+              // Use the cloud's day_id from the response (should match cloudDayId)
+              try {
+                const commitPayload = {
+                  operation_type: 'COMMIT' as const,
+                  day_id: prepareResponse.day_id, // Use cloud's day_id from response
+                  store_id: payload.store_id,
+                  closed_by: payload.closed_by || payload.initiated_by,
+                };
+
+                syncQueueDAL.enqueue({
+                  store_id: payload.store_id,
+                  entity_type: 'day_close',
+                  entity_id: prepareResponse.day_id, // Use cloud's day_id
+                  operation: 'UPDATE', // COMMIT is an update to the prepared close
+                  payload: commitPayload,
+                  priority: 2, // Higher priority - COMMIT should happen immediately
+                  sync_direction: 'PUSH',
+                });
+
+                log.info('Day close COMMIT queued after successful PREPARE', {
+                  cloudDayId: prepareResponse.day_id,
+                  localDayId: payload.day_id,
+                  entityId: item.entity_id,
+                });
+              } catch (queueError) {
+                // Log but don't fail the PREPARE - it succeeded
+                log.error('Failed to queue day close COMMIT after PREPARE', {
+                  cloudDayId: prepareResponse.day_id,
+                  localDayId: payload.day_id,
+                  error: queueError instanceof Error ? queueError.message : 'Unknown error',
+                });
+              }
             }
             break;
           }
 
           case 'COMMIT': {
-            // API-001: Validate COMMIT-specific fields
-            if (!payload.validation_token) {
-              log.warn('Day close COMMIT missing validation token', {
-                storeId: payload.store_id,
+            // API-001: Validate COMMIT-specific fields per API contract
+            if (!payload.closed_by) {
+              log.warn('Day close COMMIT missing closed_by', {
+                dayId: payload.day_id,
               });
               results.push({
                 id: item.id,
                 status: 'failed',
-                error: 'Missing validation_token for COMMIT',
+                error: 'Missing closed_by for COMMIT',
               });
               continue;
             }
 
             const commitResponse = await cloudApiService.commitDayClose({
-              store_id: payload.store_id,
-              validation_token: payload.validation_token,
-              closed_by: payload.closed_by || null,
+              day_id: payload.day_id,
+              closed_by: payload.closed_by,
+              notes: payload.notes,
             });
 
             success = commitResponse.success;
@@ -2575,34 +2769,33 @@ export class SyncEngineService {
             // SEC-017: Log with summary info
             if (success) {
               log.info('Day close COMMIT synced', {
-                storeId: payload.store_id,
-                daySummaryId: commitResponse.day_summary_id,
-                totalSales: commitResponse.total_sales,
-                totalTicketsSold: commitResponse.total_tickets_sold,
+                dayId: commitResponse.day_id,
+                status: commitResponse.status,
+                totalPacks: commitResponse.summary.total_packs,
+                totalTicketsSold: commitResponse.summary.total_tickets_sold,
               });
             }
             break;
           }
 
           case 'CANCEL': {
-            // API-001: Validate CANCEL-specific fields
-            if (!payload.validation_token) {
-              log.warn('Day close CANCEL missing validation token', {
-                storeId: payload.store_id,
+            // API-001: Validate CANCEL-specific fields per API contract
+            if (!payload.cancelled_by) {
+              log.warn('Day close CANCEL missing cancelled_by', {
+                dayId: payload.day_id,
               });
               results.push({
                 id: item.id,
                 status: 'failed',
-                error: 'Missing validation_token for CANCEL',
+                error: 'Missing cancelled_by for CANCEL',
               });
               continue;
             }
 
             const cancelResponse = await cloudApiService.cancelDayClose({
-              store_id: payload.store_id,
-              validation_token: payload.validation_token,
+              day_id: payload.day_id,
+              cancelled_by: payload.cancelled_by,
               reason: payload.reason,
-              cancelled_by: payload.cancelled_by || null,
             });
 
             success = cancelResponse.success;
@@ -2610,7 +2803,8 @@ export class SyncEngineService {
             // SEC-017: Log cancellation
             if (success) {
               log.info('Day close CANCEL synced', {
-                storeId: payload.store_id,
+                dayId: cancelResponse.day_id,
+                status: cancelResponse.status,
                 reason: payload.reason || 'No reason provided',
               });
             }
@@ -2643,6 +2837,192 @@ export class SyncEngineService {
         });
         results.push({
           id: item.id, // Use queue item ID, not entity_id
+          status: 'failed',
+          error: errorMessage,
+        });
+      }
+    }
+
+    return {
+      success: results.every((r) => r.status === 'synced'),
+      results,
+    };
+  }
+
+  /**
+   * Push day open items to cloud API
+   *
+   * Creates/opens a business day on the cloud. This MUST succeed before any
+   * day_close sync can be processed, as the cloud requires an OPEN day to exist
+   * before it can be closed.
+   *
+   * Enterprise-grade day open sync implementation:
+   * - API-001: VALIDATION - Validates payload structure with required fields
+   * - API-003: ERROR_HANDLING - Returns per-item results with error classification
+   * - SEC-006: SQL_INJECTION - Uses structured payload, no string concatenation
+   * - SEC-017: AUDIT - Logs sync events with non-sensitive data only
+   * - DB-006: TENANT_ISOLATION - store_id validated in payload for multi-tenancy
+   * - SEC-010: AUTHZ - opened_by optional (included when user session available)
+   *
+   * Idempotency:
+   * The cloud API endpoint is idempotent. Sending the same day_id multiple times
+   * will not create duplicate days. The response includes an `is_idempotent` flag
+   * indicating if the day already existed.
+   *
+   * Priority:
+   * day_open items should be queued with priority 2 (same as day_close) to ensure
+   * they are processed before pack operations that might reference the day.
+   *
+   * @security SEC-006: No string concatenation with user input
+   * @security DB-006: Tenant isolation via store_id in payload
+   * @security SEC-017: Audit logging without sensitive data
+   *
+   * @param items - Day open sync queue items
+   * @returns Batch response with per-item results
+   */
+  private async pushDayOpenBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
+    const results: BatchSyncResponse['results'] = [];
+
+    for (const item of items) {
+      try {
+        // API-001: Parse and validate payload structure
+        // DayOpenSyncPayload interface per plan Task 3.2.3
+        const payload = JSON.parse(item.payload) as {
+          day_id: string;
+          store_id: string;
+          business_date: string;
+          opened_by: string; // REQUIRED by cloud API - must have valid user UUID
+          opened_at: string;
+          notes?: string;
+          local_id?: string;
+          external_day_id?: string;
+        };
+
+        // API-001: Validate required fields - fail fast with clear errors
+        // Note: No apiContext for validation failures (no API call made)
+        if (!payload.day_id) {
+          log.warn('Day open payload missing day_id', {
+            itemId: item.id,
+            entityId: item.entity_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required field: day_id',
+          });
+          continue;
+        }
+
+        if (!payload.store_id) {
+          log.warn('Day open payload missing store_id (DB-006 violation)', {
+            itemId: item.id,
+            dayId: payload.day_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required field: store_id (tenant isolation required)',
+          });
+          continue;
+        }
+
+        if (!payload.business_date) {
+          log.warn('Day open payload missing business_date', {
+            itemId: item.id,
+            dayId: payload.day_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required field: business_date',
+          });
+          continue;
+        }
+
+        // SEC-010: opened_by is REQUIRED by cloud API - validate it's present
+        if (!payload.opened_by) {
+          log.warn('Day open payload missing opened_by (SEC-010 violation)', {
+            itemId: item.id,
+            dayId: payload.day_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required field: opened_by (user identity required)',
+          });
+          continue;
+        }
+
+        if (!payload.opened_at) {
+          log.warn('Day open payload missing opened_at', {
+            itemId: item.id,
+            dayId: payload.day_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required field: opened_at',
+          });
+          continue;
+        }
+
+        // SEC-006: Call cloud API with structured data (no string concatenation)
+        // The pushDayOpen method performs additional validation (UUID format, date format, etc.)
+        const response = await cloudApiService.pushDayOpen({
+          day_id: payload.day_id,
+          business_date: payload.business_date,
+          opened_by: payload.opened_by,
+          opened_at: payload.opened_at,
+          notes: payload.notes,
+          local_id: payload.local_id,
+          external_day_id: payload.external_day_id,
+        });
+
+        // SEC-017: Audit log (non-sensitive data only)
+        if (response.success) {
+          log.info('Day open synced to cloud', {
+            dayId: response.day_id,
+            businessDate: payload.business_date,
+            status: response.status,
+            isIdempotent: response.is_idempotent,
+            serverTime: response.server_time,
+          });
+        }
+
+        results.push({
+          id: item.id,
+          cloudId: response.day_id,
+          status: response.success ? 'synced' : 'failed',
+          error: response.success ? undefined : 'Cloud API returned failure',
+          apiContext: {
+            api_endpoint: this.getEndpointForEntityType('day_open'),
+            http_status: response.success ? 200 : 500,
+            response_body: JSON.stringify({
+              success: response.success,
+              day_id: response.day_id,
+              status: response.status,
+              is_idempotent: response.is_idempotent,
+            }),
+          },
+        });
+      } catch (error) {
+        // API-003: Centralized error handling with sanitized messages
+        const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-007/MQ-002: Classify error for retry logic
+        // No httpStatus available in catch block, so pass null
+        const classification = classifyError(null, errorMessage);
+
+        log.error('Failed to sync day open item', {
+          itemId: item.id,
+          entityId: item.entity_id,
+          error: errorMessage,
+          errorCategory: classification.category,
+        });
+
+        // No apiContext for caught exceptions (API call may have failed before response)
+        results.push({
+          id: item.id,
           status: 'failed',
           error: errorMessage,
         });

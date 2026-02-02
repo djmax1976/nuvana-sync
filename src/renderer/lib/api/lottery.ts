@@ -362,9 +362,14 @@ export interface LotteryConfigValueItem {
 
 /**
  * Mark pack as sold out input
+ *
+ * SEC-014: INPUT_VALIDATION - closing_serial is REQUIRED, not optional
+ * The closing_serial must be the pack's serial_end (last ticket index)
+ * Hardcoding defaults like '299' is a security/correctness violation
  */
 export interface MarkPackAsSoldOutInput {
-  closing_serial?: string;
+  /** Required: The pack's serial_end (last ticket index, e.g., "029" for 30-ticket pack) */
+  closing_serial: string;
 }
 
 /**
@@ -531,6 +536,7 @@ export interface OpenBusinessPeriod {
 
 /**
  * Depleted pack for the current open business period
+ * Includes sales fields for reconciliation display
  */
 export interface DepletedPackDay {
   pack_id: string;
@@ -540,6 +546,12 @@ export interface DepletedPackDay {
   bin_number: number;
   activated_at: string;
   depleted_at: string;
+  /** Closing serial (last ticket sold) */
+  closing_serial: string | null;
+  /** Total tickets sold for reconciliation */
+  tickets_sold_count: number;
+  /** Total sales amount for reconciliation */
+  sales_amount: number;
 }
 
 /**
@@ -557,6 +569,7 @@ export interface ActivatedPackDay {
 
 /**
  * Returned pack information
+ * Sales fields are always numbers (0 if no sales) for reconciliation
  */
 export interface ReturnedPackDay {
   pack_id: string;
@@ -569,8 +582,10 @@ export interface ReturnedPackDay {
   return_reason: string | null;
   return_notes: string | null;
   last_sold_serial: string | null;
-  tickets_sold_on_return: number | null;
-  return_sales_amount: number | null;
+  /** Total tickets sold before return - always a number (0 if none) */
+  tickets_sold_on_return: number;
+  /** Total sales amount before return - always a number (0 if none) */
+  return_sales_amount: number;
   returned_by_name: string | null;
 }
 
@@ -609,6 +624,58 @@ export interface DayBinsResponse {
   activated_packs: ActivatedPackDay[];
   returned_packs: ReturnedPackDay[];
   day_close_summary: DayCloseSummary | null;
+}
+
+// ============ Day Status & Initialization Types ============
+
+/**
+ * Day status response - returned by lottery:getDayStatus
+ * Used to check if initialization is needed before showing lottery UI
+ *
+ * Initialization logic:
+ * - needs_initialization: true, is_first_ever: true → Show init screen (first time ever)
+ * - needs_initialization: true, is_first_ever: false → Auto-initialize (after day close)
+ * - needs_initialization: false → Day exists, show normal UI
+ */
+export interface DayStatusResponse {
+  has_open_day: boolean;
+  day: {
+    day_id: string;
+    business_date: string;
+    status: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED';
+    opened_at: string;
+    opened_by: string | null;
+  } | null;
+  today: string;
+  prerequisites: {
+    has_bins: boolean;
+    has_games: boolean;
+    bins_count: number;
+    games_count: number;
+  };
+  needs_initialization: boolean;
+  /**
+   * Indicates if this is the store's first-ever lottery day.
+   * - true: No lottery days have ever existed for this store (show init screen)
+   * - false: Previous days exist, but no OPEN day (auto-initialize after day close)
+   */
+  is_first_ever: boolean;
+}
+
+/**
+ * Initialize business day response - returned by lottery:initializeBusinessDay
+ */
+export interface InitializeBusinessDayResponse {
+  success: boolean;
+  is_new: boolean;
+  day: {
+    day_id: string;
+    business_date: string;
+    status: 'OPEN';
+    opened_at: string;
+    opened_by: string | null;
+  };
+  message: string;
 }
 
 // ============ Two-Phase Day Close Types ============
@@ -794,6 +861,52 @@ export async function getLotteryDayBins(
   }
 }
 
+// ============ Day Status & Initialization API Functions ============
+
+/**
+ * Get current business day status without creating one
+ * IPC: lottery:getDayStatus
+ *
+ * Use this to check if initialization is needed before showing the lottery UI.
+ * Unlike getDayBins, this does NOT auto-create a day.
+ *
+ * @returns Day status with initialization requirements
+ */
+export async function getDayStatus(): Promise<ApiResponse<DayStatusResponse>> {
+  try {
+    const response = await ipcClient.invoke<DayStatusResponse>('lottery:getDayStatus');
+    return wrapSuccess(response);
+  } catch (error) {
+    return handleIPCError(error);
+  }
+}
+
+/**
+ * Initialize business day explicitly
+ * IPC: lottery:initializeBusinessDay
+ *
+ * Creates a new OPEN business day for the store. This is the explicit action
+ * that starts the store's business day, replacing implicit auto-creation.
+ *
+ * Prerequisites (checked by handler):
+ * - At least one bin must exist
+ * - At least one game must exist
+ * - No day can be in PENDING_CLOSE status
+ * - User must be authenticated
+ *
+ * @returns Initialization result with new day details
+ */
+export async function initializeBusinessDay(): Promise<ApiResponse<InitializeBusinessDayResponse>> {
+  try {
+    const response = await ipcClient.invoke<InitializeBusinessDayResponse>(
+      'lottery:initializeBusinessDay'
+    );
+    return wrapSuccess(response);
+  } catch (error) {
+    return handleIPCError(error);
+  }
+}
+
 // ============ Packs API Functions ============
 
 /**
@@ -897,19 +1010,38 @@ export async function activatePack(
 /**
  * Mark pack as sold out (deplete/settle)
  * IPC: lottery:depletePack
- * @param dataOrPackId - Depletion data object OR pack_id string
- * @param closingSerial - Optional closing serial (when first arg is packId)
+ *
+ * SEC-014: INPUT_VALIDATION - closing_serial is REQUIRED
+ * API-001: VALIDATION - Validates input before sending to backend
+ *
+ * @param data - Depletion data with pack_id and closing_serial (both required)
  * @returns Depleted pack response
+ * @throws Error if closing_serial is not provided (no hardcoded defaults)
  */
 export async function depletePack(
-  dataOrPackId: DepletePackInput | string,
-  closingSerial?: string
+  data: DepletePackInput
 ): Promise<ApiResponse<DepletePackResponse>> {
+  // SEC-014: Validate required fields - no hardcoded defaults allowed
+  if (!data.closing_serial || typeof data.closing_serial !== 'string') {
+    return {
+      success: false,
+      data: undefined as never,
+      message: 'closing_serial is required and must be a string',
+      error: 'VALIDATION_ERROR: closing_serial is required for pack depletion',
+    };
+  }
+
+  // SEC-014: Validate closing_serial format (3-digit numeric string)
+  if (!/^\d{3}$/.test(data.closing_serial)) {
+    return {
+      success: false,
+      data: undefined as never,
+      message: 'closing_serial must be a 3-digit numeric string (e.g., "029")',
+      error: 'VALIDATION_ERROR: Invalid closing_serial format',
+    };
+  }
+
   try {
-    const data =
-      typeof dataOrPackId === 'string'
-        ? { pack_id: dataOrPackId, closing_serial: closingSerial || '299' }
-        : dataOrPackId;
     const result = await ipcClient.invoke<DepletePackResponse>('lottery:depletePack', data);
     return wrapSuccess(result);
   } catch (error) {
@@ -918,17 +1050,32 @@ export async function depletePack(
 }
 
 /**
- * Alias for depletePack for backward compatibility
+ * Mark pack as sold out (depleted)
+ *
+ * SEC-014: INPUT_VALIDATION - closing_serial is REQUIRED (no hardcoded defaults)
+ * API-001: VALIDATION - Strict schema enforcement
+ *
  * @param packId - Pack UUID
- * @param data - Optional closing data
+ * @param data - Required closing data with closing_serial
+ * @returns Depleted pack response
  */
 export async function markPackAsSoldOut(
   packId: string,
-  data?: MarkPackAsSoldOutInput
+  data: MarkPackAsSoldOutInput
 ): Promise<ApiResponse<DepletePackResponse>> {
+  // SEC-014: Validate closing_serial is provided - no hardcoded defaults
+  if (!data?.closing_serial) {
+    return {
+      success: false,
+      data: undefined as never,
+      message: 'closing_serial is required to mark pack as sold out',
+      error: 'VALIDATION_ERROR: closing_serial must be provided (pack serial_end)',
+    };
+  }
+
   return depletePack({
     pack_id: packId,
-    closing_serial: data?.closing_serial || '299', // Default to last ticket
+    closing_serial: data.closing_serial,
   });
 }
 
@@ -1336,6 +1483,11 @@ export const lotteryAPI = {
 
   // Day Bins (enterprise-grade handler with full pack details)
   getDayBins: () => ipcClient.invoke<DayBinsResponse>('lottery:getDayBins'),
+
+  // Day Status & Initialization
+  getDayStatus: () => ipcClient.invoke<DayStatusResponse>('lottery:getDayStatus'),
+  initializeBusinessDay: () =>
+    ipcClient.invoke<InitializeBusinessDayResponse>('lottery:initializeBusinessDay'),
 
   // Packs
   getPacks: (filters?: LotteryPackQueryFilters) =>

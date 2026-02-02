@@ -518,8 +518,9 @@ registerHandler<Shift[] | ReturnType<typeof createErrorResponse>>(
     }
 
     try {
-      // Get today's date
-      const today = new Date().toISOString().split('T')[0];
+      // Get today's date (local timezone, not UTC)
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
       // DB-006: Store-scoped query
       const shifts = shiftsDAL.findByDate(store.store_id, today);
@@ -1032,7 +1033,10 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
     }
 
     const { pin, externalRegisterId, businessDate, startTime } = parseResult.data;
-    const today = businessDate || new Date().toISOString().split('T')[0];
+    // Use local date if no businessDate provided (not UTC)
+    const now = new Date();
+    const localDate = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+    const today = businessDate || localDate;
     const shiftStartTime = startTime || new Date().toISOString();
 
     try {

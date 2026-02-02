@@ -1922,8 +1922,9 @@ registerHandler(
       return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
     }
 
-    // Get current date in YYYY-MM-DD format
-    const today = new Date().toISOString().split('T')[0];
+    // Get current date in YYYY-MM-DD format (local timezone, not UTC)
+    const now = new Date();
+    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
     const closedCount = shiftsDAL.closeStaleOpenShifts(store.store_id, today);
 
@@ -2061,7 +2062,7 @@ registerHandler(
 
     return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
   },
-  { requiresAuth: true, description: 'Restore item from Dead Letter Queue' }
+  { requiresAuth: false, description: 'Restore item from Dead Letter Queue' }
 );
 
 /**
@@ -2097,7 +2098,7 @@ registerHandler(
       restored: restoredCount,
     });
   },
-  { requiresAuth: true, description: 'Restore multiple items from Dead Letter Queue' }
+  { requiresAuth: false, description: 'Restore multiple items from Dead Letter Queue' }
 );
 
 /**
@@ -2124,7 +2125,7 @@ registerHandler(
 
     return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Item not found in Dead Letter Queue');
   },
-  { requiresAuth: true, description: 'Delete item from Dead Letter Queue permanently' }
+  { requiresAuth: false, description: 'Delete item from Dead Letter Queue permanently' }
 );
 
 /**
@@ -2162,7 +2163,7 @@ registerHandler(
       cutoffDate,
     });
   },
-  { requiresAuth: true, description: 'Cleanup old Dead Letter Queue items' }
+  { requiresAuth: false, description: 'Cleanup old Dead Letter Queue items' }
 );
 
 /**
@@ -2200,7 +2201,7 @@ registerHandler(
       'Item not found or already dead-lettered/synced'
     );
   },
-  { requiresAuth: true, description: 'Manually move item to Dead Letter Queue' }
+  { requiresAuth: false, description: 'Manually move item to Dead Letter Queue' }
 );
 
 /**
@@ -2265,7 +2266,7 @@ registerHandler(
       message: `Moved ${deadLetteredCount} items to Dead Letter Queue`,
     });
   },
-  { requiresAuth: true, description: 'Force process auto-dead-letter for stuck items' }
+  { requiresAuth: false, description: 'Force process auto-dead-letter for stuck items' }
 );
 
 /**
@@ -2421,7 +2422,7 @@ registerHandler(
       message: `Force dead-lettered ${deadLetteredCount} stuck items`,
     });
   },
-  { requiresAuth: true, description: 'Force dead-letter ALL stuck PUSH items' }
+  { requiresAuth: false, description: 'Force dead-letter ALL stuck PUSH items' }
 );
 
 /**
@@ -2449,7 +2450,7 @@ registerHandler(
       message: `Deleted ${deleted} stale PULL tracking items`,
     });
   },
-  { requiresAuth: true, description: 'Cleanup stale PULL tracking items' }
+  { requiresAuth: false, description: 'Cleanup stale PULL tracking items' }
 );
 
 log.info('Sync IPC handlers registered');

@@ -65,11 +65,15 @@ const log = createLogger('dashboard-handlers');
 // ============================================================================
 
 /**
- * Get today's business date in YYYY-MM-DD format
- * Uses store timezone if available
+ * Get today's business date in YYYY-MM-DD format (local timezone)
+ * Uses local date, not UTC, to match user's business day
  */
 function getTodayBusinessDate(): string {
-  return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 /**

@@ -864,9 +864,12 @@ export class BidirectionalSyncService {
     const storeId = store.store_id;
     const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'packs_returned');
 
-    log.info('Starting returned packs sync (pull-only)', {
+    // DIAGNOSTIC: Enhanced logging for auth issue debugging
+    log.info('DIAG: syncReturnedPacks STARTING', {
       storeId,
       lastPull: lastPull || 'full',
+      timestamp: new Date().toISOString(),
+      caller: new Error().stack?.split('\n').slice(2, 4).join(' <- ') || 'unknown',
     });
 
     // REUSE existing PULL tracking item if one exists, otherwise create new
@@ -1006,8 +1009,17 @@ export class BidirectionalSyncService {
       return result;
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : 'Unknown error';
+      const stack = error instanceof Error ? error.stack : undefined;
       result.errors.push(`Pull returned packs failed: ${message}`);
-      log.error('Returned packs sync failed', { error: message });
+
+      // DIAGNOSTIC: Enhanced error logging
+      log.error('DIAG: syncReturnedPacks FAILED', {
+        error: message,
+        stack: stack?.split('\n').slice(0, 5).join(' | '),
+        storeId,
+        lastPull: lastPull || 'full',
+        timestamp: new Date().toISOString(),
+      });
 
       // Record PULL failure in sync queue with API context
       const httpStatus = this.extractHttpStatusFromError(message);
@@ -1036,16 +1048,40 @@ export class BidirectionalSyncService {
     activated: BidirectionalSyncResult;
     returned: BidirectionalSyncResult;
   }> {
-    log.info('Starting full packs sync');
+    const syncStartTime = Date.now();
+    log.info('DIAG: syncPacks STARTING - will sync received, activated, then returned', {
+      timestamp: new Date().toISOString(),
+    });
 
+    log.info('DIAG: syncPacks - Step 1/3: Starting syncReceivedPacks');
     const received = await this.syncReceivedPacks();
-    const activated = await this.syncActivatedPacks();
-    const returned = await this.syncReturnedPacks();
+    log.info('DIAG: syncPacks - Step 1/3 COMPLETE: syncReceivedPacks', {
+      pulled: received.pulled,
+      errors: received.errors.length,
+      elapsed: Date.now() - syncStartTime,
+    });
 
-    log.info('Full packs sync completed', {
+    log.info('DIAG: syncPacks - Step 2/3: Starting syncActivatedPacks');
+    const activated = await this.syncActivatedPacks();
+    log.info('DIAG: syncPacks - Step 2/3 COMPLETE: syncActivatedPacks', {
+      pulled: activated.pulled,
+      errors: activated.errors.length,
+      elapsed: Date.now() - syncStartTime,
+    });
+
+    log.info('DIAG: syncPacks - Step 3/3: Starting syncReturnedPacks');
+    const returned = await this.syncReturnedPacks();
+    log.info('DIAG: syncPacks - Step 3/3 COMPLETE: syncReturnedPacks', {
+      pulled: returned.pulled,
+      errors: returned.errors.length,
+      elapsed: Date.now() - syncStartTime,
+    });
+
+    log.info('DIAG: syncPacks COMPLETE', {
       received: { pulled: received.pulled, errors: received.errors.length },
       activated: { pulled: activated.pulled, errors: activated.errors.length },
       returned: { pulled: returned.pulled, errors: returned.errors.length },
+      totalElapsed: Date.now() - syncStartTime,
     });
 
     return { received, activated, returned };

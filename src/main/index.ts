@@ -1037,7 +1037,9 @@ if (!gotTheLock) {
             // Close stale open shifts from previous days
             // This fixes data where shifts weren't properly closed by Period 98 files
             const { shiftsDAL } = await import('./dal/shifts.dal');
-            const today = new Date().toISOString().split('T')[0];
+            // Use local date, not UTC
+            const nowDate = new Date();
+            const today = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
             const closedStaleShifts = shiftsDAL.closeStaleOpenShifts(store.store_id, today);
             if (closedStaleShifts > 0) {
               log.info('Closed stale open shifts at startup', {

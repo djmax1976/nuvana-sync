@@ -559,39 +559,50 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
-   * Get count of pending (unsynced) items
+   * Get count of pending (unsynced) items, excluding dead-lettered items
+   *
+   * Dead-lettered items are counted separately via getDeadLetterCount().
+   * This ensures pending count reflects only items actively in the queue.
+   *
+   * SEC-006: Parameterized query
    *
    * @param storeId - Optional store identifier for scoped count
-   * @returns Count of pending items
+   * @returns Count of pending items (excluding dead-lettered)
    */
   getPendingCount(storeId?: string): number {
     if (storeId) {
       const stmt = this.db.prepare(`
         SELECT COUNT(*) as count FROM sync_queue
-        WHERE store_id = ? AND synced = 0
+        WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
       `);
       const result = stmt.get(storeId) as { count: number };
       return result.count;
     }
 
     const stmt = this.db.prepare(`
-      SELECT COUNT(*) as count FROM sync_queue WHERE synced = 0
+      SELECT COUNT(*) as count FROM sync_queue WHERE synced = 0 AND dead_lettered = 0
     `);
     const result = stmt.get() as { count: number };
     return result.count;
   }
 
   /**
-   * Get count of failed items (exceeded max attempts)
+   * Get count of failed items (exceeded max attempts, not dead-lettered)
+   *
+   * Excludes dead-lettered items which should be counted separately via
+   * getDeadLetterCount(). This ensures failed count only reflects items
+   * that can be retried from the regular queue.
+   *
+   * SEC-006: Parameterized query
    *
    * @param storeId - Optional store identifier
-   * @returns Count of failed items
+   * @returns Count of failed items (excluding dead-lettered)
    */
   getFailedCount(storeId?: string): number {
     if (storeId) {
       const stmt = this.db.prepare(`
         SELECT COUNT(*) as count FROM sync_queue
-        WHERE store_id = ? AND synced = 0 AND sync_attempts >= max_attempts
+        WHERE store_id = ? AND synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts
       `);
       const result = stmt.get(storeId) as { count: number };
       return result.count;
@@ -599,7 +610,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     const stmt = this.db.prepare(`
       SELECT COUNT(*) as count FROM sync_queue
-      WHERE synced = 0 AND sync_attempts >= max_attempts
+      WHERE synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts
     `);
     const result = stmt.get() as { count: number };
     return result.count;
@@ -625,13 +636,14 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   /**
    * Get mutually exclusive sync counts for accurate UI display
    * Returns counts that do NOT overlap - queued + failed = total pending
+   * Excludes dead-lettered items which are counted separately.
    *
    * SEC-006: All queries use parameterized statements
    * DB-006: TENANT_ISOLATION - All queries scoped to store_id
    * API-008: OUTPUT_FILTERING - Returns accurate, non-misleading data
    *
    * @param storeId - Store identifier for tenant isolation
-   * @returns Object with mutually exclusive counts
+   * @returns Object with mutually exclusive counts (excluding dead-lettered)
    */
   getExclusiveCounts(storeId: string): {
     queued: number;
@@ -641,11 +653,12 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   } {
     // Single optimized query to get all counts in one database round-trip
     // Performance: Avoids N+1 pattern by combining counts
+    // NOTE: Excludes dead_lettered = 1 items from queued/failed/pending counts
     const stmt = this.db.prepare(`
       SELECT
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
-        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
-        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as total_pending,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 THEN 1 ELSE 0 END) as total_pending,
         SUM(CASE WHEN synced = 1 AND synced_at >= date('now', 'localtime') THEN 1 ELSE 0 END) as synced_today
       FROM sync_queue
       WHERE store_id = ?
@@ -667,16 +680,23 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
-   * Get failed items for review
+   * Get failed items for review (excludes dead-lettered items)
+   *
+   * Failed items are those that exceeded max_attempts but haven't been
+   * moved to the Dead Letter Queue yet. Dead-lettered items should be
+   * accessed via getDeadLetterItems() instead.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: Store-scoped query
    *
    * @param storeId - Store identifier
    * @param limit - Maximum items to return
-   * @returns Array of failed items
+   * @returns Array of failed items (not including dead-lettered)
    */
   getFailedItems(storeId: string, limit: number = 100): SyncQueueItem[] {
     const stmt = this.db.prepare(`
       SELECT * FROM sync_queue
-      WHERE store_id = ? AND synced = 0 AND sync_attempts >= max_attempts
+      WHERE store_id = ? AND synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts
       ORDER BY created_at DESC
       LIMIT ?
     `);
@@ -685,7 +705,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
-   * Retry failed items by resetting attempt count
+   * Retry failed items by resetting attempt count and restoring from DLQ if needed
+   *
+   * This method handles both:
+   * - Items that are "failed" (sync_attempts >= max_attempts but not dead-lettered)
+   * - Items that are in the Dead Letter Queue (dead_lettered = 1)
+   *
+   * SEC-006: Parameterized query
    *
    * @param ids - Array of item IDs to retry
    */
@@ -694,11 +720,19 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     const placeholders = ids.map(() => '?').join(', ');
 
+    // Reset all retry-related state including DLQ fields
+    // This ensures items can be retried regardless of their previous state
     const stmt = this.db.prepare(`
       UPDATE sync_queue SET
         sync_attempts = 0,
-        last_sync_error = NULL
-      WHERE id IN (${placeholders})
+        last_sync_error = NULL,
+        last_attempt_at = NULL,
+        error_category = NULL,
+        dead_lettered = 0,
+        dead_letter_reason = NULL,
+        dead_lettered_at = NULL,
+        retry_after = NULL
+      WHERE id IN (${placeholders}) AND synced = 0
     `);
 
     stmt.run(...ids);
@@ -808,6 +842,32 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     }
 
     return false;
+  }
+
+  /**
+   * Delete all sync queue items by entity type for a store
+   * SEC-006: Parameterized DELETE
+   * DB-006: Scoped to store_id for tenant isolation
+   *
+   * @param storeId - Store ID
+   * @param entityType - Entity type (e.g., 'day_open', 'day_close')
+   * @returns Number of items deleted
+   */
+  deleteByEntityType(storeId: string, entityType: string): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ? AND entity_type = ?
+    `);
+
+    const result = stmt.run(storeId, entityType);
+
+    log.info('Sync queue items deleted by entity type', {
+      storeId,
+      entityType,
+      count: result.changes,
+    });
+
+    return result.changes;
   }
 
   /**
@@ -1210,6 +1270,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   /**
    * Get queued items for sync activity monitor
    * Shows items currently waiting to be synced (pending + failed)
+   * Excludes dead-lettered items which are shown in the DLQ tab.
    *
    * SEC-006: Parameterized query
    * DB-006: Store-scoped query
@@ -1217,7 +1278,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
    *
    * @param storeId - Store identifier for tenant isolation
    * @param limit - Maximum items to return (bounded to 50)
-   * @returns Array of sync activity items
+   * @returns Array of sync activity items (excluding dead-lettered)
    */
   getQueuedItemsForActivity(storeId: string, limit: number = 20): SyncActivityItem[] {
     const safeLimit = Math.min(Math.max(1, limit), 50);
@@ -1227,7 +1288,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
              sync_attempts, max_attempts, last_sync_error, last_attempt_at,
              created_at, synced_at, sync_direction, api_endpoint, http_status, response_body
       FROM sync_queue
-      WHERE store_id = ? AND synced = 0
+      WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
       ORDER BY priority DESC, created_at DESC
       LIMIT ?
     `);
@@ -1388,7 +1449,19 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     const status = params.status || 'all';
 
     // SEC-006: Validate entity type against allowlist to prevent injection
-    const ALLOWED_ENTITY_TYPES = ['pack', 'game', 'bin', 'shift', 'user'];
+    // v047: Added day_close, shift_opening, shift_closing, variance_approval, employee
+    const ALLOWED_ENTITY_TYPES = [
+      'pack',
+      'game',
+      'bin',
+      'shift',
+      'user',
+      'employee',
+      'day_close',
+      'shift_opening',
+      'shift_closing',
+      'variance_approval',
+    ];
     const entityType =
       params.entityType && ALLOWED_ENTITY_TYPES.includes(params.entityType)
         ? params.entityType
@@ -1409,7 +1482,8 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
         : undefined;
 
     // Build WHERE clause based on filters
-    const conditions: string[] = ['store_id = ?'];
+    // NOTE: All filters exclude dead_lettered items - those are shown in the DLQ tab
+    const conditions: string[] = ['store_id = ?', 'dead_lettered = 0'];
     const queryParams: (string | number)[] = [storeId];
 
     // Status filter
@@ -1420,7 +1494,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     } else if (status === 'synced') {
       conditions.push('synced = 1');
     }
-    // 'all' has no additional condition
+    // 'all' has no additional condition (but still excludes dead_lettered)
 
     // Entity type filter
     if (entityType) {
@@ -1567,12 +1641,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     // Breakdown by entity type with mutually exclusive counts
     // pending = total unsynced (queued + failed), queued = retryable, failed = exceeded max
+    // NOTE: Excludes dead_lettered items from queued/failed/pending counts
     const byEntityTypeStmt = this.db.prepare(`
       SELECT
         entity_type,
-        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
-        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
       FROM sync_queue
       WHERE store_id = ?
@@ -1588,12 +1663,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     }>;
 
     // Breakdown by operation with mutually exclusive counts
+    // NOTE: Excludes dead_lettered items from queued/failed/pending counts
     const byOperationStmt = this.db.prepare(`
       SELECT
         operation,
-        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
-        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced
       FROM sync_queue
       WHERE store_id = ?
@@ -1611,12 +1687,13 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     // Breakdown by sync direction (PUSH/PULL) with synced today counts
     // SEC-006: Parameterized query with store_id scoping
     // Treats NULL sync_direction as 'PUSH' for backward compatibility
+    // NOTE: Excludes dead_lettered items from queued/failed/pending counts
     const byDirectionStmt = this.db.prepare(`
       SELECT
         COALESCE(sync_direction, 'PUSH') as direction,
-        SUM(CASE WHEN synced = 0 THEN 1 ELSE 0 END) as pending,
-        SUM(CASE WHEN synced = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
-        SUM(CASE WHEN synced = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 THEN 1 ELSE 0 END) as pending,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts < max_attempts THEN 1 ELSE 0 END) as queued,
+        SUM(CASE WHEN synced = 0 AND dead_lettered = 0 AND sync_attempts >= max_attempts THEN 1 ELSE 0 END) as failed,
         SUM(CASE WHEN synced = 1 THEN 1 ELSE 0 END) as synced,
         SUM(CASE WHEN synced = 1 AND synced_at >= date('now', 'localtime') THEN 1 ELSE 0 END) as synced_today
       FROM sync_queue
