@@ -243,6 +243,14 @@ export function DepletedPacksSection({
   // COMPUTED VALUES
   // ========================================================================
 
+  // Calculate total sales from depleted packs for reconciliation
+  const totalDepletedSales = depletedPacks.reduce((sum, pack) => {
+    if (typeof pack.sales_amount === 'number') {
+      return sum + pack.sales_amount;
+    }
+    return sum;
+  }, 0);
+
   // Determine if multiple days have passed (for warning display)
   const daysSinceClose = openBusinessPeriod?.days_since_last_close;
   const isMultipleDays =
@@ -304,6 +312,10 @@ export function DepletedPacksSection({
             <div className="flex items-center gap-2">
               <Package className="h-4 w-4 flex-shrink-0 text-muted-foreground" aria-hidden="true" />
               <span className="font-medium text-left">{sectionTitle}</span>
+              {/* Show total depleted sales in header for reconciliation */}
+              <span className="text-sm text-muted-foreground ml-2">
+                (${totalDepletedSales.toFixed(2)} sales)
+              </span>
             </div>
             {isOpen ? (
               <ChevronDown
@@ -342,8 +354,11 @@ export function DepletedPacksSection({
                   <TableHead scope="col" className="w-28 whitespace-nowrap">
                     Pack #
                   </TableHead>
-                  <TableHead scope="col" className="w-36 whitespace-nowrap">
-                    Activated
+                  <TableHead scope="col" className="w-20 text-right whitespace-nowrap">
+                    Sold
+                  </TableHead>
+                  <TableHead scope="col" className="w-24 text-right whitespace-nowrap">
+                    Sales $
                   </TableHead>
                   <TableHead scope="col" className="w-36 whitespace-nowrap">
                     Sold Out
@@ -385,16 +400,18 @@ export function DepletedPacksSection({
                         {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
                       </TableCell>
 
-                      {/* Activated - Stacked Date/Time */}
-                      <TableCell className="text-sm whitespace-nowrap">
-                        <div className="flex flex-col">
-                          <span className="text-foreground font-medium">
-                            {activatedDateTime.date}
-                          </span>
-                          <span className="text-muted-foreground text-xs">
-                            {activatedDateTime.time}
-                          </span>
-                        </div>
+                      {/* Tickets Sold */}
+                      <TableCell className="text-right tabular-nums">
+                        {typeof pack.tickets_sold_count === 'number'
+                          ? pack.tickets_sold_count
+                          : '--'}
+                      </TableCell>
+
+                      {/* Sales Amount */}
+                      <TableCell className="text-right tabular-nums font-medium">
+                        {typeof pack.sales_amount === 'number'
+                          ? `$${pack.sales_amount.toFixed(2)}`
+                          : '--'}
                       </TableCell>
 
                       {/* Sold Out - Stacked Date/Time */}

@@ -127,6 +127,15 @@ const ALLOWED_INVOKE_CHANNELS = [
   'lottery:lookupGameByCode',
   'lottery:createGame',
   'lottery:getPackDetails', // Pack detail modal (MarkSoldOutDialog)
+  'lottery:requeueDayCloseSync', // Re-queue closed day for sync (testing/recovery)
+  'lottery:requeueDayOpenSync', // Re-queue day open for sync (testing/recovery)
+  'lottery:listBusinessDays', // List all business days (debugging)
+  'lottery:getDayStatus', // Get current day status without creating (initialization check)
+  'lottery:initializeBusinessDay', // Explicitly initialize/start a business day
+  'lottery:deleteBusinessDay', // Delete business day (data cleanup)
+  'lottery:reopenBusinessDay', // Reopen closed day (testing/recovery)
+  'lottery:cleanupStaleDays', // Delete all stale days except most recent closed (data cleanup)
+  'lottery:deleteAllBusinessDays', // Delete ALL business days (complete reset)
   // Settings
   'settings:get',
   'settings:update',

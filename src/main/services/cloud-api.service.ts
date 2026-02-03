@@ -462,6 +462,7 @@ export interface CloudPacksResponse {
  * API: GET /api/v1/sync/lottery/day-status
  */
 export interface CloudDayStatus {
+  day_id: string;
   store_id: string;
   business_date: string;
   status: 'OPEN' | 'PREPARING_CLOSE' | 'CLOSED';
@@ -943,6 +944,52 @@ export const ApproveVarianceRequestSchema = z.object({
   approved_by: z.string().uuid('Invalid approver ID format'),
 });
 
+/**
+ * Day open status enum for response validation
+ */
+export const DayOpenStatusSchema = z.enum(['OPEN', 'PENDING_CLOSE', 'CLOSED']);
+
+/**
+ * Day open request schema
+ * API-001: Full validation for day open endpoint
+ * API Endpoint: POST /api/v1/sync/lottery/day/open
+ * Reference: myfiles/replica_end_points.md lines 2408-2465
+ *
+ * @security SEC-006: Parameterized/structured data prevents injection
+ * @security DB-006: store_id included in session for tenant isolation
+ * @security SEC-010: opened_by from authenticated session
+ */
+export const DayOpenRequestSchema = z.object({
+  day_id: z.string().uuid('Invalid day_id format. Expected UUID'),
+  business_date: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, 'Business date must be YYYY-MM-DD format'),
+  // opened_by is REQUIRED by the cloud API - must have a valid user UUID
+  opened_by: z.string().uuid('Invalid opened_by format. Expected UUID'),
+  opened_at: z.string().datetime({ message: 'opened_at must be ISO 8601 datetime format' }),
+  notes: z.string().max(500, 'Notes cannot exceed 500 characters').optional(),
+  local_id: z.string().max(100, 'local_id cannot exceed 100 characters').optional(),
+  external_day_id: z.string().max(255, 'external_day_id cannot exceed 255 characters').optional(),
+});
+
+/**
+ * Day open response schema
+ * API-001: Validates response from day open endpoint
+ * Reference: replica_end_points.md lines 2437-2445
+ */
+export const DayOpenResponseSchema = z.object({
+  success: z.boolean(),
+  day_id: z.string(),
+  status: DayOpenStatusSchema,
+  opened_at: z.string(),
+  server_time: z.string(),
+  is_idempotent: z.boolean(), // API contract uses is_idempotent, not idempotent
+});
+
+/** Type for day open request */
+export type DayOpenRequest = z.infer<typeof DayOpenRequestSchema>;
+
+/** Type for day open response */
+export type DayOpenResponse = z.infer<typeof DayOpenResponseSchema>;
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -971,9 +1018,43 @@ export class CloudApiService {
   private configStore: Store;
   private licenseStatusChangeCallbacks: Array<() => void> = [];
 
+  // DIAGNOSTIC: Track session creation for debugging auth issues
+  private sessionCreationLog: Array<{ timestamp: number; sessionId: string; caller: string }> = [];
+  private static readonly SESSION_LOG_MAX_ENTRIES = 20;
+
   constructor() {
     // Must match the store name used by SettingsService
     this.configStore = new Store({ name: 'nuvana' });
+  }
+
+  /**
+   * DIAGNOSTIC: Log session creation for debugging
+   */
+  private logSessionCreation(sessionId: string, caller: string): void {
+    this.sessionCreationLog.push({
+      timestamp: Date.now(),
+      sessionId,
+      caller,
+    });
+    // Keep only last N entries
+    if (this.sessionCreationLog.length > CloudApiService.SESSION_LOG_MAX_ENTRIES) {
+      this.sessionCreationLog.shift();
+    }
+
+    // Log recent session activity
+    const recentSessions = this.sessionCreationLog.filter(
+      (s) => Date.now() - s.timestamp < 60000 // Last 60 seconds
+    );
+    log.info('DIAG: Session creation tracked', {
+      newSessionId: sessionId,
+      caller,
+      recentSessionCount: recentSessions.length,
+      recentSessions: recentSessions.map((s) => ({
+        sessionId: s.sessionId.substring(0, 8) + '...',
+        ageMs: Date.now() - s.timestamp,
+        caller: s.caller.substring(0, 50),
+      })),
+    });
   }
 
   // ==========================================================================
@@ -1033,12 +1114,10 @@ export class CloudApiService {
 
       if (safeStorage.isEncryptionAvailable()) {
         const decryptedKey = safeStorage.decryptString(encryptedBuffer);
-        // TEMP DEBUG: Log full key to verify it matches what user entered
-        // Shows: prefix (first 20 chars), suffix (last 10 chars), and length
-        log.info('API key decryption check', {
-          keyPrefix: decryptedKey.substring(0, 20),
-          keySuffix: decryptedKey.substring(decryptedKey.length - 10),
+        // SEC-016/LM-001: Log only non-sensitive metadata, never key material
+        log.debug('API key decrypted successfully', {
           keyLength: decryptedKey.length,
+          hasValue: decryptedKey.length > 0,
         });
         return decryptedKey;
       }
@@ -1061,15 +1140,15 @@ export class CloudApiService {
   /**
    * Get debug information about the API configuration
    * Used for troubleshooting connection issues
+   * SEC-016: Never expose API key material - only safe metadata
    */
   getDebugInfo(): {
     apiUrl: string;
     environment: string;
     nodeEnv: string;
     hasApiKey: boolean;
-    apiKeyPrefix?: string;
-    apiKeySuffix?: string;
     apiKeyLength?: number;
+    apiKeyConfigured: boolean;
     timestamp: string;
   } {
     const apiUrl = this.getBaseUrl();
@@ -1077,15 +1156,14 @@ export class CloudApiService {
     const isDev = nodeEnv === 'development';
 
     let hasApiKey = false;
-    let apiKeyPrefix: string | undefined;
-    let apiKeySuffix: string | undefined;
     let apiKeyLength: number | undefined;
+    let apiKeyConfigured = false;
 
     try {
       const key = this.getApiKey();
       hasApiKey = true;
-      apiKeyPrefix = key.substring(0, 15) + '...';
-      apiKeySuffix = '...' + key.substring(key.length - 8);
+      apiKeyConfigured = key.length > 0;
+      // SEC-016: Only log length as safe metadata, never key material
       apiKeyLength = key.length;
     } catch {
       // API key not configured
@@ -1096,9 +1174,8 @@ export class CloudApiService {
       environment: isDev ? 'development' : 'production',
       nodeEnv,
       hasApiKey,
-      apiKeyPrefix,
-      apiKeySuffix,
       apiKeyLength,
+      apiKeyConfigured,
       timestamp: new Date().toISOString(),
     };
   }
@@ -1236,13 +1313,18 @@ export class CloudApiService {
             typeof errorBody.reason === 'string' ? errorBody.reason : ''
           ).toLowerCase();
 
-          log.warn('API returned auth error', {
+          // DIAGNOSTIC: Enhanced auth error logging
+          log.error('DIAG: API returned auth error (401/403)', {
             status: response.status,
             path,
+            method,
             errorCode,
             errorReason,
             message: errorMessage,
             rawBody: JSON.stringify(errorBody).substring(0, 500),
+            timestamp: new Date().toISOString(),
+            attempt: attempt + 1,
+            hasApiKeyHeader: !skipAuth,
           });
 
           // Normalize message for comparison
@@ -1288,11 +1370,28 @@ export class CloudApiService {
           // For other 401/403 errors, throw appropriate message without affecting license
           // This handles: invalid key format, wrong endpoint, permission denied, etc.
           if (response.status === 401) {
-            throw new Error(errorMessage || 'Authentication failed. Please check your API key.');
+            const finalError = errorMessage || 'Authentication failed. Please check your API key.';
+            log.error('DIAG: Throwing 401 auth error', {
+              path,
+              method,
+              finalError,
+              originalErrorMessage: errorMessage,
+              errorCode,
+              errorReason,
+            });
+            throw new Error(finalError);
           } else {
-            throw new Error(
-              errorMessage || 'Access denied. Please verify your API key is correct.'
-            );
+            const finalError =
+              errorMessage || 'Access denied. Please verify your API key is correct.';
+            log.error('DIAG: Throwing 403 access denied error', {
+              path,
+              method,
+              finalError,
+              originalErrorMessage: errorMessage,
+              errorCode,
+              errorReason,
+            });
+            throw new Error(finalError);
           }
         }
 
@@ -2219,31 +2318,58 @@ export class CloudApiService {
     const os = osModule.default || osModule;
     const osInfo = `${os.platform()} ${os.release()} ${os.arch()}`;
 
-    log.debug('Starting sync session', {
+    // DIAGNOSTIC: Track session creation for debugging auth issues
+    const sessionStartTime = Date.now();
+    const callerStack = new Error().stack?.split('\n').slice(2, 5).join(' <- ') || 'unknown';
+
+    log.info('DIAG: Starting sync session', {
       deviceFingerprint: deviceFingerprint.substring(0, 8) + '...',
       lastSyncSequence,
+      offlineDurationSeconds,
+      appVersion: CLIENT_VERSION,
+      osInfo,
+      caller: callerStack,
+      timestamp: new Date().toISOString(),
     });
 
     // API requires deviceFingerprint and appVersion (per documentation)
-    const rawResponse = await this.request<{ success: boolean; data: SyncSessionResponse }>(
-      'POST',
-      '/api/v1/sync/start',
-      {
-        deviceFingerprint,
-        appVersion: CLIENT_VERSION,
-        osInfo,
-        lastSyncSequence,
-        offlineDurationSeconds,
-      }
-    );
+    let rawResponse: { success: boolean; data: SyncSessionResponse };
+    try {
+      rawResponse = await this.request<{ success: boolean; data: SyncSessionResponse }>(
+        'POST',
+        '/api/v1/sync/start',
+        {
+          deviceFingerprint,
+          appVersion: CLIENT_VERSION,
+          osInfo,
+          lastSyncSequence,
+          offlineDurationSeconds,
+        }
+      );
+    } catch (error) {
+      const elapsed = Date.now() - sessionStartTime;
+      log.error('DIAG: Session start FAILED', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        elapsed,
+        caller: callerStack,
+        timestamp: new Date().toISOString(),
+      });
+      throw error;
+    }
 
     const response = rawResponse.data;
+    const elapsed = Date.now() - sessionStartTime;
 
-    log.info('Sync session started', {
+    log.info('DIAG: Sync session started successfully', {
       sessionId: response.sessionId,
       revocationStatus: response.revocationStatus,
       pullPendingCount: response.pullPendingCount,
+      elapsed,
+      caller: callerStack,
     });
+
+    // DIAGNOSTIC: Track this session creation
+    this.logSessionCreation(response.sessionId, callerStack);
 
     return response;
   }
@@ -3445,15 +3571,15 @@ export class CloudApiService {
       const path = `/api/v1/sync/lottery/packs/receive`;
 
       // API spec: POST /api/v1/sync/lottery/packs/receive
-      // Required fields: session_id, game_code, pack_number, serial_start, serial_end, received_at, local_id
+      // Required fields: session_id, pack_id, game_code, pack_number, serial_start, serial_end, received_at
       const requestBody = {
         session_id: session.sessionId,
+        pack_id: pack.pack_id,
         game_code: pack.game_code,
         pack_number: pack.pack_number,
         serial_start: pack.serial_start,
         serial_end: pack.serial_end,
         received_at: pack.received_at,
-        local_id: pack.pack_id,
       };
 
       log.info('Pack receive request body', {
@@ -4072,37 +4198,49 @@ export class CloudApiService {
    * @returns Validation result with token and expiration
    */
   async prepareDayClose(data: {
-    store_id: string;
-    business_date: string;
-    expected_inventory: Array<{
-      bin_id: string;
+    day_id: string;
+    closings: Array<{
       pack_id: string;
-      closing_serial: string;
+      ending_serial: string;
+      entry_method?: 'SCAN' | 'MANUAL';
+      bin_id?: string;
     }>;
-    prepared_by: string | null;
+    initiated_by: string;
+    manual_entry_authorized_by?: string;
+    expire_minutes?: number;
   }): Promise<{
     success: boolean;
-    validation_token: string;
+    day_id: string;
+    status: 'PENDING_CLOSE';
     expires_at: string;
     warnings?: string[];
-    discrepancies?: Array<{
-      bin_id: string;
-      pack_id: string;
-      expected_serial: string;
-      actual_serial?: string;
-      issue: string;
-    }>;
+    server_time: string;
   }> {
     log.debug('Preparing day close', {
-      storeId: data.store_id,
-      businessDate: data.business_date,
-      inventoryCount: data.expected_inventory.length,
+      dayId: data.day_id,
+      closingsCount: data.closings.length,
+      initiatedBy: data.initiated_by,
     });
 
-    // API-001: Validate business date format (YYYY-MM-DD)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(data.business_date)) {
-      log.error('Invalid business date format', { businessDate: data.business_date });
-      throw new Error('Invalid business date format. Expected YYYY-MM-DD');
+    // API-001: Validate day_id is present (UUID format)
+    if (
+      !data.day_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.day_id)
+    ) {
+      log.error('Invalid day_id format', { dayId: data.day_id });
+      throw new Error('Invalid day_id format. Expected UUID');
+    }
+
+    // API-001: Validate closings array has at least 1 item per API contract
+    if (!data.closings || data.closings.length === 0) {
+      log.error('Closings array is empty', { dayId: data.day_id });
+      throw new Error('Closings array must have at least 1 item');
+    }
+
+    // API-001: Validate initiated_by is present
+    if (!data.initiated_by) {
+      log.error('initiated_by is required', { dayId: data.day_id });
+      throw new Error('initiated_by is required for day close preparation');
     }
 
     // Start a sync session (required by API)
@@ -4118,30 +4256,29 @@ export class CloudApiService {
 
       const path = `/api/v1/sync/lottery/day/prepare-close?${params.toString()}`;
 
-      // API-001: Structured payload matching API contract
+      // API-001: Structured payload matching API contract (replica_end_points.md lines 2374-2386)
+      // session_id required in body for tenant isolation verification
       const response = await this.request<{
         success: boolean;
-        data?: {
-          validation_token: string;
-          expires_at: string;
-          warnings?: string[];
-          discrepancies?: Array<{
-            bin_id: string;
-            pack_id: string;
-            expected_serial: string;
-            actual_serial?: string;
-            issue: string;
-          }>;
-        };
+        day_id: string;
+        status: 'PENDING_CLOSE';
+        expires_at: string;
+        warnings?: string[];
+        server_time: string;
       }>('POST', path, {
-        store_id: data.store_id,
-        business_date: data.business_date,
-        expected_inventory: data.expected_inventory.map((inv) => ({
-          bin_id: inv.bin_id,
-          pack_id: inv.pack_id,
-          closing_serial: inv.closing_serial,
+        session_id: session.sessionId,
+        day_id: data.day_id,
+        closings: data.closings.map((closing) => ({
+          pack_id: closing.pack_id,
+          ending_serial: closing.ending_serial,
+          ...(closing.entry_method && { entry_method: closing.entry_method }),
+          ...(closing.bin_id && { bin_id: closing.bin_id }),
         })),
-        prepared_by: data.prepared_by,
+        initiated_by: data.initiated_by,
+        ...(data.manual_entry_authorized_by && {
+          manual_entry_authorized_by: data.manual_entry_authorized_by,
+        }),
+        ...(data.expire_minutes && { expire_minutes: data.expire_minutes }),
       });
 
       // Complete sync session
@@ -4153,20 +4290,20 @@ export class CloudApiService {
 
       // SEC-017: Audit log (no sensitive data)
       log.info('Day close preparation completed', {
-        storeId: data.store_id,
-        businessDate: data.business_date,
-        inventoryCount: data.expected_inventory.length,
-        hasWarnings: Boolean(response.data?.warnings?.length),
-        hasDiscrepancies: Boolean(response.data?.discrepancies?.length),
-        tokenExpiry: response.data?.expires_at,
+        dayId: response.day_id,
+        status: response.status,
+        closingsCount: data.closings.length,
+        hasWarnings: Boolean(response.warnings?.length),
+        expiresAt: response.expires_at,
       });
 
       return {
         success: response.success,
-        validation_token: response.data?.validation_token || '',
-        expires_at: response.data?.expires_at || '',
-        warnings: response.data?.warnings,
-        discrepancies: response.data?.discrepancies,
+        day_id: response.day_id,
+        status: response.status,
+        expires_at: response.expires_at,
+        warnings: response.warnings,
+        server_time: response.server_time,
       };
     } catch (error) {
       // API-003: Try to complete session even on error
@@ -4203,26 +4340,46 @@ export class CloudApiService {
    * @param data - Commit data with validation token
    * @returns Success status with day summary ID
    */
-  async commitDayClose(data: {
-    store_id: string;
-    validation_token: string;
-    closed_by: string | null;
-  }): Promise<{
+  async commitDayClose(data: { day_id: string; closed_by: string; notes?: string }): Promise<{
     success: boolean;
-    day_summary_id?: string;
-    business_date?: string;
-    total_sales?: number;
-    total_tickets_sold?: number;
+    day_id: string;
+    status: 'CLOSED';
+    day_packs: Array<{
+      day_pack_id: string;
+      day_id: string;
+      pack_id: string;
+      pack_number: string;
+      game_code: string;
+      starting_serial: string;
+      ending_serial: string;
+      tickets_sold: number;
+      sales_amount: string;
+    }>;
+    summary: {
+      total_packs: number;
+      total_tickets_sold: number;
+      total_sales_amount: string;
+    };
+    server_time: string;
   }> {
     log.debug('Committing day close', {
-      storeId: data.store_id,
-      hasToken: Boolean(data.validation_token),
+      dayId: data.day_id,
+      closedBy: data.closed_by,
     });
 
-    // API-001: Validate token is present
-    if (!data.validation_token) {
-      log.error('Day close commit missing validation token');
-      throw new Error('Validation token is required for day close commit');
+    // API-001: Validate day_id is present (UUID format)
+    if (
+      !data.day_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.day_id)
+    ) {
+      log.error('Invalid day_id format for commit', { dayId: data.day_id });
+      throw new Error('Invalid day_id format. Expected UUID');
+    }
+
+    // API-001: Validate closed_by is present
+    if (!data.closed_by) {
+      log.error('Day close commit missing closed_by');
+      throw new Error('closed_by is required for day close commit');
     }
 
     // Start a sync session (required by API)
@@ -4238,19 +4395,34 @@ export class CloudApiService {
 
       const path = `/api/v1/sync/lottery/day/commit-close?${params.toString()}`;
 
-      // API-001: Structured payload matching API contract
+      // API-001: Structured payload matching API contract (replica_end_points.md lines 2415-2420)
+      // session_id required in body for tenant isolation verification
       const response = await this.request<{
         success: boolean;
-        data?: {
-          day_summary_id: string;
-          business_date?: string;
-          total_sales?: number;
-          total_tickets_sold?: number;
+        day_id: string;
+        status: 'CLOSED';
+        day_packs: Array<{
+          day_pack_id: string;
+          day_id: string;
+          pack_id: string;
+          pack_number: string;
+          game_code: string;
+          starting_serial: string;
+          ending_serial: string;
+          tickets_sold: number;
+          sales_amount: string;
+        }>;
+        summary: {
+          total_packs: number;
+          total_tickets_sold: number;
+          total_sales_amount: string;
         };
+        server_time: string;
       }>('POST', path, {
-        store_id: data.store_id,
-        validation_token: data.validation_token,
+        session_id: session.sessionId,
+        day_id: data.day_id,
         closed_by: data.closed_by,
+        ...(data.notes && { notes: data.notes }),
       });
 
       // Complete sync session
@@ -4262,20 +4434,20 @@ export class CloudApiService {
 
       // SEC-017: Audit log with summary data (no sensitive information)
       log.info('Day close committed successfully', {
-        storeId: data.store_id,
-        daySummaryId: response.data?.day_summary_id,
-        businessDate: response.data?.business_date,
-        totalSales: response.data?.total_sales,
-        totalTicketsSold: response.data?.total_tickets_sold,
+        dayId: response.day_id,
+        status: response.status,
+        totalPacks: response.summary.total_packs,
+        totalTicketsSold: response.summary.total_tickets_sold,
         closedBy: data.closed_by,
       });
 
       return {
         success: response.success,
-        day_summary_id: response.data?.day_summary_id,
-        business_date: response.data?.business_date,
-        total_sales: response.data?.total_sales,
-        total_tickets_sold: response.data?.total_tickets_sold,
+        day_id: response.day_id,
+        status: response.status,
+        day_packs: response.day_packs,
+        summary: response.summary,
+        server_time: response.server_time,
       };
     } catch (error) {
       // API-003: Try to complete session even on error
@@ -4310,22 +4482,31 @@ export class CloudApiService {
    * @param data - Cancel data with validation token
    * @returns Success status
    */
-  async cancelDayClose(data: {
-    store_id: string;
-    validation_token: string;
-    reason?: string | null;
-    cancelled_by: string | null;
-  }): Promise<{ success: boolean }> {
+  async cancelDayClose(data: { day_id: string; cancelled_by: string; reason?: string }): Promise<{
+    success: boolean;
+    day_id: string;
+    status: 'OPEN';
+    server_time: string;
+  }> {
     log.debug('Cancelling day close', {
-      storeId: data.store_id,
-      hasToken: Boolean(data.validation_token),
+      dayId: data.day_id,
+      cancelledBy: data.cancelled_by,
       hasReason: Boolean(data.reason),
     });
 
-    // API-001: Validate token is present
-    if (!data.validation_token) {
-      log.error('Day close cancel missing validation token');
-      throw new Error('Validation token is required for day close cancel');
+    // API-001: Validate day_id is present (UUID format)
+    if (
+      !data.day_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.day_id)
+    ) {
+      log.error('Invalid day_id format for cancel', { dayId: data.day_id });
+      throw new Error('Invalid day_id format. Expected UUID');
+    }
+
+    // API-001: Validate cancelled_by is present
+    if (!data.cancelled_by) {
+      log.error('Day close cancel missing cancelled_by');
+      throw new Error('cancelled_by is required for day close cancel');
     }
 
     // Start a sync session (required by API)
@@ -4341,12 +4522,18 @@ export class CloudApiService {
 
       const path = `/api/v1/sync/lottery/day/cancel-close?${params.toString()}`;
 
-      // API-001: Structured payload matching API contract
-      const response = await this.request<{ success: boolean }>('POST', path, {
-        store_id: data.store_id,
-        validation_token: data.validation_token,
-        reason: data.reason || null,
+      // API-001: Structured payload matching API contract (replica_end_points.md lines 2453-2458)
+      // session_id required in body for tenant isolation verification
+      const response = await this.request<{
+        success: boolean;
+        day_id: string;
+        status: 'OPEN';
+        server_time: string;
+      }>('POST', path, {
+        session_id: session.sessionId,
+        day_id: data.day_id,
         cancelled_by: data.cancelled_by,
+        ...(data.reason && { reason: data.reason }),
       });
 
       // Complete sync session
@@ -4358,12 +4545,18 @@ export class CloudApiService {
 
       // SEC-017: Audit log
       log.info('Day close cancelled', {
-        storeId: data.store_id,
+        dayId: response.day_id,
+        status: response.status,
         reason: data.reason || 'No reason provided',
         cancelledBy: data.cancelled_by,
       });
 
-      return { success: response.success };
+      return {
+        success: response.success,
+        day_id: response.day_id,
+        status: response.status,
+        server_time: response.server_time,
+      };
     } catch (error) {
       // API-003: Try to complete session even on error
       try {
@@ -4375,6 +4568,204 @@ export class CloudApiService {
       } catch {
         log.warn('Failed to complete sync session after day close cancel error');
       }
+      throw error;
+    }
+  }
+
+  // ==========================================================================
+  // Phase 4: Day Open Sync Methods
+  // ==========================================================================
+
+  /**
+   * Push day open to cloud
+   * API: POST /api/v1/sync/lottery/day/open
+   *
+   * Enterprise-grade implementation for creating/opening a business day on the cloud.
+   * This must be called BEFORE attempting to close a day, as the cloud needs the day
+   * to exist before it can be closed.
+   *
+   * The endpoint is idempotent - calling it multiple times with the same day_id
+   * will return success with idempotent: true without creating duplicates.
+   *
+   * Security & Standards Compliance:
+   * - API-001: Input validation via Zod schema (DayOpenRequestSchema)
+   * - API-003: Centralized error handling with sanitized responses
+   * - SEC-006: Parameterized/structured data prevents injection
+   * - SEC-008: HTTPS enforcement (via base request method)
+   * - DB-006: Store-scoped via session validation (store_id from API key)
+   * - SEC-010: AUTHZ - opened_by recorded for audit trail
+   * - SEC-017: Audit logging for all sync operations
+   *
+   * @security SEC-006 - All data is passed as structured objects, never concatenated
+   * @security DB-006 - Tenant isolation enforced via session store_id binding
+   * @security SEC-017 - Audit log captures day_id, business_date, status (no credentials)
+   *
+   * @param data - Day open data with required fields
+   * @returns Response with day status and idempotency flag
+   */
+  async pushDayOpen(data: {
+    day_id: string;
+    business_date: string;
+    opened_by: string; // REQUIRED by cloud API - must have valid user UUID
+    opened_at: string;
+    notes?: string;
+    local_id?: string;
+    external_day_id?: string;
+  }): Promise<DayOpenResponse> {
+    log.debug('Pushing day open to cloud', {
+      dayId: data.day_id,
+      businessDate: data.business_date,
+      openedBy: data.opened_by,
+    });
+
+    // API-001: Validate day_id is present and valid UUID format
+    if (
+      !data.day_id ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.day_id)
+    ) {
+      log.error('Invalid day_id format for day open', { dayId: data.day_id });
+      throw new Error('Invalid day_id format. Expected UUID');
+    }
+
+    // API-001: Validate business_date is present and valid YYYY-MM-DD format
+    if (!data.business_date || !/^\d{4}-\d{2}-\d{2}$/.test(data.business_date)) {
+      log.error('Invalid business_date format for day open', { businessDate: data.business_date });
+      throw new Error('Invalid business_date format. Expected YYYY-MM-DD');
+    }
+
+    // API-001: Validate opened_by is present and valid UUID format (REQUIRED by cloud API)
+    if (
+      !data.opened_by ||
+      !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(data.opened_by)
+    ) {
+      log.error('Invalid or missing opened_by for day open', { openedBy: data.opened_by });
+      throw new Error('opened_by is required and must be a valid UUID');
+    }
+
+    // API-001: Validate opened_at is present and valid ISO 8601 format
+    if (!data.opened_at) {
+      log.error('opened_at is required for day open');
+      throw new Error('opened_at is required for day open');
+    }
+
+    // Validate ISO 8601 datetime format (basic check for parsability)
+    const parsedDate = Date.parse(data.opened_at);
+    if (isNaN(parsedDate)) {
+      log.error('Invalid opened_at format for day open', { openedAt: data.opened_at });
+      throw new Error('Invalid opened_at format. Expected ISO 8601 datetime');
+    }
+
+    // API-001: Validate optional notes length
+    if (data.notes !== undefined && data.notes.length > 500) {
+      log.error('Notes exceed maximum length', { notesLength: data.notes.length });
+      throw new Error('Notes cannot exceed 500 characters');
+    }
+
+    // API-001: Validate optional local_id length
+    if (data.local_id !== undefined && data.local_id.length > 100) {
+      log.error('local_id exceeds maximum length', { localIdLength: data.local_id.length });
+      throw new Error('local_id cannot exceed 100 characters');
+    }
+
+    // API-001: Validate optional external_day_id length
+    if (data.external_day_id !== undefined && data.external_day_id.length > 255) {
+      log.error('external_day_id exceeds maximum length', {
+        externalDayIdLength: data.external_day_id.length,
+      });
+      throw new Error('external_day_id cannot exceed 255 characters');
+    }
+
+    // Start a sync session (required by API)
+    const session = await this.startSyncSession();
+
+    // Validate session is valid (not suspended/revoked/rotated)
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    try {
+      const params = new URLSearchParams();
+      params.set('session_id', session.sessionId);
+
+      const path = `/api/v1/sync/lottery/day/open?${params.toString()}`;
+
+      // SEC-006: Structured payload matching API contract (replica_end_points.md lines 2408-2465)
+      // All data is passed as structured object, never concatenated into strings
+      // SEC-006: Structured payload matching API contract (replica_end_points.md lines 2420-2432)
+      // session_id is required in the request body per API spec
+      const response = await this.request<{
+        success: boolean;
+        day_id: string;
+        status: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED';
+        opened_at: string;
+        server_time: string;
+        is_idempotent: boolean; // API contract uses is_idempotent
+      }>('POST', path, {
+        session_id: session.sessionId, // Required in body per API contract
+        day_id: data.day_id,
+        business_date: data.business_date,
+        opened_at: data.opened_at,
+        opened_by: data.opened_by, // REQUIRED by cloud API
+        ...(data.notes && { notes: data.notes }),
+        ...(data.local_id && { local_id: data.local_id }),
+        ...(data.external_day_id && { external_day_id: data.external_day_id }),
+      });
+
+      // Complete sync session on success
+      await this.completeSyncSession(session.sessionId, 0, {
+        pulled: 0,
+        pushed: 1,
+        conflictsResolved: 0,
+      });
+
+      // SEC-017: Audit log (non-sensitive data only)
+      log.info('Day open pushed to cloud', {
+        dayId: response.day_id,
+        businessDate: data.business_date,
+        status: response.status,
+        isIdempotent: response.is_idempotent,
+        serverTime: response.server_time,
+      });
+
+      // API-001: Validate response matches expected schema
+      const validatedResponse = DayOpenResponseSchema.safeParse(response);
+      if (!validatedResponse.success) {
+        log.warn('Day open response validation warning', {
+          dayId: response.day_id,
+          issues: validatedResponse.error.issues.map((issue) => issue.message),
+        });
+        // Return the response anyway since the request succeeded
+        // but log the validation issues for monitoring
+      }
+
+      return {
+        success: response.success,
+        day_id: response.day_id,
+        status: response.status,
+        opened_at: response.opened_at,
+        server_time: response.server_time,
+        is_idempotent: response.is_idempotent,
+      };
+    } catch (error) {
+      // API-003: Try to complete session even on error
+      try {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      } catch {
+        log.warn('Failed to complete sync session after day open error');
+      }
+
+      // Log error without sensitive data
+      const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+      log.error('Failed to push day open to cloud', {
+        dayId: data.day_id,
+        businessDate: data.business_date,
+        error: errorMessage,
+      });
+
       throw error;
     }
   }
@@ -5190,16 +5581,38 @@ export class CloudApiService {
     sinceSequence?: number;
     limit?: number;
   }): Promise<CloudPacksResponse> {
-    log.debug('Pulling returned packs from cloud', {
+    const pullStartTime = Date.now();
+
+    log.info('DIAG: pullReturnedPacks STARTING', {
       since: options?.since || 'full',
       sinceSequence: options?.sinceSequence,
       limit: options?.limit,
+      timestamp: new Date().toISOString(),
     });
 
     // Start a sync session (required by API)
-    const session = await this.startSyncSession();
+    log.info('DIAG: pullReturnedPacks - calling startSyncSession...');
+    let session;
+    try {
+      session = await this.startSyncSession();
+      log.info('DIAG: pullReturnedPacks - startSyncSession succeeded', {
+        sessionId: session.sessionId,
+        revocationStatus: session.revocationStatus,
+        elapsed: Date.now() - pullStartTime,
+      });
+    } catch (sessionError) {
+      log.error('DIAG: pullReturnedPacks - startSyncSession FAILED', {
+        error: sessionError instanceof Error ? sessionError.message : 'Unknown',
+        elapsed: Date.now() - pullStartTime,
+      });
+      throw sessionError;
+    }
 
     if (session.revocationStatus !== 'VALID') {
+      log.error('DIAG: pullReturnedPacks - session revocationStatus is NOT VALID', {
+        revocationStatus: session.revocationStatus,
+        sessionId: session.sessionId,
+      });
       throw new Error(`API key status: ${session.revocationStatus}`);
     }
 
@@ -5220,14 +5633,37 @@ export class CloudApiService {
 
       const path = `/api/v1/sync/lottery/packs/returned?${params.toString()}`;
 
-      const rawResponse = await this.request<{
+      log.info('DIAG: pullReturnedPacks - making API request', {
+        path,
+        sessionId: session.sessionId,
+        elapsed: Date.now() - pullStartTime,
+      });
+
+      let rawResponse: {
         success: boolean;
         data?: {
           packs?: Array<Record<string, unknown>>;
           records?: Array<Record<string, unknown>>;
           syncMetadata?: CloudSyncMetadata;
         };
-      }>('GET', path);
+      };
+      try {
+        rawResponse = await this.request<typeof rawResponse>('GET', path);
+        log.info('DIAG: pullReturnedPacks - API request SUCCEEDED', {
+          success: rawResponse.success,
+          hasData: !!rawResponse.data,
+          packCount: rawResponse.data?.packs?.length || rawResponse.data?.records?.length || 0,
+          elapsed: Date.now() - pullStartTime,
+        });
+      } catch (requestError) {
+        log.error('DIAG: pullReturnedPacks - API request FAILED', {
+          error: requestError instanceof Error ? requestError.message : 'Unknown',
+          path,
+          sessionId: session.sessionId,
+          elapsed: Date.now() - pullStartTime,
+        });
+        throw requestError;
+      }
 
       // Handle various response formats - API may return camelCase or snake_case
       const data = rawResponse.data || {};
@@ -5582,16 +6018,78 @@ export class CloudApiService {
           day_status?: CloudDayStatus;
           syncMetadata?: CloudSyncMetadata;
         };
+        // Also support root-level response format
+        dayStatus?: CloudDayStatus;
+        day_status?: CloudDayStatus;
       }>('GET', path);
 
-      // Handle various response formats (camelCase and snake_case)
-      const data = rawResponse.data || {};
-      const dayStatus = data.dayStatus || data.day_status || null;
-      const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
-        lastSequence: dayStatus?.sync_sequence || 0,
-        hasMore: false,
-        serverTime: new Date().toISOString(),
-      };
+      // Handle various response formats:
+      // 1. data.dayStatus or data.day_status (direct object)
+      // 2. rawResponse.dayStatus or rawResponse.day_status (root level)
+      // 3. data.records array (cloud returns day in records array)
+      const data = (rawResponse.data || {}) as Record<string, unknown>;
+
+      // Log response structure for debugging
+      log.info('Day status raw response structure', {
+        hasData: 'data' in rawResponse && rawResponse.data !== undefined,
+        dataKeys: Object.keys(data),
+        hasRecords: Array.isArray(data.records),
+        recordsCount: Array.isArray(data.records) ? (data.records as unknown[]).length : 0,
+      });
+
+      // Try multiple response formats
+      let dayStatus: CloudDayStatus | null = null;
+
+      // Format 1: Direct day_status/dayStatus in data
+      if (data.dayStatus) {
+        dayStatus = data.dayStatus as CloudDayStatus;
+      } else if (data.day_status) {
+        dayStatus = data.day_status as CloudDayStatus;
+      }
+      // Format 2: Root level day_status/dayStatus
+      else if (rawResponse.dayStatus) {
+        dayStatus = rawResponse.dayStatus;
+      } else if (rawResponse.day_status) {
+        dayStatus = rawResponse.day_status;
+      }
+      // Format 3: Day inside records array - find matching business_date
+      else if (Array.isArray(data.records) && (data.records as unknown[]).length > 0) {
+        const records = data.records as CloudDayStatus[];
+        // If we have a specific business date, find that one
+        // Otherwise take the first (most recent) record
+        if (businessDate) {
+          dayStatus = records.find((r) => r.business_date === businessDate) || records[0] || null;
+        } else {
+          dayStatus = records[0] || null;
+        }
+        log.info('Day status extracted from records array', {
+          totalRecords: records.length,
+          foundForDate: dayStatus?.business_date === businessDate,
+          dayId: dayStatus?.day_id,
+          status: dayStatus?.status,
+        });
+      }
+
+      // Log what we resolved
+      log.info('Day status resolved', {
+        dayStatusFound: dayStatus !== null,
+        dayId: dayStatus?.day_id,
+        status: dayStatus?.status,
+        businessDate: dayStatus?.business_date,
+      });
+      // Validate syncMetadata has required properties before using it
+      const rawSyncMetadata = data.syncMetadata as Partial<CloudSyncMetadata> | undefined;
+      const syncMetadata: CloudSyncMetadata =
+        rawSyncMetadata &&
+        typeof rawSyncMetadata.lastSequence === 'number' &&
+        typeof rawSyncMetadata.hasMore === 'boolean' &&
+        typeof rawSyncMetadata.serverTime === 'string'
+          ? (rawSyncMetadata as CloudSyncMetadata)
+          : {
+              lastSequence: dayStatus?.sync_sequence || 0,
+              hasMore: false,
+              serverTime: new Date().toISOString(),
+            };
 
       // Complete sync session
       await this.completeSyncSession(session.sessionId, syncMetadata.lastSequence, {

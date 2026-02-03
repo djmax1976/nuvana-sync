@@ -184,32 +184,55 @@ export function ReturnPackDialog({
 
   /**
    * Calculate tickets sold from serial numbers
-   * Uses fencepost counting: last_sold - starting + 1
-   * MCP: SEC-014 INPUT_VALIDATION - Safe numeric parsing with fallback
+   * Formula: ending_position - starting_position
+   * The ending serial represents the current position (next ticket to sell),
+   * NOT the last sold ticket. Same semantics as Day Close scanner.
+   * Example: starting=000, ending=000 means 0 tickets sold (still at position 0)
+   * Example: starting=000, ending=015 means 15 tickets sold (tickets 0-14)
+   *
+   * MCP Guidance Applied:
+   * - SEC-014: INPUT_VALIDATION - Strict type/bounds validation with NaN guard
+   * - FE-001: STATE_MANAGEMENT - Pure function with no side effects, memoized
+   * - API-003: ERROR_HANDLING - Returns null for invalid input (fail-safe for UI)
    */
   const salesCalculation = useMemo(() => {
     if (!packData || !lastSoldSerial || lastSoldSerial.length !== 3) {
       return null;
     }
 
-    const lastSoldNum = parseInt(lastSoldSerial, 10);
-    const serialStartNum = parseInt(packData.opening_serial || '000', 10);
-
-    // Validate parsing succeeded
-    if (Number.isNaN(lastSoldNum) || Number.isNaN(serialStartNum)) {
+    // SEC-014: Validate input types before processing
+    const openingSerial = packData.opening_serial;
+    const closingSerial = packData.closing_serial;
+    if (typeof lastSoldSerial !== 'string' || typeof openingSerial !== 'string') {
       return null;
     }
 
-    // Validate serial is within valid range
-    const serialEndNum = parseInt(packData.closing_serial || '299', 10);
-    if (lastSoldNum < serialStartNum || lastSoldNum > serialEndNum) {
+    // SEC-014: Parse with explicit radix to prevent octal interpretation
+    const endingNum = parseInt(lastSoldSerial, 10);
+    const startingNum = parseInt(openingSerial, 10);
+
+    // SEC-014: Strict NaN validation using Number.isNaN (not global isNaN)
+    if (Number.isNaN(endingNum) || Number.isNaN(startingNum)) {
       return null;
     }
 
-    // Calculate tickets sold (fencepost: last - start + 1)
-    const ticketsSold = lastSoldNum - serialStartNum + 1;
+    // SEC-014: Validate serial range (reasonable bounds check)
+    const MAX_SERIAL = 999;
+    if (endingNum < 0 || endingNum > MAX_SERIAL || startingNum < 0 || startingNum > MAX_SERIAL) {
+      return null;
+    }
 
-    // Calculate sales amount
+    // Validate serial is within pack's valid range
+    const serialEndNum = parseInt(closingSerial || '299', 10);
+    if (endingNum < startingNum || endingNum > serialEndNum) {
+      return null;
+    }
+
+    // Calculate tickets sold: ending position - starting position
+    // Math.max provides defense-in-depth against data integrity issues
+    const ticketsSold = Math.max(0, endingNum - startingNum);
+
+    // Calculate sales amount with safe numeric coercion
     const gamePrice = packData.game?.price ? Number(packData.game.price) : 0;
     const salesAmount = ticketsSold * gamePrice;
 

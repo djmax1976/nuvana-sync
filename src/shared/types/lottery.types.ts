@@ -33,6 +33,7 @@ import { z } from 'zod';
  * - AUTO_REPLACED: Pack depleted when a replacement pack was activated
  * - MANUAL_SOLD_OUT: Cashier manually marked pack as sold out via UI
  * - POS_LAST_TICKET: POS system detected last ticket sale
+ * - DAY_CLOSE: Pack marked as sold out during day close operation
  *
  * @see migrations/v019_lottery_packs_shift_tracking.sql
  */
@@ -41,6 +42,7 @@ export const DepletionReasonSchema = z.enum([
   'AUTO_REPLACED',
   'MANUAL_SOLD_OUT',
   'POS_LAST_TICKET',
+  'DAY_CLOSE',
 ]);
 
 /**
@@ -58,6 +60,7 @@ export const DEPLETION_REASONS: readonly DepletionReason[] = [
   'AUTO_REPLACED',
   'MANUAL_SOLD_OUT',
   'POS_LAST_TICKET',
+  'DAY_CLOSE',
 ] as const;
 
 // ============================================================================

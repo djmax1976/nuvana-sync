@@ -26,6 +26,7 @@ import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { shiftsDAL } from '../dal/shifts.dal';
 import { parseBarcode, validateBarcode } from '../services/scanner.service';
+import { settingsService } from '../services/settings.service';
 import { createLogger } from '../utils/logger';
 import { ReturnReasonSchema } from '../../shared/types/lottery.types';
 
@@ -159,10 +160,15 @@ function getStoreWithState(): { store_id: string; state_id: string | null } {
 }
 
 /**
- * Get current business date (YYYY-MM-DD)
+ * Get current business date (YYYY-MM-DD) in local timezone
+ * Uses local date, not UTC, to match user's business day
  */
 function getCurrentBusinessDate(): string {
-  return new Date().toISOString().split('T')[0];
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, '0');
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
 }
 
 // ============================================================================
@@ -654,11 +660,17 @@ registerHandler(
       const storeId = getStoreId();
       const today = getCurrentBusinessDate();
 
+      // SEC-010: Get opened_by from authenticated session (not frontend)
+      // opened_by is REQUIRED by cloud API for sync, but viewing bins is allowed without auth
+      const currentUser = getCurrentUser();
+      const openedBy = currentUser?.user_id;
+
       // Get bins with full pack details (SEC-006: parameterized query, DB-006: store-scoped)
       const dayBins = lotteryBinsDAL.getDayBinsWithFullPackDetails(storeId);
 
       // Get or create today's business day
-      const businessDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today);
+      // Note: If no user authenticated, day is created locally but sync won't be queued (offline-first)
+      const businessDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today, openedBy);
 
       // Get last closed day for business period info
       // This determines the start date for enterprise close-to-close model
@@ -749,6 +761,7 @@ registerHandler(
 
       // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
       // Consistent with lottery-bins.dal.ts:924 transformation pattern
+      // SEC-014: Include sales fields for reconciliation display
       const recentlyDepleted = settledPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
@@ -757,6 +770,10 @@ registerHandler(
         bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         depleted_at: p.depleted_at || '',
+        // Sales fields for reconciliation - use ?? to preserve 0 values
+        closing_serial: p.closing_serial ?? null,
+        tickets_sold_count: p.tickets_sold_count ?? 0,
+        sales_amount: p.sales_amount ?? 0,
       }));
 
       // Get returned packs (returned since period start)
@@ -767,6 +784,7 @@ registerHandler(
 
       // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
       // Consistent with lottery-bins.dal.ts:924 transformation pattern
+      // SEC-014: Use ?? to preserve 0 values (|| converts 0 to null which is incorrect)
       const recentlyReturned = returnedPacksSincePeriodStart.map((p) => ({
         pack_id: p.pack_id,
         pack_number: p.pack_number,
@@ -775,11 +793,12 @@ registerHandler(
         bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         returned_at: p.returned_at || '',
-        return_reason: null,
-        return_notes: null,
-        last_sold_serial: p.closing_serial,
-        tickets_sold_on_return: p.tickets_sold_count || null,
-        return_sales_amount: p.sales_amount || null,
+        return_reason: p.return_reason ?? null,
+        return_notes: p.return_notes ?? null,
+        last_sold_serial: p.closing_serial ?? null,
+        // Use ?? to preserve 0 values for reconciliation
+        tickets_sold_on_return: p.tickets_sold_count ?? 0,
+        return_sales_amount: p.sales_amount ?? 0,
         returned_by_name: null,
       }));
 
@@ -1592,8 +1611,43 @@ registerHandler(
       const openShift = shiftsDAL.getOpenShift(storeId);
       const depleted_shift_id = openShift?.shift_id || null;
 
-      // Calculate sales before settling
-      const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(pack_id, closing_serial);
+      // Get pack details for calculation
+      const packDetails = lotteryPacksDAL.getPackWithDetails(pack_id);
+      if (!packDetails) {
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
+      }
+
+      // DEPLETION FORMULA: For "sold out" packs, closing_serial IS the last ticket INDEX
+      // Formula: (closing_serial + 1) - starting_serial = total tickets sold
+      // Example: 18-ticket pack (serials 000-017), closing_serial=017
+      //          (17 + 1) - 0 = 18 tickets (correct)
+      // This differs from day close where closing_serial is the NEXT position to sell
+      const effectiveStartingSerial = packDetails.prev_ending_serial || packDetails.opening_serial;
+      if (!effectiveStartingSerial) {
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Pack has no opening serial');
+      }
+      if (!packDetails.game_price) {
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game has no price');
+      }
+
+      const startingNum = parseInt(effectiveStartingSerial, 10);
+      const closingNum = parseInt(closing_serial, 10);
+
+      if (Number.isNaN(startingNum) || Number.isNaN(closingNum)) {
+        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid serial number format');
+      }
+
+      // CRITICAL: Use depletion formula (closingNum + 1) for sold out packs
+      // closing_serial is the LAST ticket index, not the next position
+      const ticketsSold = closingNum + 1 - startingNum;
+      const salesAmount = ticketsSold * packDetails.game_price;
+
+      if (ticketsSold < 0) {
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Closing serial cannot be less than starting serial'
+        );
+      }
 
       // DB-006: Pass store_id for tenant isolation validation
       // v019: Pass shift tracking fields
@@ -1813,8 +1867,27 @@ registerHandler(
       const storeId = getStoreId();
       const today = getCurrentBusinessDate();
 
-      // Get or create today's business day
-      const day = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today);
+      // SEC-010: Get opened_by from authenticated session (not frontend)
+      // opened_by is REQUIRED by the cloud API - must have a valid user UUID
+      const currentUser = getCurrentUser();
+      if (!currentUser?.user_id) {
+        log.error('Cannot prepare day close: No authenticated user');
+        return createErrorResponse(
+          IPCErrorCodes.NOT_AUTHENTICATED,
+          'User authentication required to open a business day.'
+        );
+      }
+      const openedBy = currentUser.user_id;
+
+      // Business date = current calendar date
+      // Close-to-close model: Multiple business days can share the same calendar date
+      // (e.g., day 1 closes at 4pm, day 2 opens immediately, both have same business_date)
+      // API constraint: business_date must be within 1 day of current date
+      const businessDate = today;
+
+      // Get or create a business day for today (pass user_id for opened_by in sync payload)
+      // Note: getOrCreateForDate is idempotent - returns existing OPEN day if one exists for this date
+      const day = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, businessDate, openedBy);
 
       // Prepare close
       const result = lotteryBusinessDaysDAL.prepareClose(day.day_id, parseResult.data.closings);
@@ -1948,6 +2021,371 @@ registerHandler(
     requiresAuth: true,
     requiredRole: 'shift_manager',
     description: 'Cancel pending lottery day close',
+  }
+);
+
+/**
+ * Re-queue day close for sync
+ * Channel: lottery:requeueDayCloseSync
+ *
+ * Used for recovery when sync failed or was deleted from queue
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:requeueDayCloseSync',
+  async (_event, input: unknown) => {
+    // API-001: Validate input
+    const parseResult = z.object({ day_id: UUIDSchema }).safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const { day_id } = parseResult.data;
+
+      // SEC-004: Verify API key is configured (enterprise security requirement)
+      if (!settingsService.hasApiKey()) {
+        return createErrorResponse(
+          IPCErrorCodes.NOT_CONFIGURED,
+          'API key not configured. Please configure your store sync key.'
+        );
+      }
+
+      // Get user ID from authenticated session, or use 'system' for recovery operations
+      const currentUser = getCurrentUser();
+      const userId = currentUser?.user_id || 'system';
+
+      const success = lotteryBusinessDaysDAL.requeueDayCloseForSync(day_id, userId);
+
+      log.info('Day close re-queued for sync', { dayId: day_id, userId });
+
+      return createSuccessResponse({ requeued: success });
+    } catch (error) {
+      // API-003: Log full error server-side, return generic message
+      log.error('Failed to re-queue day close for sync', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to re-queue day close for sync.'
+      );
+    }
+  },
+  {
+    requiresAuth: false, // No user auth required - API key validation done in handler
+    description: 'Re-queue closed day for sync',
+  }
+);
+
+/**
+ * Re-queue day open for sync
+ * Channel: lottery:requeueDayOpenSync
+ *
+ * Used for recovery when sync failed or was deleted from queue.
+ * Creates a new sync queue item with the current day data.
+ *
+ * @security API-001: Input validation with Zod schemas
+ * @security API-003: Sanitized error responses
+ * @security SEC-010: User ID from authenticated session
+ */
+registerHandler(
+  'lottery:requeueDayOpenSync',
+  async (_event, input: unknown) => {
+    // API-001: Validate input
+    const parseResult = z.object({ day_id: UUIDSchema }).safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const { day_id } = parseResult.data;
+
+      // SEC-004: Verify API key is configured (enterprise security requirement)
+      if (!settingsService.hasApiKey()) {
+        return createErrorResponse(
+          IPCErrorCodes.NOT_CONFIGURED,
+          'API key not configured. Please configure your store sync key.'
+        );
+      }
+
+      // SEC-010: Get user ID from authenticated session
+      const currentUser = getCurrentUser();
+      const userId = currentUser?.user_id;
+
+      // For day_open requeue, we need a valid user ID (UUID format)
+      // If no user is logged in, we'll pass undefined and the DAL will handle it
+      const success = lotteryBusinessDaysDAL.requeueDayOpenForSync(day_id, userId || '');
+
+      log.info('Day open re-queued for sync', { dayId: day_id, userId: userId || 'N/A' });
+
+      return createSuccessResponse({ requeued: success });
+    } catch (error) {
+      // API-003: Log full error server-side, return generic message
+      log.error('Failed to re-queue day open for sync', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to re-queue day open for sync.'
+      );
+    }
+  },
+  {
+    requiresAuth: false, // No user auth required - API key validation done in handler
+    description: 'Re-queue day open for sync',
+  }
+);
+
+/**
+ * List all business days for a store
+ * Channel: lottery:listBusinessDays
+ *
+ * Used for debugging and data inspection
+ *
+ * @security SEC-006: Uses store from configured session
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:listBusinessDays',
+  async () => {
+    try {
+      const storeId = getStoreId();
+      const days = lotteryBusinessDaysDAL.listAllDays(storeId);
+
+      log.info('Listed all business days', { storeId, count: days.length });
+
+      return createSuccessResponse({ days });
+    } catch (error) {
+      log.error('Failed to list business days', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to list business days.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'List all business days for debugging',
+  }
+);
+
+/**
+ * Delete a business day (data cleanup)
+ * Channel: lottery:deleteBusinessDay
+ *
+ * DANGER: Destructive operation for fixing data corruption
+ *
+ * @security SEC-006: Uses store from configured session
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:deleteBusinessDay',
+  async (_event, input: unknown) => {
+    const parseResult = z.object({ day_id: UUIDSchema }).safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const { day_id } = parseResult.data;
+      const result = lotteryBusinessDaysDAL.deleteBusinessDay(day_id);
+
+      log.warn('Business day deleted via IPC', { dayId: day_id, ...result });
+
+      return createSuccessResponse(result);
+    } catch (error) {
+      log.error('Failed to delete business day', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to delete business day.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Delete business day for data cleanup',
+  }
+);
+
+/**
+ * Reopen a closed business day
+ * Channel: lottery:reopenBusinessDay
+ *
+ * Used for testing and data recovery
+ *
+ * @security SEC-006: Uses store from configured session
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:reopenBusinessDay',
+  async (_event, input: unknown) => {
+    const parseResult = z.object({ day_id: UUIDSchema }).safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    try {
+      const { day_id } = parseResult.data;
+      const day = lotteryBusinessDaysDAL.reopenDay(day_id);
+
+      log.warn('Business day reopened via IPC', {
+        dayId: day_id,
+        businessDate: day.business_date,
+      });
+
+      return createSuccessResponse({ day });
+    } catch (error) {
+      log.error('Failed to reopen business day', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to reopen business day.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Reopen closed business day for testing',
+  }
+);
+
+/**
+ * Cleanup stale business days (data maintenance)
+ * Channel: lottery:cleanupStaleDays
+ *
+ * Deletes all business days except the most recent CLOSED one
+ * Used to fix data corruption from bugs
+ *
+ * @security SEC-006: Uses store from configured session
+ */
+registerHandler(
+  'lottery:cleanupStaleDays',
+  async () => {
+    try {
+      const storeId = getStoreId();
+      const days = lotteryBusinessDaysDAL.listAllDays(storeId);
+
+      // Find the most recent CLOSED day to keep
+      const closedDays = days.filter((d) => d.status === 'CLOSED');
+      const keepDayId = closedDays.length > 0 ? closedDays[0].day_id : null;
+
+      // Delete all other days
+      const deleted: string[] = [];
+      for (const day of days) {
+        if (day.day_id !== keepDayId) {
+          lotteryBusinessDaysDAL.deleteBusinessDay(day.day_id);
+          deleted.push(`${day.business_date} (${day.status})`);
+        }
+      }
+
+      log.warn('Stale business days cleaned up', {
+        storeId,
+        deletedCount: deleted.length,
+        deleted,
+        kept: keepDayId ? closedDays[0].business_date : 'none',
+      });
+
+      return createSuccessResponse({
+        deleted,
+        kept: keepDayId ? closedDays[0].business_date : null,
+      });
+    } catch (error) {
+      log.error('Failed to cleanup stale days', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to cleanup stale days.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Cleanup stale business days',
+  }
+);
+
+/**
+ * Delete ALL business days (complete reset)
+ * Channel: lottery:deleteAllBusinessDays
+ *
+ * DANGER: Deletes ALL business days for the store - use for complete reset only
+ * Also deletes associated day_open sync queue items
+ *
+ * @security SEC-006: Uses store from configured session
+ * @security DB-006: Scoped to store_id
+ */
+registerHandler(
+  'lottery:deleteAllBusinessDays',
+  async () => {
+    try {
+      const storeId = getStoreId();
+      const days = lotteryBusinessDaysDAL.listAllDays(storeId);
+
+      if (days.length === 0) {
+        return createSuccessResponse({
+          deleted: [],
+          syncQueueDeleted: 0,
+          message: 'No business days to delete',
+        });
+      }
+
+      // Delete all business days
+      const deleted: string[] = [];
+      for (const day of days) {
+        lotteryBusinessDaysDAL.deleteBusinessDay(day.day_id);
+        deleted.push(`${day.business_date} (${day.status})`);
+      }
+
+      // Also delete any pending day_open sync queue items for this store
+      const syncQueueDeleted = syncQueueDAL.deleteByEntityType(storeId, 'day_open');
+
+      log.warn('ALL business days deleted (complete reset)', {
+        storeId,
+        deletedCount: deleted.length,
+        deleted,
+        syncQueueDeleted,
+      });
+
+      return createSuccessResponse({
+        deleted,
+        syncQueueDeleted,
+        message: `Deleted ${deleted.length} business days and ${syncQueueDeleted} sync queue items`,
+      });
+    } catch (error) {
+      log.error('Failed to delete all business days', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to delete all business days.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Delete ALL business days (complete reset)',
   }
 );
 
@@ -2790,6 +3228,221 @@ registerHandler(
     requiresAuth: true,
     requiredRole: 'cashier', // Any authenticated employee can record closings
     description: 'Record lottery shift closing serials',
+  }
+);
+
+// ============================================================================
+// Business Day Initialization Handlers
+// ============================================================================
+
+/**
+ * Get current business day status without creating one
+ * Channel: lottery:getDayStatus
+ *
+ * Returns the current day status to determine if initialization is needed.
+ * Unlike getDayBins, this does NOT auto-create a day.
+ *
+ * @security SEC-006: Store-scoped query
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:getDayStatus',
+  async () => {
+    try {
+      const storeId = getStoreId();
+      const today = getCurrentBusinessDate();
+
+      // Check if an OPEN day exists (without creating one)
+      const openDay = lotteryBusinessDaysDAL.findOpenDay(storeId);
+
+      // Check prerequisites for initialization
+      const bins = lotteryBinsDAL.findActiveByStore(storeId);
+      const games = lotteryGamesDAL.findActiveByStore(storeId);
+
+      const prerequisites = {
+        has_bins: bins.length > 0,
+        has_games: games.length > 0,
+        bins_count: bins.length,
+        games_count: games.length,
+      };
+
+      if (openDay) {
+        return createSuccessResponse({
+          has_open_day: true,
+          day: {
+            day_id: openDay.day_id,
+            business_date: openDay.business_date,
+            status: openDay.status,
+            opened_at: openDay.opened_at,
+            opened_by: openDay.opened_by,
+          },
+          today: today,
+          prerequisites,
+          needs_initialization: false,
+          is_first_ever: false, // Has open day, so definitely not first ever
+        });
+      }
+
+      // No OPEN day exists - check if ANY day has ever existed
+      // SEC-006: Uses parameterized EXISTS query
+      // DB-006: Store-scoped query
+      // Performance: O(1) indexed lookup, stops at first match
+      const hasHistory = lotteryBusinessDaysDAL.hasAnyDay(storeId);
+
+      // is_first_ever determines UI behavior:
+      // - true: Show initialization screen (store has never had a lottery day)
+      // - false: Auto-initialize (store has history, just needs new day after close)
+      const isFirstEver = !hasHistory;
+
+      return createSuccessResponse({
+        has_open_day: false,
+        day: null,
+        today: today,
+        prerequisites,
+        needs_initialization: true,
+        is_first_ever: isFirstEver,
+      });
+    } catch (error) {
+      log.error('Failed to get day status', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to get day status.'
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Get current business day status without creating',
+  }
+);
+
+/**
+ * Initialize business day explicitly
+ * Channel: lottery:initializeBusinessDay
+ *
+ * Creates a new OPEN business day for the store. This is the explicit action
+ * that starts the store's business day, replacing implicit auto-creation.
+ *
+ * Prerequisites:
+ * - Store must be configured and active
+ * - At least one bin must exist
+ * - At least one game must exist
+ * - No day can be in PENDING_CLOSE status
+ * - User must be authenticated (for opened_by audit trail)
+ *
+ * @security SEC-006: Store-scoped operations
+ * @security SEC-010: Requires authenticated user for audit trail
+ * @security SEC-017: Audit logging for initialization
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:initializeBusinessDay',
+  async () => {
+    try {
+      const storeId = getStoreId();
+      const today = getCurrentBusinessDate();
+
+      // SEC-010: Get user from authenticated session (REQUIRED for audit trail)
+      const currentUser = getCurrentUser();
+      if (!currentUser?.user_id) {
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Authentication required to initialize business day.'
+        );
+      }
+      const userId = currentUser.user_id;
+
+      // Check if already initialized (idempotent)
+      const existingOpenDay = lotteryBusinessDaysDAL.findOpenDay(storeId);
+      if (existingOpenDay) {
+        log.info('Business day already initialized', {
+          dayId: existingOpenDay.day_id,
+          businessDate: existingOpenDay.business_date,
+          storeId,
+        });
+        return createSuccessResponse({
+          success: true,
+          is_new: false,
+          day: {
+            day_id: existingOpenDay.day_id,
+            business_date: existingOpenDay.business_date,
+            status: existingOpenDay.status,
+            opened_at: existingOpenDay.opened_at,
+            opened_by: existingOpenDay.opened_by,
+          },
+          message: 'Business day already open.',
+        });
+      }
+
+      // Check prerequisites
+      const bins = lotteryBinsDAL.findActiveByStore(storeId);
+      if (bins.length === 0) {
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Cannot initialize business day: No lottery bins configured. Please sync bins from cloud first.'
+        );
+      }
+
+      const games = lotteryGamesDAL.findActiveByStore(storeId);
+      if (games.length === 0) {
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Cannot initialize business day: No lottery games configured. Please sync games from cloud first.'
+        );
+      }
+
+      // Check for pending close (must be committed or cancelled first)
+      const pendingDays = lotteryBusinessDaysDAL.findByStatus(storeId, 'PENDING_CLOSE');
+      if (pendingDays.length > 0) {
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Cannot initialize new day: A previous day close is pending. Please commit or cancel the pending close first.'
+        );
+      }
+
+      // Create the business day using existing DAL method
+      // This will also queue the day_open sync item
+      const newDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today, userId);
+
+      // SEC-017: Audit logging
+      log.info('Business day initialized', {
+        dayId: newDay.day_id,
+        businessDate: newDay.business_date,
+        storeId,
+        initializedBy: userId,
+        binsAvailable: bins.length,
+        gamesAvailable: games.length,
+      });
+
+      return createSuccessResponse({
+        success: true,
+        is_new: true,
+        day: {
+          day_id: newDay.day_id,
+          business_date: newDay.business_date,
+          status: newDay.status,
+          opened_at: newDay.opened_at,
+          opened_by: newDay.opened_by,
+        },
+        message: 'Business day initialized successfully.',
+      });
+    } catch (error) {
+      log.error('Failed to initialize business day', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to initialize business day.'
+      );
+    }
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'cashier', // Any authenticated employee can initialize the day
+    description: 'Initialize business day explicitly',
   }
 );
 

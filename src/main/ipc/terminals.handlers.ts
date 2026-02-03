@@ -368,9 +368,9 @@ registerHandler<DayStatusResponse | ReturnType<typeof createErrorResponse>>(
     }
 
     try {
-      // Get current business date (local date)
-      // Business date is based on local time, not UTC
-      const today = new Date().toISOString().split('T')[0];
+      // Get current business date (local date, not UTC)
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
 
       // DB-006: Store-scoped query via DAL
       // SEC-006: Parameterized query via DAL method

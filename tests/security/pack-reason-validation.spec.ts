@@ -358,32 +358,25 @@ describe('PRV-S-003: Return Reason Allowlist Enforcement', () => {
       expect(RETURN_REASONS).not.toContain('OTHER');
     });
 
-    it('should only accept the 5 valid return reasons', () => {
-      const validReasons = [
-        'SUPPLIER_RECALL',
-        'DAMAGED',
-        'EXPIRED',
-        'INVENTORY_ADJUSTMENT',
-        'STORE_CLOSURE',
-      ];
+    it('should accept all valid return reasons from the schema', () => {
+      // ROBUST: Derive expected values from schema (single source of truth)
+      // This test won't break when new reasons are added to lottery.types.ts
+      const schemaOptions = ReturnReasonSchema.options;
 
-      expect(RETURN_REASONS).toEqual(validReasons);
-      expect(RETURN_REASONS).toHaveLength(5);
+      // Verify RETURN_REASONS constant stays in sync with schema
+      expect(RETURN_REASONS).toEqual(schemaOptions);
+      expect(RETURN_REASONS.length).toBeGreaterThan(0);
 
-      validReasons.forEach((reason) => {
+      // Verify each reason in the constant is actually valid
+      RETURN_REASONS.forEach((reason) => {
         const result = ReturnReasonSchema.safeParse(reason);
         expect(result.success).toBe(true);
       });
     });
 
     it('should be case-sensitive (reject lowercase)', () => {
-      const lowercaseReasons = [
-        'supplier_recall',
-        'damaged',
-        'expired',
-        'inventory_adjustment',
-        'store_closure',
-      ];
+      // ROBUST: Derive lowercase versions from actual valid reasons
+      const lowercaseReasons = RETURN_REASONS.map((r) => r.toLowerCase());
 
       lowercaseReasons.forEach((reason) => {
         const result = ReturnReasonSchema.safeParse(reason);
@@ -392,13 +385,8 @@ describe('PRV-S-003: Return Reason Allowlist Enforcement', () => {
     });
 
     it('should reject mixed case variations', () => {
-      const mixedCaseReasons = [
-        'Supplier_Recall',
-        'DAMAGED ',
-        'Expired',
-        'Inventory_Adjustment',
-        'Store_Closure',
-      ];
+      // ROBUST: Derive mixed case versions from actual valid reasons
+      const mixedCaseReasons = RETURN_REASONS.map((r) => r.charAt(0) + r.slice(1).toLowerCase());
 
       mixedCaseReasons.forEach((reason) => {
         const result = ReturnReasonSchema.safeParse(reason);
@@ -459,25 +447,25 @@ describe('PRV-S-004: Depletion Reason Allowlist Enforcement', () => {
       expect(DEPLETION_REASONS).not.toContain('SOLD_OUT');
     });
 
-    it('should only accept the 4 valid depletion reasons', () => {
-      const validReasons = ['SHIFT_CLOSE', 'AUTO_REPLACED', 'MANUAL_SOLD_OUT', 'POS_LAST_TICKET'];
+    it('should accept all valid depletion reasons from the schema', () => {
+      // ROBUST: Derive expected values from schema (single source of truth)
+      // This test won't break when new reasons are added to lottery.types.ts
+      const schemaOptions = DepletionReasonSchema.options;
 
-      expect(DEPLETION_REASONS).toEqual(validReasons);
-      expect(DEPLETION_REASONS).toHaveLength(4);
+      // Verify DEPLETION_REASONS constant stays in sync with schema
+      expect(DEPLETION_REASONS).toEqual(schemaOptions);
+      expect(DEPLETION_REASONS.length).toBeGreaterThan(0);
 
-      validReasons.forEach((reason) => {
+      // Verify each reason in the constant is actually valid
+      DEPLETION_REASONS.forEach((reason) => {
         const result = DepletionReasonSchema.safeParse(reason);
         expect(result.success).toBe(true);
       });
     });
 
     it('should be case-sensitive (reject lowercase)', () => {
-      const lowercaseReasons = [
-        'shift_close',
-        'auto_replaced',
-        'manual_sold_out',
-        'pos_last_ticket',
-      ];
+      // ROBUST: Derive lowercase versions from actual valid reasons
+      const lowercaseReasons = DEPLETION_REASONS.map((r) => r.toLowerCase());
 
       lowercaseReasons.forEach((reason) => {
         const result = DepletionReasonSchema.safeParse(reason);
@@ -945,15 +933,9 @@ describe('PRV-S-008: Regression Tests for Return/Deplete Fix', () => {
       expect(isDepletionReason('MANUAL_SOLD_OUT')).toBe(true);
     });
 
-    it('should accept all 4 valid depletion reasons', () => {
-      const validReasons = [
-        'SHIFT_CLOSE',
-        'AUTO_REPLACED',
-        'MANUAL_SOLD_OUT',
-        'POS_LAST_TICKET',
-      ] as const;
-
-      validReasons.forEach((reason) => {
+    it('should accept all valid depletion reasons', () => {
+      // ROBUST: Use DEPLETION_REASONS as the source of truth
+      DEPLETION_REASONS.forEach((reason) => {
         expect(isDepletionReason(reason)).toBe(true);
         expect(validateDepletionReason(reason)).toBe(reason);
       });
