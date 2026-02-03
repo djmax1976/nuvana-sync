@@ -935,7 +935,7 @@ describe('CloudApiService', () => {
         expect(body.session_id).toBe('session-123');
         expect(body.game_code).toBe('1234');
         expect(body.pack_number).toBe('1234567');
-        expect(body.local_id).toBe('pack-123');
+        expect(body.pack_id).toBe('pack-123');
       });
 
       // TODO: This test times out due to complex async interactions with dynamic imports
