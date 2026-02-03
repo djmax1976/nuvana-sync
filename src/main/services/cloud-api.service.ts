@@ -6077,11 +6077,19 @@ export class CloudApiService {
         status: dayStatus?.status,
         businessDate: dayStatus?.business_date,
       });
-      const syncMetadata: CloudSyncMetadata = data.syncMetadata || {
-        lastSequence: dayStatus?.sync_sequence || 0,
-        hasMore: false,
-        serverTime: new Date().toISOString(),
-      };
+      // Validate syncMetadata has required properties before using it
+      const rawSyncMetadata = data.syncMetadata as Partial<CloudSyncMetadata> | undefined;
+      const syncMetadata: CloudSyncMetadata =
+        rawSyncMetadata &&
+        typeof rawSyncMetadata.lastSequence === 'number' &&
+        typeof rawSyncMetadata.hasMore === 'boolean' &&
+        typeof rawSyncMetadata.serverTime === 'string'
+          ? (rawSyncMetadata as CloudSyncMetadata)
+          : {
+              lastSequence: dayStatus?.sync_sequence || 0,
+              hasMore: false,
+              serverTime: new Date().toISOString(),
+            };
 
       // Complete sync session
       await this.completeSyncSession(session.sessionId, syncMetadata.lastSequence, {
