@@ -15,11 +15,46 @@ import { test, expect } from '../fixtures/electron.fixture';
 import type { Page } from '@playwright/test';
 
 /**
+ * Complete the setup wizard via IPC so the app shows the dashboard.
+ * Reports tests require the app to be in a configured state since
+ * the sidebar (with the Reports link) only appears after setup is done.
+ * The setup wizard itself is tested separately in setup-wizard.e2e.ts.
+ */
+async function ensureAppConfigured(window: Page) {
+  // Check if setup wizard is showing (fresh database)
+  const isSetupWizard = await window
+    .locator('[data-testid="setup-wizard-title"]')
+    .isVisible()
+    .catch(() => false);
+
+  if (isSetupWizard) {
+    // Complete setup via IPC to transition to the dashboard
+    await window.evaluate(() =>
+      (
+        window as unknown as { electronAPI: { invoke: (ch: string) => Promise<unknown> } }
+      ).electronAPI.invoke('settings:completeSetup')
+    );
+    // Reload so the app re-checks config and shows dashboard
+    await window.reload();
+    await window.waitForLoadState('domcontentloaded');
+  }
+
+  // Wait for the dashboard/app layout to be visible
+  await window.waitForSelector('[data-testid="app-layout"], [data-testid="dashboard"]', {
+    timeout: 15000,
+  });
+}
+
+/**
  * Navigate to the Reports page via the sidebar
  */
 async function navigateToReports(window: Page) {
-  // Look for the Reports link in the sidebar
-  const reportsLink = window.locator('a:has-text("Reports"), [data-testid="nav-reports"]');
+  await ensureAppConfigured(window);
+
+  // Click the Reports link in the sidebar
+  const reportsLink = window.locator(
+    'a:has-text("Reports"), [data-testid="reports-link"], [data-testid="nav-reports"]'
+  );
   await reportsLink.click();
   // Wait for the reports page to be loaded
   await window.waitForSelector('[role="tablist"]', { timeout: 10000 });
