@@ -9,7 +9,13 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/**/*.spec.ts', 'tests/**/*.test.ts'],
+    include: [
+      'tests/**/*.spec.ts',
+      'tests/**/*.spec.tsx',
+      'tests/**/*.test.ts',
+      'tests/**/*.test.tsx',
+    ],
+    setupFiles: ['./tests/setup-renderer.ts'],
     exclude: [
       '**/node_modules/**',
       '**/dist/**',
@@ -52,7 +58,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, './src/renderer'),
+      '@shared': path.resolve(__dirname, './src/shared'),
+      '@main': path.resolve(__dirname, './src/main'),
+      '@renderer': path.resolve(__dirname, './src/renderer'),
     },
   },
 });

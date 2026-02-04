@@ -287,6 +287,9 @@ registerHandler(
         // Allows UI to show appropriate messaging during setup for non-NAXML POS types
         fileWatcherCompatible: settingsService.isNAXMLCompatible(),
         fileWatcherUnavailableReason: settingsService.getFileWatcherUnavailableReason(),
+        // Phase 5 (POS Sync): Register count for MANUAL mode
+        // Plain number — always serializable via Electron IPC structured clone
+        registersCount: result.store?.registers?.length ?? 0,
       },
       // Debug information for troubleshooting
       _debug: result.store?._debug,
@@ -1476,8 +1479,9 @@ registerHandler(
   'settings:getPOSConnectionType',
   async () => {
     const connectionType = settingsService.getPOSConnectionType();
-    log.info('getPOSConnectionType called', { connectionType });
-    return createSuccessResponse({ connectionType });
+    const posType = settingsService.getPOSType();
+    log.info('getPOSConnectionType called', { connectionType, posType });
+    return createSuccessResponse({ connectionType, posType });
   },
   {
     description: 'Get POS connection type (MANUAL, FILE, API, etc.)',

@@ -1126,4 +1126,176 @@ describe('Settings IPC Handlers', () => {
       });
     });
   });
+
+  // ==========================================================================
+  // Register sync in validateApiKey handler - Phase 6 Task 6.5
+  // Tests registersCount field in success response
+  // ==========================================================================
+  describe('Register sync in validateApiKey handler', () => {
+    // 6.5.1 - Returns registersCount in success response for MANUAL mode
+    it('6.5.1: should return registersCount in success response for MANUAL mode with registers', async () => {
+      const resultWithRegisters = createApiKeyValidationResult({
+        store: {
+          storeId: 'store-manual-ipc-001',
+          posConnectionConfig: {
+            pos_type: POS_TYPES.MANUAL_ENTRY,
+            pos_connection_type: POS_CONNECTION_TYPES.MANUAL,
+            pos_connection_config: null,
+          },
+          registers: [
+            {
+              external_register_id: 'R1',
+              terminal_type: 'REGISTER',
+              description: 'Reg 1',
+              active: true,
+            },
+            {
+              external_register_id: 'R2',
+              terminal_type: 'REGISTER',
+              description: 'Reg 2',
+              active: true,
+            },
+            {
+              external_register_id: 'R3',
+              terminal_type: 'KIOSK',
+              description: 'Kiosk 1',
+              active: true,
+            },
+          ],
+        },
+      });
+
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(resultWithRegisters);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, {
+        apiKey: 'nsk_live_validkeywith20ormorechars',
+        isInitialSetup: true,
+      });
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          store: expect.objectContaining({
+            registersCount: 3,
+          }),
+        })
+      );
+    });
+
+    // 6.5.2 - Returns registersCount: 0 for non-MANUAL modes
+    it('6.5.2: should return registersCount 0 for non-MANUAL modes', async () => {
+      const resultWithoutRegisters = createApiKeyValidationResult({
+        store: {
+          posConnectionConfig: {
+            pos_type: POS_TYPES.GILBARCO_PASSPORT,
+            pos_connection_type: POS_CONNECTION_TYPES.FILE,
+            pos_connection_config: { import_path: 'C:\\NAXML\\Export' },
+          },
+          // No registers field
+        },
+      });
+
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(resultWithoutRegisters);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, {
+        apiKey: 'nsk_live_validkeywith20ormorechars',
+        isInitialSetup: true,
+      });
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          store: expect.objectContaining({
+            registersCount: 0,
+          }),
+        })
+      );
+    });
+
+    // 6.5.3 - Returns registersCount: 0 for MANUAL mode with no registers from cloud
+    it('6.5.3: should return registersCount 0 for MANUAL mode with no registers from cloud', async () => {
+      const resultManualNoRegisters = createApiKeyValidationResult({
+        store: {
+          posConnectionConfig: {
+            pos_type: POS_TYPES.MANUAL_ENTRY,
+            pos_connection_type: POS_CONNECTION_TYPES.MANUAL,
+            pos_connection_config: null,
+          },
+          registers: undefined, // No registers from cloud
+        },
+      });
+
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(resultManualNoRegisters);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, {
+        apiKey: 'nsk_live_validkeywith20ormorechars',
+        isInitialSetup: true,
+      });
+
+      expect(createSuccessResponse).toHaveBeenCalledWith(
+        expect.objectContaining({
+          store: expect.objectContaining({
+            registersCount: 0,
+          }),
+        })
+      );
+    });
+
+    // 6.5.4 - Still emits FILE_WATCHER_RESTART on resync with MANUAL + registers
+    it('6.5.4: should emit FILE_WATCHER_RESTART on resync with MANUAL mode and registers', async () => {
+      const resultWithRegisters = createApiKeyValidationResult({
+        store: {
+          posConnectionConfig: {
+            pos_type: POS_TYPES.MANUAL_ENTRY,
+            pos_connection_type: POS_CONNECTION_TYPES.MANUAL,
+            pos_connection_config: null,
+          },
+          registers: [
+            {
+              external_register_id: 'R1',
+              terminal_type: 'REGISTER',
+              description: 'Reg 1',
+              active: true,
+            },
+          ],
+        },
+      });
+
+      vi.mocked(settingsService.validateAndSaveApiKey).mockResolvedValue(resultWithRegisters);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const validateCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:validateApiKey');
+
+      const handler = validateCall?.[1] as IPCHandler;
+      await handler(null, {
+        apiKey: 'nsk_live_validkeywith20ormorechars',
+        isInitialSetup: false, // RESYNC
+      });
+
+      // Existing behavior: FILE_WATCHER_RESTART emitted on resync
+      expect(eventBus.emit).toHaveBeenCalledWith('file-watcher:restart');
+    });
+  });
 });

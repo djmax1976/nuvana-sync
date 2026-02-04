@@ -41,6 +41,7 @@ export const POS_TYPES = {
   FILE_BASED: 'FILE_BASED',
   MANUAL: 'MANUAL',
   MANUAL_ENTRY: 'MANUAL_ENTRY',
+  LOTTERY: 'LOTTERY',
   UNKNOWN: 'UNKNOWN',
 } as const satisfies Record<string, POSSystemType>;
 

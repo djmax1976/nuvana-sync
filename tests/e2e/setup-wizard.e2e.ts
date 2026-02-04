@@ -15,9 +15,17 @@ import { test, expect } from './fixtures/electron.fixture';
 test.describe('Setup Wizard', () => {
   test.describe('Initial Launch', () => {
     test('should show setup wizard on first launch', async ({ window }) => {
-      // Verify setup wizard is displayed (fresh install = not configured)
+      // On a fresh (unconfigured) database the setup wizard renders.
+      // The setup-wizard-title is sr-only (accessibility), so verify it
+      // exists in the DOM with toBeAttached() and check visible content
+      // via the welcome step.
       const setupTitle = window.locator('[data-testid="setup-wizard-title"]');
-      await expect(setupTitle).toBeVisible({ timeout: 15000 });
+      await expect(setupTitle).toBeAttached({ timeout: 15000 });
+      await expect(setupTitle).toHaveText('Setup Wizard');
+
+      // Also verify visible content is displayed
+      const welcomeStep = window.locator('[data-testid="setup-step-welcome"]');
+      await expect(welcomeStep).toBeVisible();
     });
 
     test('should display welcome step initially', async ({ window }) => {

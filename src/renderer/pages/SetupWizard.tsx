@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Eye, EyeOff } from 'lucide-react';
 import logo from '../assets/logo.png';
 
@@ -52,6 +52,21 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
   const [syncing, setSyncing] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [syncStatus, setSyncStatus] = useState<string>('');
+
+  // Guard: redirect to dashboard if setup is already complete
+  useEffect(() => {
+    if (!isElectron) return;
+    window.electronAPI
+      .invoke<{ success: boolean; data?: { complete: boolean } }>('settings:isSetupComplete')
+      .then((result) => {
+        if (result?.data?.complete) {
+          onComplete();
+        }
+      })
+      .catch(() => {
+        // If check fails, let the wizard proceed normally
+      });
+  }, [onComplete]);
 
   /**
    * Validate API key and fetch store information

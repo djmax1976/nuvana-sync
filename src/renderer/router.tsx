@@ -39,6 +39,9 @@ const ShiftEndPage = lazy(() => import('./pages/ShiftEndPage'));
 const DayClosePage = lazy(() => import('./pages/DayClosePage'));
 const TerminalShiftPage = lazy(() => import('./pages/TerminalShiftPage'));
 
+// Report pages
+const LotteryDayReportPage = lazy(() => import('./pages/LotteryDayReportPage'));
+
 // Sync Monitor page
 const SyncMonitorPage = lazy(() => import('./pages/SyncMonitorPage'));
 
@@ -205,6 +208,14 @@ const router = createHashRouter([
         element: (
           <Suspense fallback={<PageLoader />}>
             <TerminalShiftPage />
+          </Suspense>
+        ),
+      },
+      {
+        path: 'lottery-day-report',
+        element: (
+          <Suspense fallback={<PageLoader />}>
+            <LotteryDayReportPage />
           </Suspense>
         ),
       },

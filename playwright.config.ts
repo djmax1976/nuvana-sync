@@ -41,6 +41,9 @@ export default defineConfig({
   // Limit parallel workers
   workers: isCI ? 1 : undefined,
 
+  // Stop after 3 failures in CI to avoid wasting time on cascading failures
+  maxFailures: isCI ? 3 : 0,
+
   // Reporter configuration
   reporter: [
     ['html', { outputFolder: 'playwright-report' }],

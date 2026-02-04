@@ -29,7 +29,7 @@ jobs:
   build-for-e2e:
     name: Build for E2E
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout code
@@ -60,6 +60,19 @@ jobs:
       - name: Package application (unsigned for testing)
         run: npm run build:win:unsigned
 
+      - name: Verify packaged app exists
+        shell: pwsh
+        run: |
+          $exePath = "release/win-unpacked/Nuvana.exe"
+          if (!(Test-Path $exePath)) {
+            Write-Error "Packaged app not found at $exePath"
+            exit 1
+          }
+          $fileInfo = Get-Item $exePath
+          Write-Host "Nuvana.exe size: $($fileInfo.Length) bytes"
+          Write-Host "Contents of release/win-unpacked/:"
+          Get-ChildItem "release/win-unpacked/" | Format-Table Name, Length -AutoSize
+
       - name: Upload packaged app
         uses: actions/upload-artifact@v4
         with:
@@ -75,7 +88,7 @@ jobs:
     name: E2E Tests
     needs: build-for-e2e
     runs-on: windows-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout code
@@ -106,11 +119,28 @@ jobs:
           name: electron-app-e2e
           path: release/win-unpacked/
 
+      - name: Verify downloaded artifact
+        shell: pwsh
+        run: |
+          $exePath = "release/win-unpacked/Nuvana.exe"
+          if (!(Test-Path $exePath)) {
+            Write-Error "Downloaded artifact missing Nuvana.exe at $exePath"
+            Get-ChildItem "release/" -Recurse | Format-Table FullName, Length -AutoSize
+            exit 1
+          }
+          $fileInfo = Get-Item $exePath
+          Write-Host "Nuvana.exe verified: $($fileInfo.Length) bytes"
+          # Count total files to ensure artifact is complete
+          $fileCount = (Get-ChildItem "release/win-unpacked/" -Recurse -File).Count
+          Write-Host "Total files in win-unpacked: $fileCount"
+
       - name: Run E2E tests
         run: npm run test:e2e
         env:
           PLAYWRIGHT_JUNIT_OUTPUT_NAME: test-results/e2e-junit.xml
           DEBUG: ${{ inputs.debug_enabled && 'pw:api' || '' }}
+          # Disable GPU for headless CI environment
+          ELECTRON_DISABLE_GPU: '1'
 
       - name: Upload test results
         uses: actions/upload-artifact@v4

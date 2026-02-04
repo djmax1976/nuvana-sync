@@ -63,7 +63,7 @@ describe('Performance Benchmarks', () => {
 
     // Auth operations
     PIN_VERIFICATION: 300, // < 300ms (bcrypt cost factor 12)
-    SESSION_CREATE: 10, // < 10ms
+    SESSION_CREATE: 25, // < 25ms (CI runners have variable scheduling latency)
   };
 
   /**

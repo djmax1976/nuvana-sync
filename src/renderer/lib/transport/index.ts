@@ -305,6 +305,18 @@ export const ipc = {
       ipcClient.invoke<MonthlyReportResponse>('reports:monthly', params),
     dateRange: (params: { startDate: string; endDate: string }) =>
       ipcClient.invoke<DateRangeReportResponse>('reports:dateRange', params),
+    /**
+     * Get shifts grouped by day with employee and register information
+     * Returns shifts for a date range with day status for determining reconciled state
+     */
+    getShiftsByDays: (params: { startDate: string; endDate: string; limit?: number }) =>
+      ipcClient.invoke<ShiftsByDayResponse>('reports:getShiftsByDays', params),
+    /**
+     * Get lottery day report for a specific business date
+     * Returns bin closings, activated/depleted/returned packs for the day
+     */
+    getLotteryDayReport: (params: { businessDate: string }) =>
+      ipcClient.invoke<LotteryDayReportResponse>('reports:getLotteryDayReport', params),
   },
 };
 
@@ -610,6 +622,109 @@ export interface DateRangeReportResponse {
     transactions: number;
     dayCount: number;
   };
+}
+
+/**
+ * Individual shift data for the shifts-by-day report
+ */
+export interface ShiftByDayData {
+  shiftId: string;
+  shiftNumber: number;
+  registerName: string;
+  employeeName: string;
+  startTime: string;
+  endTime: string | null;
+  status: 'OPEN' | 'CLOSED';
+}
+
+/**
+ * Day data with shifts for the shifts-by-day report
+ */
+export interface DayWithShifts {
+  businessDate: string;
+  dayStatus: 'OPEN' | 'CLOSED';
+  shifts: ShiftByDayData[];
+}
+
+/**
+ * Response for shifts-by-day report
+ * Returns shifts grouped by day with employee and register information
+ */
+export interface ShiftsByDayResponse {
+  days: DayWithShifts[];
+}
+
+/**
+ * Bin closing record in lottery day report
+ */
+export interface LotteryDayReportBin {
+  bin_number: number;
+  game_name: string;
+  game_price: number;
+  pack_number: string;
+  starting_serial: string;
+  ending_serial: string;
+  tickets_sold: number;
+  sales_amount: number;
+}
+
+/**
+ * Activated pack in lottery day report
+ */
+export interface LotteryDayReportActivatedPack {
+  pack_id: string;
+  bin_number: number;
+  game_name: string;
+  game_price: number;
+  pack_number: string;
+  activated_at: string;
+  status: 'ACTIVE' | 'DEPLETED' | 'RETURNED';
+}
+
+/**
+ * Depleted pack in lottery day report
+ */
+export interface LotteryDayReportDepletedPack {
+  pack_id: string;
+  bin_number: number;
+  game_name: string;
+  game_price: number;
+  pack_number: string;
+  starting_serial: string;
+  ending_serial: string;
+  tickets_sold: number;
+  sales_amount: number;
+  depleted_at: string;
+}
+
+/**
+ * Returned pack in lottery day report
+ */
+export interface LotteryDayReportReturnedPack {
+  pack_id: string;
+  bin_number: number;
+  game_name: string;
+  game_price: number;
+  pack_number: string;
+  starting_serial: string;
+  ending_serial: string;
+  tickets_sold: number;
+  sales_amount: number;
+  returned_at: string;
+}
+
+/**
+ * Full lottery day report response
+ */
+export interface LotteryDayReportResponse {
+  businessDate: string;
+  dayStatus: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED' | null;
+  closedAt: string | null;
+  lotteryTotal: number;
+  bins: LotteryDayReportBin[];
+  activatedPacks: LotteryDayReportActivatedPack[];
+  depletedPacks: LotteryDayReportDepletedPack[];
+  returnedPacks: LotteryDayReportReturnedPack[];
 }
 
 // Employee Types

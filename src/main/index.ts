@@ -10,6 +10,10 @@
  * @security DB-007: Encrypted database initialization
  */
 
+// MUST be first import: overrides userData path for test isolation before
+// electron-store reads app.getPath('userData') in settings.service constructor.
+import './test-user-data';
+
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, IpcMainInvokeEvent } from 'electron';
 import { join } from 'path';
 import { FileWatcherService } from './services/file-watcher.service';
@@ -70,10 +74,13 @@ const isTestMode =
 
 if (isTestMode) {
   log.info('Running in TEST MODE - tray minimize behavior disabled');
+  // Disable GPU acceleration in test/CI to prevent display-related launch failures
+  app.disableHardwareAcceleration();
+  log.info('GPU hardware acceleration disabled for test mode');
 }
 
-// Prevent multiple instances
-const gotTheLock = app.requestSingleInstanceLock();
+// Prevent multiple instances (skip in test mode - each test needs its own instance)
+const gotTheLock = isTestMode ? true : app.requestSingleInstanceLock();
 
 if (!gotTheLock) {
   log.warn('Another instance is running, quitting');

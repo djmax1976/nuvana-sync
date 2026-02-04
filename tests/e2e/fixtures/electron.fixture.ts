@@ -2,7 +2,8 @@
  * Electron Test Fixtures
  *
  * Provides Playwright fixtures for testing Electron applications.
- * Sets up and tears down ElectronApplication instances.
+ * Sets up and tears down ElectronApplication instances with full
+ * isolation (unique database AND userData directory per test).
  *
  * @module tests/e2e/fixtures/electron
  */
@@ -21,6 +22,9 @@ import fs from 'fs';
 
 // Determine if running in CI environment
 const isCI = !!process.env.CI;
+
+// Timeout for closing the Electron app during teardown (ms)
+const APP_CLOSE_TIMEOUT = 10000;
 
 /**
  * Extended test fixtures for Electron testing
@@ -47,26 +51,110 @@ function createTestDatabasePath(testName: string): string {
 }
 
 /**
+ * Create a unique userData directory for electron-store isolation.
+ *
+ * Each test gets its own userData directory so that the electron-store
+ * config (which stores isConfigured, setupCompletedAt, API keys, etc.)
+ * does not leak between tests. Without this, a test that calls
+ * settings:completeSetup would cause all subsequent tests to see the
+ * app as already configured, preventing the setup wizard from appearing.
+ */
+function createTestUserDataDir(testName: string): string {
+  const testDataDir =
+    process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
+  const sanitizedName = testName.replace(/[^a-zA-Z0-9]/g, '_');
+  const userDataDir = path.join(testDataDir, `userdata_${sanitizedName}_${Date.now()}`);
+  fs.mkdirSync(userDataDir, { recursive: true });
+  return userDataDir;
+}
+
+/**
  * Get the correct app launch path based on environment
  * - CI: Use packaged app from release/win-unpacked/Nuvana.exe
- * - Local: Use built app from out/main/index.js
+ * - Local: Use built app from dist/main/index.js (electron-vite build output)
  */
 function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
   const packagedAppPath = path.join(process.cwd(), 'release', 'win-unpacked', 'Nuvana.exe');
-  const devAppPath = path.join(process.cwd(), 'out', 'main', 'index.js');
+  // electron-vite.config.ts outputs to dist/ (not out/)
+  const devAppPath = path.join(process.cwd(), 'dist', 'main', 'index.js');
 
   // In CI, prefer the packaged app (downloaded from build job)
   if (isCI && fs.existsSync(packagedAppPath)) {
+    console.log(`[e2e] Using packaged app: ${packagedAppPath}`);
     return {
       executablePath: packagedAppPath,
       args: [],
     };
   }
 
-  // In development or if packaged app doesn't exist, use dev build
-  return {
-    args: [devAppPath],
-  };
+  // Locally, prefer the dev build for faster iteration. The packaged app
+  // may be stale (built from a different commit) and reject newer CLI flags
+  // like --test-mode. In CI, the packaged app is always freshly built.
+  if (!isCI && fs.existsSync(devAppPath)) {
+    console.log(`[e2e] Using dev build: ${devAppPath}`);
+    return {
+      args: [devAppPath],
+    };
+  }
+
+  // Fall back to packaged app
+  if (fs.existsSync(packagedAppPath)) {
+    console.log(`[e2e] Using packaged app: ${packagedAppPath}`);
+    return {
+      executablePath: packagedAppPath,
+      args: [],
+    };
+  }
+
+  throw new Error(
+    `[e2e] No launchable app found.\n` +
+      `  Checked dev build: ${devAppPath} (not found)\n` +
+      `  Checked packaged app: ${packagedAppPath} (not found)\n` +
+      `  Run "npm run build" or "npm run build:win:unsigned" first.`
+  );
+}
+
+/**
+ * Close Electron app with a timeout to prevent teardown from hanging forever.
+ * If graceful close doesn't work, force-kill the process.
+ */
+async function closeApp(electronApp: ElectronApplication): Promise<void> {
+  try {
+    const closePromise = electronApp.close();
+    const timeoutPromise = new Promise<'timeout'>((resolve) =>
+      setTimeout(() => resolve('timeout'), APP_CLOSE_TIMEOUT)
+    );
+
+    const result = await Promise.race([closePromise, timeoutPromise]);
+
+    if (result === 'timeout') {
+      console.warn('[e2e] App close timed out, force-killing process');
+      try {
+        const pid = electronApp.process().pid;
+        if (pid) {
+          process.kill(pid, 'SIGKILL');
+        }
+      } catch {
+        // Process already dead, that's fine
+      }
+    }
+  } catch {
+    // App may have already exited or crashed - that's OK during teardown
+    console.warn('[e2e] App close threw an error (app may have already exited)');
+  }
+}
+
+/**
+ * Recursively remove a directory (best-effort, ignores errors).
+ */
+function removeDir(dirPath: string): void {
+  try {
+    if (fs.existsSync(dirPath)) {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+  } catch {
+    // Best-effort cleanup — temp dirs are cleaned by the OS eventually
+  }
 }
 
 /**
@@ -78,34 +166,76 @@ export const test = base.extend<ElectronTestFixtures>({
     // Create isolated test database
     const dbPath = createTestDatabasePath(testInfo.title);
 
+    // Create isolated userData directory for electron-store config.
+    // This prevents isConfigured / setupCompletedAt from leaking between tests.
+    const userDataDir = createTestUserDataDir(testInfo.title);
+
     // Get the correct launch configuration
     const launchConfig = getAppLaunchConfig();
 
+    // Capture stderr for diagnostics
+    let launchError: Error | null = null;
+
     // Launch Electron app
-    const electronApp = await electron.launch({
-      ...launchConfig,
-      args: [...launchConfig.args, '--test-mode', `--test-db-path=${dbPath}`],
-      env: {
+    let electronApp: ElectronApplication;
+    try {
+      const launchArgs = [...launchConfig.args, '--test-mode', `--test-db-path=${dbPath}`];
+      // Disable GPU on CI to prevent display/rendering failures on headless runners
+      if (isCI) {
+        launchArgs.push('--disable-gpu', '--disable-software-rasterizer');
+      }
+
+      // Build env: spread process.env then remove VSCode's ELECTRON_RUN_AS_NODE
+      // which forces the Electron binary to run as plain Node.js (breaking the API).
+      const launchEnv: Record<string, string> = {
         ...process.env,
         NUVANA_TEST_MODE: 'true',
         NUVANA_TEST_DB_PATH: dbPath,
+        NUVANA_TEST_USER_DATA: userDataDir,
         NODE_ENV: 'test',
-      },
+      } as Record<string, string>;
+      delete launchEnv.ELECTRON_RUN_AS_NODE;
+
+      electronApp = await electron.launch({
+        ...launchConfig,
+        args: launchArgs,
+        env: launchEnv,
+        timeout: 30000,
+      });
+    } catch (error) {
+      launchError = error as Error;
+      console.error(`[e2e] Failed to launch Electron app: ${launchError.message}`);
+      console.error(`[e2e] Launch config:`, JSON.stringify(launchConfig, null, 2));
+      throw launchError;
+    }
+
+    // Listen for app crashes
+    electronApp.process().on('exit', (code) => {
+      if (code !== null && code !== 0) {
+        console.error(`[e2e] Electron process exited with code ${code}`);
+      }
     });
 
     // Use the app
     await use(electronApp);
 
-    // Cleanup
-    await electronApp.close();
+    // Cleanup - use timeout-protected close
+    await closeApp(electronApp);
 
     // Remove test database
-    if (fs.existsSync(dbPath)) {
-      fs.unlinkSync(dbPath);
+    try {
+      if (fs.existsSync(dbPath)) {
+        fs.unlinkSync(dbPath);
+      }
+      if (fs.existsSync(`${dbPath}-journal`)) {
+        fs.unlinkSync(`${dbPath}-journal`);
+      }
+    } catch {
+      // Best-effort cleanup
     }
-    if (fs.existsSync(`${dbPath}-journal`)) {
-      fs.unlinkSync(`${dbPath}-journal`);
-    }
+
+    // Remove test userData directory
+    removeDir(userDataDir);
   },
 
   window: async ({ electronApp }, use) => {
@@ -115,17 +245,20 @@ export const test = base.extend<ElectronTestFixtures>({
     // Wait for the app to be ready
     await window.waitForLoadState('domcontentloaded');
 
-    // Wait for the app to finish loading (setup wizard or dashboard)
-    // The app shows either setup-wizard-title or dashboard content
+    // Wait for the app to finish loading. The app will show either:
+    // 1. Setup wizard (fresh/unconfigured) — visible welcome or API key step
+    // 2. App layout (configured) — sidebar + main content area
     try {
       await Promise.race([
-        window.waitForSelector('[data-testid="setup-wizard-title"]', { timeout: 30000 }),
-        window.waitForSelector('[data-testid="dashboard"]', { timeout: 30000 }),
-        window.waitForSelector('h1:has-text("Nuvana")', { timeout: 30000 }),
+        window.waitForSelector(
+          '[data-testid="setup-step-welcome"], [data-testid="setup-step-apikey"]',
+          { timeout: 30000 }
+        ),
+        window.waitForSelector('[data-testid="app-layout"]', { timeout: 30000 }),
       ]);
     } catch {
-      // If none found, wait a bit and continue
-      console.warn('App ready indicator not found, waiting for load state');
+      // If none found, wait for network idle and continue
+      console.warn('[e2e] App ready indicator not found, waiting for load state');
       await window.waitForLoadState('networkidle');
     }
 

@@ -3850,4 +3850,412 @@ describe('CloudApiService', () => {
       });
     });
   });
+
+  // ==========================================================================
+  // Register Extraction from MANUAL Mode (Phase 6 - Task 6.3)
+  // SEC-014: Validates register entries from cloud POS configuration
+  // API-001: Schema validation for cloud response data
+  // ==========================================================================
+  describe('Register extraction from MANUAL mode', () => {
+    /**
+     * Helper to create identity response with posConnectionConfig.
+     * Mirrors the cloud API response structure for keys/identity endpoint.
+     */
+    const createManualModeResponse = (
+      posConnectionConfig?: {
+        pos_type?: string;
+        pos_connection_type?: string;
+        pos_connection_config?: unknown;
+      } | null
+    ) => ({
+      success: true,
+      data: {
+        identity: {
+          storeId: 'store-manual-001',
+          storeName: 'Manual Mode Store',
+          storePublicId: 'MAN001',
+          companyId: 'company-manual-001',
+          companyName: 'Manual Mode Company',
+          timezone: 'America/Chicago',
+          stateId: 'state-tx',
+          stateCode: 'TX',
+          offlinePermissions: [],
+          metadata: { features: ['pos', 'lottery'] },
+        },
+        offlineToken: 'offline-token-manual',
+        offlineTokenExpiresAt: '2027-12-31T00:00:00Z',
+        serverTime: new Date().toISOString(),
+        revocationCheckInterval: 3600,
+        storeManager: null,
+        posConnectionConfig: posConnectionConfig ?? {
+          pos_type: 'MANUAL_ENTRY',
+          pos_connection_type: 'MANUAL',
+          pos_connection_config: null,
+        },
+      },
+    });
+
+    // 6.3.1 - Extracts registers when MANUAL mode and registers present
+    it('6.3.1: should extract registers when pos_connection_type is MANUAL and registers are present', async () => {
+      const registers = [
+        {
+          external_register_id: '1',
+          terminal_type: 'REGISTER',
+          description: 'Front Counter',
+          active: true,
+        },
+        {
+          external_register_id: '2',
+          terminal_type: 'REGISTER',
+          description: 'Back Counter',
+          active: true,
+        },
+      ];
+
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: { registers },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toBeDefined();
+      expect(result.registers).toHaveLength(2);
+      expect(result.registers![0].external_register_id).toBe('1');
+      expect(result.registers![1].external_register_id).toBe('2');
+    });
+
+    // 6.3.2 - Returns undefined registers when MANUAL mode has no registers
+    it('6.3.2: should return undefined registers when MANUAL mode has null config', async () => {
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: null,
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      // Should be undefined or empty - no registers to extract
+      expect(result.registers === undefined || result.registers?.length === 0).toBe(true);
+    });
+
+    // 6.3.3 - Returns empty registers when MANUAL mode has empty array
+    it('6.3.3: should return empty registers when MANUAL mode has empty registers array', async () => {
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: { registers: [] },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers === undefined || result.registers?.length === 0).toBe(true);
+    });
+
+    // 6.3.4 - Does not extract registers for FILE mode
+    it('6.3.4: should not extract registers for FILE mode', async () => {
+      const response = createManualModeResponse({
+        pos_type: 'GILBARCO_PASSPORT',
+        pos_connection_type: 'FILE',
+        pos_connection_config: {
+          import_path: 'C:\\NAXML\\Export',
+        },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toBeUndefined();
+    });
+
+    // 6.3.5 - Does not extract registers for API mode
+    it('6.3.5: should not extract registers for API mode', async () => {
+      const response = createManualModeResponse({
+        pos_type: 'SQUARE_REST',
+        pos_connection_type: 'API',
+        pos_connection_config: {
+          base_url: 'https://api.squareup.com',
+        },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toBeUndefined();
+    });
+
+    // 6.3.6 - Skips invalid registers and keeps valid ones
+    it('6.3.6: should skip invalid registers and keep valid ones', async () => {
+      const registers = [
+        {
+          external_register_id: '1',
+          terminal_type: 'REGISTER',
+          active: true,
+        },
+        {
+          // Missing required external_register_id
+          terminal_type: 'REGISTER',
+          active: true,
+        },
+      ];
+
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: { registers },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toHaveLength(1);
+      expect(result.registers![0].external_register_id).toBe('1');
+    });
+
+    // 6.3.7 - Extracts registers from activation endpoint fallback
+    it('6.3.7: should extract registers from activation endpoint when identity lacks posConnectionConfig', async () => {
+      // Identity response without posConnectionConfig
+      const identityResponse = {
+        success: true,
+        data: {
+          identity: {
+            storeId: 'store-manual-002',
+            storeName: 'Fallback Store',
+            storePublicId: 'FB001',
+            companyId: 'company-fb-001',
+            companyName: 'Fallback Company',
+            timezone: 'America/Denver',
+            stateId: 'state-co',
+            stateCode: 'CO',
+            offlinePermissions: [],
+            metadata: { features: [] },
+          },
+          offlineToken: 'offline-token-fb',
+          offlineTokenExpiresAt: '2027-12-31T00:00:00Z',
+          serverTime: new Date().toISOString(),
+          revocationCheckInterval: 3600,
+          storeManager: null,
+          // No posConnectionConfig in identity
+        },
+      };
+
+      // Activation response WITH posConnectionConfig and registers
+      const activationResponse = {
+        success: true,
+        data: {
+          posConnectionConfig: {
+            pos_type: 'MANUAL_ENTRY',
+            pos_connection_type: 'MANUAL',
+            pos_connection_config: {
+              registers: [
+                {
+                  external_register_id: 'FALLBACK-1',
+                  terminal_type: 'REGISTER',
+                  description: 'Fallback Register',
+                  active: true,
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      mockFetch
+        // Activation call
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve(activationResponse),
+        })
+        // Identity call
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(identityResponse),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toBeDefined();
+      expect(result.registers).toHaveLength(1);
+      expect(result.registers![0].external_register_id).toBe('FALLBACK-1');
+    });
+
+    // 6.3.8 - Handles registers from snake_case identity response
+    it('6.3.8: should handle registers from snake_case identity response format', async () => {
+      // Flat snake_case response (alternative cloud response format)
+      const response = {
+        success: true,
+        data: {
+          store_id: 'store-snake-001',
+          store_name: 'Snake Case Store',
+          store_public_id: 'SNK001',
+          company_id: 'company-snake-001',
+          company_name: 'Snake Company',
+          timezone: 'America/Phoenix',
+          state_id: 'state-az',
+          state_code: 'AZ',
+          offline_permissions: [],
+          metadata: { features: [] },
+          offline_token: 'offline-token-snake',
+          offline_token_expires_at: '2027-12-31T00:00:00Z',
+          store_manager: null,
+          pos_connection_config: {
+            pos_type: 'MANUAL_ENTRY',
+            pos_connection_type: 'MANUAL',
+            pos_connection_config: {
+              registers: [
+                {
+                  external_register_id: 'SNAKE-REG-1',
+                  terminal_type: 'REGISTER',
+                  description: 'Snake Case Register',
+                  active: true,
+                },
+              ],
+            },
+          },
+        },
+      };
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toBeDefined();
+      expect(result.registers).toHaveLength(1);
+      expect(result.registers![0].external_register_id).toBe('SNAKE-REG-1');
+    });
+
+    // 6.3.9 - Handles registers array with all terminal types
+    it('6.3.9: should handle registers array with all terminal types', async () => {
+      const registers = [
+        { external_register_id: 'R1', terminal_type: 'REGISTER', active: true },
+        { external_register_id: 'FD1', terminal_type: 'FUEL_DISPENSER', active: true },
+        { external_register_id: 'K1', terminal_type: 'KIOSK', active: true },
+        { external_register_id: 'M1', terminal_type: 'MOBILE', active: true },
+      ];
+
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: { registers },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toHaveLength(4);
+      expect(result.registers![0].terminal_type).toBe('REGISTER');
+      expect(result.registers![1].terminal_type).toBe('FUEL_DISPENSER');
+      expect(result.registers![2].terminal_type).toBe('KIOSK');
+      expect(result.registers![3].terminal_type).toBe('MOBILE');
+    });
+
+    // 6.3.10 - Handles register with maximum-length external_register_id
+    it('6.3.10: should handle register with 50-character external_register_id', async () => {
+      const maxLengthId = 'ABCDEFGHIJ'.repeat(5); // 50 chars
+      const registers = [
+        {
+          external_register_id: maxLengthId,
+          terminal_type: 'REGISTER',
+          active: true,
+        },
+      ];
+
+      const response = createManualModeResponse({
+        pos_type: 'MANUAL_ENTRY',
+        pos_connection_type: 'MANUAL',
+        pos_connection_config: { registers },
+      });
+
+      mockFetch
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
+        })
+        .mockResolvedValue({
+          ok: true,
+          json: () => Promise.resolve(response),
+        });
+
+      const result = await service.validateApiKey();
+
+      expect(result.registers).toHaveLength(1);
+      expect(result.registers![0].external_register_id).toBe(maxLengthId);
+      expect(result.registers![0].external_register_id).toHaveLength(50);
+    });
+  });
 });
