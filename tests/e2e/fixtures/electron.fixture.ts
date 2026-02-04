@@ -52,11 +52,12 @@ function createTestDatabasePath(testName: string): string {
 /**
  * Get the correct app launch path based on environment
  * - CI: Use packaged app from release/win-unpacked/Nuvana.exe
- * - Local: Use built app from out/main/index.js
+ * - Local: Use built app from dist/main/index.js (electron-vite build output)
  */
 function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
   const packagedAppPath = path.join(process.cwd(), 'release', 'win-unpacked', 'Nuvana.exe');
-  const devAppPath = path.join(process.cwd(), 'out', 'main', 'index.js');
+  // electron-vite.config.ts outputs to dist/ (not out/)
+  const devAppPath = path.join(process.cwd(), 'dist', 'main', 'index.js');
 
   // In CI, prefer the packaged app (downloaded from build job)
   if (isCI && fs.existsSync(packagedAppPath)) {
@@ -67,7 +68,18 @@ function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
     };
   }
 
-  if (!isCI && fs.existsSync(packagedAppPath)) {
+  // Locally, prefer the dev build for faster iteration. The packaged app
+  // may be stale (built from a different commit) and reject newer CLI flags
+  // like --test-mode. In CI, the packaged app is always freshly built.
+  if (!isCI && fs.existsSync(devAppPath)) {
+    console.log(`[e2e] Using dev build: ${devAppPath}`);
+    return {
+      args: [devAppPath],
+    };
+  }
+
+  // Fall back to packaged app
+  if (fs.existsSync(packagedAppPath)) {
     console.log(`[e2e] Using packaged app: ${packagedAppPath}`);
     return {
       executablePath: packagedAppPath,
@@ -75,20 +87,12 @@ function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
     };
   }
 
-  // In development or if packaged app doesn't exist, use dev build
-  if (!fs.existsSync(devAppPath)) {
-    throw new Error(
-      `[e2e] No launchable app found.\n` +
-        `  Checked packaged app: ${packagedAppPath} (not found)\n` +
-        `  Checked dev build: ${devAppPath} (not found)\n` +
-        `  Run "npm run build" or "npm run build:win:unsigned" first.`
-    );
-  }
-
-  console.log(`[e2e] Using dev build: ${devAppPath}`);
-  return {
-    args: [devAppPath],
-  };
+  throw new Error(
+    `[e2e] No launchable app found.\n` +
+      `  Checked dev build: ${devAppPath} (not found)\n` +
+      `  Checked packaged app: ${packagedAppPath} (not found)\n` +
+      `  Run "npm run build" or "npm run build:win:unsigned" first.`
+  );
 }
 
 /**
@@ -145,15 +149,20 @@ export const test = base.extend<ElectronTestFixtures>({
         launchArgs.push('--disable-gpu', '--disable-software-rasterizer');
       }
 
+      // Build env: spread process.env then remove VSCode's ELECTRON_RUN_AS_NODE
+      // which forces the Electron binary to run as plain Node.js (breaking the API).
+      const launchEnv: Record<string, string> = {
+        ...process.env,
+        NUVANA_TEST_MODE: 'true',
+        NUVANA_TEST_DB_PATH: dbPath,
+        NODE_ENV: 'test',
+      } as Record<string, string>;
+      delete launchEnv.ELECTRON_RUN_AS_NODE;
+
       electronApp = await electron.launch({
         ...launchConfig,
         args: launchArgs,
-        env: {
-          ...process.env,
-          NUVANA_TEST_MODE: 'true',
-          NUVANA_TEST_DB_PATH: dbPath,
-          NODE_ENV: 'test',
-        },
+        env: launchEnv,
         timeout: 30000,
       });
     } catch (error) {

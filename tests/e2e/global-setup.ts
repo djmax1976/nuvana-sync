@@ -21,8 +21,9 @@ async function globalSetup(): Promise<void> {
   // In CI: Check for packaged app (downloaded from build job artifact)
   // In dev: Check for development build
   const packagedAppPath = path.join(process.cwd(), 'release', 'win-unpacked', 'Nuvana.exe');
-  const distPath = path.join(process.cwd(), 'out', 'main');
-  const rendererPath = path.join(process.cwd(), 'out', 'renderer');
+  // electron-vite.config.ts outputs to dist/ (not out/)
+  const distPath = path.join(process.cwd(), 'dist', 'main');
+  const rendererPath = path.join(process.cwd(), 'dist', 'renderer');
 
   // In CI, the packaged app should be downloaded from the build job
   if (isCI && fs.existsSync(packagedAppPath)) {
