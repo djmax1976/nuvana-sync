@@ -14,7 +14,7 @@
  * @performance PERF-002: Validates efficient transformation
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi, afterEach } from 'vitest';
 
 // ============================================================================
 // Types (mirrored from transport and components)
@@ -343,19 +343,27 @@ describe('Reports Data Flow Integration', () => {
     });
 
     it('should handle rapid successive transformations without data corruption', () => {
-      const response = createRealisticIPCResponse();
+      // Pin the clock so that open shifts (endTime: null → new Date()) produce
+      // identical timestamps across consecutive calls.
+      vi.useFakeTimers({ now: new Date('2026-01-27T12:00:00.000Z') });
 
-      const result1 = transformShiftsByDays(response);
-      const result2 = transformShiftsByDays(response);
-      const result3 = transformShiftsByDays(response);
+      try {
+        const response = createRealisticIPCResponse();
 
-      // All results should be identical but independent objects
-      expect(result1).toEqual(result2);
-      expect(result2).toEqual(result3);
+        const result1 = transformShiftsByDays(response);
+        const result2 = transformShiftsByDays(response);
+        const result3 = transformShiftsByDays(response);
 
-      // Mutating result1 should not affect result2
-      result1[0].shifts[0].employeeName = 'MUTATED';
-      expect(result2[0].shifts[0].employeeName).not.toBe('MUTATED');
+        // All results should be identical but independent objects
+        expect(result1).toEqual(result2);
+        expect(result2).toEqual(result3);
+
+        // Mutating result1 should not affect result2
+        result1[0].shifts[0].employeeName = 'MUTATED';
+        expect(result2[0].shifts[0].employeeName).not.toBe('MUTATED');
+      } finally {
+        vi.useRealTimers();
+      }
     });
   });
 
