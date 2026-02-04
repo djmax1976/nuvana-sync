@@ -59,9 +59,11 @@ async function ensureAppConfigured(window: Page) {
     return;
   }
 
-  // Check if setup wizard is showing (fresh database)
+  // Check if setup wizard is showing (fresh database).
+  // Use visible step content instead of the sr-only title element.
   const isSetupWizard = await window
-    .locator('[data-testid="setup-wizard-title"]')
+    .locator('[data-testid="setup-step-welcome"], [data-testid="setup-step-apikey"]')
+    .first()
     .isVisible()
     .catch(() => false);
 

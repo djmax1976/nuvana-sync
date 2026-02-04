@@ -10,6 +10,10 @@
  * @security DB-007: Encrypted database initialization
  */
 
+// MUST be first import: overrides userData path for test isolation before
+// electron-store reads app.getPath('userData') in settings.service constructor.
+import './test-user-data';
+
 import { app, BrowserWindow, ipcMain, Tray, Menu, nativeImage, IpcMainInvokeEvent } from 'electron';
 import { join } from 'path';
 import { FileWatcherService } from './services/file-watcher.service';

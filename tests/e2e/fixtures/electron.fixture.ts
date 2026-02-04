@@ -2,7 +2,8 @@
  * Electron Test Fixtures
  *
  * Provides Playwright fixtures for testing Electron applications.
- * Sets up and tears down ElectronApplication instances.
+ * Sets up and tears down ElectronApplication instances with full
+ * isolation (unique database AND userData directory per test).
  *
  * @module tests/e2e/fixtures/electron
  */
@@ -47,6 +48,24 @@ function createTestDatabasePath(testName: string): string {
     process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
   const sanitizedName = testName.replace(/[^a-zA-Z0-9]/g, '_');
   return path.join(testDataDir, `test_${sanitizedName}_${Date.now()}.db`);
+}
+
+/**
+ * Create a unique userData directory for electron-store isolation.
+ *
+ * Each test gets its own userData directory so that the electron-store
+ * config (which stores isConfigured, setupCompletedAt, API keys, etc.)
+ * does not leak between tests. Without this, a test that calls
+ * settings:completeSetup would cause all subsequent tests to see the
+ * app as already configured, preventing the setup wizard from appearing.
+ */
+function createTestUserDataDir(testName: string): string {
+  const testDataDir =
+    process.env.NUVANA_TEST_DATA_DIR || path.join(process.cwd(), 'test-data', 'e2e');
+  const sanitizedName = testName.replace(/[^a-zA-Z0-9]/g, '_');
+  const userDataDir = path.join(testDataDir, `userdata_${sanitizedName}_${Date.now()}`);
+  fs.mkdirSync(userDataDir, { recursive: true });
+  return userDataDir;
 }
 
 /**
@@ -126,6 +145,19 @@ async function closeApp(electronApp: ElectronApplication): Promise<void> {
 }
 
 /**
+ * Recursively remove a directory (best-effort, ignores errors).
+ */
+function removeDir(dirPath: string): void {
+  try {
+    if (fs.existsSync(dirPath)) {
+      fs.rmSync(dirPath, { recursive: true, force: true });
+    }
+  } catch {
+    // Best-effort cleanup — temp dirs are cleaned by the OS eventually
+  }
+}
+
+/**
  * Electron test fixture configuration
  */
 export const test = base.extend<ElectronTestFixtures>({
@@ -133,6 +165,10 @@ export const test = base.extend<ElectronTestFixtures>({
   electronApp: async ({}, use, testInfo) => {
     // Create isolated test database
     const dbPath = createTestDatabasePath(testInfo.title);
+
+    // Create isolated userData directory for electron-store config.
+    // This prevents isConfigured / setupCompletedAt from leaking between tests.
+    const userDataDir = createTestUserDataDir(testInfo.title);
 
     // Get the correct launch configuration
     const launchConfig = getAppLaunchConfig();
@@ -155,6 +191,7 @@ export const test = base.extend<ElectronTestFixtures>({
         ...process.env,
         NUVANA_TEST_MODE: 'true',
         NUVANA_TEST_DB_PATH: dbPath,
+        NUVANA_TEST_USER_DATA: userDataDir,
         NODE_ENV: 'test',
       } as Record<string, string>;
       delete launchEnv.ELECTRON_RUN_AS_NODE;
@@ -196,6 +233,9 @@ export const test = base.extend<ElectronTestFixtures>({
     } catch {
       // Best-effort cleanup
     }
+
+    // Remove test userData directory
+    removeDir(userDataDir);
   },
 
   window: async ({ electronApp }, use) => {
@@ -205,16 +245,19 @@ export const test = base.extend<ElectronTestFixtures>({
     // Wait for the app to be ready
     await window.waitForLoadState('domcontentloaded');
 
-    // Wait for the app to finish loading (setup wizard or dashboard)
-    // The app shows either setup-wizard-title or dashboard content
+    // Wait for the app to finish loading. The app will show either:
+    // 1. Setup wizard (fresh/unconfigured) — visible welcome or API key step
+    // 2. App layout (configured) — sidebar + main content area
     try {
       await Promise.race([
-        window.waitForSelector('[data-testid="setup-wizard-title"]', { timeout: 30000 }),
-        window.waitForSelector('[data-testid="dashboard"]', { timeout: 30000 }),
-        window.waitForSelector('h1:has-text("Nuvana")', { timeout: 30000 }),
+        window.waitForSelector(
+          '[data-testid="setup-step-welcome"], [data-testid="setup-step-apikey"]',
+          { timeout: 30000 }
+        ),
+        window.waitForSelector('[data-testid="app-layout"]', { timeout: 30000 }),
       ]);
     } catch {
-      // If none found, wait a bit and continue
+      // If none found, wait for network idle and continue
       console.warn('[e2e] App ready indicator not found, waiting for load state');
       await window.waitForLoadState('networkidle');
     }
