@@ -1479,8 +1479,9 @@ registerHandler(
   'settings:getPOSConnectionType',
   async () => {
     const connectionType = settingsService.getPOSConnectionType();
-    log.info('getPOSConnectionType called', { connectionType });
-    return createSuccessResponse({ connectionType });
+    const posType = settingsService.getPOSType();
+    log.info('getPOSConnectionType called', { connectionType, posType });
+    return createSuccessResponse({ connectionType, posType });
   },
   {
     description: 'Get POS connection type (MANUAL, FILE, API, etc.)',

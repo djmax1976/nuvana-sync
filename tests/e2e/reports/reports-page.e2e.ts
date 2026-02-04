@@ -46,65 +46,110 @@ async function ensureAppConfigured(window: Page) {
 }
 
 /**
- * Navigate to the Reports page via the sidebar
+ * Navigate to the Reports page via the sidebar.
+ *
+ * The Reports page is an accordion-based "Shifts By Day" view (the sole view).
+ * After clicking the sidebar link we wait for the page heading to confirm
+ * the route transition completed.
  */
 async function navigateToReports(window: Page) {
   await ensureAppConfigured(window);
 
   // Click the Reports link in the sidebar
-  const reportsLink = window.locator(
-    'a:has-text("Reports"), [data-testid="reports-link"], [data-testid="nav-reports"]'
-  );
+  const reportsLink = window.locator('[data-testid="reports-link"]');
   await reportsLink.click();
-  // Wait for the reports page to be loaded
-  await window.waitForSelector('[role="tablist"]', { timeout: 10000 });
+
+  // Wait for the Reports page heading to confirm navigation
+  await window.waitForSelector('h1:has-text("Reports")', { timeout: 10000 });
+
+  // Wait for the page to finish its initial data fetch (loading, data, empty, or error)
+  await Promise.race([
+    window.waitForSelector('[data-testid="day-accordion-skeleton"]', { timeout: 10000 }),
+    window.waitForSelector('[data-testid="day-accordion"]', { timeout: 10000 }),
+    window.waitForSelector('[data-testid^="reports-empty-state"]', { timeout: 10000 }),
+    window.waitForSelector('[role="alert"]', { timeout: 10000 }),
+  ]);
 }
 
 test.describe('Reports Page', () => {
   test.describe('Navigation', () => {
     test('should navigate to Reports via sidebar', async ({ window }) => {
       await navigateToReports(window);
-      // Verify the tab interface is visible
-      const tablist = window.locator('[role="tablist"]');
-      await expect(tablist).toBeVisible();
+      // Verify the Reports heading is visible (confirms route transition)
+      const heading = window.locator('h1:has-text("Reports")');
+      await expect(heading).toBeVisible();
     });
   });
 
   test.describe('Page structure', () => {
-    test('should display all report type tabs', async ({ window }) => {
+    test('should display page heading and date range controls', async ({ window }) => {
       await navigateToReports(window);
-      await expect(window.locator('text=Weekly Report')).toBeVisible();
-      await expect(window.locator('text=Monthly Report')).toBeVisible();
-      await expect(window.locator('text=Custom Range')).toBeVisible();
-      await expect(window.locator('text=Shifts By Day')).toBeVisible();
+
+      // Heading
+      await expect(window.locator('h1:has-text("Reports")')).toBeVisible();
+
+      // Date range inputs
+      await expect(window.locator('#reports-start-date')).toBeVisible();
+      await expect(window.locator('#reports-end-date')).toBeVisible();
+
+      // Labels for date controls
+      await expect(window.locator('label[for="reports-start-date"]')).toHaveText('From');
     });
 
-    test('should show tablist with aria-label', async ({ window }) => {
+    test('should show data, empty state, or loading skeleton after navigation', async ({
+      window,
+    }) => {
       await navigateToReports(window);
-      const tablist = window.locator('[role="tablist"]');
-      await expect(tablist).toHaveAttribute('aria-label', 'Report type');
+
+      // The page must render one of these states after loading
+      const skeleton = window.locator('[data-testid="day-accordion-skeleton"]');
+      const accordion = window.locator('[data-testid="day-accordion"]');
+      const emptyState = window.locator('[data-testid^="reports-empty-state"]');
+      const errorAlert = window.locator('[role="alert"]');
+
+      // At least one state must be present
+      const anyVisible = await Promise.race([
+        skeleton
+          .first()
+          .isVisible()
+          .then((v) => (v ? 'skeleton' : null)),
+        accordion
+          .first()
+          .isVisible()
+          .then((v) => (v ? 'accordion' : null)),
+        emptyState
+          .first()
+          .isVisible()
+          .then((v) => (v ? 'empty' : null)),
+        errorAlert
+          .first()
+          .isVisible()
+          .then((v) => (v ? 'error' : null)),
+      ]);
+
+      expect(anyVisible).toBeTruthy();
     });
   });
 
   test.describe('Shifts By Day view', () => {
-    test('should switch to Shifts By Day tab', async ({ window }) => {
+    test('should display date range inputs on the default view', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
-      // Should show date inputs for shifts view
-      const startDate = window.locator('#shifts-start-date');
+      // The shifts-by-day view is the sole/default view — date controls are always shown
+      const startDate = window.locator('#reports-start-date');
+      const endDate = window.locator('#reports-end-date');
       await expect(startDate).toBeVisible();
+      await expect(endDate).toBeVisible();
     });
 
-    test('should show loading state or data after tab switch', async ({ window }) => {
+    test('should show loading state, data, or empty state', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
-      // Wait for either loading skeletons, data, or empty state
+      // The page auto-fetches shifts-by-day data on mount
       await Promise.race([
-        window.waitForSelector('[data-testid="day-accordion-skeleton"]', { timeout: 5000 }),
-        window.waitForSelector('[data-testid="day-accordion"]', { timeout: 5000 }),
-        window.waitForSelector('[data-testid^="reports-empty-state"]', { timeout: 5000 }),
+        window.waitForSelector('[data-testid="day-accordion-skeleton"]', { timeout: 10000 }),
+        window.waitForSelector('[data-testid="day-accordion"]', { timeout: 10000 }),
+        window.waitForSelector('[data-testid^="reports-empty-state"]', { timeout: 10000 }),
       ]);
     });
   });
@@ -112,9 +157,8 @@ test.describe('Reports Page', () => {
   test.describe('Accordion interactions', () => {
     test('should expand/collapse accordion with click', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
-      // Wait for data to load
+      // Wait for data to load (shifts-by-day is the default view)
       const accordion = window.locator('[data-testid="day-accordion"]').first();
       const hasAccordion = await accordion.isVisible().catch(() => false);
 
@@ -138,7 +182,6 @@ test.describe('Reports Page', () => {
 
     test('should expand/collapse accordion with keyboard', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
       const header = window.locator('[data-testid="day-accordion-header"]').first();
       const hasHeader = await header.isVisible().catch(() => false);
@@ -168,15 +211,14 @@ test.describe('Reports Page', () => {
   test.describe('View Day button', () => {
     test('should navigate when View Day is clicked', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
       const viewDayBtn = window.locator('[data-testid="day-accordion-view-day-btn"]').first();
       const hasBtn = await viewDayBtn.isVisible().catch(() => false);
 
       if (hasBtn) {
         await viewDayBtn.click();
-        // Should navigate to day-close page
-        await window.waitForURL(/day-close/, { timeout: 5000 });
+        // Should navigate to lottery day report page
+        await window.waitForURL(/lottery-day-report/, { timeout: 5000 });
       }
     });
   });
@@ -219,7 +261,6 @@ test.describe('Reports Page', () => {
 
     test('should not cause layout shift during accordion toggle', async ({ window }) => {
       await navigateToReports(window);
-      await window.locator('text=Shifts By Day').click();
 
       const header = window.locator('[data-testid="day-accordion-header"]').first();
       const hasHeader = await header.isVisible().catch(() => false);
