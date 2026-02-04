@@ -22,6 +22,9 @@ import fs from 'fs';
 // Determine if running in CI environment
 const isCI = !!process.env.CI;
 
+// Timeout for closing the Electron app during teardown (ms)
+const APP_CLOSE_TIMEOUT = 10000;
+
 /**
  * Extended test fixtures for Electron testing
  */
@@ -57,6 +60,15 @@ function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
 
   // In CI, prefer the packaged app (downloaded from build job)
   if (isCI && fs.existsSync(packagedAppPath)) {
+    console.log(`[e2e] Using packaged app: ${packagedAppPath}`);
+    return {
+      executablePath: packagedAppPath,
+      args: [],
+    };
+  }
+
+  if (!isCI && fs.existsSync(packagedAppPath)) {
+    console.log(`[e2e] Using packaged app: ${packagedAppPath}`);
     return {
       executablePath: packagedAppPath,
       args: [],
@@ -64,9 +76,49 @@ function getAppLaunchConfig(): { executablePath?: string; args: string[] } {
   }
 
   // In development or if packaged app doesn't exist, use dev build
+  if (!fs.existsSync(devAppPath)) {
+    throw new Error(
+      `[e2e] No launchable app found.\n` +
+        `  Checked packaged app: ${packagedAppPath} (not found)\n` +
+        `  Checked dev build: ${devAppPath} (not found)\n` +
+        `  Run "npm run build" or "npm run build:win:unsigned" first.`
+    );
+  }
+
+  console.log(`[e2e] Using dev build: ${devAppPath}`);
   return {
     args: [devAppPath],
   };
+}
+
+/**
+ * Close Electron app with a timeout to prevent teardown from hanging forever.
+ * If graceful close doesn't work, force-kill the process.
+ */
+async function closeApp(electronApp: ElectronApplication): Promise<void> {
+  try {
+    const closePromise = electronApp.close();
+    const timeoutPromise = new Promise<'timeout'>((resolve) =>
+      setTimeout(() => resolve('timeout'), APP_CLOSE_TIMEOUT)
+    );
+
+    const result = await Promise.race([closePromise, timeoutPromise]);
+
+    if (result === 'timeout') {
+      console.warn('[e2e] App close timed out, force-killing process');
+      try {
+        const pid = electronApp.process().pid;
+        if (pid) {
+          process.kill(pid, 'SIGKILL');
+        }
+      } catch {
+        // Process already dead, that's fine
+      }
+    }
+  } catch {
+    // App may have already exited or crashed - that's OK during teardown
+    console.warn('[e2e] App close threw an error (app may have already exited)');
+  }
 }
 
 /**
@@ -81,30 +133,59 @@ export const test = base.extend<ElectronTestFixtures>({
     // Get the correct launch configuration
     const launchConfig = getAppLaunchConfig();
 
+    // Capture stderr for diagnostics
+    let launchError: Error | null = null;
+
     // Launch Electron app
-    const electronApp = await electron.launch({
-      ...launchConfig,
-      args: [...launchConfig.args, '--test-mode', `--test-db-path=${dbPath}`],
-      env: {
-        ...process.env,
-        NUVANA_TEST_MODE: 'true',
-        NUVANA_TEST_DB_PATH: dbPath,
-        NODE_ENV: 'test',
-      },
+    let electronApp: ElectronApplication;
+    try {
+      const launchArgs = [...launchConfig.args, '--test-mode', `--test-db-path=${dbPath}`];
+      // Disable GPU on CI to prevent display/rendering failures on headless runners
+      if (isCI) {
+        launchArgs.push('--disable-gpu', '--disable-software-rasterizer');
+      }
+
+      electronApp = await electron.launch({
+        ...launchConfig,
+        args: launchArgs,
+        env: {
+          ...process.env,
+          NUVANA_TEST_MODE: 'true',
+          NUVANA_TEST_DB_PATH: dbPath,
+          NODE_ENV: 'test',
+        },
+        timeout: 30000,
+      });
+    } catch (error) {
+      launchError = error as Error;
+      console.error(`[e2e] Failed to launch Electron app: ${launchError.message}`);
+      console.error(`[e2e] Launch config:`, JSON.stringify(launchConfig, null, 2));
+      throw launchError;
+    }
+
+    // Listen for app crashes
+    electronApp.process().on('exit', (code) => {
+      if (code !== null && code !== 0) {
+        console.error(`[e2e] Electron process exited with code ${code}`);
+      }
     });
 
     // Use the app
     await use(electronApp);
 
-    // Cleanup
-    await electronApp.close();
+    // Cleanup - use timeout-protected close
+    await closeApp(electronApp);
 
     // Remove test database
-    if (fs.existsSync(dbPath)) {
-      fs.unlinkSync(dbPath);
-    }
-    if (fs.existsSync(`${dbPath}-journal`)) {
-      fs.unlinkSync(`${dbPath}-journal`);
+    try {
+      if (fs.existsSync(dbPath)) {
+        fs.unlinkSync(dbPath);
+      }
+      if (fs.existsSync(`${dbPath}-journal`)) {
+        fs.unlinkSync(`${dbPath}-journal`);
+      }
+    } catch {
+      // Best-effort cleanup
     }
   },
 
@@ -125,7 +206,7 @@ export const test = base.extend<ElectronTestFixtures>({
       ]);
     } catch {
       // If none found, wait a bit and continue
-      console.warn('App ready indicator not found, waiting for load state');
+      console.warn('[e2e] App ready indicator not found, waiting for load state');
       await window.waitForLoadState('networkidle');
     }
 
