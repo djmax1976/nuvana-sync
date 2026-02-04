@@ -28,7 +28,9 @@ import {
   validatePOSConnectionConfig,
   formatPOSConnectionValidationErrors,
   convertTerminalToPOSConnectionConfig,
+  CloudRegisterSchema,
 } from '../../shared/types/config.types';
+import type { CloudRegister, ManualModeConnectionConfig } from '../../shared/types/config.types';
 import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.types';
 // SyncQueueItem type available from sync-queue.dal if needed
 
@@ -354,6 +356,15 @@ export interface ValidateApiKeyResponse {
    * Present when posConnectionConfig data exists but fails validation
    */
   posConnectionValidationErrors?: string[];
+  /**
+   * Pre-configured registers for MANUAL mode.
+   * Only populated when pos_connection_type is MANUAL and
+   * the cloud provides register definitions in pos_connection_config.
+   *
+   * @security SEC-014: Each register validated via CloudRegisterSchema
+   * @security DB-006: Store-scoped register definitions
+   */
+  registers?: CloudRegister[];
   /**
    * Debug information for troubleshooting
    * Includes raw cloud response and API configuration
@@ -795,6 +806,15 @@ const ValidateApiKeyResponseSchema = z.object({
   terminal: TerminalSyncRecordSchema.optional(),
   /** Validation errors if terminal config is invalid */
   terminalValidationErrors: z.array(z.string()).optional(),
+  /** POS connection configuration (Version 8.0) */
+  posConnectionConfig: z.unknown().optional(),
+  /** POS connection validation errors */
+  posConnectionValidationErrors: z.array(z.string()).optional(),
+  /**
+   * Pre-configured registers for MANUAL mode
+   * SEC-014: Validated via CloudRegisterSchema
+   */
+  registers: z.array(CloudRegisterSchema).optional(),
 });
 
 const _BatchSyncResponseSchema = z.object({
@@ -2040,6 +2060,57 @@ export class CloudApiService {
       }
     }
 
+    // =========================================================================
+    // Register Extraction for MANUAL Mode
+    // SEC-014: Validate each register entry individually via CloudRegisterSchema
+    // API-001: Schema validation for cloud response data
+    //
+    // When pos_connection_type is MANUAL, the cloud may provide pre-defined
+    // register definitions in pos_connection_config.registers[].
+    // Invalid entries are skipped with a warning (do not fail validation).
+    // =========================================================================
+    let registers: CloudRegister[] | undefined;
+
+    if (posConnectionConfig?.pos_connection_type === 'MANUAL') {
+      const manualConfig =
+        posConnectionConfig.pos_connection_config as ManualModeConnectionConfig | null;
+
+      if (manualConfig?.registers && Array.isArray(manualConfig.registers)) {
+        let skippedCount = 0;
+
+        registers = manualConfig.registers
+          .map((reg) => {
+            const result = CloudRegisterSchema.safeParse(reg);
+            if (result.success) {
+              return result.data;
+            }
+            skippedCount++;
+            log.warn('Invalid register in cloud response, skipping', {
+              storeId: identity.storeId,
+              validationErrors: result.error.issues.map((issue) => ({
+                path: issue.path.join('.'),
+                message: issue.message,
+              })),
+            });
+            return null;
+          })
+          .filter((r): r is CloudRegister => r !== null);
+
+        log.info('Extracted registers from MANUAL mode config', {
+          storeId: identity.storeId,
+          totalInResponse: manualConfig.registers.length,
+          validCount: registers.length,
+          skippedCount,
+          registerIds: registers.map((r) => r.external_register_id),
+        });
+      } else {
+        log.debug('MANUAL mode config has no registers array', {
+          storeId: identity.storeId,
+          hasConfig: manualConfig !== null && manualConfig !== undefined,
+        });
+      }
+    }
+
     // If no valid posConnectionConfig, fall back to terminal (legacy format)
     if (!posConnectionConfig) {
       // Version 7.0: Use activation terminal as fallback if identity doesn't have it
@@ -2168,6 +2239,8 @@ export class CloudApiService {
       // Version 8.0: POS connection configuration (NEW - store-level)
       posConnectionConfig,
       posConnectionValidationErrors,
+      // MANUAL mode: Pre-configured registers from cloud
+      registers,
       // Debug information for troubleshooting
       _debug: {
         apiUrl: debugInfo.apiUrl,
@@ -2207,6 +2280,9 @@ export class CloudApiService {
       posConnectionType: mapped.posConnectionConfig?.pos_connection_type,
       posType: mapped.posConnectionConfig?.pos_type,
       hasPosConnectionErrors: Boolean(mapped.posConnectionValidationErrors?.length),
+      // MANUAL mode: Register extraction results
+      registersCount: mapped.registers?.length ?? 0,
+      hasRegisters: Boolean(mapped.registers?.length),
       // Version 7.0: Terminal configuration status (deprecated)
       hasTerminal: Boolean(mapped.terminal),
       terminalConnectionType: mapped.terminal?.connection_type,

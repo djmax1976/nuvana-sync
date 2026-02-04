@@ -263,6 +263,7 @@ export const POSSystemTypeSchema = z.enum([
   'FILE_BASED',
   'MANUAL',
   'MANUAL_ENTRY', // Manual data entry (no POS automation)
+  'LOTTERY', // Lottery-only terminal (manual mode with lottery POS)
   'UNKNOWN',
 ]);
 export type POSSystemType = z.infer<typeof POSSystemTypeSchema>;
@@ -666,6 +667,74 @@ export function getMissingTerminalFields(error: z.ZodError): string[] {
 }
 
 // ============================================================================
+// Cloud Register Types (Manual Mode POS Configuration)
+// ============================================================================
+
+/**
+ * Register definition from cloud POS configuration.
+ * Used when pos_connection_type is MANUAL.
+ *
+ * @security DB-006: Store-scoped, includes store_id for tenant isolation
+ * @security SEC-014: Validated via CloudRegisterSchema before persistence
+ */
+export interface CloudRegister {
+  /** External register ID (matches POS system naming) */
+  external_register_id: string;
+  /** Terminal type classification */
+  terminal_type: 'REGISTER' | 'FUEL_DISPENSER' | 'KIOSK' | 'MOBILE';
+  /** User-friendly display name */
+  description: string | null;
+  /** Whether this register is currently active */
+  active: boolean;
+}
+
+/**
+ * Extended POS Connection Config payload for MANUAL mode.
+ * Replaces `null` when the cloud provides pre-defined registers.
+ *
+ * @security SEC-014: Validated via CloudRegisterSchema for each register entry
+ */
+export interface ManualModeConnectionConfig {
+  /** Pre-defined registers for manual mode (populated by cloud) */
+  registers?: CloudRegister[];
+}
+
+/**
+ * Cloud register validation schema
+ * SEC-014: Strict input validation for register definitions from cloud API
+ *
+ * Validates:
+ * - external_register_id: non-empty string, max 50 chars
+ * - terminal_type: strict enum allowlist
+ * - description: optional string, max 255 chars
+ * - active: boolean flag
+ */
+export const CloudRegisterSchema = z.object({
+  external_register_id: z
+    .string()
+    .min(1, 'Register ID is required')
+    .max(50, 'Register ID too long'),
+  terminal_type: z.enum(['REGISTER', 'FUEL_DISPENSER', 'KIOSK', 'MOBILE']).default('REGISTER'),
+  description: z.string().max(255, 'Description too long').nullable().default(null),
+  active: z.boolean().default(true),
+});
+
+/**
+ * Manual mode connection config schema
+ * SEC-014: Validates the optional registers array for MANUAL mode
+ *
+ * Used within POSConnectionConfigSchema union to allow both
+ * null (backwards compatible) and { registers: [...] } for MANUAL mode.
+ *
+ * Note: Uses z.array(z.record(...)) instead of z.array(CloudRegisterSchema)
+ * because per-register validation happens in cloud-api.service.ts (lines 2080-2096)
+ * via CloudRegisterSchema.safeParse() — invalid entries are skipped, not rejected.
+ */
+export const ManualModeConnectionConfigSchema = z.object({
+  registers: z.array(z.record(z.string(), z.unknown())).optional(),
+});
+
+// ============================================================================
 // POS Connection Configuration Types (Store-Level - New Cloud API Format)
 // ============================================================================
 
@@ -706,7 +775,7 @@ export const POSConnectionConfigSchema = z.object({
    * API: { base_url, api_key?, location_id?, merchant_id? }
    * NETWORK: { host, port, timeout_ms? }
    * WEBHOOK: { webhook_secret?, expected_source_ips? }
-   * MANUAL: null
+   * MANUAL: null OR { registers?: CloudRegister[] }
    */
   pos_connection_config: z.preprocess(
     // Preprocess: Normalize camelCase to snake_case for FILE config
@@ -769,12 +838,18 @@ export const POSConnectionConfigSchema = z.object({
             .max(65535, 'Port cannot exceed 65535'),
           timeout_ms: z.number().int().min(1000).max(120000).optional(),
         }),
+        // MANUAL mode with pre-defined registers from cloud
+        // Must be before WEBHOOK to avoid false match (WEBHOOK has all-optional fields)
+        ManualModeConnectionConfigSchema,
         // WEBHOOK connection config
-        z.object({
-          webhook_secret: z.string().max(500).optional(),
-          expected_source_ips: z.array(z.string().max(45)).optional(),
-        }),
-        // MANUAL - no config needed
+        // Uses .strict() to prevent matching objects with unrelated keys (e.g., { registers: [...] })
+        z
+          .object({
+            webhook_secret: z.string().max(500).optional(),
+            expected_source_ips: z.array(z.string().max(45)).optional(),
+          })
+          .strict(),
+        // MANUAL - no config needed (backwards compatible)
         z.null(),
       ])
       .nullable()

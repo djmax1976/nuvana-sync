@@ -18,6 +18,7 @@ import Store from 'electron-store';
 import { z } from 'zod';
 import { storesDAL } from '../dal/stores.dal';
 import { usersDAL } from '../dal/users.dal';
+import { posTerminalMappingsDAL } from '../dal/pos-id-mappings.dal';
 import { cloudApiService, ValidateApiKeyResponse } from './cloud-api.service';
 import { licenseService } from './license.service';
 import { createLogger } from '../utils/logger';
@@ -33,6 +34,7 @@ import {
   formatPOSConnectionValidationErrors,
   convertTerminalToPOSConnectionConfig,
 } from '../../shared/types/config.types';
+import type { CloudRegister } from '../../shared/types/config.types';
 // ConfigService has been consolidated into SettingsService - this is now the single source of truth
 
 // ============================================================================
@@ -867,6 +869,36 @@ export class SettingsService {
         );
       }
 
+      // =========================================================================
+      // MANUAL Mode: Sync pre-configured registers from cloud
+      // DB-006: Store-scoped register operations
+      // SEC-014: Registers already validated via CloudRegisterSchema in cloud-api.service
+      //
+      // Register sync is non-blocking: failures are logged but do not
+      // prevent API key setup or resync from completing successfully.
+      // =========================================================================
+      if (validation.registers && validation.registers.length > 0) {
+        try {
+          const storeId = this.configStore.get('storeId') as string | undefined;
+          if (storeId) {
+            const syncResult = this.syncRegistersFromCloud(storeId, validation.registers);
+            log.info('Cloud register sync completed', {
+              storeId,
+              registerCount: validation.registers.length,
+              created: syncResult.created,
+              updated: syncResult.updated,
+            });
+          } else {
+            log.warn('Cannot sync registers from cloud: storeId not available in config store');
+          }
+        } catch (registerError) {
+          log.error('Failed to sync registers from cloud', {
+            error: registerError instanceof Error ? registerError.message : String(registerError),
+          });
+          // Non-blocking: do not fail API key setup/resync on register sync failure
+        }
+      }
+
       log.info('API key validated and store configured', {
         storeId: validation.storeId,
         storeName: validation.storeName,
@@ -877,6 +909,7 @@ export class SettingsService {
         hasTerminal: hasTerminalConfig,
         terminalConnectionType: validation.terminal?.connection_type,
         terminalPosType: validation.terminal?.pos_type,
+        registersCount: validation.registers?.length ?? 0,
       });
 
       return { valid: true, store: validation };
@@ -889,6 +922,79 @@ export class SettingsService {
 
       return { valid: false, error: message };
     }
+  }
+
+  /**
+   * Sync registers from cloud POS configuration.
+   * Used during API key setup/resync for MANUAL mode stores.
+   *
+   * For each register from the cloud:
+   * - If it already exists locally (matched by store_id + external_register_id): update it
+   * - If it does not exist locally: create it via getOrCreate
+   *
+   * @security DB-006: Store-scoped operations — storeId passed to all DAL calls
+   * @security SEC-006: All DAL methods use parameterized queries
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param registers - Register definitions from cloud response
+   * @returns Counts of created and updated registers
+   */
+  private syncRegistersFromCloud(
+    storeId: string,
+    registers: CloudRegister[]
+  ): { created: number; updated: number; deactivated: number; total: number } {
+    let created = 0;
+    let updated = 0;
+
+    // Track which external IDs are in the current cloud response
+    const activeExternalIds = new Set<string>();
+
+    for (const register of registers) {
+      activeExternalIds.add(register.external_register_id);
+
+      // DB-006: Store-scoped lookup via storeId
+      const existing = posTerminalMappingsDAL.findByExternalId(
+        storeId,
+        register.external_register_id,
+        'generic'
+      );
+
+      if (existing) {
+        // Update existing mapping with cloud data
+        posTerminalMappingsDAL.update(existing.id, {
+          terminal_type: register.terminal_type,
+          description: register.description,
+          active: register.active ? 1 : 0,
+        });
+        updated++;
+      } else {
+        // Create new mapping
+        posTerminalMappingsDAL.getOrCreate(storeId, register.external_register_id, {
+          terminalType: register.terminal_type,
+          description: register.description ?? undefined,
+          posSystemType: 'generic',
+        });
+        created++;
+      }
+    }
+
+    // Deactivate cloud-sourced registers no longer in the cloud response.
+    // Only affects pos_system_type = 'generic' (cloud-synced).
+    // Parser-created registers (gilbarco, verifone, etc.) are never touched.
+    const deactivated = posTerminalMappingsDAL.deactivateStaleCloudRegisters(
+      storeId,
+      activeExternalIds
+    );
+
+    log.info('Registers synced from cloud for MANUAL mode', {
+      storeId,
+      created,
+      updated,
+      deactivated,
+      total: registers.length,
+    });
+
+    return { created, updated, deactivated, total: registers.length };
   }
 
   /**

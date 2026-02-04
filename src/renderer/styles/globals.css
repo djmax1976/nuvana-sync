@@ -217,6 +217,15 @@
   * {
     @apply border-border;
   }
+
+  /* Prevent layout shift from scrollbar appearing/disappearing
+   * Critical for accordion animations and dynamic content
+   * See: https://developer.mozilla.org/en-US/docs/Web/CSS/scrollbar-gutter
+   */
+  html {
+    scrollbar-gutter: stable;
+  }
+
   body {
     @apply bg-background text-foreground antialiased;
   }

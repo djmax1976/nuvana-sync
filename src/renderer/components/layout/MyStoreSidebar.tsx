@@ -21,6 +21,7 @@ import {
   CalendarClock,
   Receipt,
   RefreshCw,
+  BarChart3,
 } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
@@ -54,6 +55,7 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const isLotteryGamesActive = pathname === '/lottery/games';
   const isTerminalsActive = pathname === '/terminals' || pathname.startsWith('/terminal/');
   const isShiftsActive = pathname === '/shifts' || pathname.startsWith('/shifts/');
+  const isReportsActive = pathname === '/reports';
   const isTransactionsActive = pathname === '/transactions';
   const isEmployeesActive = pathname === '/employees';
   const isSyncActive = pathname === '/sync';
@@ -162,6 +164,22 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
         >
           <CalendarClock className="h-5 w-5" />
           <span>Shifts</span>
+        </Link>
+
+        {/* Reports Link */}
+        <Link
+          to="/reports"
+          data-testid="reports-link"
+          onClick={() => onNavigate?.()}
+          className={cn(
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+            isReportsActive
+              ? 'bg-primary text-primary-foreground'
+              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+          )}
+        >
+          <BarChart3 className="h-5 w-5" />
+          <span>Reports</span>
         </Link>
 
         {/* Transactions Link */}

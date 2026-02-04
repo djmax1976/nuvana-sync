@@ -39,14 +39,22 @@ export {
   useInvalidateTransactions,
 } from './useTransactions';
 
-// Reports hooks
+// Reports Data hooks (shifts by day view)
 export {
-  reportKeys,
-  useWeeklyReport,
-  useMonthlyReport,
-  useDateRangeReport,
-  useInvalidateReports,
-} from './useReports';
+  reportsDataKeys,
+  useReportsData,
+  type ReportDay,
+  type UseReportsDataParams,
+  type UseReportsDataReturn,
+} from './useReportsData';
+
+// Lottery Day Report hook (read-only report page)
+export {
+  lotteryDayReportKeys,
+  useLotteryDayReport,
+  type UseLotteryDayReportParams,
+  type UseLotteryDayReportReturn,
+} from './useLotteryDayReport';
 
 // Sync Activity hooks
 export {

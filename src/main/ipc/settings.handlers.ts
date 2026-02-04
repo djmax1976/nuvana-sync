@@ -287,6 +287,9 @@ registerHandler(
         // Allows UI to show appropriate messaging during setup for non-NAXML POS types
         fileWatcherCompatible: settingsService.isNAXMLCompatible(),
         fileWatcherUnavailableReason: settingsService.getFileWatcherUnavailableReason(),
+        // Phase 5 (POS Sync): Register count for MANUAL mode
+        // Plain number — always serializable via Electron IPC structured clone
+        registersCount: result.store?.registers?.length ?? 0,
       },
       // Debug information for troubleshooting
       _debug: result.store?._debug,

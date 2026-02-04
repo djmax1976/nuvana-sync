@@ -12,14 +12,14 @@ export default defineConfig({
     include: ['tests/integration/**/*.spec.ts', 'tests/integration/**/*.test.ts'],
     exclude: ['**/node_modules/**', '**/dist/**'],
     passWithNoTests: false,
-    pool: 'forks',
+    pool: 'vmForks',
     isolate: true,
     // Longer timeout for integration tests
     testTimeout: 30000,
     // Required for native modules like better-sqlite3-multiple-ciphers
     server: {
       deps: {
-        inline: ['better-sqlite3-multiple-ciphers'],
+        inline: [/^(?!.*vitest).*$/, 'better-sqlite3-multiple-ciphers'],
       },
     },
     deps: {

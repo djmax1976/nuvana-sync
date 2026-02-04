@@ -107,6 +107,8 @@ const ALLOWED_INVOKE_CHANNELS = [
   'reports:weekly',
   'reports:monthly',
   'reports:dateRange',
+  'reports:getShiftsByDays',
+  'reports:getLotteryDayReport',
   // Lottery
   'lottery:getGames',
   'lottery:listGames',

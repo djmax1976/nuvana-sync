@@ -424,6 +424,57 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
   }
 
   /**
+   * Update an existing terminal mapping.
+   *
+   * Builds a dynamic SET clause from non-undefined fields only.
+   * Column names are from a compile-time fixed allowlist (TerminalType, description, active),
+   * not from user input — no SQL injection risk in the SET clause.
+   *
+   * @security DB-006: Store-scoped via existing record lookup (callers use findByExternalId first)
+   * @security SEC-006: Prepared statement with parameter binding for all values
+   *
+   * @param id - Internal UUID of the terminal mapping
+   * @param updates - Partial update fields (only non-undefined fields are applied)
+   * @returns Updated mapping, or existing mapping unchanged if no fields to update
+   */
+  update(
+    id: string,
+    updates: Partial<{
+      terminal_type: TerminalType;
+      description: string | null;
+      active: number;
+    }>
+  ): POSTerminalMapping | undefined {
+    // SEC-006: Build parameterized SET clause from fixed allowlist of column names
+    const fields: [string, unknown][] = [];
+    if (updates.terminal_type !== undefined) fields.push(['terminal_type', updates.terminal_type]);
+    if (updates.description !== undefined) fields.push(['description', updates.description]);
+    if (updates.active !== undefined) fields.push(['active', updates.active]);
+
+    // No fields to update — return existing record unchanged
+    if (fields.length === 0) {
+      return this.findById(id);
+    }
+
+    // Always update the timestamp
+    fields.push(['updated_at', this.now()]);
+
+    // SEC-006: Column names from compile-time allowlist, values bound via ? placeholders
+    const setClause = fields.map(([k]) => `${k} = ?`).join(', ');
+    const params = [...fields.map(([, v]) => v), id];
+
+    const stmt = this.db.prepare(`UPDATE pos_terminal_mappings SET ${setClause} WHERE id = ?`);
+    stmt.run(...params);
+
+    log.debug('Updated terminal mapping', {
+      id,
+      updatedFields: fields.map(([k]) => k),
+    });
+
+    return this.findById(id);
+  }
+
+  /**
    * Find all fuel dispenser terminals for a store
    * SEC-006: Parameterized query
    * DB-006: Store-scoped
@@ -544,6 +595,53 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
     }
 
     return this.findById(terminalId);
+  }
+
+  /**
+   * Deactivate cloud-sourced registers that are no longer in the cloud response.
+   * Only affects registers with pos_system_type = 'generic' (cloud-synced).
+   * Registers created by POS data parsing (gilbarco, verifone, etc.) are never touched.
+   *
+   * SEC-006: Parameterized query with bound parameters
+   * DB-006: Store-scoped for tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param activeExternalIds - Set of external_register_id values present in the current cloud response
+   * @returns Number of registers deactivated
+   */
+  deactivateStaleCloudRegisters(storeId: string, activeExternalIds: Set<string>): number {
+    // SEC-006: Parameterized query — storeId bound via prepared statement
+    // Only target 'generic' pos_system_type (cloud-synced registers)
+    const stmt = this.db.prepare(`
+      SELECT id, external_register_id FROM pos_terminal_mappings
+      WHERE store_id = ? AND pos_system_type = 'generic' AND active = 1
+    `);
+    const allCloudRegisters = stmt.all(storeId) as { id: string; external_register_id: string }[];
+
+    let deactivated = 0;
+
+    for (const reg of allCloudRegisters) {
+      if (!activeExternalIds.has(reg.external_register_id)) {
+        // SEC-006: Parameterized UPDATE
+        const updateStmt = this.db.prepare(`
+          UPDATE pos_terminal_mappings
+          SET active = 0, updated_at = ?
+          WHERE id = ? AND store_id = ?
+        `);
+        updateStmt.run(this.now(), reg.id, storeId);
+        deactivated++;
+      }
+    }
+
+    if (deactivated > 0) {
+      log.info('Deactivated stale cloud-sourced registers', {
+        storeId,
+        deactivated,
+        remainingActive: activeExternalIds.size,
+      });
+    }
+
+    return deactivated;
   }
 
   /**
