@@ -29,13 +29,16 @@ async function ensureAppConfigured(window: Page) {
 
   if (isSetupWizard) {
     // Complete setup via IPC to transition to the dashboard
-    await window.evaluate(() =>
+    await window.evaluate(async () =>
       (
         window as unknown as { electronAPI: { invoke: (ch: string) => Promise<unknown> } }
       ).electronAPI.invoke('settings:completeSetup')
     );
-    // Reload so the app re-checks config and shows dashboard
-    await window.reload();
+    // Navigate to the dashboard root. Using reload() here would preserve the
+    // #/setup hash, causing the SetupWizard to render again instead of AppLayout.
+    await window.evaluate(() => {
+      (window as unknown as Window).location.hash = '#/';
+    });
     await window.waitForLoadState('domcontentloaded');
   }
 
