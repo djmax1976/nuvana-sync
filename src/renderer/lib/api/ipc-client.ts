@@ -138,8 +138,8 @@ class IPCClient {
 
       // Settings
       case 'settings:getPOSConnectionType':
-        // Mock as MANUAL for testing manual shift functionality
-        return { connectionType: 'MANUAL' } as T;
+        // Mock as MANUAL with MANUAL_ENTRY posType for testing manual shift functionality
+        return { connectionType: 'MANUAL', posType: 'MANUAL_ENTRY' } as T;
 
       // Dashboard
       case 'dashboard:getStats':
@@ -963,6 +963,28 @@ export const terminalsAPI = {
   update: (params: UpdateRegisterParams) =>
     ipcClient.invoke<RegisterResponse>('terminals:update', params),
   /**
+   * Deactivate a terminal mapping in the local database
+   *
+   * Called after successful cloud API deletion to synchronize local state.
+   * Sets the terminal's active flag to 0 (soft delete, not hard delete).
+   *
+   * @param terminalId - Terminal mapping ID or external register ID (UUID format)
+   * @returns Promise<DeactivateTerminalResponse> with success status and message
+   *
+   * @security SEC-014: terminalId validated as UUID in IPC handler
+   * @security DB-006: Operation scoped to configured store via IPC handler
+   *
+   * @example
+   * ```typescript
+   * const result = await terminalsAPI.deactivate(terminalId);
+   * if (result.success) {
+   *   console.log('Terminal deactivated:', result.message);
+   * }
+   * ```
+   */
+  deactivate: (terminalId: string) =>
+    ipcClient.invoke<DeactivateTerminalResponse>('terminals:deactivate', { terminalId }),
+  /**
    * Get business day status for day close availability
    *
    * Returns authoritative day status information for UI rendering.
@@ -1664,6 +1686,23 @@ export interface RegisterResponse {
 }
 
 /**
+ * Response for terminal deactivation operation
+ * Returned by terminals:deactivate IPC handler after local database update
+ *
+ * Used to synchronize local state after cloud terminal deletion.
+ * Success indicates the terminal was found and deactivated (or was already inactive).
+ * Failure indicates the terminal was not found in the local database.
+ */
+export interface DeactivateTerminalResponse {
+  /** Whether the deactivation was successful */
+  success: boolean;
+  /** The terminal ID that was processed */
+  terminalId: string;
+  /** Human-readable result message */
+  message: string;
+}
+
+/**
  * Day status response for determining day close availability
  *
  * This is the authoritative source for UI rendering decisions
@@ -1705,10 +1744,36 @@ export type ShiftCloseType = 'SHIFT_CLOSE' | 'DAY_CLOSE';
 export type POSConnectionType = 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
 
 /**
+ * POS System Type
+ * SEC-014: Strict allowlist validation
+ *
+ * Identifies the POS system for protocol-specific handling.
+ * Must match POSSystemTypeSchema from src/shared/types/config.types.ts
+ */
+export type POSSystemType =
+  | 'GILBARCO_PASSPORT'
+  | 'GILBARCO_NAXML'
+  | 'VERIFONE_RUBY2'
+  | 'VERIFONE_COMMANDER'
+  | 'SQUARE_REST'
+  | 'CLOVER_REST'
+  | 'NCR_RADIANT'
+  | 'INFOR_POS'
+  | 'ORACLE_SIMPHONY'
+  | 'CUSTOM_API'
+  | 'FILE_BASED'
+  | 'MANUAL'
+  | 'MANUAL_ENTRY'
+  | 'LOTTERY'
+  | 'UNKNOWN';
+
+/**
  * Response from getPOSConnectionType
+ * Returns both connection method and POS system type for UI mode detection
  */
 export interface POSConnectionTypeResponse {
   connectionType: POSConnectionType | null;
+  posType: POSSystemType | null;
 }
 
 /**

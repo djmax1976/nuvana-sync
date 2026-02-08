@@ -258,6 +258,29 @@ export const ipc = {
       ipcClient.invoke<ToggleStatusResponse>('employees:reactivate', { userId }),
   },
 
+  // Terminals
+  /**
+   * Terminal/register management operations
+   * DB-006: All operations are store-scoped for tenant isolation
+   * SEC-006: All queries use parameterized statements via DAL
+   */
+  terminals: {
+    /**
+     * Deactivate a terminal mapping in the local database
+     *
+     * Called after successful cloud API deletion to synchronize local state.
+     * The terminal is marked as inactive (active = 0), not deleted.
+     *
+     * @param terminalId - Terminal mapping ID or external register ID (UUID)
+     * @returns DeactivateTerminalResponse with success status and message
+     *
+     * @security SEC-014: terminalId validated as UUID in handler
+     * @security DB-006: Operation scoped to configured store
+     */
+    deactivate: (terminalId: string) =>
+      ipcClient.invoke<DeactivateTerminalResponse>('terminals:deactivate', { terminalId }),
+  },
+
   // Shifts
   shifts: {
     list: (params?: ShiftListParams) => ipcClient.invoke<ShiftListResponse>('shifts:list', params),
@@ -639,9 +662,12 @@ export interface ShiftByDayData {
 
 /**
  * Day data with shifts for the shifts-by-day report
+ * BIZ-003: Includes opened_at/closed_at for enterprise-grade date identification
  */
 export interface DayWithShifts {
   businessDate: string;
+  openedAt: string | null;
+  closedAt: string | null;
   dayStatus: 'OPEN' | 'CLOSED';
   shifts: ShiftByDayData[];
 }
@@ -714,6 +740,26 @@ export interface LotteryDayReportReturnedPack {
 }
 
 /**
+ * Individual closing session within a business day
+ * When a day is closed and reopened multiple times, each close produces a session.
+ */
+export interface DayClosingSession {
+  closingNumber: number;
+  dayId: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  binSales: number;
+  packSales: number;
+  returnSales: number;
+  totalSales: number;
+  totalTicketsSold: number;
+  bins: LotteryDayReportBin[];
+  depletedPacks: LotteryDayReportDepletedPack[];
+  returnedPacks: LotteryDayReportReturnedPack[];
+  activatedPacks: LotteryDayReportActivatedPack[];
+}
+
+/**
  * Full lottery day report response
  */
 export interface LotteryDayReportResponse {
@@ -721,6 +767,8 @@ export interface LotteryDayReportResponse {
   dayStatus: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED' | null;
   closedAt: string | null;
   lotteryTotal: number;
+  totalClosings: number;
+  closingSessions: DayClosingSession[];
   bins: LotteryDayReportBin[];
   activatedPacks: LotteryDayReportActivatedPack[];
   depletedPacks: LotteryDayReportDepletedPack[];
@@ -786,5 +834,31 @@ export interface UpdatePinResponse {
 
 export interface ToggleStatusResponse {
   success: boolean;
+  message: string;
+}
+
+// ============================================================================
+// Terminal Types
+// ============================================================================
+
+/**
+ * Request payload for terminal deactivation
+ * SEC-014: terminalId must be a valid UUID (validated by Zod in handler)
+ */
+export interface DeactivateTerminalRequest {
+  /** Terminal mapping ID or external register ID (UUID format) */
+  terminalId: string;
+}
+
+/**
+ * Response for terminal deactivation operation
+ * Returned by terminals:deactivate IPC handler
+ */
+export interface DeactivateTerminalResponse {
+  /** Whether the deactivation was successful */
+  success: boolean;
+  /** The terminal ID that was processed */
+  terminalId: string;
+  /** Human-readable result message */
   message: string;
 }
