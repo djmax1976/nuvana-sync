@@ -65,6 +65,23 @@ const UpdateRegisterSchema = z.object({
   description: z.string().max(255).optional(),
 });
 
+/**
+ * Deactivate Terminal Request Schema
+ *
+ * API-001: Schema validation for terminal deactivation requests
+ * SEC-014: Strict input validation with UUID format enforcement
+ *
+ * The terminalId can be either:
+ * - The internal mapping UUID (id field in pos_terminal_mappings)
+ * - The external_register_id (cloud terminal UUID for 'generic' type registers)
+ *
+ * The handler will try deactivation by ID first, then by external ID.
+ */
+const DeactivateTerminalSchema = z.object({
+  /** Terminal mapping ID or external register ID (UUID format) */
+  terminalId: z.string().uuid('Terminal ID must be a valid UUID'),
+});
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -303,6 +320,154 @@ registerHandler<POSTerminalMapping | ReturnType<typeof createErrorResponse>>(
     requiresAuth: true,
     requiredRole: 'shift_manager',
     description: 'Update register description',
+  }
+);
+
+// ============================================================================
+// Deactivate Terminal Response Type
+// ============================================================================
+
+/**
+ * Response for terminal deactivation operation
+ */
+interface DeactivateTerminalResponse {
+  /** Whether the deactivation was successful */
+  success: boolean;
+  /** The terminal ID that was deactivated (if successful) */
+  terminalId: string;
+  /** Human-readable message */
+  message: string;
+}
+
+// ============================================================================
+// Deactivate Terminal Handler
+// ============================================================================
+
+/**
+ * Deactivate a terminal mapping in the local database
+ *
+ * This handler is called after successful cloud API deletion to ensure
+ * local database state is synchronized. The terminal is not deleted,
+ * only marked as inactive (active = 0).
+ *
+ * Deactivation Strategy:
+ * 1. First attempts deactivation by internal mapping ID
+ * 2. If not found, attempts deactivation by external_register_id (cloud UUID)
+ * 3. Returns success:false if terminal not found in either lookup
+ *
+ * Performance characteristics:
+ * - O(1) lookup via PRIMARY KEY index (deactivateById)
+ * - O(1) lookup via idx_pos_terminal_map_lookup (deactivateByExternalId)
+ * - At most 2 UPDATE queries, typically 1
+ *
+ * Security:
+ * - SEC-006: All queries use parameterized statements via DAL
+ * - SEC-014: Input validated with Zod UUID schema
+ * - DB-006: All queries scoped to configured store (tenant isolation)
+ * - API-003: Generic error responses, no internal details leaked
+ *
+ * Idempotent: Multiple calls with same ID return success:false if already inactive
+ */
+registerHandler<DeactivateTerminalResponse | ReturnType<typeof createErrorResponse>>(
+  'terminals:deactivate',
+  async (_event, paramsInput: unknown) => {
+    // API-001: Validate input parameters
+    // SEC-014: Strict UUID format validation
+    const parseResult = DeactivateTerminalSchema.safeParse(paramsInput);
+    if (!parseResult.success) {
+      log.warn('Invalid deactivate terminal params', {
+        errors: parseResult.error.issues.map((i) => ({ path: i.path, message: i.message })),
+      });
+      return createErrorResponse(
+        IPCErrorCodes.VALIDATION_ERROR,
+        `Invalid terminal ID: ${parseResult.error.issues.map((i) => i.message).join(', ')}`
+      );
+    }
+
+    const { terminalId } = parseResult.data;
+
+    // DB-006: Get configured store for tenant isolation
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      log.warn('Attempted terminal deactivation without configured store', { terminalId });
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    try {
+      log.debug('Attempting terminal deactivation', {
+        terminalId,
+        storeId: store.store_id,
+      });
+
+      // Strategy: Try by internal ID first, then by external ID
+      // This handles both local mapping IDs and cloud terminal UUIDs
+
+      // Attempt 1: Deactivate by internal mapping ID
+      // DB-006: Store-scoped via DAL method
+      // SEC-006: Parameterized query via DAL
+      let deactivated = posTerminalMappingsDAL.deactivateById(store.store_id, terminalId);
+
+      if (deactivated) {
+        log.info('Terminal deactivated by internal ID', {
+          terminalId,
+          storeId: store.store_id,
+        });
+
+        return {
+          success: true,
+          terminalId,
+          message: 'Terminal deactivated successfully',
+        };
+      }
+
+      // Attempt 2: Deactivate by external register ID (cloud terminal UUID)
+      // This handles cases where the cloud sends external_register_id instead of internal ID
+      // DB-006: Store-scoped via DAL method
+      // SEC-006: Parameterized query via DAL
+      deactivated = posTerminalMappingsDAL.deactivateByExternalId(
+        store.store_id,
+        terminalId,
+        'generic' // Cloud-synced registers use 'generic' pos_system_type
+      );
+
+      if (deactivated) {
+        log.info('Terminal deactivated by external ID', {
+          externalRegisterId: terminalId,
+          storeId: store.store_id,
+        });
+
+        return {
+          success: true,
+          terminalId,
+          message: 'Terminal deactivated successfully',
+        };
+      }
+
+      // Terminal not found by either lookup method
+      // This is not an error — may already be deactivated or belong to different store
+      log.debug('Terminal not found for deactivation (may already be inactive)', {
+        terminalId,
+        storeId: store.store_id,
+      });
+
+      return {
+        success: false,
+        terminalId,
+        message: 'Terminal not found or already inactive',
+      };
+    } catch (error) {
+      // API-003: Log details server-side, return generic error to client
+      log.error('Failed to deactivate terminal', {
+        terminalId,
+        storeId: store.store_id,
+        error: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
+      });
+      throw error;
+    }
+  },
+  {
+    description: 'Deactivate a terminal mapping in local database after cloud deletion',
   }
 );
 
