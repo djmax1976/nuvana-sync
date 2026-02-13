@@ -15,7 +15,7 @@ import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { daySummariesDAL } from '../dal/day-summaries.dal';
 import { shiftSummariesDAL, shiftFuelSummariesDAL, shiftDepartmentSummariesDAL } from '../dal';
-import { lotteryBusinessDaysDAL, type LotteryBusinessDay } from '../dal/lottery-business-days.dal';
+import { type LotteryBusinessDay } from '../dal/lottery-business-days.dal';
 import { getDatabase } from '../services/database.service';
 import { createLogger } from '../utils/logger';
 
@@ -150,6 +150,36 @@ function getMerchandiseSalesForDate(storeId: string, date: string): number {
   } catch {
     return 0;
   }
+}
+
+// ============================================================================
+// Session Assignment Helper
+// ============================================================================
+
+/**
+ * Assigns a timestamped event to its owning closing session.
+ *
+ * Sessions are ordered by opened_at ASC. Each session owns the period
+ * from its opened_at until the next session's opened_at (exclusive).
+ * The last session owns from its opened_at onward.
+ *
+ * @param timestamp ISO timestamp of the event (activated_at, depleted_at, etc.)
+ * @param sessions Array of sessions ordered by opened_at ASC
+ * @returns closingNumber of the owning session
+ */
+function assignToClosingSession(
+  timestamp: string,
+  sessions: ReadonlyArray<{ closingNumber: number; openedAt: string | null }>
+): number {
+  // Walk from last to first; first session whose openedAt <= timestamp wins
+  for (let i = sessions.length - 1; i >= 0; i--) {
+    const session = sessions[i];
+    if (session.openedAt && timestamp >= session.openedAt) {
+      return session.closingNumber;
+    }
+  }
+  // Fallback: assign to first session if timestamp precedes all sessions
+  return sessions[0]?.closingNumber ?? 1;
 }
 
 // ============================================================================
@@ -438,9 +468,12 @@ interface ShiftByDayData {
 
 /**
  * Day data with shifts for the shifts-by-day report
+ * BIZ-003: Includes opened_at/closed_at for enterprise-grade date identification
  */
 interface DayWithShifts {
   businessDate: string;
+  openedAt: string | null;
+  closedAt: string | null;
   dayStatus: 'OPEN' | 'CLOSED';
   shifts: ShiftByDayData[];
 }
@@ -454,10 +487,13 @@ interface ShiftsByDayResponse {
 
 /**
  * Raw row from JOIN query (lottery_business_days LEFT JOIN shifts)
+ * BIZ-003: Includes opened_at/closed_at for enterprise-grade sorting
  */
 interface ShiftJoinRow {
   shift_id: string | null;
   business_date: string;
+  opened_at: string | null;
+  closed_at: string | null;
   shift_number: number | null;
   start_time: string | null;
   end_time: string | null;
@@ -540,14 +576,19 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
     try {
       const db = getDatabase();
 
-      // SEC-006: Parameterized query
-      // DB-006: Store-scoped via WHERE lbd.store_id = ?
-      // Primary source: lottery_business_days (the actual days in the system)
-      // LEFT JOIN shifts to include any shift data if it exists
+      // SEC-006: Parameterized query with ? placeholders only
+      // DB-006: Store-scoped via WHERE lbd.store_id = ? for tenant isolation
+      // BIZ-002: A date can have MULTIPLE closings AND an open day simultaneously.
+      // Show dates that have at least one CLOSED day. An OPEN day on the same
+      // date does NOT exclude the CLOSED days from appearing in reports.
+      // BIZ-003: Enterprise-grade sorting — order by closed_at DESC so most
+      // recently closed days appear first, regardless of business_date.
       const stmt = db.prepare(`
         SELECT
           s.shift_id,
           lbd.business_date,
+          lbd.opened_at,
+          lbd.closed_at,
           s.shift_number,
           s.start_time,
           s.end_time,
@@ -562,12 +603,14 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
         WHERE lbd.store_id = ?
           AND lbd.business_date >= ?
           AND lbd.business_date <= ?
-        ORDER BY lbd.business_date DESC, s.external_register_id ASC, s.shift_number ASC
+          AND lbd.status = 'CLOSED'
+        ORDER BY lbd.closed_at DESC, lbd.business_date DESC, s.external_register_id ASC, s.shift_number ASC
       `);
 
       const rows = stmt.all(store.store_id, startDate, endDate) as ShiftJoinRow[];
 
       // Group by business date — days appear even if they have no shifts
+      // BIZ-003: First row per date has the most recent closed_at due to ORDER BY
       const dayMap = new Map<string, DayWithShifts>();
 
       for (const row of rows) {
@@ -575,9 +618,12 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
 
         if (!dayData) {
           // Map lottery day status to the simpler OPEN/CLOSED for the UI
+          // BIZ-003: Use first row's timestamps (most recent closing due to ORDER BY)
           const uiStatus: 'OPEN' | 'CLOSED' = row.day_status === 'CLOSED' ? 'CLOSED' : 'OPEN';
           dayData = {
             businessDate: row.business_date,
+            openedAt: row.opened_at,
+            closedAt: row.closed_at,
             dayStatus: uiStatus,
             shifts: [],
           };
@@ -690,6 +736,26 @@ interface LotteryDayReportReturnedPack {
 }
 
 /**
+ * Individual closing session within a business day
+ * When a day is closed and reopened multiple times, each close produces a session.
+ */
+interface DayClosingSession {
+  closingNumber: number;
+  dayId: string;
+  openedAt: string | null;
+  closedAt: string | null;
+  binSales: number;
+  packSales: number;
+  returnSales: number;
+  totalSales: number;
+  totalTicketsSold: number;
+  bins: LotteryDayReportBin[];
+  depletedPacks: LotteryDayReportDepletedPack[];
+  returnedPacks: LotteryDayReportReturnedPack[];
+  activatedPacks: LotteryDayReportActivatedPack[];
+}
+
+/**
  * Full lottery day report response
  */
 interface LotteryDayReportResponse {
@@ -697,6 +763,8 @@ interface LotteryDayReportResponse {
   dayStatus: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED' | null;
   closedAt: string | null;
   lotteryTotal: number;
+  totalClosings: number;
+  closingSessions: DayClosingSession[];
   bins: LotteryDayReportBin[];
   activatedPacks: LotteryDayReportActivatedPack[];
   depletedPacks: LotteryDayReportDepletedPack[];
@@ -704,9 +772,12 @@ interface LotteryDayReportResponse {
 }
 
 /**
- * Raw row from day_packs JOIN query
+ * Raw row from per-session day_packs JOIN query (un-aggregated)
+ * Each row represents one pack's closing data for one session (day_id)
  */
-interface DayPackJoinRow {
+interface PerSessionBinRow {
+  day_id: string;
+  pack_id: string;
   bin_display_order: number | null;
   game_name: string | null;
   game_price: number | null;
@@ -715,8 +786,8 @@ interface DayPackJoinRow {
   pack_closing_serial: string | null;
   starting_serial: string;
   ending_serial: string | null;
-  tickets_sold: number | null;
-  sales_amount: number | null;
+  tickets_sold: number;
+  sales_amount: number;
   prev_ending_serial: string | null;
 }
 
@@ -818,44 +889,54 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
       const db = getDatabase();
       const storeId = store.store_id;
 
-      // Find the business day record for the requested date
+      // ====================================================================
+      // Fetch CLOSED business days for the requested date
       // DB-006: Store-scoped query
-      // v048: Multiple days can exist per date (close-to-close model).
-      // Prefer CLOSED day for report; fall back to most recent if none closed.
-      const businessDayStmt = db.prepare(`
-        SELECT * FROM lottery_business_days
-        WHERE store_id = ? AND business_date = ?
-        ORDER BY
-          CASE status WHEN 'CLOSED' THEN 0 WHEN 'PENDING_CLOSE' THEN 1 ELSE 2 END,
-          closed_at DESC,
-          created_at DESC
-        LIMIT 1
+      // BIZ-002: Only include CLOSED days - OPEN days are not part of reports
+      // v049: Multi-close aggregation — aggregate across all closings per date
+      // When a day is closed and reopened multiple times, we aggregate bins
+      // across ALL closings: starting serial from first, ending from last,
+      // tickets/sales summed.
+      // ====================================================================
+      const allDaysStmt = db.prepare(`
+        SELECT
+          lbd.*,
+          COALESCE(
+            (SELECT SUM(ldp.tickets_sold)
+             FROM lottery_day_packs ldp
+             WHERE ldp.day_id = lbd.day_id),
+            0
+          ) AS total_tickets_sold
+        FROM lottery_business_days lbd
+        WHERE lbd.store_id = ? AND lbd.business_date = ? AND lbd.status = 'CLOSED'
+        ORDER BY lbd.opened_at ASC
       `);
-      const businessDay = businessDayStmt.get(storeId, businessDate) as
-        | LotteryBusinessDay
-        | undefined;
+      const allBusinessDays = allDaysStmt.all(storeId, businessDate) as (LotteryBusinessDay & {
+        total_tickets_sold: number;
+      })[];
 
-      // DIAGNOSTIC: Check how many day records exist for this date
-      const allDaysForDate = db
-        .prepare(
-          `SELECT day_id, status, closed_at, created_at FROM lottery_business_days
-           WHERE store_id = ? AND business_date = ?`
-        )
-        .all(storeId, businessDate);
-      log.info('REPORT DIAGNOSTIC: Business day lookup', {
+      log.info('Multi-close aggregation: Business day lookup', {
         businessDate,
-        totalDayRecords: allDaysForDate.length,
-        allDays: allDaysForDate,
-        selectedDayId: businessDay?.day_id,
-        selectedStatus: businessDay?.status,
+        totalDayRecords: allBusinessDays.length,
+        days: allBusinessDays.map((d) => ({
+          day_id: d.day_id,
+          status: d.status,
+          opened_at: d.opened_at,
+          closed_at: d.closed_at,
+          total_sales: d.total_sales,
+          total_tickets_sold: d.total_tickets_sold,
+        })),
       });
 
-      if (!businessDay) {
+      // Zero closings for the date: return empty response
+      if (allBusinessDays.length === 0) {
         return {
           businessDate,
           dayStatus: null,
           closedAt: null,
           lotteryTotal: 0,
+          totalClosings: 0,
+          closingSessions: [],
           bins: [],
           activatedPacks: [],
           depletedPacks: [],
@@ -863,13 +944,45 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         };
       }
 
+      // Build day_id → closingNumber mapping for session assignment
+      const dayIdToClosing = new Map<string, number>();
+      allBusinessDays.forEach((day, index) => {
+        dayIdToClosing.set(day.day_id, index + 1);
+      });
+
+      // Task 1.3: Determine composite dayStatus
+      // If any closing is OPEN, report OPEN; if any is PENDING_CLOSE, report that;
+      // only if ALL are CLOSED, report CLOSED
+      const statuses = allBusinessDays.map((d) => d.status);
+      let dayStatus: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED';
+      if (statuses.includes('OPEN')) {
+        dayStatus = 'OPEN';
+      } else if (statuses.includes('PENDING_CLOSE')) {
+        dayStatus = 'PENDING_CLOSE';
+      } else {
+        dayStatus = 'CLOSED';
+      }
+
+      // Task 1.3: closedAt = the closed_at timestamp of the LAST closing
+      const lastClosing = allBusinessDays[allBusinessDays.length - 1];
+      const closedAt = lastClosing.closed_at;
+
+      // Collect all day_ids for the multi-close aggregation bins query
+      const dayIds = allBusinessDays.map((d) => d.day_id);
+      const dayIdPlaceholders = dayIds.map(() => '?').join(', ');
+
       // ====================================================================
-      // Query 1: Get bin closings from lottery_day_packs
-      // SEC-006: Parameterized query
-      // DB-006: Store-scoped via day_id which is store-specific
+      // Query 1: Get per-session bin closings (un-aggregated, one row per day_id+pack_id)
+      // SEC-006: Parameterized query with ? placeholders (no string interpolation of user input)
+      // DB-006: Store-scoped via store_id in WHERE clause
+      // Returns one row per (day_id, pack_id) — NO GROUP BY aggregation.
+      // Combined view bins are computed in JS by aggregating across sessions.
+      // Per-session view bins are grouped by day_id for direct display.
       // ====================================================================
       const binsStmt = db.prepare(`
         SELECT
+          ldp.day_id,
+          lp.pack_id,
           lb.display_order AS bin_display_order,
           lg.name AS game_name,
           lg.price AS game_price,
@@ -878,92 +991,121 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
           lp.closing_serial AS pack_closing_serial,
           ldp.starting_serial,
           ldp.ending_serial,
-          ldp.tickets_sold,
-          ldp.sales_amount,
-          -- SERIAL CARRYFORWARD: Get previous day's ending_serial as fallback
+          COALESCE(ldp.tickets_sold, 0) AS tickets_sold,
+          COALESCE(ldp.sales_amount, 0) AS sales_amount,
+          -- SERIAL CARRYFORWARD: Previous date's ending serial as fallback
           (SELECT ldp2.ending_serial
            FROM lottery_day_packs ldp2
            JOIN lottery_business_days lbd2 ON ldp2.day_id = lbd2.day_id
            WHERE ldp2.pack_id = lp.pack_id
              AND lbd2.status = 'CLOSED'
-             AND lbd2.day_id != ldp.day_id
-             AND lbd2.closed_at < COALESCE(
-               (SELECT lbd3.closed_at FROM lottery_business_days lbd3 WHERE lbd3.day_id = ldp.day_id),
-               datetime('now')
-             )
+             AND lbd2.business_date < ?
            ORDER BY lbd2.closed_at DESC
            LIMIT 1) AS prev_ending_serial
         FROM lottery_day_packs ldp
+        INNER JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
         INNER JOIN lottery_packs lp ON ldp.pack_id = lp.pack_id
         INNER JOIN lottery_games lg ON lp.game_id = lg.game_id
         LEFT JOIN lottery_bins lb ON ldp.bin_id = lb.bin_id
-        WHERE ldp.day_id = ?
+        WHERE ldp.day_id IN (${dayIdPlaceholders})
           AND ldp.store_id = ?
-        ORDER BY lb.display_order ASC
+        ORDER BY lbd.opened_at ASC, lb.display_order ASC
       `);
 
-      const binRows = binsStmt.all(businessDay.day_id, storeId) as DayPackJoinRow[];
+      // SEC-006: Parameter binding order matches ? placeholders
+      const binsParams = [businessDate, ...dayIds, storeId];
+      const binRows = binsStmt.all(...binsParams) as PerSessionBinRow[];
 
-      // DIAGNOSTIC: Log raw database values to trace serial display issues
-      log.info('REPORT DIAGNOSTIC: Raw bin rows from lottery_day_packs', {
+      log.info('Per-session bin rows fetched', {
         businessDate,
-        dayId: businessDay.day_id,
-        dayStatus: businessDay.status,
-        totalRows: binRows.length,
-        rows: binRows.map((r) => ({
-          pack_number: r.pack_number,
-          bin_display_order: r.bin_display_order,
-          starting_serial: r.starting_serial,
-          ending_serial: r.ending_serial,
-          pack_opening_serial: r.pack_opening_serial,
-          pack_closing_serial: r.pack_closing_serial,
-          prev_ending_serial: r.prev_ending_serial,
-          tickets_sold: r.tickets_sold,
-          sales_amount: r.sales_amount,
-        })),
+        totalClosings: allBusinessDays.length,
+        dayIds,
+        totalBinRows: binRows.length,
       });
 
-      // Transform to response format
+      // ====================================================================
+      // Build per-session bins (group by day_id)
+      // Each lottery_day_packs row belongs to exactly one session via day_id
       // v039 alignment: display_order is 0-indexed, bin_number is 1-indexed
-      // SERIAL FALLBACK: Use lottery_day_packs first, fall back to lottery_packs data
-      const bins: LotteryDayReportBin[] = binRows.map((row) => ({
-        bin_number: (row.bin_display_order ?? 0) + 1,
-        game_name: row.game_name || 'Unknown Game',
-        game_price: row.game_price ?? 0,
-        pack_number: row.pack_number,
-        starting_serial:
-          row.starting_serial || row.prev_ending_serial || row.pack_opening_serial || '000',
-        ending_serial: row.ending_serial || row.pack_closing_serial || row.starting_serial || '000',
-        tickets_sold: row.tickets_sold ?? 0,
-        sales_amount: row.sales_amount ?? 0,
-      }));
+      // ====================================================================
+      const sessionBinsMap = new Map<number, LotteryDayReportBin[]>();
+      for (const row of binRows) {
+        const closingNumber = dayIdToClosing.get(row.day_id) ?? 1;
+        if (!sessionBinsMap.has(closingNumber)) {
+          sessionBinsMap.set(closingNumber, []);
+        }
+        sessionBinsMap.get(closingNumber)!.push({
+          bin_number: (row.bin_display_order ?? 0) + 1,
+          game_name: row.game_name || 'Unknown Game',
+          game_price: row.game_price ?? 0,
+          pack_number: row.pack_number,
+          starting_serial:
+            row.starting_serial || row.prev_ending_serial || row.pack_opening_serial || '000',
+          ending_serial:
+            row.ending_serial || row.pack_closing_serial || row.starting_serial || '000',
+          tickets_sold: row.tickets_sold ?? 0,
+          sales_amount: row.sales_amount ?? 0,
+        });
+      }
+
+      // ====================================================================
+      // Build combined bins (aggregate across sessions by pack_id)
+      // starting_serial = from first session (earliest opened_at)
+      // ending_serial   = from last session (latest opened_at)
+      // tickets_sold, sales_amount = SUM across all sessions
+      // ====================================================================
+      const packGroupMap = new Map<string, PerSessionBinRow[]>();
+      for (const row of binRows) {
+        const existing = packGroupMap.get(row.pack_id) || [];
+        existing.push(row);
+        packGroupMap.set(row.pack_id, existing);
+      }
+
+      const bins: LotteryDayReportBin[] = Array.from(packGroupMap.values())
+        .map((rows) => {
+          // rows are ordered by opened_at ASC from SQL — first = earliest session
+          const first = rows[0];
+          const last = rows[rows.length - 1];
+          return {
+            bin_number: (first.bin_display_order ?? 0) + 1,
+            game_name: first.game_name || 'Unknown Game',
+            game_price: first.game_price ?? 0,
+            pack_number: first.pack_number,
+            starting_serial:
+              first.starting_serial ||
+              first.prev_ending_serial ||
+              first.pack_opening_serial ||
+              '000',
+            ending_serial:
+              last.ending_serial || last.pack_closing_serial || last.starting_serial || '000',
+            tickets_sold: rows.reduce((sum, r) => sum + (r.tickets_sold ?? 0), 0),
+            sales_amount: rows.reduce((sum, r) => sum + (r.sales_amount ?? 0), 0),
+          };
+        })
+        .sort((a, b) => a.bin_number - b.bin_number);
 
       // ====================================================================
       // Determine period boundaries for pack queries
-      // Enterprise close-to-close model: period starts day after last close
+      // Enterprise close-to-close model: use actual session timestamps
+      //
+      // The period is bounded by the actual opened_at/closed_at timestamps
+      // of the CLOSED sessions for this business date. This prevents:
+      // - Cross-session pack attribution when sessions cross timezone midnight
+      // - Ghost packs from adjacent sessions leaking into the wrong report
+      // - Timezone conversion errors from midnight-to-midnight calculations
+      //
+      // allBusinessDays is sorted by opened_at ASC (all CLOSED for this date)
       // ====================================================================
-      const closedDays = lotteryBusinessDaysDAL.findByStatus(storeId, 'CLOSED');
-      // Find the previous closed day (the one before our target date)
-      const previousClosedDay = closedDays.find(
-        (d) => d.business_date < businessDate && d.day_id !== businessDay.day_id
-      );
-
-      let periodStartDate: string;
-      if (previousClosedDay) {
-        const prevDate = new Date(previousClosedDay.business_date);
-        prevDate.setDate(prevDate.getDate() + 1);
-        periodStartDate = prevDate.toISOString().split('T')[0];
-      } else {
-        periodStartDate = businessDate;
-      }
-
-      // Period ends at the business date (inclusive)
-      const periodEndDate = businessDate;
+      const firstSession = allBusinessDays[0];
+      const lastSession = allBusinessDays[allBusinessDays.length - 1];
+      const periodStartUtc = firstSession.opened_at;
+      const periodEndUtc = lastSession.closed_at;
 
       // ====================================================================
       // Query 2: Activated packs during the business period
       // SEC-006: Parameterized query with indexed date filtering
       // ====================================================================
+      // TIMEZONE FIX: Use UTC datetime boundaries instead of DATE() comparison
       const activatedStmt = db.prepare(`
         SELECT
           lp.pack_id,
@@ -978,15 +1120,15 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         LEFT JOIN lottery_bins lb ON lp.current_bin_id = lb.bin_id
         WHERE lp.store_id = ?
           AND lp.activated_at IS NOT NULL
-          AND DATE(lp.activated_at) >= ?
-          AND DATE(lp.activated_at) <= ?
+          AND lp.activated_at >= ?
+          AND lp.activated_at < ?
         ORDER BY lb.display_order ASC, lp.activated_at ASC
       `);
 
       const activatedRows = activatedStmt.all(
         storeId,
-        periodStartDate,
-        periodEndDate
+        periodStartUtc,
+        periodEndUtc
       ) as ActivatedPackRow[];
 
       const activatedPacks: LotteryDayReportActivatedPack[] = activatedRows.map((row) => ({
@@ -1029,15 +1171,16 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         WHERE lp.store_id = ?
           AND lp.status = 'DEPLETED'
           AND lp.depleted_at IS NOT NULL
-          AND DATE(lp.depleted_at) >= ?
-          AND DATE(lp.depleted_at) <= ?
+          AND lp.depleted_at >= ?
+          AND lp.depleted_at < ?
         ORDER BY lb.display_order ASC
       `);
 
+      // TIMEZONE FIX: Use UTC datetime boundaries
       const depletedRows = depletedStmt.all(
         storeId,
-        periodStartDate,
-        periodEndDate
+        periodStartUtc,
+        periodEndUtc
       ) as DepletedPackRow[];
 
       const depletedPacks: LotteryDayReportDepletedPack[] = depletedRows.map((row) => ({
@@ -1083,40 +1226,121 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         WHERE lp.store_id = ?
           AND lp.status = 'RETURNED'
           AND lp.returned_at IS NOT NULL
-          AND DATE(lp.returned_at) >= ?
-          AND DATE(lp.returned_at) <= ?
+          AND lp.returned_at >= ?
+          AND lp.returned_at < ?
         ORDER BY lb.display_order ASC
       `);
 
+      // TIMEZONE FIX: Use UTC datetime boundaries
       const returnedRows = returnedStmt.all(
         storeId,
-        periodStartDate,
-        periodEndDate
+        periodStartUtc,
+        periodEndUtc
       ) as ReturnedPackRow[];
 
-      const returnedPacks: LotteryDayReportReturnedPack[] = returnedRows.map((row) => ({
-        pack_id: row.pack_id,
-        bin_number: (row.bin_display_order ?? 0) + 1,
-        game_name: row.game_name || 'Unknown Game',
-        game_price: row.game_price ?? 0,
-        pack_number: row.pack_number,
-        starting_serial: row.prev_ending_serial || row.opening_serial || '000',
-        ending_serial: row.ending_serial || '000',
-        tickets_sold: row.tickets_sold ?? 0,
-        sales_amount: row.sales_amount ?? 0,
-        returned_at: row.returned_at,
+      const returnedPacks: LotteryDayReportReturnedPack[] = returnedRows.map((row) => {
+        // Calculate tickets_sold from serials to ensure consistency with displayed values
+        const startSerial = row.prev_ending_serial || row.opening_serial || '000';
+        const endSerial = row.ending_serial || '000';
+        const startNum = parseInt(startSerial, 10);
+        const endNum = parseInt(endSerial, 10);
+        const ticketsSold = !isNaN(startNum) && !isNaN(endNum) ? Math.max(0, endNum - startNum) : 0;
+        const gamePrice = row.game_price ?? 0;
+
+        return {
+          pack_id: row.pack_id,
+          bin_number: (row.bin_display_order ?? 0) + 1,
+          game_name: row.game_name || 'Unknown Game',
+          game_price: gamePrice,
+          pack_number: row.pack_number,
+          starting_serial: startSerial,
+          ending_serial: endSerial,
+          tickets_sold: ticketsSold,
+          sales_amount: ticketsSold * gamePrice,
+          returned_at: row.returned_at,
+        };
+      });
+
+      // ====================================================================
+      // Distribute packs to closing sessions based on timestamps
+      // Each pack is assigned to the session whose opened_at <= pack timestamp
+      // and is the latest such session (session owns until next session opens)
+      // ====================================================================
+      const sessionInfo = allBusinessDays.map((day, index) => ({
+        closingNumber: index + 1,
+        openedAt: day.opened_at,
       }));
 
-      // Calculate lottery total: bins + depleted packs + returned packs
-      const binsSales = bins.reduce((sum, bin) => sum + bin.sales_amount, 0);
-      const depletedSales = depletedPacks.reduce((sum, p) => sum + p.sales_amount, 0);
-      const returnedSales = returnedPacks.reduce((sum, p) => sum + p.sales_amount, 0);
-      const lotteryTotal = binsSales + depletedSales + returnedSales;
+      const sessionDepletedMap = new Map<number, LotteryDayReportDepletedPack[]>();
+      for (const pack of depletedPacks) {
+        const closingNum = assignToClosingSession(pack.depleted_at, sessionInfo);
+        if (!sessionDepletedMap.has(closingNum)) {
+          sessionDepletedMap.set(closingNum, []);
+        }
+        sessionDepletedMap.get(closingNum)!.push(pack);
+      }
+
+      const sessionReturnedMap = new Map<number, LotteryDayReportReturnedPack[]>();
+      for (const pack of returnedPacks) {
+        const closingNum = assignToClosingSession(pack.returned_at, sessionInfo);
+        if (!sessionReturnedMap.has(closingNum)) {
+          sessionReturnedMap.set(closingNum, []);
+        }
+        sessionReturnedMap.get(closingNum)!.push(pack);
+      }
+
+      const sessionActivatedMap = new Map<number, LotteryDayReportActivatedPack[]>();
+      for (const pack of activatedPacks) {
+        const closingNum = assignToClosingSession(pack.activated_at, sessionInfo);
+        if (!sessionActivatedMap.has(closingNum)) {
+          sessionActivatedMap.set(closingNum, []);
+        }
+        sessionActivatedMap.get(closingNum)!.push(pack);
+      }
+
+      // ====================================================================
+      // Build closing sessions with per-session data and computed totals
+      // totalSales = binSales + packSales + returnSales (all three categories)
+      // ====================================================================
+      const closingSessions: DayClosingSession[] = allBusinessDays.map((day, index) => {
+        const closingNumber = index + 1;
+        const sBins = sessionBinsMap.get(closingNumber) ?? [];
+        const sDepleted = sessionDepletedMap.get(closingNumber) ?? [];
+        const sReturned = sessionReturnedMap.get(closingNumber) ?? [];
+        const sActivated = sessionActivatedMap.get(closingNumber) ?? [];
+
+        const binSales = sBins.reduce((sum, b) => sum + b.sales_amount, 0);
+        const packSales = sDepleted.reduce((sum, p) => sum + p.sales_amount, 0);
+        const returnSales = sReturned.reduce((sum, p) => sum + p.sales_amount, 0);
+
+        return {
+          closingNumber,
+          dayId: day.day_id,
+          openedAt: day.opened_at,
+          closedAt: day.closed_at,
+          binSales,
+          packSales,
+          returnSales,
+          totalSales: binSales + packSales + returnSales,
+          totalTicketsSold: day.total_tickets_sold ?? 0,
+          bins: sBins,
+          depletedPacks: sDepleted,
+          returnedPacks: sReturned,
+          activatedPacks: sActivated,
+        };
+      });
+
+      // lotteryTotal = sum of all sales categories across combined view
+      const lotteryTotal =
+        bins.reduce((sum, b) => sum + b.sales_amount, 0) +
+        depletedPacks.reduce((sum, p) => sum + p.sales_amount, 0) +
+        returnedPacks.reduce((sum, p) => sum + p.sales_amount, 0);
 
       log.info('Lottery day report generated', {
         storeId,
         businessDate,
-        dayStatus: businessDay.status,
+        dayStatus,
+        totalClosings: allBusinessDays.length,
         binsCount: bins.length,
         activatedCount: activatedPacks.length,
         depletedCount: depletedPacks.length,
@@ -1126,9 +1350,11 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
 
       return {
         businessDate,
-        dayStatus: businessDay.status,
-        closedAt: businessDay.closed_at,
+        dayStatus,
+        closedAt,
         lotteryTotal,
+        totalClosings: allBusinessDays.length,
+        closingSessions,
         bins,
         activatedPacks,
         depletedPacks,

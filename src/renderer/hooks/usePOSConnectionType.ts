@@ -10,7 +10,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { settingsAPI, type POSConnectionType } from '../lib/api/ipc-client';
+import { settingsAPI, type POSConnectionType, type POSSystemType } from '../lib/api/ipc-client';
 
 // ============================================================================
 // Query Keys
@@ -71,6 +71,29 @@ export function useIsManualMode(): boolean {
 }
 
 /**
- * Export POSConnectionType for convenience
+ * Hook to check if the store is in LOTTERY mode
+ *
+ * Used to conditionally hide non-lottery features (Terminals, Shifts, Clock In/Out, Transactions)
+ * in lottery-only store configurations.
+ *
+ * @returns true if the store's POS system type is LOTTERY
+ *
+ * @example
+ * ```tsx
+ * function MyComponent() {
+ *   const isLotteryMode = useIsLotteryMode();
+ *   if (isLotteryMode) {
+ *     // Hide non-lottery features
+ *   }
+ * }
+ * ```
  */
-export type { POSConnectionType };
+export function useIsLotteryMode(): boolean {
+  const { data } = usePOSConnectionType();
+  return data?.posType === 'LOTTERY';
+}
+
+/**
+ * Export types for convenience
+ */
+export type { POSConnectionType, POSSystemType };

@@ -47,6 +47,8 @@ vi.mock('../../../src/main/services/settings.service', () => ({
     isNAXMLCompatible: vi.fn(() => true),
     getFileWatcherUnavailableReason: vi.fn(() => null),
     getPOSConnectionType: vi.fn(() => 'FILE'),
+    // Store Config: POS system type for lottery mode detection
+    getPOSType: vi.fn(() => 'GILBARCO_PASSPORT'),
   },
 }));
 
@@ -1296,6 +1298,146 @@ describe('Settings IPC Handlers', () => {
 
       // Existing behavior: FILE_WATCHER_RESTART emitted on resync
       expect(eventBus.emit).toHaveBeenCalledWith('file-watcher:restart');
+    });
+  });
+
+  // ==========================================================================
+  // Store Config: settings:getPOSConnectionType Handler Tests
+  // Phase 6A: Validates handler returns both connectionType and posType
+  // ==========================================================================
+
+  describe('Store Config: settings:getPOSConnectionType Handler', () => {
+    it('SC-IPC-001: returns both connectionType and posType in response', async () => {
+      // Arrange
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('FILE');
+      vi.mocked(settingsService.getPOSType).mockReturnValue('GILBARCO_PASSPORT');
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getPOSConnectionTypeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:getPOSConnectionType');
+
+      const handler = getPOSConnectionTypeCall?.[1] as IPCHandler;
+
+      // Act
+      await handler();
+
+      // Assert
+      expect(createSuccessResponse).toHaveBeenCalledWith({
+        connectionType: 'FILE',
+        posType: 'GILBARCO_PASSPORT',
+      });
+    });
+
+    it('SC-IPC-002: returns posType LOTTERY for lottery stores', async () => {
+      // Arrange
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('MANUAL');
+      vi.mocked(settingsService.getPOSType).mockReturnValue(POS_TYPES.LOTTERY);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getPOSConnectionTypeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:getPOSConnectionType');
+
+      const handler = getPOSConnectionTypeCall?.[1] as IPCHandler;
+
+      // Act
+      await handler();
+
+      // Assert
+      expect(createSuccessResponse).toHaveBeenCalledWith({
+        connectionType: 'MANUAL',
+        posType: POS_TYPES.LOTTERY,
+      });
+    });
+
+    it('SC-IPC-003: returns posType null when not configured', async () => {
+      // Arrange
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue(null);
+      vi.mocked(settingsService.getPOSType).mockReturnValue(null);
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getPOSConnectionTypeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:getPOSConnectionType');
+
+      const handler = getPOSConnectionTypeCall?.[1] as IPCHandler;
+
+      // Act
+      await handler();
+
+      // Assert
+      expect(createSuccessResponse).toHaveBeenCalledWith({
+        connectionType: null,
+        posType: null,
+      });
+    });
+
+    it('SC-IPC-004: returns correct posType for each POS system type (parameterized)', async () => {
+      // Test each POS type to ensure accurate passthrough
+      const posTypesToTest = [
+        POS_TYPES.GILBARCO_PASSPORT,
+        POS_TYPES.VERIFONE_RUBY2,
+        POS_TYPES.SQUARE_REST,
+        POS_TYPES.CLOVER_REST,
+        POS_TYPES.MANUAL_ENTRY,
+        POS_TYPES.LOTTERY,
+      ];
+
+      for (const posType of posTypesToTest) {
+        // Arrange
+        vi.mocked(settingsService.getPOSType).mockReturnValue(posType);
+        vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('FILE');
+        vi.mocked(createSuccessResponse).mockClear();
+
+        await import('../../../src/main/ipc/settings.handlers');
+
+        const getPOSConnectionTypeCall = vi
+          .mocked(registerHandler)
+          .mock.calls.find((call) => call[0] === 'settings:getPOSConnectionType');
+
+        const handler = getPOSConnectionTypeCall?.[1] as IPCHandler;
+
+        // Act
+        await handler();
+
+        // Assert - posType is passed through without transformation
+        expect(createSuccessResponse).toHaveBeenCalledWith(
+          expect.objectContaining({
+            posType: posType,
+          })
+        );
+      }
+    });
+
+    // SC-SEC-001: Security test - posType cannot be injected via IPC
+    it('SC-SEC-001: posType cannot be injected or tampered via IPC arguments', async () => {
+      // Arrange - handler takes NO input parameters
+      vi.mocked(settingsService.getPOSConnectionType).mockReturnValue('FILE');
+      vi.mocked(settingsService.getPOSType).mockReturnValue('GILBARCO_PASSPORT');
+
+      await import('../../../src/main/ipc/settings.handlers');
+
+      const getPOSConnectionTypeCall = vi
+        .mocked(registerHandler)
+        .mock.calls.find((call) => call[0] === 'settings:getPOSConnectionType');
+
+      const handler = getPOSConnectionTypeCall?.[1] as IPCHandler;
+
+      // Act - Try to pass arbitrary arguments (should be ignored)
+      await handler({ posType: 'LOTTERY' }); // Attempted injection
+      await handler('LOTTERY'); // Attempted injection
+      await handler(null, { posType: 'LOTTERY' }); // Attempted injection
+
+      // Assert - posType MUST come from settingsService, not user input
+      // All three calls should return the same value from settingsService
+      expect(createSuccessResponse).toHaveBeenLastCalledWith({
+        connectionType: 'FILE',
+        posType: 'GILBARCO_PASSPORT', // NOT 'LOTTERY' - injection failed as expected
+      });
     });
   });
 });

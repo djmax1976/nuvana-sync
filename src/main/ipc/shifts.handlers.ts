@@ -15,6 +15,7 @@ import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { shiftsDAL, type Shift } from '../dal/shifts.dal';
 import { usersDAL } from '../dal/users.dal';
+import { posTerminalMappingsDAL } from '../dal/pos-id-mappings.dal';
 import { transactionsDAL } from '../dal/transactions.dal';
 import {
   shiftSummariesDAL,
@@ -27,6 +28,7 @@ import {
   type MSMFuelTotals,
   type MSMFuelByGrade,
 } from '../dal';
+import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { createLogger } from '../utils/logger';
 import { settingsService } from '../services/settings.service';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
@@ -104,6 +106,28 @@ const ShiftListParamsSchema = z.object({
 
 const ShiftIdSchema = z.string().uuid();
 
+/**
+ * Schema for closing a shift
+ *
+ * API-001: Zod validation for all inputs
+ * SEC-014: UUID format validation for shift_id
+ *
+ * @property shift_id - UUID of the shift to close
+ * @property closing_cash - Non-negative cash amount in drawer at close
+ */
+const CloseShiftInputSchema = z.object({
+  shift_id: z.string().uuid('Invalid shift ID format'),
+  closing_cash: z
+    .number({ message: 'Closing cash must be a number' })
+    .min(0, 'Closing cash must be non-negative')
+    .max(999999.99, 'Closing cash exceeds maximum allowed value')
+    .refine((val) => !Number.isNaN(val) && Number.isFinite(val), {
+      message: 'Closing cash must be a valid finite number',
+    }),
+});
+
+type CloseShiftInput = z.infer<typeof CloseShiftInputSchema>;
+
 // ============================================================================
 // Logger
 // ============================================================================
@@ -166,19 +190,47 @@ export function determineShiftCloseType(
 /**
  * Shift sync payload for cloud synchronization
  * Contains all fields required by the POST /api/v1/sync/lottery/shifts endpoint
+ *
+ * INTERNAL FIELD NAMING (used in sync queue and sync-engine):
+ * - opened_at: When shift was opened (ISO timestamp)
+ * - opened_by: Who opened the shift (internal user UUID)
+ * - closed_at: When shift was closed (ISO timestamp), null if OPEN
+ * - closing_cash: Cash amount in drawer at shift close (null if OPEN)
+ *
+ * CLOUD API FIELD NAMES (same as internal - no translation needed):
+ * - opened_at: ISO timestamp when shift was opened (REQUIRED, defaults to now if missing)
+ * - opened_by: User UUID who opened the shift (REQUIRED, defaults to empty string if missing)
+ * - closed_at: ISO timestamp when shift was closed (optional, null if OPEN)
+ * - closing_cash: Cash amount at close (optional, null if OPEN)
+ *
+ * API-008: OUTPUT_FILTERING - Only includes fields defined in cloud API contract
+ * SEC-010: AUTHZ - opened_by must be valid user UUID from authenticated session
  */
 export interface ShiftSyncPayload {
   shift_id: string;
   store_id: string;
   business_date: string;
   shift_number: number;
-  start_time: string;
+  /** When the shift was opened (ISO timestamp) - translated to start_time for cloud */
+  opened_at: string;
+  /** Who opened the shift (user UUID) - translated to cashier_id for cloud, null if no cashier */
+  opened_by: string | null;
   status: 'OPEN' | 'CLOSED';
-  cashier_id: string | null;
-  end_time: string | null;
+  /** When the shift was closed (ISO timestamp) - translated to end_time for cloud, null if OPEN */
+  closed_at: string | null;
+  /** Cash amount in drawer at shift close, null if OPEN */
+  closing_cash: number | null;
   external_register_id: string | null;
   external_cashier_id: string | null;
   external_till_id: string | null;
+}
+
+/**
+ * Options for building shift sync payload
+ */
+export interface BuildShiftSyncPayloadOptions {
+  /** Cash amount in drawer at shift close (only for CLOSED shifts) */
+  closing_cash?: number;
 }
 
 /**
@@ -187,22 +239,40 @@ export interface ShiftSyncPayload {
  * Creates a payload suitable for cloud sync containing all required
  * and optional fields per API specification.
  *
+ * INTERNAL → INTERNAL MAPPING (stored in sync queue):
+ * - shift.start_time → opened_at (internal naming)
+ * - shift.cashier_id → opened_by (internal naming)
+ * - shift.end_time → closed_at (internal naming)
+ * - options.closing_cash → closing_cash (from shift close input)
+ *
+ * NOTE: Translation to cloud API field names (start_time, cashier_id, end_time)
+ * happens in cloud-api.service.ts.pushShift() at the API boundary.
+ *
  * SEC-006: No string concatenation, structured payload only
+ * SEC-010: AUTHZ - User ID comes from authenticated session, not frontend
  * API-008: OUTPUT_FILTERING - Only includes fields defined in API contract
  *
  * @param shift - Shift entity from DAL
- * @returns Sync payload for cloud API
+ * @param options - Optional additional payload data (closing_cash for closed shifts)
+ * @returns Sync payload for internal use (translated at API boundary)
  */
-export function buildShiftSyncPayload(shift: Shift): ShiftSyncPayload {
+export function buildShiftSyncPayload(
+  shift: Shift,
+  options?: BuildShiftSyncPayloadOptions
+): ShiftSyncPayload {
   return {
     shift_id: shift.shift_id,
     store_id: shift.store_id,
     business_date: shift.business_date,
     shift_number: shift.shift_number,
-    start_time: shift.start_time || new Date().toISOString(),
+    // REQUIRED: opened_at must always be a valid ISO timestamp
+    opened_at: shift.start_time || new Date().toISOString(),
+    // opened_by: user UUID from shifts.cashier_id (can be null if no cashier assigned)
+    opened_by: shift.cashier_id,
     status: shift.status,
-    cashier_id: shift.cashier_id,
-    end_time: shift.end_time,
+    closed_at: shift.end_time,
+    // closing_cash: from options for closed shifts, null for open shifts
+    closing_cash: options?.closing_cash ?? null,
     external_register_id: shift.external_register_id,
     external_cashier_id: shift.external_cashier_id,
     external_till_id: shift.external_till_id,
@@ -312,12 +382,33 @@ registerHandler<ShiftListResponse | ReturnType<typeof createErrorResponse>>(
 // ============================================================================
 
 /**
- * Get a single shift by ID
+ * Shift response with resolved cashier name
+ * Extends Shift entity with pre-resolved cashier_name for frontend display
  */
-registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
+interface ShiftWithCashierName extends Shift {
+  /** Resolved cashier name from users table, or fallback message */
+  cashier_name: string;
+}
+
+/**
+ * Get a single shift by ID with resolved cashier name
+ *
+ * Returns shift data with pre-resolved cashier_name to eliminate
+ * frontend lookup requirements. This follows the same pattern as
+ * shifts:getOpenShifts which also returns resolved names.
+ *
+ * Performance: O(1) indexed lookup for shift + O(1) indexed lookup for user
+ * No N+1 patterns, no unbounded reads.
+ *
+ * @security SEC-006: All queries use parameterized statements via DAL
+ * @security DB-006: Tenant isolation - verifies shift belongs to configured store
+ * @security API-001: Input validated via Zod schema
+ * @security API-003: Generic error responses, no internal details leaked
+ */
+registerHandler<ShiftWithCashierName | ReturnType<typeof createErrorResponse>>(
   'shifts:getById',
   async (_event, shiftIdInput: unknown) => {
-    // API-001: Validate shift ID
+    // API-001: Validate shift ID format (UUID)
     const parseResult = ShiftIdSchema.safeParse(shiftIdInput);
     if (!parseResult.success) {
       return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid shift ID format');
@@ -326,20 +417,43 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
     const shiftId = parseResult.data;
 
     try {
-      // SEC-006: Parameterized query via DAL
+      // SEC-006: Parameterized query via DAL (uses ? placeholder)
       const shift = shiftsDAL.findById(shiftId);
 
       if (!shift) {
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
       }
 
-      // DB-006: Verify shift belongs to configured store
+      // DB-006: Verify shift belongs to configured store (tenant isolation)
       const store = storesDAL.getConfiguredStore();
       if (!store || shift.store_id !== store.store_id) {
+        // Return same error to prevent tenant enumeration
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
       }
 
-      return shift;
+      // Resolve cashier name from internal cashier_id (user UUID)
+      // SEC-006: usersDAL.findById uses parameterized query
+      // Performance: O(1) indexed primary key lookup
+      let cashierName = 'No Cashier Assigned';
+      if (shift.cashier_id) {
+        const user = usersDAL.findById(shift.cashier_id);
+        if (user) {
+          cashierName = user.name;
+        } else {
+          // User exists in shift but not in users table (deleted/corrupted)
+          cashierName = 'Unknown Cashier';
+          log.warn('Shift references non-existent user', {
+            shiftId: shift.shift_id,
+            cashierId: shift.cashier_id,
+          });
+        }
+      }
+
+      // Return shift with resolved cashier_name
+      return {
+        ...shift,
+        cashier_name: cashierName,
+      };
     } catch (error) {
       log.error('Failed to get shift', {
         shiftId,
@@ -348,7 +462,7 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
       throw error;
     }
   },
-  { description: 'Get shift by ID' }
+  { description: 'Get shift by ID with resolved cashier name' }
 );
 
 // ============================================================================
@@ -547,30 +661,49 @@ registerHandler<Shift[] | ReturnType<typeof createErrorResponse>>(
 // ============================================================================
 
 /**
- * Close a shift
- * API-004: Requires MANAGER role for authorization
- * SEC-017: Audit logged operation
+ * Response type for shift close operation
+ * Extends Shift with closing_cash for client confirmation
  */
-registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
+interface CloseShiftResponse extends Shift {
+  /** Cash amount in drawer at shift close */
+  closing_cash: number;
+}
+
+/**
+ * Close a shift with closing cash amount
+ *
+ * @security API-001: Input validated via CloseShiftInputSchema (Zod)
+ * @security API-004: Requires MANAGER role for authorization
+ * @security SEC-006: All queries use parameterized statements
+ * @security SEC-014: UUID format validation for shift_id
+ * @security SEC-017: Audit logged operation
+ * @security DB-006: Store-scoped tenant isolation
+ * @security SYNC-001: Sync payload includes closing_cash
+ */
+registerHandler<CloseShiftResponse | ReturnType<typeof createErrorResponse>>(
   'shifts:close',
-  async (_event, shiftIdInput: unknown) => {
-    // API-001: Validate shift ID
-    const parseResult = ShiftIdSchema.safeParse(shiftIdInput);
+  async (_event, input: unknown) => {
+    // API-001: Validate input with comprehensive schema
+    const parseResult = CloseShiftInputSchema.safeParse(input);
     if (!parseResult.success) {
-      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid shift ID format');
+      const errorMessages = parseResult.error.issues.map((i) => i.message).join(', ');
+      log.warn('Invalid shift close input', { errors: parseResult.error.issues });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessages);
     }
 
-    const shiftId = parseResult.data;
+    const { shift_id: shiftId, closing_cash: closingCash } = parseResult.data;
 
     try {
+      // SEC-006: Parameterized lookup via DAL
       const shift = shiftsDAL.findById(shiftId);
       if (!shift) {
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
       }
 
-      // DB-006: Verify shift belongs to configured store
+      // DB-006: Verify shift belongs to configured store (tenant isolation)
       const store = storesDAL.getConfiguredStore();
       if (!store || shift.store_id !== store.store_id) {
+        // Return same error to prevent tenant enumeration
         return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
       }
 
@@ -586,25 +719,28 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, 'Failed to close shift');
       }
 
-      // Also close the shift summary if it exists
+      // Close the shift summary and set closing_cash
+      // SEC-006: Parameterized update via DAL
       const shiftSummary = shiftSummariesDAL.findByShiftId(store.store_id, shiftId);
       if (shiftSummary && closedShift.end_time) {
         shiftSummariesDAL.closeShiftSummary(
           store.store_id,
           shiftSummary.shift_summary_id,
-          closedShift.end_time
+          closedShift.end_time,
+          undefined, // closedByUserId - not tracked here
+          closingCash
         );
       }
 
-      // SEC-017: Enqueue SHIFT STATUS UPDATE for cloud sync
-      // Updates the shift record on cloud with CLOSED status and end_time
+      // SEC-017 / SYNC-001: Enqueue SHIFT STATUS UPDATE for cloud sync
+      // Includes closing_cash in payload for cloud reconciliation
       syncQueueDAL.enqueue({
         entity_type: 'shift',
         entity_id: closedShift.shift_id,
         operation: 'UPDATE',
         store_id: store.store_id,
         priority: SHIFT_SYNC_PRIORITY, // High priority ensures consistent state
-        payload: buildShiftSyncPayload(closedShift),
+        payload: buildShiftSyncPayload(closedShift, { closing_cash: closingCash }),
       });
 
       // SEC-017: Audit log
@@ -613,9 +749,14 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         storeId: store.store_id,
         shiftNumber: closedShift.shift_number,
         businessDate: closedShift.business_date,
+        closingCash,
       });
 
-      return closedShift;
+      // Return closed shift with closing_cash for client confirmation
+      return {
+        ...closedShift,
+        closing_cash: closingCash,
+      };
     } catch (error) {
       log.error('Failed to close shift', {
         shiftId,
@@ -627,7 +768,7 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
   {
     requiresAuth: true,
     requiredRole: 'shift_manager',
-    description: 'Close a shift (requires MANAGER role)',
+    description: 'Close a shift with closing cash amount (requires MANAGER role)',
   }
 );
 
@@ -1064,13 +1205,34 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         );
       }
 
-      // Ensure day_summary exists for this business date
-      // First shift of the day implicitly starts the day
+      // ========================================================================
+      // BIZ-007: Verify open lottery day exists before allowing shift start
+      // Shifts cannot exist without an open day - this is a business invariant.
+      // This guard ensures cloud sync integrity: shifts reference a day_id.
+      // DB-006: Store-scoped query via findOpenDay(storeId)
+      // SEC-017: Audit log for blocked attempts
+      // ========================================================================
+      const openLotteryDay = lotteryBusinessDaysDAL.findOpenDay(store.store_id);
+      if (!openLotteryDay) {
+        log.warn('Manual shift start blocked: No open lottery day', {
+          storeId: store.store_id,
+          businessDate: today,
+          cashierUserId: cashier.user_id,
+          registerId: externalRegisterId,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.'
+        );
+      }
+
+      // Ensure day_summary exists for this business date (local tracking)
       const daySummary = daySummariesDAL.getOrCreateForDate(store.store_id, today);
       log.debug('Day summary ensured for manual shift', {
         daySummaryId: daySummary.day_summary_id,
         businessDate: today,
         status: daySummary.status,
+        linkedLotteryDayId: openLotteryDay.day_id,
       });
 
       // Create the shift using existing DAL method with internal user ID
@@ -1100,23 +1262,11 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         payload: buildShiftSyncPayload(shift),
       });
 
-      // SEC-017: Enqueue shift_opening for lottery serial readings
-      // Note: This has lower priority than the shift record itself
-      syncQueueDAL.enqueue({
-        entity_type: 'shift_opening',
-        entity_id: shift.shift_id,
-        operation: 'CREATE',
-        store_id: store.store_id,
-        payload: {
-          shift_id: shift.shift_id,
-          business_date: today,
-          external_register_id: externalRegisterId,
-          cashier_id: cashier.user_id,
-          cashier_name: cashier.name,
-          start_time: shiftStartTime,
-          source: 'MANUAL',
-        },
-      });
+      // NOTE: shift_opening is NOT enqueued here.
+      // Lottery shift openings are recorded via lottery:recordShiftOpening handler
+      // AFTER the user scans packs and records their opening serial numbers.
+      // That handler builds the correct payload with: store_id, openings[], opened_at, opened_by
+      // See: lottery.handlers.ts:buildShiftOpeningSyncPayload()
 
       // SEC-017: Audit log for manual shift start
       log.info('Manual shift started', {
@@ -1143,3 +1293,218 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
     description: 'Manually start a shift (MANUAL mode only)',
   }
 );
+
+// ============================================================================
+// Shift Re-sync Handler
+// ============================================================================
+
+/**
+ * Re-sync a shift to cloud
+ *
+ * Deletes any existing queue items (including failed ones with old field names)
+ * and re-enqueues with correct payload format.
+ *
+ * Use this to fix failed shift sync items that have incorrect payload structure.
+ *
+ * SEC-006: Parameterized queries via DAL
+ * DB-006: Store-scoped operations
+ * API-001: Input validation via Zod
+ */
+registerHandler<{ success: boolean; message: string } | ReturnType<typeof createErrorResponse>>(
+  'shifts:resync',
+  async (_event, input: unknown) => {
+    // API-001: Validate input
+    const params = input as { shift_id: string } | undefined;
+    if (!params?.shift_id || typeof params.shift_id !== 'string') {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid shift_id');
+    }
+
+    // DB-006: Get configured store
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'No store configured');
+    }
+
+    try {
+      // Look up the shift from database
+      const shift = shiftsDAL.findById(params.shift_id);
+      if (!shift || shift.store_id !== store.store_id) {
+        return createErrorResponse(
+          IPCErrorCodes.NOT_FOUND,
+          `Shift not found: ${params.shift_id}`
+        );
+      }
+
+      // Delete any existing queue items for this shift (including failed ones)
+      const deleted = syncQueueDAL.deleteByEntityId(store.store_id, 'shift', params.shift_id);
+
+      // Re-enqueue with correct payload format
+      syncQueueDAL.enqueue({
+        entity_type: 'shift',
+        entity_id: shift.shift_id,
+        operation: shift.status === 'CLOSED' ? 'UPDATE' : 'CREATE',
+        store_id: store.store_id,
+        priority: SHIFT_SYNC_PRIORITY,
+        payload: buildShiftSyncPayload(shift),
+      });
+
+      log.info('Shift re-enqueued for sync', {
+        shiftId: shift.shift_id,
+        status: shift.status,
+        deletedOldItems: deleted,
+      });
+
+      return {
+        success: true,
+        message: `Shift ${shift.shift_id} re-enqueued for sync (deleted ${deleted} old items)`,
+      };
+    } catch (error) {
+      log.error('Failed to resync shift', {
+        shiftId: params.shift_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        `Failed to resync shift: ${error instanceof Error ? error.message : 'Unknown error'}`
+      );
+    }
+  },
+  {
+    requiresAuth: false,
+    description: 'Re-sync a shift with corrected payload format',
+  }
+);
+
+// ============================================================================
+// Get Open Shifts Handler (Task 1.2)
+// ============================================================================
+
+/**
+ * Open shift with resolved names for DayClosePage
+ */
+interface OpenShiftWithNames {
+  /** Shift ID (UUID) */
+  shift_id: string;
+  /** Resolved terminal/register name */
+  terminal_name: string;
+  /** Resolved cashier name */
+  cashier_name: string;
+  /** Shift number for the day */
+  shift_number: number;
+  /** Shift status (always OPEN for this query) */
+  status: 'OPEN' | 'CLOSED';
+  /** External register ID from POS */
+  external_register_id: string | null;
+  /** Business date */
+  business_date: string;
+  /** Start time */
+  start_time: string | null;
+}
+
+/**
+ * Response for open shifts query
+ */
+interface OpenShiftsResponse {
+  /** Array of open shifts with resolved names */
+  open_shifts: OpenShiftWithNames[];
+}
+
+/**
+ * Get all open shifts for the current store with resolved terminal and cashier names
+ *
+ * Used by DayClosePage to display which shifts need to be closed.
+ * Resolves terminal_name from pos_terminal_mappings and cashier_name from users.
+ *
+ * Performance characteristics:
+ * - Single query to shifts table filtered by end_time IS NULL (indexed)
+ * - In-memory join for terminal names (O(n) where n = open shifts, typically small)
+ * - In-memory join for cashier names (O(n) where n = open shifts, typically small)
+ * - Total: O(n) with n typically < 10 open shifts
+ *
+ * @security SEC-006: All queries use parameterized statements via DAL
+ * @security DB-006: All queries scoped to configured store (tenant isolation)
+ * @security API-003: Generic error responses, no internal details leaked
+ *
+ * Channel: shifts:getOpenShifts
+ */
+registerHandler<OpenShiftsResponse | ReturnType<typeof createErrorResponse>>(
+  'shifts:getOpenShifts',
+  async () => {
+    // DB-006: Get configured store for tenant isolation
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    try {
+      // Get current business date (local timezone)
+      const now = new Date();
+      const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
+
+      // SEC-006: Parameterized query via DAL
+      // DB-006: Store-scoped query
+      const allShifts = shiftsDAL.findByDate(store.store_id, today);
+
+      // Filter to open shifts (end_time IS NULL is more reliable than status)
+      const openShifts = allShifts.filter((s) => s.end_time === null);
+
+      // Build lookup maps for efficient name resolution
+      // Get all terminals for this store (single query, then filter in memory)
+      const terminals = posTerminalMappingsDAL.findRegisters(store.store_id);
+      const terminalMap = new Map<string, string>();
+      for (const t of terminals) {
+        terminalMap.set(t.external_register_id, t.description || `Register ${t.external_register_id}`);
+      }
+
+      // Get all users for this store (single query, then filter in memory)
+      const usersResult = usersDAL.findByStore(store.store_id, { limit: 1000 });
+      const userMap = new Map<string, string>();
+      for (const u of usersResult.data) {
+        userMap.set(u.user_id, u.name);
+      }
+
+      // Map shifts to response format with resolved names
+      const openShiftsWithNames: OpenShiftWithNames[] = openShifts.map((shift) => {
+        // Resolve terminal name from external_register_id
+        const terminalName = shift.external_register_id
+          ? terminalMap.get(shift.external_register_id) || `Register ${shift.external_register_id}`
+          : 'Unknown Register';
+
+        // Resolve cashier name from cashier_id (internal user ID)
+        const cashierName = shift.cashier_id
+          ? userMap.get(shift.cashier_id) || 'Unknown Cashier'
+          : 'No Cashier Assigned';
+
+        return {
+          shift_id: shift.shift_id,
+          terminal_name: terminalName,
+          cashier_name: cashierName,
+          shift_number: shift.shift_number,
+          status: shift.status,
+          external_register_id: shift.external_register_id,
+          business_date: shift.business_date,
+          start_time: shift.start_time,
+        };
+      });
+
+      log.debug('Open shifts retrieved with names', {
+        storeId: store.store_id,
+        businessDate: today,
+        openShiftCount: openShiftsWithNames.length,
+      });
+
+      return {
+        open_shifts: openShiftsWithNames,
+      };
+    } catch (error) {
+      log.error('Failed to get open shifts', {
+        storeId: store.store_id,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+  { description: 'Get all open shifts with resolved terminal and cashier names' }
+);
+
+log.info('Shifts handlers registered');

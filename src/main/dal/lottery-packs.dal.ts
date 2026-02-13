@@ -590,20 +590,24 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
-   * Find the active pack in a specific bin
-   * SEC-006: Parameterized query
+   * Find the active pack in a specific bin for a store
+   * SEC-006: Parameterized query - all values bound, no string concatenation
+   * DB-006: TENANT_ISOLATION - store_id required to prevent cross-tenant data access
    * v029 API Alignment: Uses current_bin_id
    *
+   * @param storeId - Store identifier for tenant isolation (REQUIRED)
    * @param currentBinId - Bin identifier
    * @returns Active pack or undefined
    */
-  findActiveInBin(currentBinId: string): LotteryPack | undefined {
+  findActiveInBin(storeId: string, currentBinId: string): LotteryPack | undefined {
+    // SEC-006: Fully parameterized query prevents SQL injection
+    // DB-006: store_id in WHERE clause enforces tenant isolation
     const stmt = this.db.prepare(`
       SELECT * FROM lottery_packs
-      WHERE current_bin_id = ? AND status = 'ACTIVE'
+      WHERE store_id = ? AND current_bin_id = ? AND status = 'ACTIVE'
       LIMIT 1
     `);
-    return stmt.get(currentBinId) as LotteryPack | undefined;
+    return stmt.get(storeId, currentBinId) as LotteryPack | undefined;
   }
 
   /**
@@ -771,38 +775,52 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
   }
 
   /**
-   * Find packs activated since a specific date (enterprise close-to-close model)
+   * Normalize a date or ISO timestamp to a comparable datetime string.
    *
-   * This method returns ALL packs that were activated on or after the specified date,
-   * regardless of their current status. This supports the enterprise close-to-close
-   * business day model where:
-   * - A pack activated yesterday that was returned today should still appear
-   * - A pack activated yesterday that was settled (sold out) today should still appear
-   * - The UI shows the full history of the open business period
+   * Accepts either:
+   * - YYYY-MM-DD (date only) → converts to YYYY-MM-DDT00:00:00
+   * - Full ISO timestamp (e.g. 2026-02-05T00:34:36.156Z) → used as-is
    *
-   * Performance: Uses indexed activated_at column with parameterized date filter.
-   * Query is bounded by date range and store_id (both indexed).
+   * @security Input validated against strict patterns; rejects malformed strings.
+   * @param input - Date string or ISO timestamp
+   * @returns Normalized datetime string suitable for SQLite comparison
+   */
+  private normalizeSinceTimestamp(input: string): string {
+    // ISO date: YYYY-MM-DD
+    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
+      return `${input}T00:00:00`;
+    }
+    // Full ISO timestamp: YYYY-MM-DDTHH:MM:SS with optional fractional seconds and Z
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/.test(input)) {
+      return input;
+    }
+    throw new Error('Invalid date/timestamp format. Expected YYYY-MM-DD or ISO 8601 timestamp');
+  }
+
+  /**
+   * Find packs activated since a specific timestamp (enterprise close-to-close model)
+   *
+   * Returns ALL packs activated on or after the specified timestamp,
+   * regardless of their current status. Supports the enterprise close-to-close
+   * business day model where the period starts at the previous day's actual
+   * close timestamp — not at a calendar date boundary.
+   *
+   * Performance: Uses indexed activated_at column with parameterized filter.
+   * Query is bounded by timestamp and store_id (both indexed).
    *
    * @security SEC-006: Parameterized query prevents SQL injection
    * @security DB-006: store_id in WHERE clause enforces tenant isolation
    *
    * @param storeId - Store identifier for tenant isolation
-   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @param since - ISO date (YYYY-MM-DD) or ISO timestamp for the start of the period
    * @returns Array of packs with game and bin details, ordered by activated_at DESC
    */
-  findPacksActivatedSince(storeId: string, sinceDate: string): PackWithDetails[] {
-    // Validate sinceDate format to prevent malformed queries
-    // Format: YYYY-MM-DD (ISO 8601 date)
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
-      throw new Error('Invalid date format. Expected YYYY-MM-DD');
-    }
-
-    const sinceDatetime = `${sinceDate}T00:00:00`;
+  findPacksActivatedSince(storeId: string, since: string): PackWithDetails[] {
+    const sinceTimestamp = this.normalizeSinceTimestamp(since);
 
     // SEC-006: Fully parameterized query
     // DB-006: store_id enforces tenant isolation
     // Performance: Uses indexed columns (store_id, activated_at) with bounded result set
-    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -822,29 +840,24 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       ORDER BY p.activated_at DESC
     `);
 
-    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
+    return stmt.all(storeId, sinceTimestamp) as PackWithDetails[];
   }
 
   /**
-   * Find packs settled since a specific date (enterprise close-to-close model)
+   * Find packs settled since a specific timestamp (enterprise close-to-close model)
    *
-   * Returns packs that were settled (sold out / depleted) on or after the specified date.
+   * Returns packs that were settled (sold out / depleted) on or after the specified timestamp.
    *
    * @security SEC-006: Parameterized query prevents SQL injection
    * @security DB-006: store_id in WHERE clause enforces tenant isolation
    *
    * @param storeId - Store identifier for tenant isolation
-   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @param since - ISO date (YYYY-MM-DD) or ISO timestamp for the start of the period
    * @returns Array of packs with game and bin details
    */
-  findPacksSettledSince(storeId: string, sinceDate: string): PackWithDetails[] {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
-      throw new Error('Invalid date format. Expected YYYY-MM-DD');
-    }
+  findPacksSettledSince(storeId: string, since: string): PackWithDetails[] {
+    const sinceTimestamp = this.normalizeSinceTimestamp(since);
 
-    const sinceDatetime = `${sinceDate}T00:00:00`;
-
-    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -865,29 +878,24 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       ORDER BY p.depleted_at DESC
     `);
 
-    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
+    return stmt.all(storeId, sinceTimestamp) as PackWithDetails[];
   }
 
   /**
-   * Find packs returned since a specific date (enterprise close-to-close model)
+   * Find packs returned since a specific timestamp (enterprise close-to-close model)
    *
-   * Returns packs that were returned on or after the specified date.
+   * Returns packs that were returned on or after the specified timestamp.
    *
    * @security SEC-006: Parameterized query prevents SQL injection
    * @security DB-006: store_id in WHERE clause enforces tenant isolation
    *
    * @param storeId - Store identifier for tenant isolation
-   * @param sinceDate - ISO date string (YYYY-MM-DD) for the start of the period
+   * @param since - ISO date (YYYY-MM-DD) or ISO timestamp for the start of the period
    * @returns Array of packs with game and bin details
    */
-  findPacksReturnedSince(storeId: string, sinceDate: string): PackWithDetails[] {
-    if (!/^\d{4}-\d{2}-\d{2}$/.test(sinceDate)) {
-      throw new Error('Invalid date format. Expected YYYY-MM-DD');
-    }
+  findPacksReturnedSince(storeId: string, since: string): PackWithDetails[] {
+    const sinceTimestamp = this.normalizeSinceTimestamp(since);
 
-    const sinceDatetime = `${sinceDate}T00:00:00`;
-
-    // v029 API Alignment: JOIN on current_bin_id
     const stmt = this.db.prepare(`
       SELECT
         p.*,
@@ -908,7 +916,7 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
       ORDER BY p.returned_at DESC
     `);
 
-    return stmt.all(storeId, sinceDatetime) as PackWithDetails[];
+    return stmt.all(storeId, sinceTimestamp) as PackWithDetails[];
   }
 
   // ==========================================================================

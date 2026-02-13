@@ -199,22 +199,49 @@ describe('Shifts IPC Integration', () => {
   });
 
   describe('shifts:close', () => {
-    it('should close an open shift', async () => {
+    it('should close an open shift with closing cash', async () => {
       const closedShift = {
         shift_id: 'shift-1',
         store_id: 'store-1',
         shift_number: 1,
         status: 'CLOSED',
         end_time: '2026-01-11T16:00:00Z',
+        closing_cash: 250.50,
       };
 
       mockInvoke.mockResolvedValueOnce(closedShift);
 
       const { ipc } = await import('../../src/renderer/lib/transport');
-      const result = await ipc.shifts.close('shift-1');
+      const result = await ipc.shifts.close('shift-1', 250.50);
 
-      expect(mockInvoke).toHaveBeenCalledWith('shifts:close', 'shift-1');
+      expect(mockInvoke).toHaveBeenCalledWith('shifts:close', {
+        shift_id: 'shift-1',
+        closing_cash: 250.50,
+      });
       expect(result.status).toBe('CLOSED');
+      expect(result.closing_cash).toBe(250.50);
+    });
+
+    it('should close shift with zero closing cash', async () => {
+      const closedShift = {
+        shift_id: 'shift-1',
+        store_id: 'store-1',
+        shift_number: 1,
+        status: 'CLOSED',
+        end_time: '2026-01-11T16:00:00Z',
+        closing_cash: 0,
+      };
+
+      mockInvoke.mockResolvedValueOnce(closedShift);
+
+      const { ipc } = await import('../../src/renderer/lib/transport');
+      const result = await ipc.shifts.close('shift-1', 0);
+
+      expect(mockInvoke).toHaveBeenCalledWith('shifts:close', {
+        shift_id: 'shift-1',
+        closing_cash: 0,
+      });
+      expect(result.closing_cash).toBe(0);
     });
 
     it('should reject already closed shift', async () => {
@@ -225,7 +252,7 @@ describe('Shifts IPC Integration', () => {
 
       const { ipc } = await import('../../src/renderer/lib/transport');
 
-      await expect(ipc.shifts.close('shift-1')).rejects.toMatchObject({
+      await expect(ipc.shifts.close('shift-1', 100)).rejects.toMatchObject({
         code: 'ALREADY_CLOSED',
       });
     });
@@ -238,7 +265,7 @@ describe('Shifts IPC Integration', () => {
 
       const { ipc } = await import('../../src/renderer/lib/transport');
 
-      await expect(ipc.shifts.close('shift-1')).rejects.toMatchObject({
+      await expect(ipc.shifts.close('shift-1', 100)).rejects.toMatchObject({
         code: 'FORBIDDEN',
       });
     });

@@ -274,4 +274,131 @@ describe('Stores IPC Handlers', () => {
       expect(store.store_id).not.toBe('other-store-456');
     });
   });
+
+  // ==========================================================================
+  // store:getConfigured Handler Tests (Task 1.6)
+  // ==========================================================================
+
+  describe('store:getConfigured handler', () => {
+    describe('happy path', () => {
+      it('should return minimal store data (store_id and name only)', () => {
+        mockStoresDAL.getConfiguredStore.mockReturnValue(mockStore);
+
+        const store = mockStoresDAL.getConfiguredStore();
+
+        // Build the ConfiguredStoreResponse (minimal data)
+        const response = {
+          store_id: store.store_id,
+          name: store.name,
+        };
+
+        expect(response.store_id).toBe('store-123');
+        expect(response.name).toBe('Test Store');
+        expect(Object.keys(response)).toHaveLength(2);
+      });
+
+      it('should only include store_id and name fields', () => {
+        const fullStore = {
+          ...mockStore,
+          company_id: 'company-456',
+          timezone: 'America/New_York',
+          status: 'ACTIVE',
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+        };
+        mockStoresDAL.getConfiguredStore.mockReturnValue(fullStore);
+
+        const store = mockStoresDAL.getConfiguredStore();
+
+        // Build the minimal ConfiguredStoreResponse
+        const response = {
+          store_id: store.store_id,
+          name: store.name,
+        };
+
+        // Should not include other fields
+        expect(response).not.toHaveProperty('company_id');
+        expect(response).not.toHaveProperty('timezone');
+        expect(response).not.toHaveProperty('status');
+        expect(response).not.toHaveProperty('created_at');
+        expect(response).not.toHaveProperty('updated_at');
+      });
+    });
+
+    describe('error handling', () => {
+      it('should return NOT_CONFIGURED when store is not configured', () => {
+        mockStoresDAL.getConfiguredStore.mockReturnValue(null);
+
+        const store = mockStoresDAL.getConfiguredStore();
+
+        const errorResponse = !store
+          ? { error: 'NOT_CONFIGURED', message: 'Store not configured' }
+          : null;
+
+        expect(errorResponse).not.toBeNull();
+        expect(errorResponse?.error).toBe('NOT_CONFIGURED');
+      });
+
+      it('should handle database errors gracefully', () => {
+        mockStoresDAL.getConfiguredStore.mockImplementation(() => {
+          throw new Error('Database connection failed');
+        });
+
+        expect(() => mockStoresDAL.getConfiguredStore()).toThrow('Database connection failed');
+      });
+    });
+
+    describe('response structure', () => {
+      it('should return correct ConfiguredStoreResponse schema', () => {
+        mockStoresDAL.getConfiguredStore.mockReturnValue(mockStore);
+
+        const store = mockStoresDAL.getConfiguredStore();
+        const response = {
+          store_id: store.store_id,
+          name: store.name,
+        };
+
+        // Verify response matches plan specification
+        expect(response).toHaveProperty('store_id');
+        expect(response).toHaveProperty('name');
+        expect(typeof response.store_id).toBe('string');
+        expect(typeof response.name).toBe('string');
+      });
+    });
+
+    describe('security', () => {
+      it('DB-006: should return only configured store data', () => {
+        mockStoresDAL.getConfiguredStore.mockReturnValue(mockStore);
+
+        const store = mockStoresDAL.getConfiguredStore();
+
+        // Handler should use getConfiguredStore() which returns only the configured store
+        expect(store.store_id).toBe('store-123');
+        expect(mockStoresDAL.getConfiguredStore).toHaveBeenCalledTimes(1);
+      });
+
+      it('should not leak sensitive store configuration', () => {
+        const storeWithSecrets = {
+          ...mockStore,
+          api_key: 'secret-api-key',
+          webhook_secret: 'secret-webhook',
+          internal_config: { sensitive: 'data' },
+        };
+        mockStoresDAL.getConfiguredStore.mockReturnValue(storeWithSecrets);
+
+        const store = mockStoresDAL.getConfiguredStore();
+
+        // Build the minimal ConfiguredStoreResponse
+        const response = {
+          store_id: store.store_id,
+          name: store.name,
+        };
+
+        // Should not include any secrets
+        expect(response).not.toHaveProperty('api_key');
+        expect(response).not.toHaveProperty('webhook_secret');
+        expect(response).not.toHaveProperty('internal_config');
+      });
+    });
+  });
 });

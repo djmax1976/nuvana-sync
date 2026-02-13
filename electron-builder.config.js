@@ -45,7 +45,7 @@ const config = {
   // Extra files to be copied to resources (migrations, etc.)
   extraResources: [
     {
-      from: 'resources/migrations',
+      from: 'src/main/migrations',
       to: 'migrations',
       filter: ['**/*'],
     },

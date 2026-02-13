@@ -15,6 +15,7 @@ import React, { useState, useEffect, useCallback } from 'react';
 import { CloudProtectedPage } from '../components/auth/CloudProtectedPage';
 import type { CloudAuthUser } from '../components/auth/CloudAuthDialog';
 import { ResetStoreDialog } from '../components/settings/ResetStoreDialog';
+import { SyncMonitorPanel } from '../components/sync/SyncMonitorPanel';
 
 /**
  * Check if running in Electron environment
@@ -896,9 +897,9 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
   }
 
   return (
-    <div className="min-h-screen bg-background">
-      {/* Header */}
-      <header className="bg-card border-b border-border px-6 py-4">
+    <div className="flex flex-col h-full">
+      {/* Header — bleeds into AppLayout padding with negative margins */}
+      <header className="bg-card border-b border-border px-6 py-4 flex-shrink-0 -mx-6 -mt-6">
         <div className="flex items-center gap-4">
           <button
             onClick={onBack}
@@ -918,7 +919,15 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
         </div>
       </header>
 
-      <main className="p-6 max-w-2xl mx-auto">
+      {/* Two-column content area */}
+      <div className="flex-1 min-h-0 flex flex-col xl:flex-row gap-6 pt-6 overflow-y-auto xl:overflow-hidden">
+        {/* LEFT: Sync Monitor (primary) — scrolls independently on desktop */}
+        <div className="xl:flex-1 xl:min-w-0 xl:overflow-y-auto">
+          <SyncMonitorPanel />
+        </div>
+
+        {/* RIGHT: Settings forms — scrolls independently on desktop */}
+        <div className="w-full xl:w-[480px] xl:flex-shrink-0 xl:overflow-y-auto space-y-6">
         {/* Store Info Section */}
         {storeInfo && (
           <section className="bg-card rounded-xl border border-border p-6 mb-6">
@@ -1710,8 +1719,8 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
           ) : posConnectionConfig.pos_connection_type === 'NETWORK' ? (
             /* NETWORK - Direct TCP/IP connection */
             <div className="space-y-4">
-              <div className="grid grid-cols-3 gap-4">
-                <div className="col-span-2">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-2">
                   <label htmlFor="host" className="block text-sm font-medium text-foreground mb-1">
                     Host / IP Address
                   </label>
@@ -2265,7 +2274,8 @@ function SettingsContent({ onBack, cloudAuthUser }: SettingsContentProps): React
         >
           {saving ? 'Saving...' : saved ? 'Saved!' : 'Save Changes'}
         </button>
-      </main>
+        </div>{/* end RIGHT column */}
+      </div>{/* end two-column content */}
     </div>
   );
 }

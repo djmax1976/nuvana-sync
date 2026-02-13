@@ -845,6 +845,38 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Delete all sync queue items for a specific entity by ID
+   * SEC-006: Parameterized DELETE
+   * DB-006: Scoped to store_id for tenant isolation
+   *
+   * Use this to clean up failed/pending items before re-enqueueing
+   *
+   * @param storeId - Store ID
+   * @param entityType - Entity type (e.g., 'shift')
+   * @param entityId - Entity ID (e.g., shift_id)
+   * @returns Number of items deleted
+   */
+  deleteByEntityId(storeId: string, entityType: string, entityId: string): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ? AND entity_type = ? AND entity_id = ?
+    `);
+
+    const result = stmt.run(storeId, entityType, entityId);
+
+    if (result.changes > 0) {
+      log.info('Sync queue items deleted by entity ID', {
+        storeId,
+        entityType,
+        entityId,
+        count: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
    * Delete all sync queue items by entity type for a store
    * SEC-006: Parameterized DELETE
    * DB-006: Scoped to store_id for tenant isolation

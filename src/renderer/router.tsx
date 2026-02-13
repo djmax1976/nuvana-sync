@@ -12,6 +12,8 @@ import { createHashRouter, RouterProvider, Navigate } from 'react-router-dom';
 import { AppLayout } from './components/layout/AppLayout';
 import { LoadingSpinner } from './components/ui/LoadingSpinner';
 import { ProtectedPage } from './components/auth/ProtectedPage';
+import { DayCloseAccessGuard } from './components/guards/DayCloseAccessGuard';
+import { useIsLotteryMode } from './hooks/usePOSConnectionType';
 
 // ============================================================================
 // Lazy-loaded Pages
@@ -42,8 +44,7 @@ const TerminalShiftPage = lazy(() => import('./pages/TerminalShiftPage'));
 // Report pages
 const LotteryDayReportPage = lazy(() => import('./pages/LotteryDayReportPage'));
 
-// Sync Monitor page
-const SyncMonitorPage = lazy(() => import('./pages/SyncMonitorPage'));
+// Sync Monitor is now embedded in the Settings page (SyncMonitorPanel component)
 
 // Setup wizard (not lazy - needed immediately)
 import SetupWizard from './pages/SetupWizard';
@@ -58,6 +59,33 @@ function PageLoader() {
       <LoadingSpinner size="lg" />
     </div>
   );
+}
+
+// ============================================================================
+// Route Guards
+// ============================================================================
+
+/**
+ * LotteryGuard - Prevents access to non-lottery routes in lottery-only stores
+ *
+ * When a store's POS type is LOTTERY, this guard redirects to the dashboard.
+ * During loading state (data undefined), children render normally to prevent flash.
+ *
+ * Security: SC-GUARD-002 - Redirects in lottery mode
+ * UX: SC-GUARD-003 - No flash redirect during loading
+ *
+ * @param children - The route element to render if not in lottery mode
+ */
+function LotteryGuard({ children }: { children: React.ReactNode }) {
+  const isLotteryMode = useIsLotteryMode();
+
+  // In lottery mode, redirect to dashboard
+  // During loading (isLotteryMode === false when data undefined), render children
+  if (isLotteryMode) {
+    return <Navigate to="/" replace />;
+  }
+
+  return <>{children}</>;
 }
 
 // ============================================================================
@@ -96,9 +124,11 @@ const router = createHashRouter([
       {
         path: 'clock-in-out',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <ClockInOutPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ClockInOutPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
@@ -120,9 +150,11 @@ const router = createHashRouter([
       {
         path: 'terminals',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <TerminalsPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <TerminalsPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
@@ -142,25 +174,31 @@ const router = createHashRouter([
       {
         path: 'shifts',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <ShiftsPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ShiftsPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
         path: 'shifts/:shiftId',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <ShiftDetailPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ShiftDetailPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
         path: 'transactions',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <TransactionsPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <TransactionsPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
@@ -180,35 +218,35 @@ const router = createHashRouter([
         ),
       },
       {
-        path: 'sync',
-        element: (
-          <Suspense fallback={<PageLoader />}>
-            <SyncMonitorPage />
-          </Suspense>
-        ),
-      },
-      {
         path: 'shift-end',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <ShiftEndPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ShiftEndPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {
         path: 'day-close',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <DayClosePage />
-          </Suspense>
+          <LotteryGuard>
+            <DayCloseAccessGuard>
+              <Suspense fallback={<PageLoader />}>
+                <DayClosePage />
+              </Suspense>
+            </DayCloseAccessGuard>
+          </LotteryGuard>
         ),
       },
       {
         path: 'terminal/:terminalId/shift',
         element: (
-          <Suspense fallback={<PageLoader />}>
-            <TerminalShiftPage />
-          </Suspense>
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <TerminalShiftPage />
+            </Suspense>
+          </LotteryGuard>
         ),
       },
       {

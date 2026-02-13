@@ -27,15 +27,19 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => `mock-uuid-${++uuidCounter}`),
 }));
 
-import {
-  TransactionsDAL,
-  type Transaction,
-  type TransactionLineItem,
-  type TransactionPayment,
+// Import actual DAL module (use importActual to prevent mock leakage from other test files)
+const { TransactionsDAL } = await vi.importActual<
+  typeof import('../../../src/main/dal/transactions.dal')
+>('../../../src/main/dal/transactions.dal');
+
+import type {
+  Transaction,
+  TransactionLineItem,
+  TransactionPayment,
 } from '../../../src/main/dal/transactions.dal';
 
 describe('TransactionsDAL', () => {
-  let dal: TransactionsDAL;
+  let dal: InstanceType<typeof TransactionsDAL>;
 
   const mockTransactionData: Transaction = {
     transaction_id: 'txn-123',

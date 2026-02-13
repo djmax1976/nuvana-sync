@@ -30,7 +30,7 @@ import { lotteryGamesDAL } from '../dal/lottery-games.dal';
 import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { usersDAL } from '../dal/users.dal';
 import { createLogger } from '../utils/logger';
-import { cloudApiService } from './cloud-api.service';
+import { cloudApiService, CloudApiError } from './cloud-api.service';
 import {
   bidirectionalSyncService,
   type BidirectionalSyncResult,
@@ -935,12 +935,31 @@ export class SyncEngineService {
         // Track batch-level error
         this.addRecentError(entityType, sanitizedError);
 
-        // v040: Extract HTTP status from error message if available
-        const httpStatus = this.extractHttpStatusFromError(errorMessage);
+        // ERR-002: Extract full response body from CloudApiError for dead letter storage
+        // This preserves the complete error details from the cloud API
+        let httpStatus: number | null = null;
+        let responseBody: string;
+
+        if (CloudApiError.isCloudApiError(error)) {
+          // CloudApiError contains full response details for debugging
+          httpStatus = error.httpStatus;
+          responseBody = error.getTruncatedResponseBody(2000);
+          log.debug('CloudApiError captured with full response', {
+            httpStatus,
+            code: error.code,
+            hasDetails: Boolean(error.details),
+            responseBodyLength: error.responseBody.length,
+          });
+        } else {
+          // Fallback for non-CloudApiError (network errors, etc.)
+          httpStatus = this.extractHttpStatusFromError(errorMessage);
+          responseBody = errorMessage.substring(0, 500);
+        }
+
         const batchApiContext: SyncApiContext = {
           api_endpoint: this.getEndpointForEntityType(entityType),
           http_status: httpStatus,
-          response_body: errorMessage.substring(0, 500),
+          response_body: responseBody,
         };
 
         // ERR-007/MQ-002: Classify the batch error
@@ -1528,7 +1547,19 @@ export class SyncEngineService {
                 packId: payload.pack_id,
                 error: errorMsg,
               });
-              const httpStatus = this.extractHttpStatusFromError(errorMsg);
+
+              // ERR-002: Extract full response body from CloudApiError
+              let httpStatus: number | null;
+              let responseBody: string;
+
+              if (CloudApiError.isCloudApiError(activateError)) {
+                httpStatus = activateError.httpStatus;
+                responseBody = activateError.getTruncatedResponseBody(2000);
+              } else {
+                httpStatus = this.extractHttpStatusFromError(errorMsg);
+                responseBody = errorMsg.substring(0, 500);
+              }
+
               results.push({
                 id: item.id,
                 status: 'failed',
@@ -1536,7 +1567,7 @@ export class SyncEngineService {
                 apiContext: {
                   api_endpoint: '/api/v1/sync/lottery/packs/activate',
                   http_status: httpStatus,
-                  response_body: errorMsg.substring(0, 500),
+                  response_body: responseBody,
                 },
               });
             }
@@ -1582,8 +1613,19 @@ export class SyncEngineService {
           operation: item.operation,
           error: errorMessage,
         });
-        // v040: Extract HTTP status from error and include API context
-        const httpStatus = this.extractHttpStatusFromError(errorMessage);
+
+        // ERR-002: Extract full response body from CloudApiError for dead letter storage
+        let httpStatus: number | null;
+        let responseBody: string;
+
+        if (CloudApiError.isCloudApiError(error)) {
+          httpStatus = error.httpStatus;
+          responseBody = error.getTruncatedResponseBody(2000);
+        } else {
+          httpStatus = this.extractHttpStatusFromError(errorMessage);
+          responseBody = errorMessage.substring(0, 500);
+        }
+
         // Use actual endpoint based on operation and status instead of generic fallback
         const actualEndpoint = this.getPackEndpoint(item.operation, packStatus);
         results.push({
@@ -1593,7 +1635,7 @@ export class SyncEngineService {
           apiContext: {
             api_endpoint: actualEndpoint,
             http_status: httpStatus,
-            response_body: errorMessage.substring(0, 500),
+            response_body: responseBody,
           },
         });
       }
@@ -1612,8 +1654,15 @@ export class SyncEngineService {
    * - API-001: Validates payload structure with required field checks
    * - API-003: Returns per-item results for error handling
    * - SEC-006: Uses structured payload, no string concatenation
+   * - SEC-010: AUTHZ - opened_by/closed_by must be valid user UUIDs
    * - SEC-017: Audit logging for all operations
    * - DB-006: TENANT_ISOLATION - store_id validated in payload
+   *
+   * Field Mapping (ShiftSyncPayload → Cloud API):
+   * - opened_at: When shift was opened (ISO timestamp) - REQUIRED
+   * - opened_by: Who opened the shift (user UUID) - REQUIRED
+   * - closed_at: When shift was closed - null if OPEN
+   * - closed_by: Who closed the shift - null if OPEN
    *
    * IMPORTANT: Shifts MUST sync BEFORE pack operations that reference them
    * to satisfy cloud FK constraints (activated_shift_id, depleted_shift_id, etc.)
@@ -1627,27 +1676,31 @@ export class SyncEngineService {
     for (const item of items) {
       try {
         // API-001: Parse and validate payload structure
+        // Internal field names: opened_at, opened_by, closed_at
+        // Cloud API translation happens in cloud-api.service.ts: opened_at→start_time, opened_by→cashier_id, closed_at→end_time
         const payload = JSON.parse(item.payload) as {
           shift_id: string;
           store_id: string;
           business_date: string;
           shift_number: number;
-          start_time: string;
           status: 'OPEN' | 'CLOSED';
-          cashier_id?: string | null;
-          end_time?: string | null;
+          opened_at: string;
+          opened_by: string | null;
+          closed_at: string | null;
           external_register_id?: string | null;
           external_cashier_id?: string | null;
           external_till_id?: string | null;
         };
 
         // API-001: Validate required fields
+        // opened_at is REQUIRED by cloud API
+        // opened_by can be null for shifts without assigned cashier
         if (
           !payload.shift_id ||
           !payload.store_id ||
           !payload.business_date ||
           typeof payload.shift_number !== 'number' ||
-          !payload.start_time ||
+          !payload.opened_at ||
           !payload.status
         ) {
           log.warn('Shift payload missing required fields', {
@@ -1655,7 +1708,7 @@ export class SyncEngineService {
             hasStoreId: Boolean(payload.store_id),
             hasBusinessDate: Boolean(payload.business_date),
             hasShiftNumber: typeof payload.shift_number === 'number',
-            hasStartTime: Boolean(payload.start_time),
+            hasOpenedAt: Boolean(payload.opened_at),
             hasStatus: Boolean(payload.status),
           });
           results.push({
@@ -1666,16 +1719,16 @@ export class SyncEngineService {
           continue;
         }
 
-        // Route to cloud API
+        // Route to cloud API - field translation happens in pushShift()
         const response = await cloudApiService.pushShift({
           shift_id: payload.shift_id,
           store_id: payload.store_id,
           business_date: payload.business_date,
           shift_number: payload.shift_number,
-          start_time: payload.start_time,
+          opened_at: payload.opened_at,
+          opened_by: payload.opened_by,
           status: payload.status,
-          cashier_id: payload.cashier_id,
-          end_time: payload.end_time,
+          closed_at: payload.closed_at,
           external_register_id: payload.external_register_id,
           external_cashier_id: payload.external_cashier_id,
           external_till_id: payload.external_till_id,
@@ -1694,20 +1747,34 @@ export class SyncEngineService {
             shiftId: payload.shift_id,
             businessDate: payload.business_date,
             shiftNumber: payload.shift_number,
+            hasOpenedBy: Boolean(payload.opened_by),
             idempotent: response.idempotent,
           });
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/lottery/shifts',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to sync shift item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
         });
         results.push({
           id: item.id,
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }
@@ -1866,17 +1933,31 @@ export class SyncEngineService {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/employees',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to push employee batch to cloud', {
           count: employees.length,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
+          httpStatus: apiContext?.http_status,
         });
 
-        // Mark all items as failed
+        // Mark all items as failed with API context for dead letter storage
         for (const emp of employees) {
           results.push({
             id: emp.itemId,
             status: 'failed',
             error: errorMessage,
+            apiContext,
           });
         }
       }
@@ -1959,15 +2040,28 @@ export class SyncEngineService {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/lottery/shift/open',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to sync shift opening item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
         });
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }
@@ -2053,15 +2147,28 @@ export class SyncEngineService {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/lottery/shift/close',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to sync shift closing item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
         });
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }
@@ -2830,15 +2937,28 @@ export class SyncEngineService {
         });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/lottery/day',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to sync day close item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
         });
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }
@@ -3009,22 +3129,35 @@ export class SyncEngineService {
         // API-003: Centralized error handling with sanitized messages
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
 
+        // ERR-002: Extract full response body from CloudApiError for dead letter storage
+        let httpStatus: number | null = null;
+        let apiContext: SyncApiContext | undefined;
+
+        if (CloudApiError.isCloudApiError(error)) {
+          httpStatus = error.httpStatus;
+          apiContext = {
+            api_endpoint: this.getEndpointForEntityType('day_open'),
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         // ERR-007/MQ-002: Classify error for retry logic
-        // No httpStatus available in catch block, so pass null
-        const classification = classifyError(null, errorMessage);
+        const classification = classifyError(httpStatus, errorMessage);
 
         log.error('Failed to sync day open item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
           errorCategory: classification.category,
+          hasApiContext: Boolean(apiContext),
         });
 
-        // No apiContext for caught exceptions (API call may have failed before response)
         results.push({
           id: item.id,
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }
@@ -3121,15 +3254,28 @@ export class SyncEngineService {
         }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+
+        // ERR-002: Extract full response body from CloudApiError
+        let apiContext: SyncApiContext | undefined;
+        if (CloudApiError.isCloudApiError(error)) {
+          apiContext = {
+            api_endpoint: '/api/v1/sync/lottery/variances/approve',
+            http_status: error.httpStatus,
+            response_body: error.getTruncatedResponseBody(2000),
+          };
+        }
+
         log.error('Failed to sync variance approval item', {
           itemId: item.id,
           entityId: item.entity_id,
           error: errorMessage,
+          hasApiContext: Boolean(apiContext),
         });
         results.push({
           id: item.id, // Use queue item ID, not entity_id
           status: 'failed',
           error: errorMessage,
+          apiContext,
         });
       }
     }

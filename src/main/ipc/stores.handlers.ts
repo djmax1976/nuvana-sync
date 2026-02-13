@@ -154,3 +154,63 @@ registerHandler<boolean>(
   },
   { description: 'Check if store is configured' }
 );
+
+// ============================================================================
+// Get Configured Store Handler (Task 1.6 - Day Close Page)
+// ============================================================================
+
+/**
+ * Configured store response - minimal data for DayClosePage
+ */
+interface ConfiguredStoreResponse {
+  /** Store ID (UUID) */
+  store_id: string;
+  /** Store name */
+  name: string;
+}
+
+/**
+ * Get the configured store ID and name
+ *
+ * Used by DayClosePage for store context.
+ * Returns minimal store data (ID and name only).
+ *
+ * Performance characteristics:
+ * - Single read from electron-store config (O(1))
+ *
+ * @security DB-006: Returns only configured store data
+ * @security API-003: Generic error responses
+ *
+ * Channel: store:getConfigured
+ */
+registerHandler<ConfiguredStoreResponse | ReturnType<typeof createErrorResponse>>(
+  'store:getConfigured',
+  async () => {
+    try {
+      const store = storesDAL.getConfiguredStore();
+
+      if (!store) {
+        log.warn('Configured store requested but no store configured');
+        return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+      }
+
+      log.debug('Configured store retrieved', {
+        storeId: store.store_id,
+        name: store.name,
+      });
+
+      return {
+        store_id: store.store_id,
+        name: store.name,
+      };
+    } catch (error) {
+      log.error('Failed to get configured store', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+  { description: 'Get configured store ID and name' }
+);
+
+log.info('Stores handlers registered');
