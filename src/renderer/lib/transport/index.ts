@@ -266,6 +266,17 @@ export const ipc = {
    */
   terminals: {
     /**
+     * List all registers for the configured store with their active shift status
+     *
+     * Used by DayClosePage for terminal name resolution and dropdowns.
+     * Returns registers with current shift status for each.
+     *
+     * @returns TerminalListResponse with registers array
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized queries in backend
+     */
+    list: () => ipcClient.invoke<TerminalListResponse>('terminals:list'),
+    /**
      * Deactivate a terminal mapping in the local database
      *
      * Called after successful cloud API deletion to synchronize local state.
@@ -281,6 +292,45 @@ export const ipc = {
       ipcClient.invoke<DeactivateTerminalResponse>('terminals:deactivate', { terminalId }),
   },
 
+  // Cashiers
+  /**
+   * Cashier/employee operations for DayClosePage
+   * DB-006: All operations are store-scoped for tenant isolation
+   * SEC-001: PIN hashes are never exposed in responses
+   */
+  cashiers: {
+    /**
+     * List active cashiers for the current store
+     *
+     * Used by DayClosePage for cashier name resolution and dropdowns.
+     * Returns only active users with safe data (no PIN hash).
+     *
+     * @returns CashiersListResponse with cashiers array
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-001: PIN hash excluded from response
+     * @security SEC-006: Parameterized queries in backend
+     */
+    list: () => ipcClient.invoke<CashiersListResponse>('cashiers:list'),
+  },
+
+  // Store
+  /**
+   * Store configuration operations
+   * DB-006: Returns only the configured store for this terminal
+   */
+  store: {
+    /**
+     * Get the configured store ID and name
+     *
+     * Used by DayClosePage for store context.
+     * Returns minimal store data (ID and name only).
+     *
+     * @returns ConfiguredStoreResponse with store_id and name
+     * @security DB-006: Returns only configured store data
+     */
+    getConfigured: () => ipcClient.invoke<ConfiguredStoreResponse>('store:getConfigured'),
+  },
+
   // Shifts
   shifts: {
     list: (params?: ShiftListParams) => ipcClient.invoke<ShiftListResponse>('shifts:list', params),
@@ -288,7 +338,34 @@ export const ipc = {
     getSummary: (shiftId: string) =>
       ipcClient.invoke<ShiftSummaryResponse>('shifts:getSummary', shiftId),
     findOpenShifts: () => ipcClient.invoke<ShiftResponse[]>('shifts:findOpenShifts'),
-    close: (shiftId: string) => ipcClient.invoke<ShiftResponse>('shifts:close', shiftId),
+    /**
+     * Close a shift with closing cash amount
+     *
+     * Updates shift status to CLOSED and records the closing cash amount.
+     * Returns the closed shift with closing_cash for client confirmation.
+     *
+     * @param shiftId - UUID of the shift to close
+     * @param closingCash - Non-negative cash amount in drawer at close
+     * @returns ShiftCloseResponse with shift data and closing_cash
+     *
+     * @security API-001: Input validated via Zod schema in handler
+     * @security SEC-014: shiftId validated as UUID in handler
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized queries in backend
+     */
+    close: (shiftId: string, closingCash: number) =>
+      ipcClient.invoke<ShiftCloseResponse>('shifts:close', { shift_id: shiftId, closing_cash: closingCash }),
+    /**
+     * Get all open shifts with resolved terminal and cashier names
+     *
+     * Used by DayClosePage to display which shifts need to be closed.
+     * Returns open shifts with pre-resolved names for efficient display.
+     *
+     * @returns OpenShiftsResponse with open_shifts array containing names
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized queries in backend
+     */
+    getOpenShifts: () => ipcClient.invoke<OpenShiftsResponse>('shifts:getOpenShifts'),
     /**
      * Get fuel data for a specific shift with inside/outside breakdown
      * Returns MSM-sourced data when available
@@ -301,6 +378,12 @@ export const ipc = {
      */
     getDailyFuelTotals: (businessDate: string) =>
       ipcClient.invoke<DailyFuelTotalsResponse>('shifts:getDailyFuelTotals', businessDate),
+    /**
+     * Re-sync a shift to cloud with corrected payload format
+     * Deletes old queue items and re-enqueues with correct field names
+     */
+    resync: (shiftId: string) =>
+      ipcClient.invoke<{ success: boolean; message: string }>('shifts:resync', { shift_id: shiftId }),
   },
 
   // Day Summaries
@@ -341,6 +424,36 @@ export const ipc = {
     getLotteryDayReport: (params: { businessDate: string }) =>
       ipcClient.invoke<LotteryDayReportResponse>('reports:getLotteryDayReport', params),
   },
+
+  // Day Close Access
+  /**
+   * Day close access validation operations
+   *
+   * Centralized access control for the day close wizard.
+   * Validates shift conditions and user authorization before entry.
+   *
+   * @security SEC-010: Authorization enforced server-side
+   * @security DB-006: All queries store-scoped for tenant isolation
+   */
+  dayClose: {
+    /**
+     * Check day close access with PIN authentication
+     *
+     * Validates all conditions for day close access:
+     * 1. User is authenticated via PIN (BR-005)
+     * 2. Exactly one open shift exists (BR-001, BR-002)
+     * 3. User is shift owner OR has override role (BR-003, BR-004)
+     *
+     * @param input - Access check input with PIN
+     * @returns DayCloseAccessResult with access decision and shift details
+     *
+     * @security SEC-010: Authorization decision made server-side
+     * @security SEC-014: PIN validated as 4-6 digits
+     * @security API-001: Input validated via Zod schema in handler
+     */
+    checkAccess: (input: { pin: string }) =>
+      ipcClient.invoke<DayCloseAccessResult>('dayClose:checkAccess', input),
+  },
 };
 
 // ============================================================================
@@ -380,6 +493,13 @@ export interface WeeklySalesResponse {
   totalTransactions: number;
 }
 
+/**
+ * Local shift response from shifts:getById handler
+ * Maps to full Shift entity from DAL with resolved cashier name
+ *
+ * @security DB-006: Store-scoped via backend handler
+ * @security SEC-006: Backend uses parameterized queries for all lookups
+ */
 export interface ShiftResponse {
   shift_id: string;
   store_id: string;
@@ -390,8 +510,32 @@ export interface ShiftResponse {
   start_time: string | null;
   end_time: string | null;
   status: 'OPEN' | 'CLOSED';
+  /** External cashier ID from POS (for reference/debugging) */
+  external_cashier_id: string | null;
+  /** External register ID from POS - use for terminal name lookup */
+  external_register_id: string | null;
+  /** External till ID from POS (for reference/debugging) */
+  external_till_id: string | null;
   created_at: string;
   updated_at: string;
+  /**
+   * Pre-resolved cashier name from backend
+   * Eliminates need for frontend lookup - follows same pattern as shifts:getOpenShifts
+   * Values: user.name if found, "No Cashier Assigned" if null, "Unknown Cashier" if user missing
+   */
+  cashier_name: string;
+}
+
+/**
+ * Response from shifts:close handler
+ * Extends ShiftResponse with closing_cash for client confirmation
+ *
+ * @security SEC-006: All queries use parameterized statements
+ * @security DB-006: Store-scoped via backend handler
+ */
+export interface ShiftCloseResponse extends ShiftResponse {
+  /** Cash amount in drawer at shift close (non-negative) */
+  closing_cash: number;
 }
 
 export interface ShiftListParams {
@@ -861,4 +1005,221 @@ export interface DeactivateTerminalResponse {
   terminalId: string;
   /** Human-readable result message */
   message: string;
+}
+
+/**
+ * Register with associated shift information
+ * Returned by terminals:list IPC handler
+ */
+export interface RegisterWithShiftStatus {
+  /** Internal terminal mapping ID */
+  id: string;
+  /** External register ID from POS system */
+  external_register_id: string;
+  /** Terminal type (always REGISTER for this endpoint) */
+  terminal_type: string;
+  /** User-friendly description/name */
+  description: string | null;
+  /** Whether the register is active */
+  active: boolean;
+  /** Currently open shift on this register, if any */
+  activeShift: ShiftResponse | null;
+  /** Count of open shifts for this register */
+  openShiftCount: number;
+  /** When this register was first identified */
+  created_at: string;
+  /** When this register was last updated */
+  updated_at: string;
+}
+
+/**
+ * Response for terminals:list IPC handler
+ */
+export interface TerminalListResponse {
+  /** Array of registers with shift status */
+  registers: RegisterWithShiftStatus[];
+  /** Total count of registers */
+  total: number;
+}
+
+// ============================================================================
+// Cashier Types
+// ============================================================================
+
+/**
+ * Cashier info for dropdown/display
+ * Returned by cashiers:list IPC handler
+ */
+export interface CashierInfo {
+  /** User ID (UUID) */
+  cashier_id: string;
+  /** Display name */
+  name: string;
+  /** Role */
+  role: string;
+}
+
+/**
+ * Response for cashiers:list IPC handler
+ */
+export interface CashiersListResponse {
+  /** Array of active cashiers */
+  cashiers: CashierInfo[];
+  /** Total count */
+  total: number;
+}
+
+// ============================================================================
+// Store Types
+// ============================================================================
+
+/**
+ * Configured store response - minimal data for DayClosePage
+ * Returned by store:getConfigured IPC handler
+ */
+export interface ConfiguredStoreResponse {
+  /** Store ID (UUID) */
+  store_id: string;
+  /** Store name */
+  name: string;
+}
+
+// ============================================================================
+// Open Shifts Types
+// ============================================================================
+
+/**
+ * Open shift with resolved names for DayClosePage
+ * Used in shifts:getOpenShifts response
+ */
+export interface OpenShiftWithNames {
+  /** Shift ID (UUID) */
+  shift_id: string;
+  /** Resolved terminal/register name */
+  terminal_name: string;
+  /** Resolved cashier name */
+  cashier_name: string;
+  /** Shift number for the day */
+  shift_number: number;
+  /** Shift status (always OPEN for this query) */
+  status: 'OPEN' | 'CLOSED';
+  /** External register ID from POS */
+  external_register_id: string | null;
+  /** Business date */
+  business_date: string;
+  /** Start time */
+  start_time: string | null;
+}
+
+/**
+ * Response for shifts:getOpenShifts IPC handler
+ */
+export interface OpenShiftsResponse {
+  /** Array of open shifts with resolved names */
+  open_shifts: OpenShiftWithNames[];
+}
+
+// ============================================================================
+// Day Close Access Types
+// ============================================================================
+
+/**
+ * Reason codes for day close access denial
+ * Used by DayCloseAccessGuard to show appropriate error messages
+ */
+export type DayCloseAccessDenialReason =
+  | 'NO_OPEN_SHIFTS'
+  | 'MULTIPLE_OPEN_SHIFTS'
+  | 'NOT_SHIFT_OWNER'
+  | 'INVALID_PIN'
+  | 'NOT_AUTHENTICATED';
+
+/**
+ * How day close access was granted
+ * OWNER: User is the assigned cashier of the shift
+ * OVERRIDE: User has shift_manager or store_manager role
+ */
+export type DayCloseAccessType = 'OWNER' | 'OVERRIDE';
+
+/**
+ * User role type for day close access
+ */
+export type DayCloseUserRole = 'store_manager' | 'shift_manager' | 'cashier';
+
+/**
+ * Active shift details for day close access
+ * Includes resolved names for UI display
+ *
+ * @security DB-006: Store-scoped via backend query
+ */
+export interface DayCloseActiveShift {
+  /** Shift ID (UUID) */
+  shift_id: string;
+  /** Shift number for the day */
+  shift_number: number;
+  /** Cashier's user ID (may be null if no cashier assigned) */
+  cashier_id: string | null;
+  /** Resolved cashier name */
+  cashier_name: string;
+  /** External register ID from POS */
+  external_register_id: string | null;
+  /** Resolved terminal/register name */
+  terminal_name: string;
+  /** Business date (YYYY-MM-DD) */
+  business_date: string;
+  /** Start time (ISO timestamp) */
+  start_time: string | null;
+}
+
+/**
+ * Authenticated user info from day close access check
+ * Returned when PIN authentication succeeds
+ *
+ * @security SEC-001: PIN hash never exposed
+ */
+export interface DayCloseAccessUser {
+  /** User ID (UUID) */
+  userId: string;
+  /** User's display name */
+  name: string;
+  /** User's role */
+  role: DayCloseUserRole;
+}
+
+/**
+ * Result of day close access check
+ * Returned by dayClose:checkAccess IPC handler
+ *
+ * @security SEC-010: Authorization decision made server-side
+ */
+export interface DayCloseAccessResult {
+  /** Whether access is allowed */
+  allowed: boolean;
+
+  /** Reason code if denied */
+  reasonCode?: DayCloseAccessDenialReason;
+
+  /** Human-readable reason if denied */
+  reason?: string;
+
+  /** The active shift (if exactly one exists) */
+  activeShift?: DayCloseActiveShift;
+
+  /** How access was granted */
+  accessType?: DayCloseAccessType;
+
+  /** The authenticated user */
+  user?: DayCloseAccessUser;
+
+  /** Open shift count (for UI messaging) */
+  openShiftCount: number;
+}
+
+/**
+ * Input for day close access check
+ * SEC-014: PIN must be 4-6 digits
+ */
+export interface DayCloseAccessInput {
+  /** PIN for authentication (4-6 digits) */
+  pin: string;
 }

@@ -11,6 +11,7 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ipc,
   type ShiftResponse,
+  type ShiftCloseResponse,
   type ShiftListParams,
   type ShiftListResponse,
   type ShiftSummaryResponse,
@@ -106,15 +107,32 @@ export function useShiftSummary(shiftId: string | null, options?: { enabled?: bo
 // ============================================================================
 
 /**
- * Hook to close a shift
- * Requires MANAGER role
+ * Input for shift close mutation
+ */
+export interface CloseShiftInput {
+  /** UUID of the shift to close */
+  shiftId: string;
+  /** Non-negative cash amount in drawer at close */
+  closingCash: number;
+}
+
+/**
+ * Hook to close a shift with closing cash amount
+ *
+ * Requires MANAGER role (shift_manager or store_manager).
+ * Returns the closed shift with closing_cash for client confirmation.
+ *
+ * @security API-001: Input validated via Zod schema in handler
+ * @security SEC-006: Parameterized queries in backend
+ * @security DB-006: Store-scoped via backend handler
  */
 export function useCloseShift() {
   const queryClient = useQueryClient();
 
-  return useMutation({
-    mutationFn: (shiftId: string) => ipc.shifts.close(shiftId),
-    onSuccess: (_data, shiftId) => {
+  return useMutation<ShiftCloseResponse, Error, CloseShiftInput>({
+    mutationFn: ({ shiftId, closingCash }: CloseShiftInput) =>
+      ipc.shifts.close(shiftId, closingCash),
+    onSuccess: (_data, { shiftId }) => {
       // Invalidate related queries
       queryClient.invalidateQueries({ queryKey: shiftKeys.lists() });
       queryClient.invalidateQueries({ queryKey: shiftKeys.detail(shiftId) });

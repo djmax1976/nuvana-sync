@@ -39,12 +39,72 @@ import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.t
 // ============================================================================
 
 /**
- * API error response
+ * API error response structure from cloud
  */
-interface ApiError {
+interface ApiErrorResponse {
   code: string;
   message: string;
   details?: Record<string, unknown>;
+}
+
+/**
+ * Custom error class for Cloud API errors
+ *
+ * ERR-002: Centralized error handling - preserves full error context
+ * for proper dead letter queue storage and debugging.
+ *
+ * @security API-003: Sanitized for client display but full details preserved
+ * for server-side logging and dead letter queue storage.
+ */
+export class CloudApiError extends Error {
+  /** HTTP status code from the response */
+  public readonly httpStatus: number;
+
+  /** Error code from the cloud API (e.g., 'VALIDATION_ERROR', 'NOT_FOUND') */
+  public readonly code: string;
+
+  /** Detailed error information from the cloud API */
+  public readonly details?: Record<string, unknown>;
+
+  /** Full JSON response body for dead letter queue storage */
+  public readonly responseBody: string;
+
+  constructor(
+    message: string,
+    httpStatus: number,
+    code: string,
+    details: Record<string, unknown> | undefined,
+    responseBody: string
+  ) {
+    super(message);
+    this.name = 'CloudApiError';
+    this.httpStatus = httpStatus;
+    this.code = code;
+    this.details = details;
+    this.responseBody = responseBody;
+
+    // Maintains proper prototype chain for instanceof checks
+    Object.setPrototypeOf(this, CloudApiError.prototype);
+  }
+
+  /**
+   * Check if an error is a CloudApiError
+   * Type guard for proper error handling in catch blocks
+   */
+  static isCloudApiError(error: unknown): error is CloudApiError {
+    return error instanceof CloudApiError;
+  }
+
+  /**
+   * Get a truncated response body suitable for database storage
+   * @param maxLength - Maximum length (default 2000 chars for DB field)
+   */
+  getTruncatedResponseBody(maxLength = 2000): string {
+    if (this.responseBody.length <= maxLength) {
+      return this.responseBody;
+    }
+    return this.responseBody.substring(0, maxLength - 3) + '...';
+  }
 }
 
 /**
@@ -1426,9 +1486,11 @@ export class CloudApiService {
         // Handle non-OK responses
         if (!response.ok) {
           const errorBody = await response.json().catch(() => ({ message: 'Unknown error' }));
-          const errorMessage = (errorBody as ApiError).message || `HTTP ${response.status}`;
-          const errorCode = (errorBody as ApiError).code;
-          const errorDetails = (errorBody as ApiError).details;
+          const errorResponse = errorBody as ApiErrorResponse;
+          const errorMessage = errorResponse.message || `HTTP ${response.status}`;
+          const errorCode = errorResponse.code || 'UNKNOWN_ERROR';
+          const errorDetails = errorResponse.details;
+          const fullResponseBody = JSON.stringify(errorBody);
 
           // API-003: Log full error server-side (except sensitive body data)
           log.error('API request failed', {
@@ -1437,10 +1499,17 @@ export class CloudApiService {
             errorCode,
             errorMessage,
             errorDetails: errorDetails ? JSON.stringify(errorDetails) : undefined,
-            fullErrorBody: JSON.stringify(errorBody),
+            fullErrorBody: fullResponseBody,
           });
 
-          throw new Error(errorMessage);
+          // ERR-002: Throw CloudApiError with full context for dead letter storage
+          throw new CloudApiError(
+            errorMessage,
+            response.status,
+            errorCode,
+            errorDetails,
+            fullResponseBody
+          );
         }
 
         // Parse and return successful response
@@ -1454,19 +1523,24 @@ export class CloudApiService {
         lastError = error instanceof Error ? error : new Error('Unknown error');
 
         // Don't retry for certain errors:
+        // - CloudApiError with 4xx status: Client errors are not transient
         // - AbortError: Request was cancelled
         // - API key errors: Authentication issues
         // - HTTPS errors: Security configuration
         // - License status errors: Account issues
-        // - 4xx client errors: Not transient (404, 400, etc.)
+        const isCloudApiClientError =
+          CloudApiError.isCloudApiError(lastError) &&
+          lastError.httpStatus >= 400 &&
+          lastError.httpStatus < 500;
+
         const shouldNotRetry =
+          isCloudApiClientError ||
           lastError.name === 'AbortError' ||
           lastError.message.includes('API key') ||
           lastError.message.includes('HTTPS') ||
           lastError.message.includes('suspended') ||
           lastError.message.includes('cancelled') ||
-          lastError.message.includes('not found') ||
-          lastError.message.includes('HTTP 4'); // Catches HTTP 400, 404, etc.
+          lastError.message.includes('not found');
 
         if (shouldNotRetry) {
           throw lastError;
@@ -4969,15 +5043,21 @@ export class CloudApiService {
    * Shifts MUST be synced BEFORE any pack operations that reference them
    * to satisfy foreign key constraints on the cloud database.
    *
+   * Field Names (same for internal and cloud API):
+   * - opened_at: When shift was opened (ISO timestamp)
+   * - opened_by: Who opened the shift (user UUID, can be null)
+   * - closed_at: When shift was closed (ISO timestamp, null if OPEN)
+   *
    * Security & Standards Compliance:
    * - API-001: Input validation via TypeScript types and session validation
    * - API-003: Centralized error handling with sanitized responses
    * - SEC-008: HTTPS enforcement (via base request method)
+   * - SEC-010: AUTHZ - opened_by must be valid user UUID
    * - DB-006: Store-scoped via session validation
    * - SEC-017: Audit logging for all sync operations
    * - API-002: Rate limiting via sync session management
    *
-   * @param data - Shift data to sync
+   * @param data - Shift data to sync (internal field naming)
    * @returns Success status and idempotent flag
    */
   async pushShift(data: {
@@ -4986,21 +5066,30 @@ export class CloudApiService {
     store_id: string;
     business_date: string;
     shift_number: number;
-    start_time: string;
+    /** When shift was opened (ISO timestamp) */
+    opened_at: string;
+    /** Who opened the shift (user UUID), null if no cashier assigned */
+    opened_by: string | null;
     status: 'OPEN' | 'CLOSED';
     // Optional fields
-    cashier_id?: string | null;
-    end_time?: string | null;
+    /** When shift was closed (ISO timestamp), null if OPEN */
+    closed_at?: string | null;
     external_register_id?: string | null;
     external_cashier_id?: string | null;
     external_till_id?: string | null;
     local_id?: string;
   }): Promise<{ success: boolean; idempotent?: boolean }> {
-    log.debug('Pushing shift to cloud', {
+    // DEBUG: Log exactly what we receive and will send
+    log.info('pushShift: Input data received', {
       shiftId: data.shift_id,
       businessDate: data.business_date,
       shiftNumber: data.shift_number,
       status: data.status,
+      opened_at: data.opened_at,
+      opened_by: data.opened_by,
+      opened_by_type: typeof data.opened_by,
+      opened_by_is_null: data.opened_by === null,
+      opened_by_is_undefined: data.opened_by === undefined,
     });
 
     // Start a sync session (required by API)
@@ -5014,25 +5103,31 @@ export class CloudApiService {
       const path = `/api/v1/sync/lottery/shifts`;
 
       // API spec: POST /api/v1/sync/lottery/shifts
-      // Required: session_id, shift_id, store_id, business_date, shift_number, start_time, status
-      // Optional: cashier_id, end_time, external_register_id, external_cashier_id, external_till_id, local_id
+      // Required: session_id, shift_id, store_id, business_date, shift_number, opened_at, opened_by, cashier_id, status
+      // Optional: closed_at, external_register_id, external_cashier_id, external_till_id, local_id
+      // User IDs now sync bidirectionally to cloud, so we can use opened_by directly.
+      // Priority: external_cashier_id (if explicitly mapped) > opened_by (synced user) > store_id (last resort)
+      const cashierIdForApi = data.external_cashier_id || data.opened_by || data.store_id;
+
       const requestBody: Record<string, unknown> = {
         session_id: session.sessionId,
         shift_id: data.shift_id,
         store_id: data.store_id,
         business_date: data.business_date,
         shift_number: data.shift_number,
-        start_time: data.start_time,
+        // REQUIRED: opened_at must be a valid ISO timestamp
+        opened_at: data.opened_at || new Date().toISOString(),
+        // REQUIRED: opened_by - user UUID (prefer external, fallback to internal)
+        opened_by: cashierIdForApi,
+        // REQUIRED: cashier_id - same value as opened_by
+        cashier_id: cashierIdForApi,
         status: data.status,
         local_id: data.local_id || data.shift_id,
       };
 
-      // Optional fields - only include if present (don't send null)
-      if (data.cashier_id) {
-        requestBody.cashier_id = data.cashier_id;
-      }
-      if (data.end_time) {
-        requestBody.end_time = data.end_time;
+      // Optional fields for CLOSED shifts
+      if (data.closed_at) {
+        requestBody.closed_at = data.closed_at;
       }
       if (data.external_register_id) {
         requestBody.external_register_id = data.external_register_id;
@@ -5043,6 +5138,22 @@ export class CloudApiService {
       if (data.external_till_id) {
         requestBody.external_till_id = data.external_till_id;
       }
+
+      // DEBUG: Log exactly what we're sending to cloud
+      log.info('pushShift: Request body to cloud', {
+        path,
+        hasSessionId: Boolean(requestBody.session_id),
+        shiftId: requestBody.shift_id,
+        storeId: requestBody.store_id,
+        businessDate: requestBody.business_date,
+        shiftNumber: requestBody.shift_number,
+        opened_at: requestBody.opened_at,
+        opened_by: requestBody.opened_by,
+        cashier_id: requestBody.cashier_id,
+        status: requestBody.status,
+        closed_at: requestBody.closed_at,
+        bodyKeys: Object.keys(requestBody),
+      });
 
       const response = await this.request<{
         success: boolean;

@@ -28,6 +28,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'stores:getInfo',
   'stores:getStatus',
   'stores:isConfigured',
+  'store:getConfigured', // Get configured store ID and name for DayClosePage
   // Auto-Updater
   'updater:check',
   'updater:download',
@@ -96,6 +97,7 @@ const ALLOWED_INVOKE_CHANNELS = [
   'shifts:getFuelData',
   'shifts:getDailyFuelTotals',
   'shifts:manualStart', // Manual shift start for MANUAL mode stores
+  'shifts:getOpenShifts', // Get open shifts with resolved names for DayClosePage
   // Day Summaries
   'daySummaries:list',
   'daySummaries:getByDate',
@@ -180,10 +182,16 @@ const ALLOWED_INVOKE_CHANNELS = [
   'employees:updatePin',
   'employees:deactivate',
   'employees:reactivate',
+  // Cashiers (for DayClosePage)
+  'cashiers:list',
   // Terminals/Registers
   'terminals:list',
   'terminals:getById',
   'terminals:update',
+  'terminals:deactivate',
+  'terminals:getDayStatus',
+  // Day Close Access
+  'dayClose:checkAccess', // Centralized day close access validation
   // App Lifecycle
   'app:restart', // Full app restart (used after FULL_RESET)
 ] as const;

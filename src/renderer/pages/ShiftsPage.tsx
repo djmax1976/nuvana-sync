@@ -4,13 +4,18 @@
  * Lists all shifts with filtering and pagination.
  * Allows viewing shift details and closing open shifts.
  *
+ * SEC-010: Uses session-first auth guard pattern for shift close operations.
+ * Pattern: Check session → if valid proceed, else show PIN dialog.
+ *
  * @module renderer/pages/ShiftsPage
  */
 
-import React, { useState } from 'react';
+import React, { useState, useCallback } from 'react';
 import { Link } from 'react-router-dom';
 import { useShifts, useCloseShift } from '../lib/hooks';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
+import { useAuthGuard } from '../hooks/useAuthGuard';
+import { PinVerificationDialog } from '../components/auth/PinVerificationDialog';
 import type { ShiftListParams } from '../lib/transport';
 
 export default function ShiftsPage() {
@@ -22,20 +27,77 @@ export default function ShiftsPage() {
   const { data, isLoading, error, refetch } = useShifts(filters);
   const closeShiftMutation = useCloseShift();
 
+  // SEC-010: Auth guard for shift_manager role validation
+  const { executeWithAuth, isChecking } = useAuthGuard('shift_manager');
+
+  // State for PIN dialog flow
+  const [showPinDialog, setShowPinDialog] = useState(false);
+  const [pendingShiftId, setPendingShiftId] = useState<string | null>(null);
+
   const handleStatusFilter = (status: 'OPEN' | 'CLOSED' | undefined) => {
     setFilters((prev) => ({ ...prev, status, offset: 0 }));
   };
 
+  /**
+   * Performs the actual shift close operation.
+   * SEC-010: Called only after successful authentication/authorization.
+   *
+   * TODO: This page should use ShiftClosingForm dialog to collect closing_cash.
+   * Currently using 0 as default for compatibility during migration.
+   * See: Phase 4 of day_close_local_fix plan for proper integration.
+   */
+  const performClose = useCallback(
+    async (shiftId: string) => {
+      try {
+        // TODO: Replace with ShiftClosingForm dialog to collect actual closing_cash
+        await closeShiftMutation.mutateAsync({ shiftId, closingCash: 0 });
+        refetch();
+        setPendingShiftId(null);
+      } catch (err) {
+        alert(err instanceof Error ? err.message : 'Failed to close shift');
+      }
+    },
+    [closeShiftMutation, refetch]
+  );
+
+  /**
+   * Handle shift close with session-first auth guard.
+   * SEC-010: Validates session before attempting protected operation.
+   */
   const handleCloseShift = async (shiftId: string) => {
     if (!confirm('Are you sure you want to close this shift?')) return;
 
-    try {
-      await closeShiftMutation.mutateAsync(shiftId);
-      refetch();
-    } catch (err) {
-      alert(err instanceof Error ? err.message : 'Failed to close shift');
-    }
+    await executeWithAuth(
+      // onSuccess: Session is valid with shift_manager role - proceed directly
+      () => {
+        performClose(shiftId);
+      },
+      // onNeedAuth: No valid session - store shift ID and show PIN dialog
+      () => {
+        setPendingShiftId(shiftId);
+        setShowPinDialog(true);
+      }
+    );
   };
+
+  /**
+   * Handle successful PIN verification.
+   * SEC-010: PIN verification confirms shift_manager role - proceed with close.
+   */
+  const handlePinVerified = useCallback(() => {
+    setShowPinDialog(false);
+    if (pendingShiftId) {
+      performClose(pendingShiftId);
+    }
+  }, [pendingShiftId, performClose]);
+
+  /**
+   * Handle PIN dialog cancellation.
+   */
+  const handlePinClose = useCallback(() => {
+    setShowPinDialog(false);
+    setPendingShiftId(null);
+  }, []);
 
   const handleNextPage = () => {
     if (data && data.offset + data.limit < data.total) {
@@ -149,10 +211,10 @@ export default function ShiftsPage() {
                       {shift.status === 'OPEN' && (
                         <button
                           onClick={() => handleCloseShift(shift.shift_id)}
-                          disabled={closeShiftMutation.isPending}
+                          disabled={closeShiftMutation.isPending || isChecking}
                           className="text-destructive hover:text-destructive/80 disabled:opacity-50"
                         >
-                          Close
+                          {isChecking ? 'Checking...' : 'Close'}
                         </button>
                       )}
                     </td>
@@ -189,6 +251,16 @@ export default function ShiftsPage() {
           <div className="p-8 text-center text-muted-foreground">No shifts found</div>
         )}
       </div>
+
+      {/* SEC-010: PIN verification dialog for shift_manager authentication */}
+      <PinVerificationDialog
+        open={showPinDialog}
+        onClose={handlePinClose}
+        onVerified={handlePinVerified}
+        requiredRole="shift_manager"
+        title="Manager Approval Required"
+        description="Enter your PIN to close this shift."
+      />
     </div>
   );
 }

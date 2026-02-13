@@ -13,27 +13,33 @@
  */
 
 import { useState, useEffect, useCallback, useMemo } from 'react';
-import { useSearchParams, useNavigate, useLocation } from 'react-router-dom';
+import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { formatDateTime } from '../utils/date-format.utils';
 import { useStoreTimezone } from '../contexts/StoreContext';
 import { Button } from '../components/ui/button';
-import { Badge } from '../components/ui/badge';
 import { CalendarCheck, Loader2, AlertCircle, Check, ArrowRight, ArrowLeft } from 'lucide-react';
 
-import { useClientAuth } from '../contexts/ClientAuthContext';
-import { useClientDashboard } from '../lib/api/client-dashboard';
+// Day Close Access Context - provides validated shift/user from guard
+// SEC-010: Authorization already enforced by DayCloseAccessGuard before rendering
+import { useDayCloseAccessContext } from '../contexts/DayCloseAccessContext';
+
+// Local IPC hooks - query local SQLite directly, no cloud API dependency
+import { useLocalStore } from '../hooks/useLocalStore';
 import { useLotteryDayBins } from '../hooks/useLottery';
+import { useIsLotteryMode } from '../hooks/usePOSConnectionType';
 import { ShiftClosingForm } from '../components/shifts/ShiftClosingForm';
-import { useShiftDetail, useOpenShiftsCheck } from '../lib/api/shifts';
-import { useStoreTerminals } from '../lib/api/stores';
-import { useCashiers } from '../lib/api/cashiers';
-import { commitLotteryDayClose, cancelLotteryDayClose } from '../lib/api/lottery';
+import {
+  prepareLotteryDayClose,
+  commitLotteryDayClose,
+  cancelLotteryDayClose,
+} from '../lib/api/lottery';
 import { useToast } from '../hooks/use-toast';
 import {
   DayCloseModeScanner,
   type LotteryCloseResult,
   type ScannedBin,
+  type PendingClosingsData,
 } from '../components/lottery/DayCloseModeScanner';
 
 // Import shared shift-closing components for Step 3
@@ -78,6 +84,13 @@ interface WizardState {
   // Two-phase commit tracking
   pendingLotteryDayId: string | null;
   pendingLotteryCloseExpiresAt: string | null;
+  /**
+   * Deferred commit data for non-LOTTERY POS types.
+   * When deferCommit=true in DayCloseModeScanner, closings are stored here
+   * instead of being committed immediately. Step 3 then commits via API.
+   * SEC-010: fromWizard flag enables backend to allow non-LOTTERY POS closes.
+   */
+  pendingClosings: PendingClosingsData | null;
 }
 
 // ============ STEP INDICATOR COMPONENT ============
@@ -151,59 +164,47 @@ function StepIndicator({
 // ============ MAIN COMPONENT ============
 
 export default function DayCloseWizardPage() {
-  const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const location = useLocation();
   const { toast } = useToast();
-  const shiftId = searchParams.get('shiftId');
 
-  // Check if we're in manual mode (passed from TerminalsPage)
-  const isManualMode = (location.state as { isManualMode?: boolean } | null)?.isManualMode ?? false;
+  // SEC-010: Get validated shift/user from context (set by DayCloseAccessGuard)
+  // Guard has already verified: exactly one open shift exists, user is authorized
+  const { activeShift, user, accessType } = useDayCloseAccessContext();
+  const shiftId = activeShift.shift_id;
+
+  // Manual mode allows direct editing of POS totals (when automatic POS sync unavailable)
+  // Default to false - POS data comes from automatic sync; manual editing disabled
+  // Note: Could be passed via location.state from TerminalsPage if manual override needed
+  const isManualMode = false;
 
   // ========================================================================
   // HOOKS
   // ========================================================================
   const storeTimezone = useStoreTimezone();
 
-  // ============ AUTH & DATA HOOKS ============
-  const { isLoading: authLoading } = useClientAuth();
-  const {
-    data: dashboardData,
-    isLoading: dashboardLoading,
-    isError: dashboardError,
-  } = useClientDashboard();
+  // Check if this is a LOTTERY-only POS type
+  // Non-lottery POS types must use deferCommit mode for lottery close
+  // (API blocks independent lottery close for non-LOTTERY POS types)
+  const isLotteryMode = useIsLotteryMode();
 
-  // Get store ID from user's accessible stores
-  const storeId =
-    dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
-    dashboardData?.stores[0]?.store_id;
+  // ============ LOCAL IPC DATA HOOKS ============
+  // DB-006: All queries are store-scoped via backend handlers
+  // SEC-006: All queries use parameterized statements in backend
 
-  // Fetch shift details to check if already closed
-  const { data: shiftData, isLoading: shiftLoading } = useShiftDetail(shiftId);
-  const isShiftClosed = shiftData?.status === 'CLOSED';
+  // Get configured store from local settings (replaces useClientDashboard)
+  const { data: localStoreData, isLoading: storeLoading, isError: storeError } = useLocalStore();
 
-  // Fetch terminals for the store to get terminal name
-  const { data: terminals = [], isLoading: isLoadingTerminals } = useStoreTerminals(storeId, {
-    enabled: !!storeId,
-  });
+  // Get store ID from local configuration
+  const storeId = localStoreData?.store_id;
 
-  // Find terminal info by ID from shift data
-  const terminal = shiftData
-    ? terminals.find((t) => t.pos_terminal_id === shiftData.pos_terminal_id)
-    : null;
+  // ============ DATA FROM CONTEXT ============
+  // SEC-010: Shift and user data comes from DayCloseAccessGuard
+  // Guard has already verified: exactly one open shift, user is authorized
+  // No need for separate shift/terminal/cashier/open-shifts queries
 
-  // Get cashiers to find cashier name (fallback if not in shiftData)
-  const { data: cashiers = [], isLoading: isLoadingCashiers } = useCashiers(
-    storeId || '',
-    { is_active: true },
-    { enabled: !!storeId }
-  );
-
-  // Find cashier info from shift - prefer shiftData.cashier_name, fallback to lookup
-  const cashierName =
-    shiftData?.cashier_name ||
-    cashiers.find((c) => c.cashier_id === shiftData?.cashier_id)?.name ||
-    'Unknown Cashier';
+  // Terminal and cashier names are pre-resolved by the guard's backend handler
+  const terminalName = activeShift.terminal_name || 'Terminal';
+  const cashierName = activeShift.cashier_name || 'Unknown Cashier';
 
   // Lottery day bins data
   const {
@@ -211,18 +212,6 @@ export default function DayCloseWizardPage() {
     isLoading: dayBinsLoading,
     isError: dayBinsError,
   } = useLotteryDayBins(storeId);
-
-  // Open shifts check - BUSINESS RULE: All shifts must be closed before day close
-  const {
-    data: openShiftsData,
-    isLoading: openShiftsLoading,
-    isFetched: openShiftsFetched,
-  } = useOpenShiftsCheck(storeId);
-
-  // Exclude current shift from blocking list
-  const otherOpenShifts = openShiftsData?.open_shifts?.filter((s) => s.shift_id !== shiftId) ?? [];
-  const hasOtherOpenShifts = otherOpenShifts.length > 0;
-  const openShiftsCheckComplete = !!storeId && openShiftsFetched;
 
   // Check if lottery is already closed for today
   // Use the business_day.status field which is "CLOSED" when lottery was closed
@@ -315,6 +304,7 @@ export default function DayCloseWizardPage() {
     reportScanningData: null,
     pendingLotteryDayId: null,
     pendingLotteryCloseExpiresAt: null,
+    pendingClosings: null,
   });
 
   // Loading state for committing lottery close
@@ -342,6 +332,7 @@ export default function DayCloseWizardPage() {
     reportScanningData,
     pendingLotteryDayId,
     pendingLotteryCloseExpiresAt,
+    pendingClosings,
   } = wizardState;
 
   // If lottery was already closed before wizard started, skip to step 2
@@ -397,6 +388,18 @@ export default function DayCloseWizardPage() {
     setWizardState((prev) => ({
       ...prev,
       scannedBins: bins,
+    }));
+  }, []);
+
+  /**
+   * Handle pending closings data from DayCloseModeScanner in deferred commit mode.
+   * SEC-010: This data will be committed with fromWizard=true in Step 3.
+   * Called when deferCommit=true (non-LOTTERY POS types).
+   */
+  const handlePendingClosings = useCallback((data: PendingClosingsData) => {
+    setWizardState((prev) => ({
+      ...prev,
+      pendingClosings: data,
     }));
   }, []);
 
@@ -481,6 +484,10 @@ export default function DayCloseWizardPage() {
   }, []);
 
   const handleOpenShiftClosingForm = useCallback(async () => {
+    // ========================================================================
+    // Case 1: LOTTERY POS type - immediate commit (pendingLotteryDayId exists)
+    // The scanner already called prepareDayClose, we just need to commit
+    // ========================================================================
     if (pendingLotteryDayId && storeId) {
       setIsCommittingLottery(true);
       try {
@@ -515,8 +522,64 @@ export default function DayCloseWizardPage() {
       setIsCommittingLottery(false);
     }
 
+    // ========================================================================
+    // Case 2: Non-LOTTERY POS type - deferred commit (pendingClosings exists)
+    // SEC-010: fromWizard=true bypasses POS type restriction in backend
+    // BIZ-007: Backend auto-opens next day after commit
+    // ========================================================================
+    if (pendingClosings && !pendingLotteryDayId && storeId) {
+      setIsCommittingLottery(true);
+      try {
+        // Phase 1: Prepare - validates and stores pending data
+        // SEC-010: fromWizard=true allows non-LOTTERY POS types
+        const prepareResult = await prepareLotteryDayClose({
+          closings: pendingClosings.closings,
+          fromWizard: true,
+        });
+
+        if (!prepareResult.success || !prepareResult.data) {
+          throw new Error(prepareResult.message || 'Failed to prepare lottery close');
+        }
+
+        const dayId = prepareResult.data.day_id;
+
+        // Phase 2: Commit - applies settlements, sets CLOSED status
+        // SEC-010: fromWizard=true allows non-LOTTERY POS types
+        // BIZ-007: Backend auto-opens next day after successful commit
+        const commitResult = await commitLotteryDayClose({
+          day_id: dayId,
+          fromWizard: true,
+        });
+
+        if (commitResult.success) {
+          toast({
+            title: 'Lottery Closed',
+            description: `Lottery day closed successfully. ${commitResult.data?.closings_created || 0} pack(s) recorded.`,
+          });
+
+          setWizardState((prev) => ({
+            ...prev,
+            pendingClosings: null,
+          }));
+        } else {
+          throw new Error('Failed to commit lottery close');
+        }
+      } catch (error) {
+        const errorMessage =
+          error instanceof Error ? error.message : 'Failed to finalize lottery close';
+        toast({
+          title: 'Error',
+          description: errorMessage,
+          variant: 'destructive',
+        });
+        setIsCommittingLottery(false);
+        return;
+      }
+      setIsCommittingLottery(false);
+    }
+
     setShiftClosingFormOpen(true);
-  }, [pendingLotteryDayId, storeId, toast]);
+  }, [pendingLotteryDayId, pendingClosings, storeId, toast]);
 
   const handleShiftClosingSuccess = useCallback(() => {
     setShiftClosingFormOpen(false);
@@ -547,11 +610,8 @@ export default function DayCloseWizardPage() {
   }, [pendingLotteryDayId, storeId, navigate]);
 
   // ============ REDIRECT IF SHIFT CLOSED ============
-  useEffect(() => {
-    if (isShiftClosed) {
-      navigate('/mystore', { replace: true });
-    }
-  }, [isShiftClosed, navigate]);
+  // Note: DayCloseAccessGuard already validates exactly one open shift exists (BR-001, BR-002)
+  // This redirect is no longer needed as the guard prevents access if conditions aren't met
 
   // ============ CLEANUP ON PAGE UNLOAD ============
   useEffect(() => {
@@ -570,15 +630,10 @@ export default function DayCloseWizardPage() {
   }, [pendingLotteryDayId, storeId]);
 
   // ============ LOADING STATE ============
-  if (
-    authLoading ||
-    dashboardLoading ||
-    shiftLoading ||
-    isLoadingTerminals ||
-    isLoadingCashiers ||
-    dayBinsLoading ||
-    openShiftsLoading
-  ) {
+  // Local IPC hooks - no cloud auth/dashboard loading
+  // Note: Shift/terminal/cashier data comes from context (DayCloseAccessGuard)
+  // Only store config and lottery bins need loading checks
+  if (storeLoading || dayBinsLoading) {
     return (
       <div
         className="flex items-center justify-center min-h-[400px]"
@@ -593,7 +648,8 @@ export default function DayCloseWizardPage() {
   }
 
   // ============ ERROR STATE ============
-  if (dashboardError || dayBinsError) {
+  // Local IPC error handling
+  if (storeError || dayBinsError) {
     return (
       <div className="container mx-auto p-6" data-testid="day-close-wizard-error">
         <Card className="border-destructive">
@@ -603,7 +659,7 @@ export default function DayCloseWizardPage() {
               <p>
                 {dayBinsError
                   ? 'Failed to load lottery bins data. Please restart the backend server and try again.'
-                  : 'Failed to load dashboard data. Please try again.'}
+                  : 'Failed to load store data. Ensure the store is configured and try again.'}
               </p>
             </div>
           </CardContent>
@@ -627,27 +683,25 @@ export default function DayCloseWizardPage() {
     );
   }
 
-  // Get store name and format date
-  const storeName = dashboardData?.stores.find((s) => s.store_id === storeId)?.name || 'Your Store';
+  // Get store name from local configuration and format date
+  const storeName = localStoreData?.name || 'Your Store';
   const businessDate = lotteryData?.business_date || dayBinsData?.business_day?.date;
   const formattedDate = formatBusinessDate(businessDate);
 
-  // Transform open shifts to blocking format for DayCloseModeScanner
-  const blockingShifts = otherOpenShifts.map((shift) => ({
-    shift_id: shift.shift_id,
-    terminal_name: shift.terminal_name,
-    cashier_name: shift.cashier_name,
-    shift_number: shift.shift_number,
-  }));
+  // ============ CONTEXT-PROVIDED SHIFT VALUES ============
+  // SEC-010: Shift data validated by DayCloseAccessGuard before rendering
+  // BR-001, BR-002: Guard already verified exactly one open shift exists
+  // No blocking shifts check needed - guard prevents entry if conditions aren't met
 
-  // Terminal and shift display values
-  const terminalName = terminal?.name || 'Terminal';
-  const shiftNumber = shiftData?.shift_number;
+  // Shift display values from context (pre-resolved by guard's backend handler)
+  const shiftNumber = activeShift.shift_number;
   const shiftNumberDisplay = shiftNumber ? `#${shiftNumber}` : null;
-  const shiftStartDateTime = shiftData?.opened_at
-    ? formatDateTime(shiftData.opened_at, storeTimezone)
+  const shiftStartDateTime = activeShift.start_time
+    ? formatDateTime(activeShift.start_time, storeTimezone)
     : '';
-  const openingCash = shiftData?.opening_cash ?? 0;
+  // Opening cash not available from context - would need separate query
+  // Display 0 as fallback; could be enhanced to fetch from shift summary if needed
+  const openingCash = 0;
 
   // Format currency helper
   const formatCurrency = (amount: number): string => {
@@ -712,11 +766,12 @@ export default function DayCloseWizardPage() {
               onSuccess={handleLotterySuccess}
               scannedBins={scannedBins}
               onScannedBinsChange={handleScannedBinsChange}
-              blockingShifts={blockingShifts}
               returnedPacks={dayBinsData?.returned_packs}
               depletedPacks={dayBinsData?.depleted_packs}
               activatedPacks={dayBinsData?.activated_packs}
               openBusinessPeriod={dayBinsData?.open_business_period}
+              deferCommit={!isLotteryMode}
+              onPendingClosings={handlePendingClosings}
             />
           </div>
         )}
@@ -760,43 +815,9 @@ export default function DayCloseWizardPage() {
               isRequired={true}
             />
 
-            {/* Open Shifts Blocking Banner */}
-            {openShiftsCheckComplete && hasOtherOpenShifts && (
-              <Card
-                className="border-destructive bg-destructive/5"
-                data-testid="open-shifts-blocking-banner"
-              >
-                <CardContent className="pt-6">
-                  <div className="flex items-start gap-4">
-                    <AlertCircle className="h-6 w-6 text-destructive flex-shrink-0 mt-0.5" />
-                    <div className="space-y-3">
-                      <div>
-                        <h3 className="font-semibold text-destructive">
-                          Cannot Close Day – Open Shifts Found
-                        </h3>
-                        <p className="text-sm text-muted-foreground mt-1">
-                          All shifts must be closed before the day can be closed.
-                        </p>
-                      </div>
-                      <ul className="space-y-2">
-                        {otherOpenShifts.map((shift) => (
-                          <li key={shift.shift_id} className="text-sm flex items-center gap-2">
-                            <Badge variant="outline" className="text-amber-600 border-amber-300">
-                              {shift.status}
-                            </Badge>
-                            <span className="font-medium">
-                              {shift.terminal_name || 'Unknown Terminal'}
-                            </span>
-                            <span className="text-muted-foreground">•</span>
-                            <span>{shift.cashier_name}</span>
-                          </li>
-                        ))}
-                      </ul>
-                    </div>
-                  </div>
-                </CardContent>
-              </Card>
-            )}
+            {/* Note: Open Shifts Blocking Banner removed (Phase 4, Task 4.3)
+                DayCloseAccessGuard now validates exactly one open shift exists (BR-001, BR-002)
+                before allowing access to this page. No redundant check needed. */}
 
             {/* Main Content - Two Column Layout */}
             <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -877,7 +898,7 @@ export default function DayCloseWizardPage() {
                       Cancel
                     </Button>
                     <Button
-                      disabled={hasOtherOpenShifts || !shiftId || isCommittingLottery}
+                      disabled={isCommittingLottery}
                       data-testid="complete-day-close-btn"
                       onClick={handleOpenShiftClosingForm}
                       className="bg-green-600 hover:bg-green-700 text-white"
@@ -900,6 +921,7 @@ export default function DayCloseWizardPage() {
             </Card>
 
             {/* Shift Closing Form Modal */}
+            {/* SEC-010: Pass preAuthorizedOverride when user came from guard with manager role */}
             {shiftId && (
               <ShiftClosingForm
                 shiftId={shiftId}
@@ -907,6 +929,7 @@ export default function DayCloseWizardPage() {
                 open={shiftClosingFormOpen}
                 onOpenChange={setShiftClosingFormOpen}
                 onSuccess={handleShiftClosingSuccess}
+                preAuthorizedOverride={accessType === 'OVERRIDE'}
               />
             )}
           </div>

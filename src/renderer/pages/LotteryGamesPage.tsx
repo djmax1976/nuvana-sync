@@ -14,11 +14,13 @@
  */
 
 import React, { useState, useCallback, useMemo } from 'react';
-import { Link } from 'react-router-dom';
 import { useGamesListPaginated, usePacksByGame, useInvalidateLottery } from '../hooks/useLottery';
 import { useClientDashboard } from '../lib/api/client-dashboard';
+import { useAuthGuard } from '../hooks/useAuthGuard';
 import { LoadingSpinner } from '../components/ui/LoadingSpinner';
 import { ReturnPackDialog } from '../components/lottery/ReturnPackDialog';
+import { PackReceptionForm } from '../components/lottery/PackReceptionForm';
+import { PinVerificationDialog, type VerifiedUser } from '../components/auth/PinVerificationDialog';
 import {
   Search,
   Package,
@@ -27,6 +29,7 @@ import {
   ChevronDown,
   Loader2,
   Undo2,
+  Plus,
 } from 'lucide-react';
 import { Button } from '../components/ui/button';
 import type {
@@ -75,6 +78,12 @@ export default function LotteryGamesPage() {
   const [returnPackDialogOpen, setReturnPackDialogOpen] = useState(false);
   const [packIdToReturn, setPackIdToReturn] = useState<string | null>(null);
   const [packDataToReturn, setPackDataToReturn] = useState<LotteryPackResponse | null>(null);
+
+  // Receive Pack dialog state
+  // FE-001: Auth guard for session-first validation (check before showing dialog)
+  const { executeWithAuth } = useAuthGuard('cashier');
+  const [receptionDialogOpen, setReceptionDialogOpen] = useState(false);
+  const [receptionPinDialogOpen, setReceptionPinDialogOpen] = useState(false);
 
   // Get store ID from dashboard
   const { data: dashboardData } = useClientDashboard();
@@ -196,6 +205,26 @@ export default function LotteryGamesPage() {
     setPackIdToReturn(null);
   }, [invalidateAll]);
 
+  /**
+   * Handle Receive Pack button click
+   * FE-001: Check session first, only show PIN dialog if session invalid
+   */
+  const handleReceivePackClick = useCallback(() => {
+    executeWithAuth(
+      () => setReceptionDialogOpen(true),
+      () => setReceptionPinDialogOpen(true)
+    );
+  }, [executeWithAuth]);
+
+  /**
+   * Handle Pack Reception PIN verification success
+   * SEC-010: AUTHZ - PIN verification logs user in, backend tracks received_by from session
+   */
+  const handleReceptionPinVerified = useCallback((_user: VerifiedUser) => {
+    setReceptionPinDialogOpen(false);
+    setReceptionDialogOpen(true);
+  }, []);
+
   // Error state
   if (error) {
     return (
@@ -218,12 +247,15 @@ export default function LotteryGamesPage() {
             View all lottery games and their pack inventory
           </p>
         </div>
-        <Link
-          to="/lottery"
-          className="px-4 py-2 text-sm font-medium bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          Manage Packs
-        </Link>
+        <div className="flex items-center gap-2">
+          <Button
+            onClick={handleReceivePackClick}
+            data-testid="receive-pack-button"
+          >
+            <Plus className="mr-2 h-4 w-4" />
+            Receive Pack
+          </Button>
+        </div>
       </div>
 
       {/* Filters */}
@@ -395,6 +427,26 @@ export default function LotteryGamesPage() {
         packId={packIdToReturn}
         packData={packDataToReturn}
         onSuccess={handleReturnPackSuccess}
+      />
+
+      {/* Pack Reception PIN Verification Dialog
+          SEC-010: AUTHZ - Verify user before allowing pack reception
+      */}
+      <PinVerificationDialog
+        open={receptionPinDialogOpen}
+        onClose={() => setReceptionPinDialogOpen(false)}
+        onVerified={handleReceptionPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Pack Reception"
+        description="Enter your PIN to receive lottery packs into inventory."
+      />
+
+      {/* Pack Reception Dialog */}
+      <PackReceptionForm
+        storeId={storeId!}
+        open={receptionDialogOpen}
+        onOpenChange={setReceptionDialogOpen}
+        onSuccess={() => invalidateAll()}
       />
     </div>
   );

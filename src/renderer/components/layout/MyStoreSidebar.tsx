@@ -20,11 +20,12 @@ import {
   Users,
   CalendarClock,
   Receipt,
-  RefreshCw,
   BarChart3,
+  CalendarCheck,
 } from 'lucide-react';
 import logo from '../../assets/logo.png';
 import { SyncStatusIndicator } from './SyncStatusIndicator';
+import { useIsLotteryMode } from '../../hooks/usePOSConnectionType';
 
 interface MyStoreSidebarProps {
   className?: string;
@@ -47,6 +48,7 @@ interface MyStoreSidebarProps {
 export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const location = useLocation();
   const pathname = location.pathname;
+  const isLotteryMode = useIsLotteryMode();
 
   // Determine active states
   const isDashboardActive = pathname === '/' || pathname === '/mystore';
@@ -58,7 +60,7 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
   const isReportsActive = pathname === '/reports';
   const isTransactionsActive = pathname === '/transactions';
   const isEmployeesActive = pathname === '/employees';
-  const isSyncActive = pathname === '/sync';
+  const isDayCloseActive = pathname === '/day-close';
 
   return (
     <div
@@ -86,21 +88,23 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
           <span>Dashboard</span>
         </Link>
 
-        {/* Clock In/Out Link */}
-        <Link
-          to="/clock-in-out"
-          data-testid="clock-in-out-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isClockInOutActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <Clock className="h-5 w-5" />
-          <span>Clock In/Out</span>
-        </Link>
+        {/* Clock In/Out Link - Hidden in lottery mode (SC-NAV-002) */}
+        {!isLotteryMode && (
+          <Link
+            to="/clock-in-out"
+            data-testid="clock-in-out-link"
+            onClick={() => onNavigate?.()}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isClockInOutActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <Clock className="h-5 w-5" />
+            <span>Clock In/Out</span>
+          </Link>
+        )}
 
         {/* Lottery Management Link */}
         <Link
@@ -124,47 +128,69 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
           data-testid="lottery-games-link"
           onClick={() => onNavigate?.()}
           className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors ml-4',
+            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
             isLotteryGamesActive
               ? 'bg-primary text-primary-foreground'
               : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
           )}
         >
-          <Package className="h-4 w-4" />
-          <span>Inventory</span>
+          <Package className="h-5 w-5" />
+          <span>Lottery Inventory</span>
         </Link>
 
-        {/* Terminals Link */}
-        <Link
-          to="/terminals"
-          data-testid="terminals-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isTerminalsActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <Monitor className="h-5 w-5" />
-          <span>Terminals</span>
-        </Link>
+        {/* Terminals Link - Hidden in lottery mode (SC-NAV-002) */}
+        {!isLotteryMode && (
+          <Link
+            to="/terminals"
+            data-testid="terminals-link"
+            onClick={() => onNavigate?.()}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isTerminalsActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <Monitor className="h-5 w-5" />
+            <span>Terminals</span>
+          </Link>
+        )}
 
-        {/* Shifts Link */}
-        <Link
-          to="/shifts"
-          data-testid="shifts-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isShiftsActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <CalendarClock className="h-5 w-5" />
-          <span>Shifts</span>
-        </Link>
+        {/* Shifts Link - Hidden in lottery mode (SC-NAV-002) */}
+        {!isLotteryMode && (
+          <Link
+            to="/shifts"
+            data-testid="shifts-link"
+            onClick={() => onNavigate?.()}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isShiftsActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <CalendarClock className="h-5 w-5" />
+            <span>Shifts</span>
+          </Link>
+        )}
+
+        {/* Day Close Link - Only for MANUAL_ENTRY stores (SC-NAV-003) */}
+        {!isLotteryMode && (
+          <Link
+            to="/day-close"
+            data-testid="day-close-link"
+            onClick={() => onNavigate?.()}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isDayCloseActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <CalendarCheck className="h-5 w-5" />
+            <span>Day Close</span>
+          </Link>
+        )}
 
         {/* Reports Link */}
         <Link
@@ -182,21 +208,23 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
           <span>Reports</span>
         </Link>
 
-        {/* Transactions Link */}
-        <Link
-          to="/transactions"
-          data-testid="transactions-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isTransactionsActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <Receipt className="h-5 w-5" />
-          <span>Transactions</span>
-        </Link>
+        {/* Transactions Link - Hidden in lottery mode (SC-NAV-002) */}
+        {!isLotteryMode && (
+          <Link
+            to="/transactions"
+            data-testid="transactions-link"
+            onClick={() => onNavigate?.()}
+            className={cn(
+              'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
+              isTransactionsActive
+                ? 'bg-primary text-primary-foreground'
+                : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
+            )}
+          >
+            <Receipt className="h-5 w-5" />
+            <span>Transactions</span>
+          </Link>
+        )}
 
         {/* Employees Link */}
         <Link
@@ -212,22 +240,6 @@ export function MyStoreSidebar({ className, onNavigate }: MyStoreSidebarProps) {
         >
           <Users className="h-5 w-5" />
           <span>Employees</span>
-        </Link>
-
-        {/* Sync Monitor Link */}
-        <Link
-          to="/sync"
-          data-testid="sync-link"
-          onClick={() => onNavigate?.()}
-          className={cn(
-            'flex items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors',
-            isSyncActive
-              ? 'bg-primary text-primary-foreground'
-              : 'text-muted-foreground hover:bg-accent hover:text-accent-foreground'
-          )}
-        >
-          <RefreshCw className="h-5 w-5" />
-          <span>Sync Monitor</span>
         </Link>
       </nav>
 

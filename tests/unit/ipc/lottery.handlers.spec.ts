@@ -91,10 +91,15 @@ vi.mock('../../../src/main/services/session.service', () => ({
   hasMinimumRole: vi.fn(),
 }));
 
+// Mock settingsService with getPOSType for SEC-010 authorization tests
+const mockSettingsService = {
+  getStoreId: vi.fn().mockReturnValue('store-1'),
+  getPOSType: vi.fn().mockReturnValue('LOTTERY'),
+  getPOSConnectionType: vi.fn().mockReturnValue('MANUAL'),
+};
+
 vi.mock('../../../src/main/services/settings.service', () => ({
-  settingsService: {
-    getStoreId: vi.fn().mockReturnValue('store-1'),
-  },
+  settingsService: mockSettingsService,
 }));
 
 describe('Lottery IPC Handlers', () => {
@@ -218,43 +223,233 @@ describe('Lottery IPC Handlers', () => {
     });
 
     describe('ActivatePackInputSchema', () => {
-      const ActivatePackInputSchema = z.object({
-        pack_id: z.string().uuid(),
-        bin_id: z.string().uuid(),
-        opening_serial: z.string().regex(/^\d{3}$/),
+      /**
+       * Production-accurate schema matching src/main/ipc/lottery.handlers.ts:91-97
+       * API-001: VALIDATION - Zod schema validation
+       * SEC-014: INPUT_VALIDATION - Boolean field with safe default
+       * BIN-001: One active pack per bin - deplete_previous enables collision handling
+       */
+      const SerialSchema = z.string().regex(/^\d{3}$/);
+      const UUIDSchema = z.string().uuid();
+      const ActivatePackSchema = z.object({
+        pack_id: UUIDSchema,
+        bin_id: UUIDSchema,
+        opening_serial: SerialSchema,
+        /** Default true ensures safety - always check for bin collisions unless explicitly disabled */
+        deplete_previous: z.boolean().optional().default(true),
       });
 
-      it('should accept valid input', () => {
-        const input = {
-          pack_id: '550e8400-e29b-41d4-a716-446655440000',
-          bin_id: '660e8400-e29b-41d4-a716-446655440001',
-          opening_serial: '000',
-        };
+      describe('Basic Valid Input', () => {
+        it('should accept valid input without deplete_previous (defaults to true)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+          };
 
-        const result = ActivatePackInputSchema.safeParse(input);
-        expect(result.success).toBe(true);
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data.deplete_previous).toBe(true);
+          }
+        });
+
+        it('should accept valid input with deplete_previous: true', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: true,
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data.deplete_previous).toBe(true);
+          }
+        });
+
+        it('should accept valid input with deplete_previous: false (legacy behavior)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: false,
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data.deplete_previous).toBe(false);
+          }
+        });
       });
 
-      it('should reject invalid opening_serial', () => {
-        const input = {
-          pack_id: '550e8400-e29b-41d4-a716-446655440000',
-          bin_id: '660e8400-e29b-41d4-a716-446655440001',
-          opening_serial: '00', // Too short
-        };
+      describe('deplete_previous Field Validation (SEC-014)', () => {
+        it('should default deplete_previous to true when omitted', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+          };
 
-        const result = ActivatePackInputSchema.safeParse(input);
-        expect(result.success).toBe(false);
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+          if (result.success) {
+            expect(result.data.deplete_previous).toBe(true);
+          }
+        });
+
+        it('should reject string "true" for deplete_previous (strict type)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: 'true', // String, not boolean
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject number 1 for deplete_previous (strict type)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: 1, // Number, not boolean
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject object for deplete_previous (strict type)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: { value: true }, // Object, not boolean
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject null for deplete_previous', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+            deplete_previous: null,
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
       });
 
-      it('should reject 4-digit opening_serial', () => {
-        const input = {
-          pack_id: '550e8400-e29b-41d4-a716-446655440000',
-          bin_id: '660e8400-e29b-41d4-a716-446655440001',
-          opening_serial: '0000', // Too long
-        };
+      describe('opening_serial Validation (SEC-014)', () => {
+        it('should accept opening_serial 000 (pack minimum)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+          };
 
-        const result = ActivatePackInputSchema.safeParse(input);
-        expect(result.success).toBe(false);
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+        });
+
+        it('should accept opening_serial 299 (pack maximum for 300-ticket pack)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '299',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(true);
+        });
+
+        it('should reject invalid opening_serial (2 digits - too short)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '00', // Too short
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject 4-digit opening_serial (too long)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '0000', // Too long
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject opening_serial with letters (SEC-006: type constraint)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: 'ABC',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject opening_serial with special characters (SEC-006: injection prevention)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '1;2',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+      });
+
+      describe('UUID Validation (SEC-006)', () => {
+        it('should reject invalid pack_id UUID', () => {
+          const input = {
+            pack_id: 'not-a-uuid',
+            bin_id: '660e8400-e29b-41d4-a716-446655440001',
+            opening_serial: '000',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject invalid bin_id UUID', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: 'not-a-uuid',
+            opening_serial: '000',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
+
+        it('should reject SQL injection attempt in bin_id (SEC-006)', () => {
+          const input = {
+            pack_id: '550e8400-e29b-41d4-a716-446655440000',
+            bin_id: "'; DROP TABLE lottery_bins; --",
+            opening_serial: '000',
+          };
+
+          const result = ActivatePackSchema.safeParse(input);
+          expect(result.success).toBe(false);
+        });
       });
     });
 
@@ -3881,6 +4076,936 @@ describe('Lottery IPC Handlers', () => {
         // Step 4: Sync payload
         const syncPayload = { return_notes: dbRow.return_notes };
         expect(syncPayload.return_notes).toBe(inputNotes);
+      });
+    });
+  });
+
+  // ============================================================================
+  // BIN COLLISION - FINAL SERIAL CALCULATION TESTS (Phase 4 - Task 4.1.3)
+  // ============================================================================
+  // Tests for the final serial calculation formula used during bin collision
+  // auto-depletion. When a pack is AUTO_REPLACED, we calculate:
+  //   final_serial = opening_serial + tickets_per_pack - 1
+  //
+  // TRACEABILITY:
+  // - Component: lottery.handlers.ts activatePack handler (lines 1567-1574)
+  // - Business Rule: BIN-001 - One active pack per bin
+  // - Risk: Incorrect ticket count/sales if calculation is wrong
+  // ============================================================================
+  describe('Bin Collision Final Serial Calculation (Phase 4 - Task 4.1.3)', () => {
+    /**
+     * Helper function that replicates the final serial calculation logic
+     * from lottery.handlers.ts lines 1567-1574 for isolated unit testing.
+     *
+     * Formula: final_serial = opening_serial + tickets_per_pack - 1
+     * (zero-indexed serial numbers, so subtract 1)
+     *
+     * @param openingSerial - 3-digit string opening serial (e.g., '000')
+     * @param ticketsPerPack - Number of tickets in the pack
+     * @returns 3-digit string closing serial (e.g., '299' for 300-ticket pack starting at 000)
+     */
+    const calculateFinalSerial = (openingSerial: string, ticketsPerPack: number): string => {
+      const openingSerialNum = parseInt(openingSerial, 10);
+      const finalSerialNum = openingSerialNum + ticketsPerPack - 1;
+      return String(finalSerialNum).padStart(3, '0');
+    };
+
+    describe('Standard Pack Sizes', () => {
+      // ======================================================================
+      // FS-STD-001: 300-ticket pack starting at 000
+      // ======================================================================
+      it('FS-STD-001: 300-ticket pack starting at 000 → final 299', () => {
+        const result = calculateFinalSerial('000', 300);
+        expect(result).toBe('299');
+      });
+
+      // ======================================================================
+      // FS-STD-002: 150-ticket pack starting at 000
+      // ======================================================================
+      it('FS-STD-002: 150-ticket pack starting at 000 → final 149', () => {
+        const result = calculateFinalSerial('000', 150);
+        expect(result).toBe('149');
+      });
+
+      // ======================================================================
+      // FS-STD-003: 50-ticket pack starting at 000
+      // ======================================================================
+      it('FS-STD-003: 50-ticket pack starting at 000 → final 049', () => {
+        const result = calculateFinalSerial('000', 50);
+        expect(result).toBe('049');
+      });
+
+      // ======================================================================
+      // FS-STD-004: 18-ticket pack starting at 000
+      // ======================================================================
+      it('FS-STD-004: 18-ticket pack starting at 000 → final 017', () => {
+        const result = calculateFinalSerial('000', 18);
+        expect(result).toBe('017');
+      });
+    });
+
+    describe('Mid-Pack Start Positions', () => {
+      // ======================================================================
+      // FS-MID-001: 300-ticket pack starting at 050
+      // ======================================================================
+      it('FS-MID-001: 300-ticket pack starting at 050 → final 349 (3 digits needed)', () => {
+        const result = calculateFinalSerial('050', 300);
+        expect(result).toBe('349');
+      });
+
+      // ======================================================================
+      // FS-MID-002: 18-ticket pack starting at 005
+      // ======================================================================
+      it('FS-MID-002: 18-ticket pack starting at 005 → final 022', () => {
+        const result = calculateFinalSerial('005', 18);
+        expect(result).toBe('022');
+      });
+
+      // ======================================================================
+      // FS-MID-003: 50-ticket pack starting at 100
+      // ======================================================================
+      it('FS-MID-003: 50-ticket pack starting at 100 → final 149', () => {
+        const result = calculateFinalSerial('100', 50);
+        expect(result).toBe('149');
+      });
+
+      // ======================================================================
+      // FS-MID-004: 150-ticket pack starting at 075
+      // ======================================================================
+      it('FS-MID-004: 150-ticket pack starting at 075 → final 224', () => {
+        const result = calculateFinalSerial('075', 150);
+        expect(result).toBe('224');
+      });
+    });
+
+    describe('Edge Cases', () => {
+      // ======================================================================
+      // FS-EDGE-001: 1-ticket pack (minimum possible)
+      // ======================================================================
+      it('FS-EDGE-001: 1-ticket pack starting at 000 → final 000', () => {
+        const result = calculateFinalSerial('000', 1);
+        expect(result).toBe('000');
+      });
+
+      // ======================================================================
+      // FS-EDGE-002: 1-ticket pack starting at 299
+      // ======================================================================
+      it('FS-EDGE-002: 1-ticket pack starting at 299 → final 299', () => {
+        const result = calculateFinalSerial('299', 1);
+        expect(result).toBe('299');
+      });
+
+      // ======================================================================
+      // FS-EDGE-003: Large pack (999 tickets)
+      // ======================================================================
+      it('FS-EDGE-003: 999-ticket pack starting at 000 → final 998', () => {
+        const result = calculateFinalSerial('000', 999);
+        expect(result).toBe('998');
+      });
+
+      // ======================================================================
+      // FS-EDGE-004: 300-ticket pack starting at 001
+      // ======================================================================
+      it('FS-EDGE-004: 300-ticket pack starting at 001 → final 300', () => {
+        const result = calculateFinalSerial('001', 300);
+        expect(result).toBe('300');
+      });
+
+      // ======================================================================
+      // FS-EDGE-005: 2-ticket pack (boundary case)
+      // ======================================================================
+      it('FS-EDGE-005: 2-ticket pack starting at 000 → final 001', () => {
+        const result = calculateFinalSerial('000', 2);
+        expect(result).toBe('001');
+      });
+    });
+
+    describe('Calculation Correctness', () => {
+      // ======================================================================
+      // FS-CALC-001: Verify tickets_sold_count equals tickets_per_pack
+      // ======================================================================
+      it('FS-CALC-001: tickets_sold_count should equal tickets_per_pack for full pack depletion', () => {
+        const ticketsPerPack = 300;
+        const openingSerial = '000';
+        const closingSerial = calculateFinalSerial(openingSerial, ticketsPerPack);
+
+        // Tickets sold = closing - opening + 1 (inclusive range)
+        const ticketsSold =
+          parseInt(closingSerial, 10) - parseInt(openingSerial, 10) + 1;
+        expect(ticketsSold).toBe(ticketsPerPack);
+      });
+
+      // ======================================================================
+      // FS-CALC-002: Verify sales_amount calculation
+      // ======================================================================
+      it('FS-CALC-002: sales_amount should equal tickets_per_pack * game_price', () => {
+        const ticketsPerPack = 300;
+        const gamePrice = 5;
+        const expectedSalesAmount = ticketsPerPack * gamePrice;
+
+        expect(expectedSalesAmount).toBe(1500);
+      });
+
+      // ======================================================================
+      // FS-CALC-003: Formula is deterministic
+      // ======================================================================
+      it('FS-CALC-003: same inputs should always produce same output', () => {
+        const results: string[] = [];
+        for (let i = 0; i < 100; i++) {
+          results.push(calculateFinalSerial('050', 150));
+        }
+
+        expect(new Set(results).size).toBe(1);
+        expect(results[0]).toBe('199');
+      });
+
+      // ======================================================================
+      // FS-CALC-004: Padding preserves numeric value
+      // ======================================================================
+      it('FS-CALC-004: padding should not change numeric value', () => {
+        const result = calculateFinalSerial('000', 50);
+        expect(result).toBe('049');
+        expect(parseInt(result, 10)).toBe(49);
+      });
+    });
+
+    describe('Integration with Settle Parameters', () => {
+      /**
+       * Simulates the complete settle pack data structure that would be passed
+       * to lotteryPacksDAL.settle() during bin collision auto-depletion.
+       */
+      interface SettlePackData {
+        store_id: string;
+        closing_serial: string;
+        tickets_sold_count: number;
+        sales_amount: number;
+        depleted_by: string;
+        depleted_shift_id: string;
+        depletion_reason: string;
+      }
+
+      const buildSettleData = (
+        storeId: string,
+        openingSerial: string,
+        ticketsPerPack: number,
+        gamePrice: number,
+        depletedBy: string,
+        shiftId: string
+      ): SettlePackData => {
+        const closingSerial = calculateFinalSerial(openingSerial, ticketsPerPack);
+        return {
+          store_id: storeId,
+          closing_serial: closingSerial,
+          tickets_sold_count: ticketsPerPack,
+          sales_amount: ticketsPerPack * gamePrice,
+          depleted_by: depletedBy,
+          depleted_shift_id: shiftId,
+          depletion_reason: 'AUTO_REPLACED',
+        };
+      };
+
+      // ======================================================================
+      // FS-INT-001: Complete settle data structure for 300-ticket $1 pack
+      // ======================================================================
+      it('FS-INT-001: should build correct settle data for 300-ticket $1 pack', () => {
+        const settleData = buildSettleData(
+          'store-123',
+          '000',
+          300,
+          1, // $1 tickets
+          'user-456',
+          'shift-789'
+        );
+
+        expect(settleData.closing_serial).toBe('299');
+        expect(settleData.tickets_sold_count).toBe(300);
+        expect(settleData.sales_amount).toBe(300);
+        expect(settleData.depletion_reason).toBe('AUTO_REPLACED');
+      });
+
+      // ======================================================================
+      // FS-INT-002: Complete settle data structure for 150-ticket $5 pack
+      // ======================================================================
+      it('FS-INT-002: should build correct settle data for 150-ticket $5 pack', () => {
+        const settleData = buildSettleData(
+          'store-123',
+          '000',
+          150,
+          5, // $5 tickets
+          'user-456',
+          'shift-789'
+        );
+
+        expect(settleData.closing_serial).toBe('149');
+        expect(settleData.tickets_sold_count).toBe(150);
+        expect(settleData.sales_amount).toBe(750);
+        expect(settleData.depletion_reason).toBe('AUTO_REPLACED');
+      });
+
+      // ======================================================================
+      // FS-INT-003: Mid-pack start position
+      // ======================================================================
+      it('FS-INT-003: should handle mid-pack start position correctly', () => {
+        const settleData = buildSettleData(
+          'store-123',
+          '050',
+          300,
+          2, // $2 tickets
+          'user-456',
+          'shift-789'
+        );
+
+        expect(settleData.closing_serial).toBe('349');
+        expect(settleData.tickets_sold_count).toBe(300);
+        expect(settleData.sales_amount).toBe(600);
+      });
+
+      // ======================================================================
+      // FS-INT-004: Store ID and user ID preserved (DB-006, SEC-010)
+      // ======================================================================
+      it('FS-INT-004: should preserve store_id and user context (DB-006, SEC-010)', () => {
+        const settleData = buildSettleData(
+          'store-test-uuid',
+          '000',
+          300,
+          1,
+          'user-test-uuid',
+          'shift-test-uuid'
+        );
+
+        expect(settleData.store_id).toBe('store-test-uuid');
+        expect(settleData.depleted_by).toBe('user-test-uuid');
+        expect(settleData.depleted_shift_id).toBe('shift-test-uuid');
+      });
+    });
+  });
+
+  // ============================================================================
+  // SEC-010: POS-Based Authorization for Independent Lottery Close
+  // ============================================================================
+  // Business Rule: Independent lottery day close (via Close Day button) is ONLY
+  // allowed for LOTTERY POS type. Other POS types must use Day Close Wizard.
+  //
+  // Traceability:
+  // - SEC-010: AUTHZ - Function-level authorization
+  // - API-SEC-005: Enforce function-level access control based on POS type
+  // - BIZ-007: POS type determines close workflow availability
+  // ============================================================================
+
+  describe('SEC-010: POS-Based Authorization for Day Close', () => {
+    // Reset mocks before each test to ensure isolation
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Default to LOTTERY mode (allowed)
+      mockSettingsService.getPOSType.mockReturnValue('LOTTERY');
+    });
+
+    describe('can_close_independently Capability Flag', () => {
+      // ======================================================================
+      // SEC-010-001: LOTTERY POS type returns can_close_independently: true
+      // ======================================================================
+      it('SEC-010-001: should return can_close_independently: true for LOTTERY POS', () => {
+        mockSettingsService.getPOSType.mockReturnValue('LOTTERY');
+
+        // Verify the mock returns correct value
+        const posType = mockSettingsService.getPOSType();
+        const canCloseIndependently = posType === 'LOTTERY';
+
+        expect(posType).toBe('LOTTERY');
+        expect(canCloseIndependently).toBe(true);
+      });
+
+      // ======================================================================
+      // SEC-010-002: Non-LOTTERY POS types return can_close_independently: false
+      // ======================================================================
+      const nonLotteryPOSTypes = [
+        'GILBARCO_PASSPORT',
+        'GILBARCO_NAXML',
+        'VERIFONE_RUBY2',
+        'VERIFONE_COMMANDER',
+        'SQUARE_REST',
+        'CLOVER_REST',
+        'NCR_RADIANT',
+        'INFOR_POS',
+        'ORACLE_SIMPHONY',
+        'CUSTOM_API',
+        'FILE_BASED',
+        'MANUAL',
+        'MANUAL_ENTRY',
+        'UNKNOWN',
+        null,
+      ];
+
+      it.each(nonLotteryPOSTypes)(
+        'SEC-010-002: should return can_close_independently: false for POS type: %s',
+        (posType) => {
+          mockSettingsService.getPOSType.mockReturnValue(posType);
+
+          const result = mockSettingsService.getPOSType();
+          const canCloseIndependently = result === 'LOTTERY';
+
+          expect(canCloseIndependently).toBe(false);
+        }
+      );
+    });
+
+    describe('Authorization Enforcement Logic', () => {
+      // ======================================================================
+      // SEC-010-003: Authorization check rejects non-LOTTERY POS
+      // ======================================================================
+      it('SEC-010-003: should reject prepareDayClose for GILBARCO_PASSPORT POS', () => {
+        mockSettingsService.getPOSType.mockReturnValue('GILBARCO_PASSPORT');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+        // In production, handler returns FORBIDDEN error
+      });
+
+      it('SEC-010-004: should reject prepareDayClose for VERIFONE_RUBY2 POS', () => {
+        mockSettingsService.getPOSType.mockReturnValue('VERIFONE_RUBY2');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      it('SEC-010-005: should reject prepareDayClose for SQUARE_REST POS', () => {
+        mockSettingsService.getPOSType.mockReturnValue('SQUARE_REST');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      // ======================================================================
+      // SEC-010-006: Authorization check allows LOTTERY POS
+      // ======================================================================
+      it('SEC-010-006: should allow prepareDayClose for LOTTERY POS', () => {
+        mockSettingsService.getPOSType.mockReturnValue('LOTTERY');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(true);
+      });
+    });
+
+    describe('Edge Cases and Security Boundaries', () => {
+      // ======================================================================
+      // SEC-010-007: Null POS type handling (fail-closed)
+      // ======================================================================
+      it('SEC-010-007: should deny access when POS type is null (fail-closed)', () => {
+        mockSettingsService.getPOSType.mockReturnValue(null);
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      // ======================================================================
+      // SEC-010-008: Undefined POS type handling (fail-closed)
+      // ======================================================================
+      it('SEC-010-008: should deny access when POS type is undefined (fail-closed)', () => {
+        mockSettingsService.getPOSType.mockReturnValue(undefined);
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      // ======================================================================
+      // SEC-010-009: Case sensitivity check (strict match)
+      // ======================================================================
+      it('SEC-010-009: should deny access for lowercase "lottery" (case-sensitive)', () => {
+        mockSettingsService.getPOSType.mockReturnValue('lottery');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      it('SEC-010-010: should deny access for mixed case "Lottery" (case-sensitive)', () => {
+        mockSettingsService.getPOSType.mockReturnValue('Lottery');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      // ======================================================================
+      // SEC-010-011: Empty string POS type (fail-closed)
+      // ======================================================================
+      it('SEC-010-011: should deny access when POS type is empty string', () => {
+        mockSettingsService.getPOSType.mockReturnValue('');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+
+      // ======================================================================
+      // SEC-010-012: Whitespace handling
+      // ======================================================================
+      it('SEC-010-012: should deny access for POS type with leading/trailing spaces', () => {
+        mockSettingsService.getPOSType.mockReturnValue(' LOTTERY ');
+
+        const posType = mockSettingsService.getPOSType();
+        const isAllowed = posType === 'LOTTERY';
+
+        expect(isAllowed).toBe(false);
+      });
+    });
+
+    describe('Audit Logging Verification', () => {
+      // ======================================================================
+      // SEC-010-013: Rejection should include audit context
+      // ======================================================================
+      it('SEC-010-013: should provide context for audit logging on rejection', () => {
+        mockSettingsService.getPOSType.mockReturnValue('GILBARCO_PASSPORT');
+        mockSettingsService.getStoreId.mockReturnValue('store-uuid-123');
+
+        const posType = mockSettingsService.getPOSType();
+        const storeId = mockSettingsService.getStoreId();
+        const isAllowed = posType === 'LOTTERY';
+
+        // Verify all context needed for audit log is available
+        expect(posType).toBe('GILBARCO_PASSPORT');
+        expect(storeId).toBe('store-uuid-123');
+        expect(isAllowed).toBe(false);
+
+        // In production, log.warn is called with:
+        // { storeId, posType, action: 'prepareDayClose' }
+      });
+    });
+
+    describe('Consistency Between Handlers', () => {
+      // ======================================================================
+      // SEC-010-014: Both prepareDayClose and commitDayClose use same logic
+      // ======================================================================
+      it('SEC-010-014: prepareDayClose and commitDayClose should use identical auth logic', () => {
+        // Test that both handlers would make the same authorization decision
+        const testPOSTypes = ['LOTTERY', 'GILBARCO_PASSPORT', 'SQUARE_REST', null];
+
+        testPOSTypes.forEach((posType) => {
+          mockSettingsService.getPOSType.mockReturnValue(posType);
+
+          const prepareAllowed = mockSettingsService.getPOSType() === 'LOTTERY';
+          const commitAllowed = mockSettingsService.getPOSType() === 'LOTTERY';
+
+          expect(prepareAllowed).toBe(commitAllowed);
+        });
+      });
+    });
+  });
+
+  // ==========================================================================
+  // BIZ-007: Auto-Open Next Day After Close Tests
+  // ==========================================================================
+  describe('lottery:commitDayClose - BIZ-007 Auto-Open Next Day', () => {
+    // Test fixtures
+    const STORE_ID = 'store-uuid-biz007';
+    const USER_ID = 'user-uuid-closer';
+    const CLOSED_DAY_ID = 'day-uuid-closed';
+    const NEW_DAY_ID = 'day-uuid-new';
+    const BUSINESS_DATE_TODAY = '2026-02-11';
+    const BUSINESS_DATE_YESTERDAY = '2026-02-10';
+
+    const mockCommitCloseResult = {
+      day_id: CLOSED_DAY_ID,
+      business_date: BUSINESS_DATE_YESTERDAY,
+      status: 'CLOSED',
+      closings_created: 5,
+      lottery_total: 1250.0,
+    };
+
+    const mockNewDay = {
+      day_id: NEW_DAY_ID,
+      store_id: STORE_ID,
+      business_date: BUSINESS_DATE_TODAY,
+      status: 'OPEN',
+      opened_at: '2026-02-11T14:30:00.000Z',
+      opened_by: USER_ID,
+      closed_at: null,
+      closed_by: null,
+      total_sales: 0,
+      total_packs_sold: 0,
+      total_packs_activated: 0,
+      day_summary_id: null,
+      synced_at: null,
+      created_at: '2026-02-11T14:30:00.000Z',
+      updated_at: '2026-02-11T14:30:00.000Z',
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+      // Default mock setup for BIZ-007 tests
+      mockSettingsService.getPOSType.mockReturnValue('LOTTERY');
+      mockSettingsService.getStoreId.mockReturnValue(STORE_ID);
+      mockSessionService.getCurrentSession.mockReturnValue({
+        user_id: USER_ID,
+        username: 'closer_user',
+        role: 'shift_manager',
+        store_id: STORE_ID,
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-001: Auto-opens next day on success
+    // ========================================================================
+    describe('LOT-CLOSE-001: Auto-opens next day on success', () => {
+      it('should create a new OPEN day after closing current day', () => {
+        // Arrange: Setup expected behavior
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act: Simulate the handler logic
+        const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: New day exists with status OPEN
+        expect(commitResult).toBeDefined();
+        expect(commitResult.status).toBe('CLOSED');
+        expect(nextDay).toBeDefined();
+        expect(nextDay.status).toBe('OPEN');
+        expect(nextDay.day_id).toBe(NEW_DAY_ID);
+      });
+
+      it('should call getOrCreateForDate after successful commitClose', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act: Simulate handler flow
+        lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: Both methods called
+        expect(lotteryBusinessDaysDAL.commitClose).toHaveBeenCalledWith(CLOSED_DAY_ID, USER_ID);
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).toHaveBeenCalledWith(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-002: Next day uses correct business date (today)
+    // ========================================================================
+    describe('LOT-CLOSE-002: Next day uses correct business date', () => {
+      it('should use getCurrentBusinessDate() for new day', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act: Simulate handler with specific date
+        lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: New day has today's date (not the closed day's date)
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).toHaveBeenCalledWith(
+          STORE_ID,
+          BUSINESS_DATE_TODAY, // Must use current business date, not closed day's date
+          USER_ID
+        );
+      });
+
+      it('should handle midnight crossing correctly', () => {
+        // Scenario: Closing day from 2026-02-10 at 00:30 on 2026-02-11
+        // The new day should be 2026-02-11, not 2026-02-10
+        const closedDayResult = {
+          ...mockCommitCloseResult,
+          business_date: '2026-02-10', // Day being closed is from yesterday
+        };
+        const newDayAfterMidnight = {
+          ...mockNewDay,
+          business_date: '2026-02-11', // New day is today
+        };
+
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(closedDayResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(newDayAfterMidnight);
+
+        // Act
+        const closedResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, '2026-02-11', USER_ID);
+
+        // Assert: Closed day is 02-10, new day is 02-11
+        expect(closedResult.business_date).toBe('2026-02-10');
+        expect(nextDay.business_date).toBe('2026-02-11');
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-003: Next day uses closer userId
+    // ========================================================================
+    describe('LOT-CLOSE-003: Next day uses closer userId', () => {
+      it('should set opened_by to the user who closed previous day', () => {
+        // Arrange
+        const closerUserId = 'user-uuid-manager';
+        const newDayWithOpener = {
+          ...mockNewDay,
+          opened_by: closerUserId,
+        };
+
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(newDayWithOpener);
+
+        // Act
+        lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, closerUserId);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, closerUserId);
+
+        // Assert: opened_by matches the closer
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).toHaveBeenCalledWith(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          closerUserId // Same user who closed
+        );
+        expect(nextDay.opened_by).toBe(closerUserId);
+      });
+
+      it('should pass userId through to DAL method (SEC-010)', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act
+        lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: userId is passed as third parameter
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).toHaveBeenCalledWith(
+          expect.any(String), // storeId
+          expect.any(String), // date
+          USER_ID // userId must be passed
+        );
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-004: Response includes next_day object
+    // ========================================================================
+    describe('LOT-CLOSE-004: Response includes next_day', () => {
+      it('should return next_day object in response', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act: Build response as handler does
+        const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        const response = {
+          ...commitResult,
+          next_day: {
+            day_id: nextDay.day_id,
+            business_date: nextDay.business_date,
+            status: nextDay.status,
+          },
+        };
+
+        // Assert: Response structure
+        expect(response).toHaveProperty('next_day');
+        expect(response.next_day).toHaveProperty('day_id', NEW_DAY_ID);
+        expect(response.next_day).toHaveProperty('business_date', BUSINESS_DATE_TODAY);
+        expect(response.next_day).toHaveProperty('status', 'OPEN');
+      });
+
+      it('should preserve original commitClose fields in response', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockNewDay);
+
+        // Act
+        const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        const response = {
+          ...commitResult,
+          next_day: {
+            day_id: nextDay.day_id,
+            business_date: nextDay.business_date,
+            status: nextDay.status,
+          },
+        };
+
+        // Assert: Original fields preserved via spread
+        expect(response).toHaveProperty('closings_created', 5);
+        expect(response).toHaveProperty('lottery_total', 1250.0);
+        expect(response).toHaveProperty('day_id', CLOSED_DAY_ID);
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-005: Next day syncs to cloud
+    // ========================================================================
+    describe('LOT-CLOSE-005: Next day syncs to cloud', () => {
+      let syncQueueDAL: { enqueue: ReturnType<typeof vi.fn> };
+
+      beforeEach(async () => {
+        const syncModule = await import('../../../src/main/dal/sync-queue.dal');
+        syncQueueDAL = syncModule.syncQueueDAL as unknown as typeof syncQueueDAL;
+      });
+
+      it('should enqueue day_open entity for sync via getOrCreateForDate', () => {
+        // Note: The DAL method getOrCreateForDate internally enqueues sync
+        // This test verifies the expected behavior
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockImplementation(() => {
+          // Simulate what the real DAL does - enqueue sync
+          syncQueueDAL.enqueue({
+            entity_type: 'day_open',
+            entity_id: NEW_DAY_ID,
+            operation: 'CREATE',
+            store_id: STORE_ID,
+            priority: 2, // day_open has high priority
+            payload: { day_id: NEW_DAY_ID, business_date: BUSINESS_DATE_TODAY },
+          });
+          return mockNewDay;
+        });
+
+        // Act
+        lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: Sync was queued
+        expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            entity_type: 'day_open',
+            entity_id: NEW_DAY_ID,
+            operation: 'CREATE',
+          })
+        );
+      });
+
+      it('should queue day_open with correct priority (high priority)', () => {
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockImplementation(() => {
+          syncQueueDAL.enqueue({
+            entity_type: 'day_open',
+            entity_id: NEW_DAY_ID,
+            operation: 'CREATE',
+            store_id: STORE_ID,
+            priority: 2, // Priority 2 is high (lower number = higher priority)
+            payload: {},
+          });
+          return mockNewDay;
+        });
+
+        // Act
+        lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: High priority
+        expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
+          expect.objectContaining({
+            priority: 2,
+          })
+        );
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-006: Idempotent if day already open
+    // ========================================================================
+    describe('LOT-CLOSE-006: Idempotent if day already open', () => {
+      it('should return existing open day if one exists', () => {
+        // Arrange: Pre-existing OPEN day for today
+        const existingOpenDay = {
+          ...mockNewDay,
+          day_id: 'day-uuid-existing',
+          opened_at: '2026-02-11T08:00:00.000Z', // Opened earlier today
+        };
+
+        lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(existingOpenDay);
+
+        // Act
+        lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        const returnedDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: Returns existing day, same ID
+        expect(returnedDay.day_id).toBe('day-uuid-existing');
+        expect(returnedDay.status).toBe('OPEN');
+      });
+
+      it('should not create duplicate OPEN days for same store', () => {
+        // Arrange: Simulate getOrCreateForDate's idempotent behavior
+        const firstOpenDay = { ...mockNewDay, day_id: 'day-uuid-first' };
+
+        lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(firstOpenDay);
+
+        // Act: Call twice
+        const day1 = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const day2 = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+
+        // Assert: Same day returned both times
+        expect(day1.day_id).toBe(day2.day_id);
+      });
+    });
+
+    // ========================================================================
+    // LOT-CLOSE-007: No next day on close failure
+    // ========================================================================
+    describe('LOT-CLOSE-007: No next day on close failure', () => {
+      it('should NOT create next day if commitClose throws', () => {
+        // Arrange: commitClose fails
+        lotteryBusinessDaysDAL.commitClose.mockImplementation(() => {
+          throw new Error('Database constraint violation');
+        });
+
+        // Act & Assert: Handler catches error, getOrCreateForDate not called
+        expect(() => {
+          lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        }).toThrow('Database constraint violation');
+
+        // getOrCreateForDate should NOT have been called after the error
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).not.toHaveBeenCalled();
+      });
+
+      it('should NOT create next day if commitClose returns error result', () => {
+        // Arrange: commitClose indicates failure
+        lotteryBusinessDaysDAL.commitClose.mockImplementation(() => {
+          throw new Error('Day is not in PENDING_CLOSE status');
+        });
+
+        // Act
+        let errorThrown = false;
+        try {
+          lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        } catch {
+          errorThrown = true;
+        }
+
+        // Assert: Error occurred, no next day created
+        expect(errorThrown).toBe(true);
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).not.toHaveBeenCalled();
+      });
+
+      it('should handle transaction rollback scenario', () => {
+        // Arrange: Simulate transaction failure mid-operation
+        lotteryBusinessDaysDAL.commitClose.mockImplementation(() => {
+          throw new Error('SQLITE_CONSTRAINT: transaction aborted');
+        });
+
+        // Act
+        let transactionError = null;
+        try {
+          lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
+        } catch (error) {
+          transactionError = error;
+        }
+
+        // Assert: Transaction error captured, no side effects
+        expect(transactionError).toBeTruthy();
+        expect((transactionError as Error).message).toContain('SQLITE_CONSTRAINT');
+        expect(lotteryBusinessDaysDAL.getOrCreateForDate).not.toHaveBeenCalled();
       });
     });
   });

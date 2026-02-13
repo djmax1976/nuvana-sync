@@ -888,6 +888,32 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
   }
 
   /**
+   * Get all open shifts for a store for day close access validation
+   *
+   * Returns ALL open shifts (end_time IS NULL) regardless of business date.
+   * Used by DayCloseAccessService to validate BR-001 (at least one open) and
+   * BR-002 (exactly one open) business rules.
+   *
+   * Performance: O(1) via indexed query on (store_id, end_time)
+   *
+   * @security SEC-006: Parameterized query with ? placeholders
+   * @security DB-006: Store-scoped query for tenant isolation
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Array of all open shifts (empty if none, multiple if more than one)
+   */
+  getAllOpenShifts(storeId: string): Shift[] {
+    // SEC-006: Parameterized query
+    // DB-006: Store-scoped via storeId parameter
+    const stmt = this.db.prepare(`
+      SELECT * FROM shifts
+      WHERE store_id = ? AND end_time IS NULL
+      ORDER BY start_time DESC, created_at DESC
+    `);
+    return stmt.all(storeId) as Shift[];
+  }
+
+  /**
    * Get day status for determining if day close is available
    *
    * Returns business day status in a single optimized query that:

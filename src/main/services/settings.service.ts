@@ -276,6 +276,14 @@ interface SettingsStoreSchema {
   /** Whether app is fully configured */
   isConfigured?: boolean;
 
+  // ========== One-Time Migration Tracking (CRON-001: Idempotency) ==========
+  /**
+   * Tracks completion of the v007 terminal backfill migration.
+   * ISO timestamp when backfill was completed, or undefined if not run.
+   * CRITICAL: Once set, backfill MUST NOT run again to preserve user deletions.
+   */
+  'migrations.terminalBackfillV007CompletedAt'?: string;
+
   // ========== Terminal Configuration (Version 7.0 - DEPRECATED) ==========
   // NOTE: Terminal config is deprecated. Use posConnection.* for new implementations.
   // These fields are kept for backward compatibility during migration.
@@ -1965,6 +1973,48 @@ export class SettingsService {
   setIsConfiguredFlag(value: boolean): void {
     this.configStore.set('isConfigured', value);
     log.info('isConfigured flag updated', { value });
+  }
+
+  // ==========================================================================
+  // One-Time Migration Tracking (CRON-001: Idempotency)
+  // ==========================================================================
+
+  /**
+   * Check if the v007 terminal backfill migration has been completed.
+   *
+   * CRON-001 Compliance: This check ensures the backfill operation is idempotent.
+   * Once completed, the backfill MUST NOT run again to preserve user deletions.
+   *
+   * @returns true if backfill has been completed, false otherwise
+   */
+  isTerminalBackfillV007Completed(): boolean {
+    const completedAt = this.configStore.get('migrations.terminalBackfillV007CompletedAt');
+    return !!completedAt;
+  }
+
+  /**
+   * Mark the v007 terminal backfill migration as completed.
+   *
+   * CRON-001 Compliance: Records completion timestamp for audit trail.
+   * Once marked, backfill will not run on subsequent startups.
+   *
+   * @security LM-001: Logs completion for audit trail
+   */
+  markTerminalBackfillV007Completed(): void {
+    const timestamp = new Date().toISOString();
+    this.configStore.set('migrations.terminalBackfillV007CompletedAt', timestamp);
+    log.info('Terminal backfill v007 migration marked as completed', {
+      completedAt: timestamp,
+    });
+  }
+
+  /**
+   * Get the completion timestamp for the v007 terminal backfill migration.
+   *
+   * @returns ISO timestamp of completion, or null if not completed
+   */
+  getTerminalBackfillV007CompletedAt(): string | null {
+    return (this.configStore.get('migrations.terminalBackfillV007CompletedAt') as string) || null;
   }
 
   /**

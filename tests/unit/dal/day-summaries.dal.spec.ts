@@ -6,7 +6,7 @@
  * @security DB-006: Verifies tenant isolation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 
 // Mock database service
 const mockPrepare = vi.fn();
@@ -29,14 +29,15 @@ vi.mock('crypto', async (importOriginal) => {
   };
 });
 
-import {
-  DaySummariesDAL,
-  type DaySummary,
-  type DaySummaryStatus,
-} from '../../../src/main/dal/day-summaries.dal';
+// Import actual DAL module (use importActual to prevent mock leakage from other test files)
+const { DaySummariesDAL } = await vi.importActual<
+  typeof import('../../../src/main/dal/day-summaries.dal')
+>('../../../src/main/dal/day-summaries.dal');
+
+import type { DaySummary, DaySummaryStatus } from '../../../src/main/dal/day-summaries.dal';
 
 describe('DaySummariesDAL', () => {
-  let dal: DaySummariesDAL;
+  let dal: InstanceType<typeof DaySummariesDAL>;
 
   const mockSummary: DaySummary = {
     day_summary_id: 'summary-123',
