@@ -110,11 +110,7 @@ function renderWithProviders(ui: React.ReactElement) {
  * Create mock register data for tests
  * @security SEC-014: Uses valid UUID format for IDs
  */
-function createMockRegister(
-  id: string,
-  externalId: string,
-  hasActiveShift: boolean = false
-) {
+function createMockRegister(id: string, externalId: string, hasActiveShift: boolean = false) {
   return {
     id,
     external_register_id: externalId,

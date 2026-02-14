@@ -31,9 +31,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('lucide-react', () => ({
   Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  ChevronRight: (props: Record<string, unknown>) => (
-    <div data-testid="chevron-icon" {...props} />
-  ),
+  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
 }));
 
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
@@ -83,9 +81,7 @@ function createPack(overrides: Partial<ActivatedPackDay> = {}): ActivatedPackDay
   };
 }
 
-function createOpenPeriod(
-  overrides: Partial<OpenBusinessPeriod> = {}
-): OpenBusinessPeriod {
+function createOpenPeriod(overrides: Partial<OpenBusinessPeriod> = {}): OpenBusinessPeriod {
   return {
     started_at: '2026-02-02T08:00:00Z',
     last_closed_date: '2026-02-01',
@@ -109,9 +105,7 @@ describe('ActivatedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Empty State Guard', () => {
     it('should return null when activatedPacks is empty array', () => {
-      const { container } = render(
-        <ActivatedPacksSection activatedPacks={[]} />
-      );
+      const { container } = render(<ActivatedPacksSection activatedPacks={[]} />);
       expect(container.firstChild).toBeNull();
     });
 
@@ -202,9 +196,7 @@ describe('ActivatedPacksSection', () => {
           openBusinessPeriod={createOpenPeriod({ days_since_last_close: 3 })}
         />
       );
-      expect(
-        screen.getByText('Activated Packs - Current Period (1)')
-      ).toBeInTheDocument();
+      expect(screen.getByText('Activated Packs - Current Period (1)')).toBeInTheDocument();
     });
 
     it('should show "Activated Packs" for first period', () => {
@@ -243,9 +235,7 @@ describe('ActivatedPacksSection', () => {
     });
 
     it('should start expanded when defaultOpen=true', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByTestId('activated-packs-content')).toBeInTheDocument();
     });
 
@@ -263,9 +253,7 @@ describe('ActivatedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Pack Row Data', () => {
     it('should render BinBadge with bin number', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       // BinBadge renders the number as text
       const section = screen.getByTestId('activated-packs-content');
       const binBadge = section.querySelector('span[class*="bg-blue-100"]');
@@ -274,37 +262,27 @@ describe('ActivatedPacksSection', () => {
     });
 
     it('should display game name', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Powerball')).toBeInTheDocument();
     });
 
     it('should display game price as currency', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('$30.00')).toBeInTheDocument();
     });
 
     it('should display pack number', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('PKG-001')).toBeInTheDocument();
     });
 
     it('should render pack row with data-testid', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByTestId('activated-pack-row-pack-001')).toBeInTheDocument();
     });
 
     it('should display Start column with 000', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('activated-pack-row-pack-001');
       const cells = row.querySelectorAll('td');
       // Start column is the 5th cell (index 4)
@@ -312,9 +290,7 @@ describe('ActivatedPacksSection', () => {
     });
 
     it('should display End column with "- - -"', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('activated-pack-row-pack-001');
       const cells = row.querySelectorAll('td');
       // End column is the 6th cell (index 5)
@@ -322,9 +298,7 @@ describe('ActivatedPacksSection', () => {
     });
 
     it('should have blue hover on rows', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('activated-pack-row-pack-001');
       expect(row.className).toContain('hover:bg-blue-50');
     });
@@ -346,9 +320,7 @@ describe('ActivatedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Start/End Columns', () => {
     it('should display "Start" and "End" column headers', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Start')).toBeInTheDocument();
       expect(screen.getByText('End')).toBeInTheDocument();
     });
@@ -467,9 +439,7 @@ describe('ActivatedPacksSection', () => {
     it('should show "--" for non-string game_name', () => {
       render(
         <ActivatedPacksSection
-          activatedPacks={[
-            createPack({ game_name: null as unknown as string }),
-          ]}
+          activatedPacks={[createPack({ game_name: null as unknown as string })]}
           defaultOpen={true}
         />
       );
@@ -480,9 +450,7 @@ describe('ActivatedPacksSection', () => {
     it('should show "--" for non-number game_price', () => {
       render(
         <ActivatedPacksSection
-          activatedPacks={[
-            createPack({ game_price: null as unknown as number }),
-          ]}
+          activatedPacks={[createPack({ game_price: null as unknown as number })]}
           defaultOpen={true}
         />
       );
@@ -493,9 +461,7 @@ describe('ActivatedPacksSection', () => {
     it('should show 0 in BinBadge for non-number bin_number', () => {
       render(
         <ActivatedPacksSection
-          activatedPacks={[
-            createPack({ bin_number: null as unknown as number }),
-          ]}
+          activatedPacks={[createPack({ bin_number: null as unknown as number })]}
           defaultOpen={true}
         />
       );
@@ -524,17 +490,13 @@ describe('ActivatedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Accessibility', () => {
     it('should have aria-label on table region', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       const region = screen.getByRole('region');
       expect(region).toHaveAttribute('aria-label', 'Activated packs table');
     });
 
     it('should have column headers with scope="col"', () => {
-      render(
-        <ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
       const headers = screen.getAllByRole('columnheader');
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');

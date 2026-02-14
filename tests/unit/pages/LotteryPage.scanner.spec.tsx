@@ -68,7 +68,9 @@ vi.mock('../../../src/renderer/hooks/useLottery', () => ({
 }));
 
 // Mock useAuthGuard - returns an object with executeWithAuth that calls the callback immediately
-const mockExecuteWithAuth = vi.fn((onValid, _onInvalid) => onValid({ userId: 'test-user', name: 'Test User' }));
+const mockExecuteWithAuth = vi.fn((onValid, _onInvalid) =>
+  onValid({ userId: 'test-user', name: 'Test User' })
+);
 vi.mock('../../../src/renderer/hooks/useAuthGuard', () => ({
   useAuthGuard: () => ({
     executeWithAuth: mockExecuteWithAuth,
@@ -109,74 +111,82 @@ vi.mock('../../../src/renderer/lib/services/lottery-closing-validation', () => (
 
 // Mock components that are complex to test
 vi.mock('../../../src/renderer/components/lottery/DayBinsTable', () => ({
-  DayBinsTable: vi.fn(({
-    bins,
-    scannedBins,
-    lastScannedBinId,
-    onUndoScan,
-    scannerModeActive,
-    manualEntryMode,
-    endingValues,
-    'data-testid': testId,
-  }) => (
-    <div data-testid={testId || 'day-bins-table'}>
-      <div data-testid="scanner-mode-active">{String(scannerModeActive)}</div>
-      <div data-testid="manual-entry-mode">{String(manualEntryMode)}</div>
-      <div data-testid="scanned-count">{scannedBins?.length ?? 0}</div>
-      <div data-testid="last-scanned-id">{lastScannedBinId || 'none'}</div>
-      {bins?.map((bin: { bin_id: string; pack?: { pack_id: string } | null }) => (
-        <div key={bin.bin_id} data-testid={`bin-row-${bin.bin_id}`}>
-          {bin.pack && (
-            <button
-              data-testid={`undo-scan-${bin.bin_id}`}
-              onClick={() => onUndoScan?.(bin.bin_id)}
-            >
-              Undo
-            </button>
-          )}
-          <span data-testid={`ending-value-${bin.bin_id}`}>
-            {endingValues?.[bin.bin_id] || '--'}
-          </span>
-        </div>
-      ))}
-    </div>
-  )),
+  DayBinsTable: vi.fn(
+    ({
+      bins,
+      scannedBins,
+      lastScannedBinId,
+      onUndoScan,
+      scannerModeActive,
+      manualEntryMode,
+      endingValues,
+      'data-testid': testId,
+    }) => (
+      <div data-testid={testId || 'day-bins-table'}>
+        <div data-testid="scanner-mode-active">{String(scannerModeActive)}</div>
+        <div data-testid="manual-entry-mode">{String(manualEntryMode)}</div>
+        <div data-testid="scanned-count">{scannedBins?.length ?? 0}</div>
+        <div data-testid="last-scanned-id">{lastScannedBinId || 'none'}</div>
+        {bins?.map((bin: { bin_id: string; pack?: { pack_id: string } | null }) => (
+          <div key={bin.bin_id} data-testid={`bin-row-${bin.bin_id}`}>
+            {bin.pack && (
+              <button
+                data-testid={`undo-scan-${bin.bin_id}`}
+                onClick={() => onUndoScan?.(bin.bin_id)}
+              >
+                Undo
+              </button>
+            )}
+            <span data-testid={`ending-value-${bin.bin_id}`}>
+              {endingValues?.[bin.bin_id] || '--'}
+            </span>
+          </div>
+        ))}
+      </div>
+    )
+  ),
 }));
 
 vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
-  DayCloseScannerBar: vi.fn(({
-    bins,
-    scannedBins,
-    onScan,
-    onScanError,
-    onCancel,
-    onComplete,
-    isMuted,
-    onToggleMute,
-    isComplete,
-    'data-testid': testId,
-  }) => (
-    <div data-testid={testId || 'day-close-scanner-bar'}>
-      <input
-        data-testid="scanner-input"
-        onChange={(e) => {
-          if (e.target.value.length === 24 && /^\d+$/.test(e.target.value)) {
-            onScan(e.target.value);
-          } else if (e.target.value === 'ERROR') {
-            onScanError?.();
-          }
-        }}
-      />
-      <span data-testid="progress">{scannedBins?.length ?? 0}/{bins?.filter((b: { pack?: unknown }) => b.pack)?.length ?? 0}</span>
-      <button data-testid="cancel-scanner" onClick={onCancel}>Cancel</button>
-      <button data-testid="complete-scanner" onClick={onComplete} disabled={!isComplete}>
-        Complete
-      </button>
-      <button data-testid="toggle-mute" onClick={onToggleMute}>
-        {isMuted ? 'Unmute' : 'Mute'}
-      </button>
-    </div>
-  )),
+  DayCloseScannerBar: vi.fn(
+    ({
+      bins,
+      scannedBins,
+      onScan,
+      onScanError,
+      onCancel,
+      onComplete,
+      isMuted,
+      onToggleMute,
+      isComplete,
+      'data-testid': testId,
+    }) => (
+      <div data-testid={testId || 'day-close-scanner-bar'}>
+        <input
+          data-testid="scanner-input"
+          onChange={(e) => {
+            if (e.target.value.length === 24 && /^\d+$/.test(e.target.value)) {
+              onScan(e.target.value);
+            } else if (e.target.value === 'ERROR') {
+              onScanError?.();
+            }
+          }}
+        />
+        <span data-testid="progress">
+          {scannedBins?.length ?? 0}/{bins?.filter((b: { pack?: unknown }) => b.pack)?.length ?? 0}
+        </span>
+        <button data-testid="cancel-scanner" onClick={onCancel}>
+          Cancel
+        </button>
+        <button data-testid="complete-scanner" onClick={onComplete} disabled={!isComplete}>
+          Complete
+        </button>
+        <button data-testid="toggle-mute" onClick={onToggleMute}>
+          {isMuted ? 'Unmute' : 'Mute'}
+        </button>
+      </div>
+    )
+  ),
 }));
 
 vi.mock('../../../src/renderer/components/lottery/DepletedPacksSection', () => ({
@@ -238,7 +248,9 @@ vi.mock('lucide-react', () => ({
   CalendarCheck: (props: Record<string, unknown>) => <div data-testid="calendar-icon" {...props} />,
   ScanLine: (props: Record<string, unknown>) => <div data-testid="scan-line-icon" {...props} />,
   CheckCircle2: (props: Record<string, unknown>) => <div data-testid="check-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => <div data-testid="alert-triangle-icon" {...props} />,
+  AlertTriangle: (props: Record<string, unknown>) => (
+    <div data-testid="alert-triangle-icon" {...props} />
+  ),
 }));
 
 // ============================================================================
@@ -253,9 +265,7 @@ import LotteryPage from '../../../src/renderer/pages/LotteryPage';
 
 function createMockDashboard() {
   return {
-    stores: [
-      { store_id: 'store-001', name: 'Test Store', status: 'ACTIVE' },
-    ],
+    stores: [{ store_id: 'store-001', name: 'Test Store', status: 'ACTIVE' }],
   };
 }
 

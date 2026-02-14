@@ -169,12 +169,12 @@ vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
       capturedOnScanError = onScanError;
 
       // Calculate empty bins count
-      const emptyBinsCount = bins?.filter(
-        (b: { is_active: boolean; pack: unknown }) => b.is_active && !b.pack
-      ).length ?? 0;
-      const activeBinsCount = bins?.filter(
-        (b: { is_active: boolean; pack: unknown }) => b.is_active && b.pack
-      ).length ?? 0;
+      const emptyBinsCount =
+        bins?.filter((b: { is_active: boolean; pack: unknown }) => b.is_active && !b.pack).length ??
+        0;
+      const activeBinsCount =
+        bins?.filter((b: { is_active: boolean; pack: unknown }) => b.is_active && b.pack).length ??
+        0;
 
       return (
         <div data-testid="day-close-scanner-bar">

@@ -33,12 +33,8 @@ vi.mock('lucide-react', () => ({
   MoreVertical: (props: Record<string, unknown>) => (
     <div data-testid="more-vertical-icon" {...props} />
   ),
-  Package: (props: Record<string, unknown>) => (
-    <div data-testid="package-icon" {...props} />
-  ),
-  RotateCcw: (props: Record<string, unknown>) => (
-    <div data-testid="rotate-ccw-icon" {...props} />
-  ),
+  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
+  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
 }));
 
 // ============================================================================
@@ -92,24 +88,12 @@ describe('BinActionsMenu', () => {
     });
 
     it('should render menu when only onMarkSold is provided', () => {
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />);
       expect(screen.getByTestId('actions-menu-trigger')).toBeInTheDocument();
     });
 
     it('should render menu when only onReturn is provided', () => {
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onReturn={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onReturn={vi.fn()} />);
       expect(screen.getByTestId('actions-menu-trigger')).toBeInTheDocument();
     });
   });
@@ -119,25 +103,13 @@ describe('BinActionsMenu', () => {
   // --------------------------------------------------------------------------
   describe('Accessibility', () => {
     it('should have aria-label with pack number', () => {
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />);
       const trigger = screen.getByTestId('actions-menu-trigger');
       expect(trigger).toHaveAttribute('aria-label', 'Actions for pack 1234567');
     });
 
     it('should have sr-only text for screen readers', () => {
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />);
       expect(screen.getByText('Open actions menu')).toBeInTheDocument();
       expect(screen.getByText('Open actions menu')).toHaveClass('sr-only');
     });
@@ -160,13 +132,7 @@ describe('BinActionsMenu', () => {
     });
 
     it('should enable trigger button by default', () => {
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />);
       expect(screen.getByTestId('actions-menu-trigger')).not.toBeDisabled();
     });
   });
@@ -232,13 +198,7 @@ describe('BinActionsMenu', () => {
 
     it('should only show Mark Sold when onReturn is not provided', async () => {
       const user = userEvent.setup();
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />);
 
       await user.click(screen.getByTestId('actions-menu-trigger'));
 
@@ -250,13 +210,7 @@ describe('BinActionsMenu', () => {
 
     it('should only show Return when onMarkSold is not provided', async () => {
       const user = userEvent.setup();
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onReturn={vi.fn()}
-        />
-      );
+      render(<BinActionsMenu packId="pack-001" packNumber="1234567" onReturn={vi.fn()} />);
 
       await user.click(screen.getByTestId('actions-menu-trigger'));
 
@@ -326,11 +280,7 @@ describe('BinActionsMenu', () => {
 
       render(
         <div onClick={parentClickHandler}>
-          <BinActionsMenu
-            packId="pack-001"
-            packNumber="1234567"
-            onMarkSold={vi.fn()}
-          />
+          <BinActionsMenu packId="pack-001" packNumber="1234567" onMarkSold={vi.fn()} />
         </div>
       );
 

@@ -85,9 +85,13 @@ vi.mock('../../../../src/renderer/components/ui/LoadingSpinner', () => ({
 
 // Mock lucide-react icons as simple spans
 vi.mock('lucide-react', () => {
-  const iconFactory = (name: string) => (props: { className?: string }) => (
-    <span data-testid={`icon-${name}`} className={props.className} />
-  );
+  const iconFactory = (name: string) => {
+    const IconComponent = (props: { className?: string }) => (
+      <span data-testid={`icon-${name}`} className={props.className} />
+    );
+    IconComponent.displayName = `Icon${name}`;
+    return IconComponent;
+  };
   return {
     RefreshCw: iconFactory('refresh-cw'),
     AlertTriangle: iconFactory('alert-triangle'),
@@ -384,9 +388,7 @@ describe('SyncMonitorPanel', () => {
       const grids = container.querySelectorAll('.grid');
       expect(grids.length).toBeGreaterThan(0);
       // At least one grid should use xl: breakpoint classes for responsive embedding
-      const hasResponsiveGrid = Array.from(grids).some(
-        (g) => g.className.includes('xl:grid-cols')
-      );
+      const hasResponsiveGrid = Array.from(grids).some((g) => g.className.includes('xl:grid-cols'));
       expect(hasResponsiveGrid).toBe(true);
     });
   });

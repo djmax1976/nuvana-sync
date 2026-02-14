@@ -24,10 +24,7 @@ import { resolve } from 'path';
 // Static Analysis Tests (Source Code Verification)
 // ============================================================================
 
-const routerSource = readFileSync(
-  resolve(__dirname, '../../../src/renderer/router.tsx'),
-  'utf-8'
-);
+const routerSource = readFileSync(resolve(__dirname, '../../../src/renderer/router.tsx'), 'utf-8');
 
 describe('Router — Sync Route Removal', () => {
   // --------------------------------------------------------------------------

@@ -122,8 +122,16 @@ function createDefaultProps() {
   return {
     bins: [
       createBin({ bin_id: 'b1', bin_number: 1, pack: createPack({ pack_id: 'p1' }) }),
-      createBin({ bin_id: 'b2', bin_number: 2, pack: createPack({ pack_id: 'p2', pack_number: '2345678' }) }),
-      createBin({ bin_id: 'b3', bin_number: 3, pack: createPack({ pack_id: 'p3', pack_number: '3456789' }) }),
+      createBin({
+        bin_id: 'b2',
+        bin_number: 2,
+        pack: createPack({ pack_id: 'p2', pack_number: '2345678' }),
+      }),
+      createBin({
+        bin_id: 'b3',
+        bin_number: 3,
+        pack: createPack({ pack_id: 'p3', pack_number: '3456789' }),
+      }),
       createEmptyBin({ bin_id: 'b4', bin_number: 4 }),
     ],
     scannedBins: [] as ScannedBin[],

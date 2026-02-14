@@ -130,11 +130,7 @@ vi.mock('../../../src/renderer/components/lottery/DayCloseModeScanner', () => ({
 
 // Mock ReportScanningStep
 vi.mock('../../../src/renderer/components/day-close/ReportScanningStep', () => ({
-  ReportScanningStep: ({
-    onComplete,
-  }: {
-    onComplete: (data: unknown) => void;
-  }) => (
+  ReportScanningStep: ({ onComplete }: { onComplete: (data: unknown) => void }) => (
     <div data-testid="report-scanning-step">
       <button
         data-testid="complete-reports-btn"

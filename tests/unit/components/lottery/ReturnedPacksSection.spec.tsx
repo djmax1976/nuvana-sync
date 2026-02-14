@@ -30,15 +30,11 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // ============================================================================
 
 vi.mock('lucide-react', () => ({
-  RotateCcw: (props: Record<string, unknown>) => (
-    <div data-testid="rotate-ccw-icon" {...props} />
-  ),
+  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
   AlertTriangle: (props: Record<string, unknown>) => (
     <div data-testid="alert-triangle-icon" {...props} />
   ),
-  ChevronRight: (props: Record<string, unknown>) => (
-    <div data-testid="chevron-icon" {...props} />
-  ),
+  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
 }));
 
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
@@ -76,10 +72,7 @@ vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
 // ============================================================================
 
 import { ReturnedPacksSection } from '../../../../src/renderer/components/lottery/ReturnedPacksSection';
-import type {
-  ReturnedPackDay,
-  OpenBusinessPeriod,
-} from '../../../../src/renderer/lib/api/lottery';
+import type { ReturnedPackDay, OpenBusinessPeriod } from '../../../../src/renderer/lib/api/lottery';
 
 // ============================================================================
 // Test Fixtures
@@ -104,9 +97,7 @@ function createPack(overrides: Partial<ReturnedPackDay> = {}): ReturnedPackDay {
   };
 }
 
-function createOpenPeriod(
-  overrides: Partial<OpenBusinessPeriod> = {}
-): OpenBusinessPeriod {
+function createOpenPeriod(overrides: Partial<OpenBusinessPeriod> = {}): OpenBusinessPeriod {
   return {
     started_at: '2026-02-02T08:00:00Z',
     last_closed_date: '2026-02-01',
@@ -130,9 +121,7 @@ describe('ReturnedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Empty State Guard', () => {
     it('should return null for empty array', () => {
-      const { container } = render(
-        <ReturnedPacksSection returnedPacks={[]} />
-      );
+      const { container } = render(<ReturnedPacksSection returnedPacks={[]} />);
       expect(container.firstChild).toBeNull();
     });
 
@@ -145,9 +134,7 @@ describe('ReturnedPacksSection', () => {
 
     it('should return null for undefined input', () => {
       const { container } = render(
-        <ReturnedPacksSection
-          returnedPacks={undefined as unknown as ReturnedPackDay[]}
-        />
+        <ReturnedPacksSection returnedPacks={undefined as unknown as ReturnedPackDay[]} />
       );
       expect(container.firstChild).toBeNull();
     });
@@ -164,9 +151,7 @@ describe('ReturnedPacksSection', () => {
 
     it('should display title with count', () => {
       render(
-        <ReturnedPacksSection
-          returnedPacks={[createPack(), createPack({ pack_id: 'ret-002' })]}
-        />
+        <ReturnedPacksSection returnedPacks={[createPack(), createPack({ pack_id: 'ret-002' })]} />
       );
       expect(screen.getByText('Returned Packs (2)')).toBeInTheDocument();
     });
@@ -195,11 +180,7 @@ describe('ReturnedPacksSection', () => {
     });
 
     it('should NOT show currency badge when total return sales is 0', () => {
-      render(
-        <ReturnedPacksSection
-          returnedPacks={[createPack({ return_sales_amount: 0 })]}
-        />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack({ return_sales_amount: 0 })]} />);
       // No currency badge when total is 0 — rightBadge is undefined
       expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
     });
@@ -216,9 +197,7 @@ describe('ReturnedPacksSection', () => {
           openBusinessPeriod={createOpenPeriod({ days_since_last_close: 3 })}
         />
       );
-      expect(
-        screen.getByText('Returned Packs - Current Period (1)')
-      ).toBeInTheDocument();
+      expect(screen.getByText('Returned Packs - Current Period (1)')).toBeInTheDocument();
     });
 
     it('should show "Returned Packs" for first period', () => {
@@ -279,9 +258,7 @@ describe('ReturnedPacksSection', () => {
     });
 
     it('should start expanded when defaultOpen=true', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByTestId('returned-packs-content')).toBeInTheDocument();
     });
 
@@ -299,46 +276,34 @@ describe('ReturnedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Pack Row Data', () => {
     it('should render BinBadge with bin number', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const section = screen.getByTestId('returned-packs-content');
       const binBadge = section.querySelector('span[class*="bg-blue-100"]');
       expect(binBadge!.textContent).toBe('3');
     });
 
     it('should display game name', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Mega Millions')).toBeInTheDocument();
     });
 
     it('should display game price as currency', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('$20.00')).toBeInTheDocument();
     });
 
     it('should display pack number', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('PKG-RET-001')).toBeInTheDocument();
     });
 
     it('should display tickets sold on return', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('5')).toBeInTheDocument();
     });
 
     it('should display return sales in the Amount cell', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('returned-pack-row-ret-001');
       // Amount is in the last cell (index 7)
       const cells = row.querySelectorAll('td');
@@ -346,9 +311,7 @@ describe('ReturnedPacksSection', () => {
     });
 
     it('should display returned date and time in Amount cell', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('returned-pack-row-ret-001');
       // Amount is in the last cell (index 7), date is stacked below
       const cells = row.querySelectorAll('td');
@@ -357,9 +320,7 @@ describe('ReturnedPacksSection', () => {
     });
 
     it('should display Start column with 000', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('returned-pack-row-ret-001');
       const cells = row.querySelectorAll('td');
       // Start column is the 5th cell (index 4)
@@ -380,9 +341,7 @@ describe('ReturnedPacksSection', () => {
     });
 
     it('should have orange hover on rows', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('returned-pack-row-ret-001');
       expect(row.className).toContain('hover:bg-orange-50');
     });
@@ -393,9 +352,7 @@ describe('ReturnedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Start/End Columns', () => {
     it('should display "Start" and "End" column headers', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Start')).toBeInTheDocument();
       expect(screen.getByText('End')).toBeInTheDocument();
     });
@@ -434,9 +391,7 @@ describe('ReturnedPacksSection', () => {
     it('should show "--" for non-number tickets_sold_on_return', () => {
       render(
         <ReturnedPacksSection
-          returnedPacks={[
-            createPack({ tickets_sold_on_return: null as unknown as number }),
-          ]}
+          returnedPacks={[createPack({ tickets_sold_on_return: null as unknown as number })]}
           defaultOpen={true}
         />
       );
@@ -464,17 +419,13 @@ describe('ReturnedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Accessibility', () => {
     it('should have aria-label on table region', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const region = screen.getByRole('region');
       expect(region).toHaveAttribute('aria-label', 'Returned packs table');
     });
 
     it('should have column headers with scope="col"', () => {
-      render(
-        <ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
       const headers = screen.getAllByRole('columnheader');
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');

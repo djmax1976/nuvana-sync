@@ -36,21 +36,15 @@ import userEvent from '@testing-library/user-event';
 // ============================================================================
 
 vi.mock('lucide-react', () => ({
-  ChevronRight: (props: Record<string, unknown>) => (
-    <div data-testid="chevron-icon" {...props} />
-  ),
+  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
   CheckCircle2: (props: Record<string, unknown>) => (
     <div data-testid="check-circle-icon" {...props} />
   ),
   MoreVertical: (props: Record<string, unknown>) => (
     <div data-testid="more-vertical-icon" {...props} />
   ),
-  Package: (props: Record<string, unknown>) => (
-    <div data-testid="package-icon" {...props} />
-  ),
-  RotateCcw: (props: Record<string, unknown>) => (
-    <div data-testid="rotate-ccw-icon" {...props} />
-  ),
+  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
+  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
 }));
 
 // ============================================================================
@@ -340,9 +334,7 @@ describe('DayBinsTable', () => {
 
     it('should NOT call onRowClick in manual entry mode', () => {
       const onRowClick = vi.fn();
-      render(
-        <DayBinsTable bins={[createBin()]} onRowClick={onRowClick} manualEntryMode={true} />
-      );
+      render(<DayBinsTable bins={[createBin()]} onRowClick={onRowClick} manualEntryMode={true} />);
       fireEvent.click(screen.getByTestId('day-bins-row-bin-001'));
       expect(onRowClick).not.toHaveBeenCalled();
     });
@@ -370,11 +362,7 @@ describe('DayBinsTable', () => {
     it('should strip non-numeric characters from input', () => {
       const onEndingChange = vi.fn();
       render(
-        <DayBinsTable
-          bins={[createBin()]}
-          manualEntryMode={true}
-          onEndingChange={onEndingChange}
-        />
+        <DayBinsTable bins={[createBin()]} manualEntryMode={true} onEndingChange={onEndingChange} />
       );
       const input = screen.getByTestId('ending-input-bin-001');
       fireEvent.change(input, { target: { value: 'abc123' } });
@@ -384,11 +372,7 @@ describe('DayBinsTable', () => {
     it('should truncate input to 3 digits', () => {
       const onEndingChange = vi.fn();
       render(
-        <DayBinsTable
-          bins={[createBin()]}
-          manualEntryMode={true}
-          onEndingChange={onEndingChange}
-        />
+        <DayBinsTable bins={[createBin()]} manualEntryMode={true} onEndingChange={onEndingChange} />
       );
       const input = screen.getByTestId('ending-input-bin-001');
       fireEvent.change(input, { target: { value: '12345' } });
@@ -548,29 +532,17 @@ describe('DayBinsTable', () => {
   // --------------------------------------------------------------------------
   describe('Actions Menu', () => {
     it('should show actions menu trigger for non-empty bins', () => {
-      render(
-        <DayBinsTable
-          bins={[createBin()]}
-          onReturnPack={vi.fn()}
-        />
-      );
+      render(<DayBinsTable bins={[createBin()]} onReturnPack={vi.fn()} />);
       expect(screen.getByTestId('bin-bin-001-actions-menu-trigger')).toBeInTheDocument();
     });
 
     it('should show "--" for empty bins instead of actions menu', () => {
-      render(
-        <DayBinsTable
-          bins={[createEmptyBin()]}
-          onReturnPack={vi.fn()}
-        />
-      );
+      render(<DayBinsTable bins={[createEmptyBin()]} onReturnPack={vi.fn()} />);
       expect(screen.queryByTestId('bin-bin-empty-actions-menu-trigger')).not.toBeInTheDocument();
     });
 
     it('should have aria-label on actions menu trigger', () => {
-      render(
-        <DayBinsTable bins={[createBin()]} onReturnPack={vi.fn()} />
-      );
+      render(<DayBinsTable bins={[createBin()]} onReturnPack={vi.fn()} />);
       const trigger = screen.getByTestId('bin-bin-001-actions-menu-trigger');
       expect(trigger).toHaveAttribute('aria-label', 'Actions for pack PKG-001');
     });
@@ -634,13 +606,7 @@ describe('DayBinsTable', () => {
 
     it('should NOT show Mark Sold option when onMarkSoldOut is NOT provided', async () => {
       const user = userEvent.setup();
-      render(
-        <DayBinsTable
-          bins={[createBin()]}
-          manualEntryMode={false}
-          onReturnPack={vi.fn()}
-        />
-      );
+      render(<DayBinsTable bins={[createBin()]} manualEntryMode={false} onReturnPack={vi.fn()} />);
 
       await user.click(screen.getByTestId('bin-bin-001-actions-menu-trigger'));
 
@@ -652,13 +618,7 @@ describe('DayBinsTable', () => {
 
     it('should show only Return when onMarkSoldOut is NOT provided even in manual entry mode', async () => {
       const user = userEvent.setup();
-      render(
-        <DayBinsTable
-          bins={[createBin()]}
-          manualEntryMode={true}
-          onReturnPack={vi.fn()}
-        />
-      );
+      render(<DayBinsTable bins={[createBin()]} manualEntryMode={true} onReturnPack={vi.fn()} />);
 
       await user.click(screen.getByTestId('bin-bin-001-actions-menu-trigger'));
 
@@ -691,11 +651,7 @@ describe('DayBinsTable', () => {
       const onMarkSoldOut = vi.fn();
       const user = userEvent.setup();
       render(
-        <DayBinsTable
-          bins={[createBin()]}
-          onMarkSoldOut={onMarkSoldOut}
-          onReturnPack={vi.fn()}
-        />
+        <DayBinsTable bins={[createBin()]} onMarkSoldOut={onMarkSoldOut} onReturnPack={vi.fn()} />
       );
 
       await user.click(screen.getByTestId('bin-bin-001-actions-menu-trigger'));
@@ -710,11 +666,7 @@ describe('DayBinsTable', () => {
       const onReturnPack = vi.fn();
       const user = userEvent.setup();
       render(
-        <DayBinsTable
-          bins={[createBin()]}
-          onMarkSoldOut={vi.fn()}
-          onReturnPack={onReturnPack}
-        />
+        <DayBinsTable bins={[createBin()]} onMarkSoldOut={vi.fn()} onReturnPack={onReturnPack} />
       );
 
       await user.click(screen.getByTestId('bin-bin-001-actions-menu-trigger'));
@@ -734,16 +686,18 @@ describe('DayBinsTable', () => {
     it('should show actions menu for multiple bins with different packs', async () => {
       const user = userEvent.setup();
       const bins = [
-        createBin({ bin_id: 'b1', bin_number: 1, pack: createPack({ pack_id: 'p1', pack_number: 'PKG-001' }) }),
-        createBin({ bin_id: 'b2', bin_number: 2, pack: createPack({ pack_id: 'p2', pack_number: 'PKG-002' }) }),
+        createBin({
+          bin_id: 'b1',
+          bin_number: 1,
+          pack: createPack({ pack_id: 'p1', pack_number: 'PKG-001' }),
+        }),
+        createBin({
+          bin_id: 'b2',
+          bin_number: 2,
+          pack: createPack({ pack_id: 'p2', pack_number: 'PKG-002' }),
+        }),
       ];
-      render(
-        <DayBinsTable
-          bins={bins}
-          onMarkSoldOut={vi.fn()}
-          onReturnPack={vi.fn()}
-        />
-      );
+      render(<DayBinsTable bins={bins} onMarkSoldOut={vi.fn()} onReturnPack={vi.fn()} />);
 
       // Both bins should have action menu triggers
       expect(screen.getByTestId('bin-b1-actions-menu-trigger')).toBeInTheDocument();
@@ -798,11 +752,7 @@ describe('DayBinsTable', () => {
         pack: createPack({ ending_serial: null }),
       });
       render(
-        <DayBinsTable
-          bins={[bin]}
-          manualEntryMode={true}
-          endingValues={{ 'bin-001': '020' }}
-        />
+        <DayBinsTable bins={[bin]} manualEntryMode={true} endingValues={{ 'bin-001': '020' }} />
       );
       const soldCell = screen.getByTestId('sold-bin-001');
       expect(soldCell.textContent).toBe('20');
@@ -1002,13 +952,7 @@ describe('DayBinsTable', () => {
     it('should apply green background to scanned rows', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001');
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const row = screen.getByTestId('day-bins-row-bin-001');
       expect(row.className).toContain('bg-green-50');
     });
@@ -1046,26 +990,14 @@ describe('DayBinsTable', () => {
     it('should show checkmark icon for scanned bins', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001');
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       expect(screen.getByTestId('check-circle-icon')).toBeInTheDocument();
     });
 
     it('should display scanned closing serial with checkmark', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001', { closing_serial: '025' });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const scannedSerial = screen.getByTestId('scanned-serial-bin-001');
       expect(scannedSerial.textContent).toContain('025');
     });
@@ -1128,13 +1060,7 @@ describe('DayBinsTable', () => {
         }),
       });
       const scannedBin = createScannedBin('bin-001', { closing_serial: '020' });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const soldCell = screen.getByTestId('sold-bin-001');
       expect(soldCell.textContent).toBe('20');
     });
@@ -1142,26 +1068,14 @@ describe('DayBinsTable', () => {
     it('should show "Scanned Total:" label in scanner mode', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001', { closing_serial: '015' });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       expect(screen.getByText('Scanned Total:')).toBeInTheDocument();
     });
 
     it('should apply green styling to Sold column for scanned bins', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001', { closing_serial: '015' });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const soldCell = screen.getByTestId('sold-bin-001');
       expect(soldCell.className).toContain('text-green-700');
     });
@@ -1169,13 +1083,7 @@ describe('DayBinsTable', () => {
     it('should apply green styling to Amount column for scanned bins', () => {
       const bin = createBin();
       const scannedBin = createScannedBin('bin-001', { closing_serial: '015' });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const amountCell = screen.getByTestId('amount-bin-001');
       expect(amountCell.className).toContain('text-green-700');
     });
@@ -1193,13 +1101,7 @@ describe('DayBinsTable', () => {
         closing_serial: '029',
         is_sold_out: true,
       });
-      render(
-        <DayBinsTable
-          bins={[bin]}
-          scannedBins={[scannedBin]}
-          scannerModeActive={true}
-        />
-      );
+      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
       const soldCell = screen.getByTestId('sold-bin-001');
       // Sold out: 29 - 0 + 1 = 30 tickets
       expect(soldCell.textContent).toBe('30');

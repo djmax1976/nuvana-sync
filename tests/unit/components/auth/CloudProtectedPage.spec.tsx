@@ -137,9 +137,7 @@ const EXPECTED_DEV_USER = {
  * Required because IS_DEV_MODE is captured at module load time.
  */
 async function importComponent() {
-  const mod = await import(
-    '../../../../src/renderer/components/auth/CloudProtectedPage'
-  );
+  const mod = await import('../../../../src/renderer/components/auth/CloudProtectedPage');
   return mod.CloudProtectedPage;
 }
 
@@ -171,7 +169,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="protected-content">Settings Panel</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.getByTestId('protected-content')).toBeInTheDocument();
@@ -184,12 +182,10 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
-      expect(
-        screen.getByText('Dev Mode: Cloud authentication bypassed'),
-      ).toBeInTheDocument();
+      expect(screen.getByText('Dev Mode: Cloud authentication bypassed')).toBeInTheDocument();
     });
 
     it('CPP-DEV-003: dev banner displays DEV_BYPASS role indicator', async () => {
@@ -197,7 +193,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.getByText('DEV_BYPASS')).toBeInTheDocument();
@@ -208,7 +204,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.getByTestId('icon-code')).toBeInTheDocument();
@@ -221,7 +217,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.queryByText(/Support Mode/)).not.toBeInTheDocument();
@@ -244,12 +240,8 @@ describe('CloudProtectedPage', () => {
       expect(receivedUser).toEqual(EXPECTED_DEV_USER);
 
       // Verify the content rendered from the render prop
-      expect(screen.getByTestId('user-id')).toHaveTextContent(
-        'dev-bypass-00000000',
-      );
-      expect(screen.getByTestId('user-email')).toHaveTextContent(
-        'dev@localhost',
-      );
+      expect(screen.getByTestId('user-id')).toHaveTextContent('dev-bypass-00000000');
+      expect(screen.getByTestId('user-email')).toHaveTextContent('dev@localhost');
     });
 
     it('CPP-DEV-007: does NOT call onAuthenticated callback (no real auth occurred)', async () => {
@@ -259,7 +251,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage onAuthenticated={onAuthenticated}>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(onAuthenticated).not.toHaveBeenCalled();
@@ -281,13 +273,11 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="protected-content">Settings Panel</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.getByTestId('cloud-auth-dialog')).toBeInTheDocument();
-      expect(
-        screen.queryByTestId('protected-content'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
     });
 
     it('CPP-PROD-002: auth dialog receives default title and description', async () => {
@@ -295,33 +285,28 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       expect(screen.getByTestId('dialog-title')).toHaveTextContent(
-        'Support Authentication Required',
+        'Support Authentication Required'
       );
       expect(screen.getByTestId('dialog-description')).toHaveTextContent(
-        'This area is restricted to authorized support personnel only.',
+        'This area is restricted to authorized support personnel only.'
       );
     });
 
     it('CPP-PROD-003: auth dialog receives custom title and description when provided', async () => {
       const CloudProtectedPage = await importComponent();
       render(
-        <CloudProtectedPage
-          title="Custom Title"
-          description="Custom description text."
-        >
+        <CloudProtectedPage title="Custom Title" description="Custom description text.">
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
-      expect(screen.getByTestId('dialog-title')).toHaveTextContent(
-        'Custom Title',
-      );
+      expect(screen.getByTestId('dialog-title')).toHaveTextContent('Custom Title');
       expect(screen.getByTestId('dialog-description')).toHaveTextContent(
-        'Custom description text.',
+        'Custom description text.'
       );
     });
 
@@ -330,12 +315,10 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage requiredRoles={['SUPERADMIN']}>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
-      expect(capturedDialogProps.current.requiredRoles).toEqual([
-        'SUPERADMIN',
-      ]);
+      expect(capturedDialogProps.current.requiredRoles).toEqual(['SUPERADMIN']);
     });
 
     it('CPP-PROD-005: after successful auth, renders content and hides dialog', async () => {
@@ -343,27 +326,24 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="protected-content">Settings Panel</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Verify dialog is shown, content is hidden
       expect(screen.getByTestId('cloud-auth-dialog')).toBeInTheDocument();
-      expect(
-        screen.queryByTestId('protected-content'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
 
       // Simulate successful authentication via captured callback
-      const onAuthenticated = capturedDialogProps.current
-        .onAuthenticated as Function;
+      const onAuthenticated = capturedDialogProps.current.onAuthenticated as (
+        user: typeof SUPPORT_USER
+      ) => void;
       act(() => {
         onAuthenticated(SUPPORT_USER);
       });
 
       // Now content is shown, dialog is gone
       expect(screen.getByTestId('protected-content')).toBeInTheDocument();
-      expect(
-        screen.queryByTestId('cloud-auth-dialog'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('cloud-auth-dialog')).not.toBeInTheDocument();
     });
 
     it('CPP-PROD-006: production banner shows authenticated user name and email', async () => {
@@ -371,26 +351,20 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
 
       // Verify individual elements — user name in <strong> and email in surrounding text
       expect(screen.getByText(SUPPORT_USER.name)).toBeInTheDocument();
-      expect(
-        screen.getByText(SUPPORT_USER.name).tagName.toLowerCase(),
-      ).toBe('strong');
-      expect(
-        screen.getByText(/Support Mode: Logged in as/),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(new RegExp(SUPPORT_USER.email)),
-      ).toBeInTheDocument();
+      expect(screen.getByText(SUPPORT_USER.name).tagName.toLowerCase()).toBe('strong');
+      expect(screen.getByText(/Support Mode: Logged in as/)).toBeInTheDocument();
+      expect(screen.getByText(new RegExp(SUPPORT_USER.email))).toBeInTheDocument();
     });
 
     it('CPP-PROD-007: production banner shows user roles', async () => {
@@ -398,12 +372,12 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPERADMIN_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPERADMIN_USER
         );
       });
 
@@ -415,12 +389,12 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
 
@@ -433,18 +407,16 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
 
-      expect(
-        screen.queryByText('Dev Mode: Cloud authentication bypassed'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText('Dev Mode: Cloud authentication bypassed')).not.toBeInTheDocument();
       expect(screen.queryByText('DEV_BYPASS')).not.toBeInTheDocument();
     });
 
@@ -453,11 +425,11 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Simulate dialog close
-      const onClose = capturedDialogProps.current.onClose as Function;
+      const onClose = capturedDialogProps.current.onClose as () => void;
       act(() => {
         onClose();
       });
@@ -470,28 +442,22 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="protected-content">Settings Panel</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Close the dialog without authenticating
       act(() => {
-        (capturedDialogProps.current.onClose as Function)();
+        (capturedDialogProps.current.onClose as () => void)();
       });
 
       // Should show locked state
+      expect(screen.getByText('Support Access Required')).toBeInTheDocument();
       expect(
-        screen.getByText('Support Access Required'),
-      ).toBeInTheDocument();
-      expect(
-        screen.getByText(
-          'This area is restricted to authorized support personnel only.',
-        ),
+        screen.getByText('This area is restricted to authorized support personnel only.')
       ).toBeInTheDocument();
 
       // Protected content must NOT be rendered
-      expect(
-        screen.queryByTestId('protected-content'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('protected-content')).not.toBeInTheDocument();
     });
 
     it('CPP-PROD-012: go-back button in locked state navigates to dashboard', async () => {
@@ -499,12 +465,12 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Close dialog to show locked state
       act(() => {
-        (capturedDialogProps.current.onClose as Function)();
+        (capturedDialogProps.current.onClose as () => void)();
       });
       mockNavigate.mockClear();
 
@@ -520,18 +486,16 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Close dialog
       act(() => {
-        (capturedDialogProps.current.onClose as Function)();
+        (capturedDialogProps.current.onClose as () => void)();
       });
 
       // Dialog should be gone
-      expect(
-        screen.queryByTestId('cloud-auth-dialog'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('cloud-auth-dialog')).not.toBeInTheDocument();
 
       // Click Login to retry
       const loginBtn = screen.getByText('Login');
@@ -556,16 +520,14 @@ describe('CloudProtectedPage', () => {
 
       // Authenticate
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
 
       expect(renderProp).toHaveBeenCalledTimes(1);
       expect(renderProp.mock.calls[0][0]).toEqual(SUPPORT_USER);
-      expect(screen.getByTestId('user-email')).toHaveTextContent(
-        'jane.support@nuvanapos.com',
-      );
+      expect(screen.getByTestId('user-email')).toHaveTextContent('jane.support@nuvanapos.com');
     });
 
     it('CPP-PROD-015: onAuthenticated callback fires on successful auth', async () => {
@@ -575,12 +537,12 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage onAuthenticated={onAuthCb}>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPERADMIN_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPERADMIN_USER
         );
       });
 
@@ -593,15 +555,15 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="static-child">Static Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Not visible before auth
       expect(screen.queryByTestId('static-child')).not.toBeInTheDocument();
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
 
@@ -625,7 +587,7 @@ describe('CloudProtectedPage', () => {
       const { container } = render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       const wrapper = container.firstElementChild as HTMLElement;
@@ -640,7 +602,7 @@ describe('CloudProtectedPage', () => {
       const { container } = render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       const wrapper = container.firstElementChild as HTMLElement;
@@ -654,7 +616,7 @@ describe('CloudProtectedPage', () => {
       const { container } = render(
         <CloudProtectedPage>
           <div data-testid="child">Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       const wrapper = container.firstElementChild as HTMLElement;
@@ -665,9 +627,7 @@ describe('CloudProtectedPage', () => {
       expect(contentWrapper.className).toContain('p-6');
 
       // Content should be inside this wrapper
-      const child = contentWrapper.querySelector(
-        '[data-testid="child"]',
-      );
+      const child = contentWrapper.querySelector('[data-testid="child"]');
       expect(child).not.toBeNull();
     });
   });
@@ -690,7 +650,7 @@ describe('CloudProtectedPage', () => {
             receivedUser.current = user as unknown as Record<string, unknown>;
             return <div>Content</div>;
           }}
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       const user = receivedUser.current;
@@ -713,7 +673,7 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Authenticate with a user that has DEV_BYPASS role (attack scenario)
@@ -725,13 +685,13 @@ describe('CloudProtectedPage', () => {
       };
 
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(hackedUser);
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          hackedUser
+        );
       });
 
       // IS_DEV_MODE is false, so the dev banner condition fails regardless of roles
-      expect(
-        screen.queryByText('Dev Mode: Cloud authentication bypassed'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByText('Dev Mode: Cloud authentication bypassed')).not.toBeInTheDocument();
     });
 
     it('CPP-SEC-003: production mode requires explicit auth — starts unverified', async () => {
@@ -742,13 +702,11 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="secret-content">Secret Data</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Content MUST NOT be in the DOM before authentication
-      expect(
-        screen.queryByTestId('secret-content'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('secret-content')).not.toBeInTheDocument();
       expect(screen.queryByText('Secret Data')).not.toBeInTheDocument();
 
       // Auth dialog MUST be shown
@@ -763,21 +721,17 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="secret-content">Confidential Settings</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // Close dialog to enter locked state
       act(() => {
-        (capturedDialogProps.current.onClose as Function)();
+        (capturedDialogProps.current.onClose as () => void)();
       });
 
       // Content must be completely absent from DOM, not just hidden via CSS
-      expect(
-        screen.queryByTestId('secret-content'),
-      ).not.toBeInTheDocument();
-      expect(
-        screen.queryByText('Confidential Settings'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('secret-content')).not.toBeInTheDocument();
+      expect(screen.queryByText('Confidential Settings')).not.toBeInTheDocument();
     });
   });
 
@@ -794,13 +748,10 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
-      expect(capturedDialogProps.current.requiredRoles).toEqual([
-        'SUPPORT',
-        'SUPERADMIN',
-      ]);
+      expect(capturedDialogProps.current.requiredRoles).toEqual(['SUPPORT', 'SUPERADMIN']);
     });
 
     it('CPP-EDGE-002: custom requiredRoles override the defaults', async () => {
@@ -811,13 +762,10 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage requiredRoles={['ADMIN', 'OWNER']}>
           <div>Content</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
-      expect(capturedDialogProps.current.requiredRoles).toEqual([
-        'ADMIN',
-        'OWNER',
-      ]);
+      expect(capturedDialogProps.current.requiredRoles).toEqual(['ADMIN', 'OWNER']);
     });
 
     it('CPP-EDGE-003: multiple auth cycles work — close, retry, authenticate', async () => {
@@ -828,12 +776,12 @@ describe('CloudProtectedPage', () => {
       render(
         <CloudProtectedPage>
           <div data-testid="protected-content">Settings</div>
-        </CloudProtectedPage>,
+        </CloudProtectedPage>
       );
 
       // 1. Close dialog → locked state
       act(() => {
-        (capturedDialogProps.current.onClose as Function)();
+        (capturedDialogProps.current.onClose as () => void)();
       });
       expect(screen.getByText('Support Access Required')).toBeInTheDocument();
 
@@ -843,14 +791,12 @@ describe('CloudProtectedPage', () => {
 
       // 3. Successfully authenticate
       act(() => {
-        (capturedDialogProps.current.onAuthenticated as Function)(
-          SUPPORT_USER,
+        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
+          SUPPORT_USER
         );
       });
       expect(screen.getByTestId('protected-content')).toBeInTheDocument();
-      expect(
-        screen.queryByTestId('cloud-auth-dialog'),
-      ).not.toBeInTheDocument();
+      expect(screen.queryByTestId('cloud-auth-dialog')).not.toBeInTheDocument();
     });
   });
 });

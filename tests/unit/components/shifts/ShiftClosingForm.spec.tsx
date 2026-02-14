@@ -51,12 +51,7 @@ import userEvent from '@testing-library/user-event';
  * Note: mockInvalidateList removed in Phase 4 - useLocalCloseShift handles
  * query invalidation internally via onSuccess callback
  */
-const {
-  mockMutateAsync,
-  mockToast,
-  mockExecuteWithAuth,
-  mockPinDialogProps,
-} = vi.hoisted(() => ({
+const { mockMutateAsync, mockToast, mockExecuteWithAuth, mockPinDialogProps } = vi.hoisted(() => ({
   mockMutateAsync: vi.fn(),
   mockToast: vi.fn(),
   mockExecuteWithAuth: vi.fn(),
@@ -186,7 +181,11 @@ vi.mock('../../../../src/renderer/components/ui/form', () => ({
   }: {
     render: (props: { field: Record<string, unknown> }) => React.ReactNode;
     name: string;
-  }) => <div data-testid={`form-field-${name}`}>{render({ field: { value: 0, onChange: vi.fn() } })}</div>,
+  }) => (
+    <div data-testid={`form-field-${name}`}>
+      {render({ field: { value: 0, onChange: vi.fn() } })}
+    </div>
+  ),
   FormItem: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FormLabel: ({ children }: { children: React.ReactNode }) => <label>{children}</label>,
   FormMessage: () => null,
@@ -219,13 +218,15 @@ import { useLocalCloseShift } from '../../../../src/renderer/hooks/useLocalShift
 /**
  * Factory function for creating shift test data
  */
-function createShiftFixture(overrides?: Partial<{
-  shiftId: string;
-  storeId: string;
-  open: boolean;
-  onOpenChange: (open: boolean) => void;
-  onSuccess: () => void;
-}>) {
+function createShiftFixture(
+  overrides?: Partial<{
+    shiftId: string;
+    storeId: string;
+    open: boolean;
+    onOpenChange: (open: boolean) => void;
+    onSuccess: () => void;
+  }>
+) {
   return {
     shiftId: 'shift-uuid-123',
     storeId: 'store-uuid-456',
