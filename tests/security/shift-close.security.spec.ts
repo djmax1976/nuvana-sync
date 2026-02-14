@@ -17,12 +17,16 @@ import { z } from 'zod';
 
 // ============================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ============================================================================
 
-const mockGetConfiguredStore = vi.fn();
-const mockFindById = vi.fn();
-const mockClose = vi.fn();
-const mockEnqueue = vi.fn();
+const { mockGetConfiguredStore, mockFindById, mockClose, mockEnqueue } = vi.hoisted(() => ({
+  mockGetConfiguredStore: vi.fn(),
+  mockFindById: vi.fn(),
+  mockClose: vi.fn(),
+  mockEnqueue: vi.fn(),
+}));
 
 vi.mock('../../src/main/dal/stores.dal', () => ({
   storesDAL: {
