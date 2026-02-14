@@ -1582,12 +1582,7 @@ describe('Shifts Handlers', () => {
       it('should not include internal-only fields in sync payload', () => {
         // Fields that should NOT be in the sync payload
         // These are DB/internal fields that should be excluded
-        const internalOnlyFields = [
-          'created_at',
-          'updated_at',
-          'sync_status',
-          'local_only',
-        ];
+        const internalOnlyFields = ['created_at', 'updated_at', 'sync_status', 'local_only'];
 
         // Internal sync payload (translated to cloud names at API boundary)
         // Internal: opened_at → Cloud: start_time
@@ -1908,9 +1903,11 @@ describe('Shifts Handlers', () => {
     const BUSINESS_DATE = '2026-02-11';
 
     // Mock lottery business days DAL
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type MockFn = ReturnType<typeof vi.fn> & ((...args: any[]) => any);
     let lotteryBusinessDaysDAL: {
-      findOpenDay: ReturnType<typeof vi.fn>;
-      getOrCreateForDate: ReturnType<typeof vi.fn>;
+      findOpenDay: MockFn;
+      getOrCreateForDate: MockFn;
     };
 
     // Mock open day
@@ -1988,7 +1985,8 @@ describe('Shifts Handlers', () => {
         const errorResponse = {
           success: false,
           error: 'VALIDATION_ERROR',
-          message: 'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
+          message:
+            'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
         };
 
         // Assert: Correct error structure

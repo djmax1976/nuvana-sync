@@ -104,31 +104,34 @@ vi.mock('../../../src/main/services/settings.service', () => ({
 
 describe('Lottery IPC Handlers', () => {
   // Import mocked modules
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  type MockFn = ReturnType<typeof vi.fn> & ((...args: any[]) => any);
+
   let lotteryGamesDAL: {
-    findActiveByStore: ReturnType<typeof vi.fn>;
-    findByGameCode: ReturnType<typeof vi.fn>;
-    create: ReturnType<typeof vi.fn>;
-    update: ReturnType<typeof vi.fn>;
+    findActiveByStore: MockFn;
+    findByGameCode: MockFn;
+    create: MockFn;
+    update: MockFn;
   };
   let lotteryBinsDAL: {
-    findActiveByStore: ReturnType<typeof vi.fn>;
-    findBinsWithPacks: ReturnType<typeof vi.fn>;
-    findById: ReturnType<typeof vi.fn>;
+    findActiveByStore: MockFn;
+    findBinsWithPacks: MockFn;
+    findById: MockFn;
   };
   let lotteryPacksDAL: {
-    receive: ReturnType<typeof vi.fn>;
-    activate: ReturnType<typeof vi.fn>;
-    settle: ReturnType<typeof vi.fn>;
-    returnPack: ReturnType<typeof vi.fn>;
-    findWithFilters: ReturnType<typeof vi.fn>;
-    getActivatedPacksForDayClose: ReturnType<typeof vi.fn>;
+    receive: MockFn;
+    activate: MockFn;
+    settle: MockFn;
+    returnPack: MockFn;
+    findWithFilters: MockFn;
+    getActivatedPacksForDayClose: MockFn;
   };
   let lotteryBusinessDaysDAL: {
-    getOrCreateForDate: ReturnType<typeof vi.fn>;
-    findOpenDay: ReturnType<typeof vi.fn>;
-    prepareClose: ReturnType<typeof vi.fn>;
-    commitClose: ReturnType<typeof vi.fn>;
-    cancelClose: ReturnType<typeof vi.fn>;
+    getOrCreateForDate: MockFn;
+    findOpenDay: MockFn;
+    prepareClose: MockFn;
+    commitClose: MockFn;
+    cancelClose: MockFn;
   };
   let scannerService: {
     parseBarcode: ReturnType<typeof vi.fn>;
@@ -4230,8 +4233,7 @@ describe('Lottery IPC Handlers', () => {
         const closingSerial = calculateFinalSerial(openingSerial, ticketsPerPack);
 
         // Tickets sold = closing - opening + 1 (inclusive range)
-        const ticketsSold =
-          parseInt(closingSerial, 10) - parseInt(openingSerial, 10) + 1;
+        const ticketsSold = parseInt(closingSerial, 10) - parseInt(openingSerial, 10) + 1;
         expect(ticketsSold).toBe(ticketsPerPack);
       });
 
@@ -4669,7 +4671,11 @@ describe('Lottery IPC Handlers', () => {
 
         // Act: Simulate the handler logic
         const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
-        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
 
         // Assert: New day exists with status OPEN
         expect(commitResult).toBeDefined();
@@ -4761,7 +4767,11 @@ describe('Lottery IPC Handlers', () => {
 
         // Act
         lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, closerUserId);
-        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, closerUserId);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          closerUserId
+        );
 
         // Assert: opened_by matches the closer
         expect(lotteryBusinessDaysDAL.getOrCreateForDate).toHaveBeenCalledWith(
@@ -4800,7 +4810,11 @@ describe('Lottery IPC Handlers', () => {
 
         // Act: Build response as handler does
         const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
-        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
 
         const response = {
           ...commitResult,
@@ -4825,7 +4839,11 @@ describe('Lottery IPC Handlers', () => {
 
         // Act
         const commitResult = lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
-        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
 
         const response = {
           ...commitResult,
@@ -4847,7 +4865,7 @@ describe('Lottery IPC Handlers', () => {
     // LOT-CLOSE-005: Next day syncs to cloud
     // ========================================================================
     describe('LOT-CLOSE-005: Next day syncs to cloud', () => {
-      let syncQueueDAL: { enqueue: ReturnType<typeof vi.fn> };
+      let syncQueueDAL: { enqueue: MockFn };
 
       beforeEach(async () => {
         const syncModule = await import('../../../src/main/dal/sync-queue.dal');
@@ -4928,7 +4946,11 @@ describe('Lottery IPC Handlers', () => {
 
         // Act
         lotteryBusinessDaysDAL.commitClose(CLOSED_DAY_ID, USER_ID);
-        const returnedDay = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const returnedDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
 
         // Assert: Returns existing day, same ID
         expect(returnedDay.day_id).toBe('day-uuid-existing');
@@ -4942,8 +4964,16 @@ describe('Lottery IPC Handlers', () => {
         lotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(firstOpenDay);
 
         // Act: Call twice
-        const day1 = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
-        const day2 = lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
+        const day1 = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
+        const day2 = lotteryBusinessDaysDAL.getOrCreateForDate(
+          STORE_ID,
+          BUSINESS_DATE_TODAY,
+          USER_ID
+        );
 
         // Assert: Same day returned both times
         expect(day1.day_id).toBe(day2.day_id);

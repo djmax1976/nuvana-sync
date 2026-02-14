@@ -582,33 +582,27 @@ describe('POS Type Authorization Matrix', () => {
     'POS_PLUS',
   ];
 
-  it.each(nonLotteryPOSTypes)(
-    'allows %s POS type with fromWizard=true',
-    (posType) => {
-      mockSettingsService.getPOSType.mockReturnValue(posType);
+  it.each(nonLotteryPOSTypes)('allows %s POS type with fromWizard=true', (posType) => {
+    mockSettingsService.getPOSType.mockReturnValue(posType);
 
-      const currentPosType = mockSettingsService.getPOSType();
-      const fromWizard = true;
+    const currentPosType = mockSettingsService.getPOSType();
+    const fromWizard = true;
 
-      const isAllowed = currentPosType === 'LOTTERY' || fromWizard;
+    const isAllowed = currentPosType === 'LOTTERY' || fromWizard;
 
-      expect(isAllowed).toBe(true);
-    }
-  );
+    expect(isAllowed).toBe(true);
+  });
 
-  it.each(nonLotteryPOSTypes)(
-    'blocks %s POS type with fromWizard=false',
-    (posType) => {
-      mockSettingsService.getPOSType.mockReturnValue(posType);
+  it.each(nonLotteryPOSTypes)('blocks %s POS type with fromWizard=false', (posType) => {
+    mockSettingsService.getPOSType.mockReturnValue(posType);
 
-      const currentPosType = mockSettingsService.getPOSType();
-      const fromWizard = false;
+    const currentPosType = mockSettingsService.getPOSType();
+    const fromWizard = false;
 
-      const isAllowed = currentPosType === 'LOTTERY' || fromWizard;
+    const isAllowed = currentPosType === 'LOTTERY' || fromWizard;
 
-      expect(isAllowed).toBe(false);
-    }
-  );
+    expect(isAllowed).toBe(false);
+  });
 
   it('always allows LOTTERY POS type regardless of fromWizard flag', () => {
     mockSettingsService.getPOSType.mockReturnValue('LOTTERY');
@@ -734,8 +728,8 @@ describe('DB-006: Tenant Isolation', () => {
 
   it('rejects cross-store day_id access', () => {
     // Day belongs to store-uuid-001, but request comes from store-uuid-002
-    const dayStoreId = 'store-uuid-001';
-    const requestStoreId = 'store-uuid-002';
+    const dayStoreId: string = 'store-uuid-001';
+    const requestStoreId: string = 'store-uuid-002';
 
     const isSameStore = dayStoreId === requestStoreId;
 

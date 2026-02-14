@@ -141,7 +141,9 @@ function createDayBinPack(overrides: Partial<DayBinPack> = {}): DayBinPack {
 /**
  * Create a DayBin with defaults
  */
-function createDayBin(overrides: Partial<DayBin & { pack?: Partial<DayBinPack> | null }> = {}): DayBin {
+function createDayBin(
+  overrides: Partial<Omit<DayBin, 'pack'>> & { pack?: Partial<DayBinPack> | null } = {}
+): DayBin {
   const { pack: packOverrides, ...binOverrides } = overrides;
   return {
     bin_id: 'bin-001',
@@ -198,7 +200,9 @@ function createMultipleBins(count: number, options: { includeEmptyBins?: boolean
               game_name: `Game ${binNumber}`,
               game_price: (binNumber % 5) * 5 + 5, // Prices: 5, 10, 15, 20, 25
               starting_serial: '000',
+              ending_serial: null,
               serial_end: '299',
+              is_first_period: true,
             },
       })
     );
@@ -539,9 +543,7 @@ describe('Day Close Scanner Integration — Phase 6', () => {
       expect(result.current.scannedBins).toHaveLength(1);
       expect(onScanSuccess).toHaveBeenCalledTimes(1);
       expect(onScanError).toHaveBeenCalledTimes(1);
-      expect(onScanError).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'DUPLICATE_SCAN' })
-      );
+      expect(onScanError).toHaveBeenCalledWith(expect.objectContaining({ type: 'DUPLICATE_SCAN' }));
     });
 
     it('should handle interleaved valid and invalid scans', () => {
@@ -638,9 +640,7 @@ describe('Day Close Scanner Integration — Phase 6', () => {
         result2.current.addFromSerial(createBarcode());
       });
 
-      expect(onScanError).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'PACK_NOT_FOUND' })
-      );
+      expect(onScanError).toHaveBeenCalledWith(expect.objectContaining({ type: 'PACK_NOT_FOUND' }));
     });
 
     it('should handle bins with all empty packs (no active packs)', () => {
@@ -697,7 +697,7 @@ describe('Day Close Scanner Integration — Phase 6', () => {
           "'; DROP TABLE lottery_packs; --",
           "1' OR '1'='1",
           '1; SELECT * FROM users',
-          "UNION SELECT password FROM users--",
+          'UNION SELECT password FROM users--',
         ];
 
         sqlInjectionAttempts.forEach((injection) => {
@@ -844,7 +844,12 @@ describe('Day Close Scanner Integration — Phase 6', () => {
       it('should reject closing serial below starting serial', () => {
         const bins = [
           createDayBin({
-            pack: { starting_serial: '050', serial_end: '299' }, // Starting at 050
+            pack: {
+              starting_serial: '050',
+              ending_serial: null,
+              serial_end: '299',
+              is_first_period: true,
+            }, // Starting at 050
           }),
         ];
         const onScanError = vi.fn();
@@ -871,7 +876,12 @@ describe('Day Close Scanner Integration — Phase 6', () => {
       it('should reject closing serial above pack max', () => {
         const bins = [
           createDayBin({
-            pack: { starting_serial: '000', serial_end: '099' }, // Max at 099
+            pack: {
+              starting_serial: '000',
+              ending_serial: null,
+              serial_end: '099',
+              is_first_period: true,
+            }, // Max at 099
           }),
         ];
         const onScanError = vi.fn();
@@ -898,7 +908,12 @@ describe('Day Close Scanner Integration — Phase 6', () => {
       it('should accept valid serial at exact boundaries', () => {
         const bins = [
           createDayBin({
-            pack: { starting_serial: '050', serial_end: '199' },
+            pack: {
+              starting_serial: '050',
+              ending_serial: null,
+              serial_end: '199',
+              is_first_period: true,
+            },
           }),
         ];
         const onScanSuccess = vi.fn();

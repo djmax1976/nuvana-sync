@@ -301,24 +301,29 @@ describeSuite('Lottery Handlers Edge Case Tests (Phase 4)', () => {
    * Get lottery day by ID
    * SEC-006: Parameterized query
    */
-  function getDayById(dayId: string): {
-    day_id: string;
-    status: string;
-    business_date: string;
-    opened_at: string;
-    closed_at: string | null;
-    opened_by: string;
-    closed_by: string | null;
-  } | undefined {
+  function getDayById(dayId: string):
+    | {
+        day_id: string;
+        status: string;
+        business_date: string;
+        opened_at: string;
+        closed_at: string | null;
+        opened_by: string;
+        closed_by: string | null;
+      }
+    | undefined {
     const stmt = db.prepare(`SELECT * FROM lottery_business_days WHERE day_id = ?`);
-    return stmt.get(dayId) as {
-      day_id: string;
-      status: string;
-      business_date: string;
-      opened_at: string;
-      closed_at: string | null;
-      opened_by: string;
-    } | undefined;
+    return stmt.get(dayId) as
+      | {
+          day_id: string;
+          status: string;
+          business_date: string;
+          opened_at: string;
+          closed_at: string | null;
+          opened_by: string;
+          closed_by: string | null;
+        }
+      | undefined;
   }
 
   /**
@@ -332,7 +337,11 @@ describeSuite('Lottery Handlers Edge Case Tests (Phase 4)', () => {
       WHERE store_id = ? AND status = 'OPEN'
       ORDER BY business_date DESC
     `);
-    return stmt.all(ctx.storeId) as Array<{ day_id: string; status: string; business_date: string }>;
+    return stmt.all(ctx.storeId) as Array<{
+      day_id: string;
+      status: string;
+      business_date: string;
+    }>;
   }
 
   /**
@@ -359,25 +368,23 @@ describeSuite('Lottery Handlers Edge Case Tests (Phase 4)', () => {
     second?: number;
   }): string {
     const now = new Date();
-    const date = new Date(Date.UTC(
-      options.year ?? now.getUTCFullYear(),
-      (options.month ?? now.getUTCMonth() + 1) - 1, // Month is 0-indexed
-      options.day ?? now.getUTCDate(),
-      options.hour ?? 0,
-      options.minute ?? 0,
-      options.second ?? 0
-    ));
+    const date = new Date(
+      Date.UTC(
+        options.year ?? now.getUTCFullYear(),
+        (options.month ?? now.getUTCMonth() + 1) - 1, // Month is 0-indexed
+        options.day ?? now.getUTCDate(),
+        options.hour ?? 0,
+        options.minute ?? 0,
+        options.second ?? 0
+      )
+    );
     return date.toISOString();
   }
 
   /**
    * Generate business date string (YYYY-MM-DD)
    */
-  function createBusinessDate(options: {
-    year?: number;
-    month?: number;
-    day?: number;
-  }): string {
+  function createBusinessDate(options: { year?: number; month?: number; day?: number }): string {
     const now = new Date();
     const year = options.year ?? now.getFullYear();
     const month = String(options.month ?? now.getMonth() + 1).padStart(2, '0');
@@ -1036,7 +1043,11 @@ describeSuite('Lottery Handlers Edge Case Tests (Phase 4)', () => {
       syncQueueMaxSize = Infinity;
 
       // Act: Create another day (simulates retry or new operation)
-      const newDay = lotteryBusinessDaysDAL.getOrCreateForDate(ctx.storeId, ctx.utils.today(), user.user_id);
+      const newDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+        ctx.storeId,
+        ctx.utils.today(),
+        user.user_id
+      );
 
       // Assert: Since getOrCreateForDate is idempotent, returns existing
       expect(newDay).toBeDefined();
