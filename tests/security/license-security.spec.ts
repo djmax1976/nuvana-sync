@@ -27,12 +27,10 @@ import { randomBytes } from 'crypto';
 // Mocks - Must be hoisted
 // ============================================================================
 
-// Mock electron (app and safeStorage)
-vi.mock('electron', () => ({
-  app: {
-    getVersion: vi.fn(() => '1.0.0'),
-  },
-  safeStorage: {
+// Create hoisted containers for mock storage and electron mocks
+const { mockElectronStore, mockSafeStorage } = vi.hoisted(() => ({
+  mockElectronStore: { store: new Map<string, unknown>() },
+  mockSafeStorage: {
     isEncryptionAvailable: vi.fn(() => true),
     encryptString: vi.fn((data: string) => Buffer.from(`encrypted:${data}`)),
     decryptString: vi.fn((buffer: Buffer) => {
@@ -45,25 +43,32 @@ vi.mock('electron', () => ({
   },
 }));
 
+// Mock electron (app and safeStorage)
+vi.mock('electron', () => ({
+  app: {
+    getVersion: vi.fn(() => '1.0.0'),
+  },
+  safeStorage: mockSafeStorage,
+}));
+
 // Mock electron-store with internal store
 vi.mock('electron-store', () => {
-  const internalStore = new Map<string, unknown>();
   class MockStore {
-    static __store = internalStore;
+    static __store = mockElectronStore.store;
     get(key: string): unknown {
-      return internalStore.get(key);
+      return mockElectronStore.store.get(key);
     }
     set(key: string, value: unknown): void {
-      internalStore.set(key, value);
+      mockElectronStore.store.set(key, value);
     }
     delete(key: string): void {
-      internalStore.delete(key);
+      mockElectronStore.store.delete(key);
     }
     has(key: string): boolean {
-      return internalStore.has(key);
+      return mockElectronStore.store.has(key);
     }
     clear(): void {
-      internalStore.clear();
+      mockElectronStore.store.clear();
     }
   }
   return { default: MockStore };
@@ -89,19 +94,9 @@ import {
   GRACE_PERIOD_DAYS,
   type LicenseApiResponse,
 } from '../../src/main/services/license.service';
-import Store from 'electron-store';
-
-// Access the mock's internal store via static property
-type MockStoreClass = typeof Store & { __store: Map<string, unknown> };
 
 describe('License Security Tests', () => {
   let service: LicenseService;
-  let safeStorageMock: {
-    isEncryptionAvailable: ReturnType<typeof vi.fn>;
-    encryptString: ReturnType<typeof vi.fn>;
-    decryptString: ReturnType<typeof vi.fn>;
-  };
-  let mockStoreData: Map<string, unknown>;
 
   const daysFromNow = (days: number): string => {
     const date = new Date();
@@ -114,22 +109,20 @@ describe('License Security Tests', () => {
     status: 'active',
   });
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
 
-    // Get access to mock store data
-    mockStoreData = (Store as unknown as MockStoreClass).__store;
-    mockStoreData.clear();
+    // Clear mock store data using hoisted reference
+    mockElectronStore.store.clear();
 
-    const electron = await import('electron');
-    safeStorageMock = electron.safeStorage as unknown as typeof safeStorageMock;
-    safeStorageMock.isEncryptionAvailable.mockReturnValue(true);
+    // Reset safeStorage mock defaults
+    mockSafeStorage.isEncryptionAvailable.mockReturnValue(true);
 
     service = new LicenseService();
   });
 
   afterEach(() => {
-    mockStoreData.clear();
+    mockElectronStore.store.clear();
     vi.restoreAllMocks();
   });
 
