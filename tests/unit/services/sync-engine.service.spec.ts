@@ -197,30 +197,75 @@ const {
 }));
 
 // Mock cloud-api.service to prevent real API calls during tests
-// Pack sync operations use cloudApiService directly, this mock enables
-// testing pack routing and failure handling without API configuration
-// Phase 10: pushPackDeplete and pushPackReturn now use controllable mocks
-// v047: Day close two-phase commit mocks added
-vi.mock('../../../src/main/services/cloud-api.service', () => ({
-  cloudApiService: {
-    pushPackReceive: vi.fn().mockRejectedValue(new Error('API key not configured')),
-    pushPackActivate: vi.fn().mockRejectedValue(new Error('API key not configured')),
-    pushPackDeplete: mockPushPackDeplete,
-    pushPackReturn: mockPushPackReturn,
-    pushBatch: vi.fn().mockResolvedValue({ success: true, results: [] }),
-    healthCheck: vi.fn().mockResolvedValue({ success: true }),
-    pushShift: mockPushShift,
-    pushEmployees: mockPushEmployees,
-    // v047: Day close two-phase commit methods
-    prepareDayClose: mockPrepareDayClose,
-    commitDayClose: mockCommitDayClose,
-    cancelDayClose: mockCancelDayClose,
-    // v048: Cloud day_id resolution
-    pullDayStatus: mockPullDayStatus,
-    // day_open_push: Day open push method
-    pushDayOpen: mockPushDayOpen,
-  },
-}));
+//
+// IMPORTANT: This mock must manually include ALL exports used by sync-engine.service.ts
+// We cannot use importOriginal() here because cloud-api.service has heavy dependencies
+// (electron-store, license.service, etc.) that would require additional mocking.
+//
+// MAINTENANCE: When adding new exports to cloud-api.service.ts that sync-engine uses,
+// you MUST add them here too, or tests will fail with "export not defined on mock".
+//
+// Currently required exports:
+// - CloudApiError: Class used for error type checking (isCloudApiError)
+// - cloudApiService: Service methods for API calls
+vi.mock('../../../src/main/services/cloud-api.service', () => {
+  // CloudApiError must match the real class interface for instanceof checks
+  class MockCloudApiError extends Error {
+    public readonly httpStatus: number;
+    public readonly code: string;
+    public readonly details?: Record<string, unknown>;
+    public readonly responseBody: string;
+
+    constructor(
+      message: string,
+      httpStatus: number,
+      code: string,
+      details: Record<string, unknown> | undefined,
+      responseBody: string
+    ) {
+      super(message);
+      this.name = 'CloudApiError';
+      this.httpStatus = httpStatus;
+      this.code = code;
+      this.details = details;
+      this.responseBody = responseBody;
+      Object.setPrototypeOf(this, MockCloudApiError.prototype);
+    }
+
+    static isCloudApiError(error: unknown): error is MockCloudApiError {
+      return error instanceof MockCloudApiError;
+    }
+
+    getTruncatedResponseBody(maxLength = 2000): string {
+      if (this.responseBody.length <= maxLength) {
+        return this.responseBody;
+      }
+      return this.responseBody.substring(0, maxLength - 3) + '...';
+    }
+  }
+
+  return {
+    CloudApiError: MockCloudApiError,
+    cloudApiService: {
+      pushPackReceive: vi.fn().mockRejectedValue(new Error('API key not configured')),
+      pushPackActivate: vi.fn().mockRejectedValue(new Error('API key not configured')),
+      pushPackDeplete: mockPushPackDeplete,
+      pushPackReturn: mockPushPackReturn,
+      pushBatch: vi.fn().mockResolvedValue({ success: true, results: [] }),
+      healthCheck: vi.fn().mockResolvedValue({ success: true }),
+      pushShift: mockPushShift,
+      pushEmployees: mockPushEmployees,
+      // v047: Day close two-phase commit methods
+      prepareDayClose: mockPrepareDayClose,
+      commitDayClose: mockCommitDayClose,
+      cancelDayClose: mockCancelDayClose,
+      // v048: Cloud day_id resolution
+      pullDayStatus: mockPullDayStatus,
+      // day_open_push: Day open push method
+      pushDayOpen: mockPushDayOpen,
+    },
+  };
+});
 
 // v048: Mock lotteryBusinessDaysDAL for cloud day_id resolution
 vi.mock('../../../src/main/dal/lottery-business-days.dal', () => ({
@@ -1573,10 +1618,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'OPEN',
-          cashier_id: 'cashier-123',
-          end_time: null,
+          opened_by: 'cashier-123',
+          closed_at: null,
           external_register_id: 'REG001',
           external_cashier_id: null,
           external_till_id: null,
@@ -1625,10 +1670,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 2,
-          start_time: '2024-01-15T12:00:00Z',
+          opened_at: '2024-01-15T12:00:00Z',
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          opened_by: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1668,10 +1713,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'CLOSED',
-          cashier_id: 'cashier-123',
-          end_time: '2024-01-15T16:00:00Z',
+          opened_by: 'cashier-123',
+          closed_at: '2024-01-15T16:00:00Z',
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1712,10 +1757,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          opened_by: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1795,10 +1840,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'CLOSED',
-          cashier_id: 'cashier-123',
-          end_time: '2024-01-15T16:30:00Z',
+          opened_by: 'cashier-123',
+          closed_at: '2024-01-15T16:30:00Z',
           external_register_id: 'REG001',
           external_cashier_id: null,
           external_till_id: null,
@@ -1827,7 +1872,7 @@ describe('SyncEngineService', () => {
         expect.objectContaining({
           shift_id: 'shift-to-close',
           status: 'CLOSED',
-          end_time: '2024-01-15T16:30:00Z',
+          closed_at: '2024-01-15T16:30:00Z',
         })
       );
     });
@@ -1845,10 +1890,10 @@ describe('SyncEngineService', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 1,
-            start_time: '2024-01-15T08:00:00Z',
+            opened_at: '2024-01-15T08:00:00Z',
             status: 'OPEN',
-            cashier_id: null,
-            end_time: null,
+            opened_by: null,
+            closed_at: null,
             external_register_id: null,
             external_cashier_id: null,
             external_till_id: null,
@@ -1873,10 +1918,10 @@ describe('SyncEngineService', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 2,
-            start_time: '2024-01-15T12:00:00Z',
+            opened_at: '2024-01-15T12:00:00Z',
             status: 'OPEN',
-            cashier_id: null,
-            end_time: null,
+            opened_by: null,
+            closed_at: null,
             external_register_id: null,
             external_cashier_id: null,
             external_till_id: null,
@@ -1919,10 +1964,10 @@ describe('SyncEngineService', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 1,
-            start_time: '2024-01-15T08:00:00Z',
+            opened_at: '2024-01-15T08:00:00Z',
             status: 'OPEN',
-            cashier_id: null,
-            end_time: null,
+            opened_by: null,
+            closed_at: null,
             external_register_id: null,
             external_cashier_id: null,
             external_till_id: null,
@@ -1947,10 +1992,10 @@ describe('SyncEngineService', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 2,
-            start_time: '2024-01-15T12:00:00Z',
+            opened_at: '2024-01-15T12:00:00Z',
             status: 'OPEN',
-            cashier_id: null,
-            end_time: null,
+            opened_by: null,
+            closed_at: null,
             external_register_id: null,
             external_cashier_id: null,
             external_till_id: null,
@@ -2054,10 +2099,10 @@ describe('SyncEngineService', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 1,
-            start_time: '2024-01-15T08:00:00Z',
+            opened_at: '2024-01-15T08:00:00Z',
             status: 'OPEN',
-            cashier_id: null,
-            end_time: null,
+            opened_by: null,
+            closed_at: null,
             external_register_id: null,
             external_cashier_id: null,
             external_till_id: null,
@@ -2135,10 +2180,10 @@ describe('SyncEngineService', () => {
           store_id: configuredStoreId,
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          opened_by: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -2193,10 +2238,10 @@ describe('SyncEngineService', () => {
           store_id: 'store-123',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          opened_by: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
