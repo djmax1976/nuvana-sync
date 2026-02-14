@@ -39,6 +39,8 @@ const {
   mockGameFindById,
   // Employee sync: usersDAL mock for pin_hash lookup
   mockUserFindById,
+  // Reference data sync: bidirectionalSyncService mock
+  mockSyncGames,
 } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockGetRetryableItems: vi.fn(),
@@ -71,6 +73,8 @@ const {
   mockGameFindById: vi.fn(),
   // Employee sync: usersDAL mock for pin_hash lookup
   mockUserFindById: vi.fn(),
+  // Reference data sync: bidirectionalSyncService mock
+  mockSyncGames: vi.fn(),
 }));
 
 // Mock electron (including safeStorage for cloud-api.service)
@@ -151,6 +155,16 @@ vi.mock('../../../src/main/dal/lottery-games.dal', () => ({
 vi.mock('../../../src/main/dal/users.dal', () => ({
   usersDAL: {
     findById: mockUserFindById,
+  },
+}));
+
+// Mock bidirectional-sync.service for reference data sync
+// The sync engine calls bidirectionalSyncService.syncGames() during reference data sync.
+// Without this mock, the real service attempts to use cloudApiService.pullGames(),
+// which fails because configStore is undefined in the test environment.
+vi.mock('../../../src/main/services/bidirectional-sync.service', () => ({
+  bidirectionalSyncService: {
+    syncGames: mockSyncGames,
   },
 }));
 
@@ -335,6 +349,14 @@ describe('SyncEngineService', () => {
     // By default, return null (no cloud day) for non-day-close tests
     mockDayFindById.mockReturnValue(null);
     mockPullDayStatus.mockRejectedValue(new Error('API key not configured'));
+    // Reference data sync: Default mock for bidirectionalSyncService.syncGames
+    // Returns empty successful result to prevent "Cannot read properties of undefined" errors
+    mockSyncGames.mockResolvedValue({
+      pushed: 0,
+      pulled: 0,
+      conflicts: 0,
+      errors: [],
+    });
     service = new SyncEngineService();
   });
 
