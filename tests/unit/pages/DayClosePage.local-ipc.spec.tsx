@@ -156,7 +156,11 @@ vi.mock('../../../src/renderer/components/ui/card', () => ({
       {children}
     </div>
   ),
-  CardContent: ({ children, className, ...props }: React.PropsWithChildren<{ className?: string }>) => (
+  CardContent: ({
+    children,
+    className,
+    ...props
+  }: React.PropsWithChildren<{ className?: string }>) => (
     <div className={className} {...props}>
       {children}
     </div>

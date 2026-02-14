@@ -27,7 +27,11 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import type { ScannedBin, PendingClosingsData, LotteryCloseResult } from '../../../../src/renderer/components/lottery/DayCloseModeScanner';
+import type {
+  ScannedBin,
+  PendingClosingsData,
+  LotteryCloseResult,
+} from '../../../../src/renderer/components/lottery/DayCloseModeScanner';
 import type { DayBin } from '../../../../src/renderer/lib/api/lottery';
 
 // ============================================================================
@@ -59,7 +63,9 @@ vi.mock('../../../../src/renderer/hooks/use-notification-sound', () => ({
 // Mock UI components
 vi.mock('../../../../src/renderer/components/ui/card', () => ({
   Card: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
-    <div data-testid="card" {...props}>{children}</div>
+    <div data-testid="card" {...props}>
+      {children}
+    </div>
   ),
   CardContent: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
     <div {...props}>{children}</div>
@@ -96,29 +102,27 @@ vi.mock('../../../../src/renderer/components/ui/input', () => ({
   }: {
     value?: string;
     onChange?: (e: React.ChangeEvent<HTMLInputElement>) => void;
-  }) => (
-    <input value={value} onChange={onChange} {...props} />
-  ),
+  }) => <input value={value} onChange={onChange} {...props} />,
 }));
 
 vi.mock('../../../../src/renderer/components/ui/dialog', () => ({
   Dialog: ({ children, open }: React.PropsWithChildren<{ open?: boolean }>) =>
     open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: React.PropsWithChildren) =>
-    <div data-testid="dialog-content">{children}</div>,
-  DialogDescription: ({ children }: React.PropsWithChildren) =>
-    <div>{children}</div>,
-  DialogFooter: ({ children }: React.PropsWithChildren) =>
-    <div>{children}</div>,
-  DialogHeader: ({ children }: React.PropsWithChildren) =>
-    <div>{children}</div>,
-  DialogTitle: ({ children }: React.PropsWithChildren) =>
-    <div>{children}</div>,
+  DialogContent: ({ children }: React.PropsWithChildren) => (
+    <div data-testid="dialog-content">{children}</div>
+  ),
+  DialogDescription: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogFooter: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogHeader: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
+  DialogTitle: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 
 vi.mock('../../../../src/renderer/components/ui/progress', () => ({
-  Progress: ({ value }: { value?: number }) =>
-    <div data-testid="progress" data-value={value}>Progress: {value}%</div>,
+  Progress: ({ value }: { value?: number }) => (
+    <div data-testid="progress" data-value={value}>
+      Progress: {value}%
+    </div>
+  ),
 }));
 
 vi.mock('../../../../src/renderer/components/ui/collapsible', () => ({
@@ -743,16 +747,18 @@ describe('DayCloseModeScanner - deferCommit=false (Normal Mode)', () => {
         business_date: '2026-02-13',
         closings_count: 1,
         estimated_lottery_total: 75,
-        bins_preview: [{
-          bin_number: 1,
-          pack_number: '1234567',
-          game_name: 'Test Game',
-          starting_serial: '000',
-          closing_serial: '015',
-          game_price: 5,
-          tickets_sold: 15,
-          sales_amount: 75,
-        }],
+        bins_preview: [
+          {
+            bin_number: 1,
+            pack_number: '1234567',
+            game_name: 'Test Game',
+            starting_serial: '000',
+            closing_serial: '015',
+            game_price: 5,
+            tickets_sold: 15,
+            sales_amount: 75,
+          },
+        ],
         pending_close_expires_at: '2026-02-13T23:59:59.000Z',
       },
     });

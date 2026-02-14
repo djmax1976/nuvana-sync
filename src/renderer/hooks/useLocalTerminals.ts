@@ -14,7 +14,7 @@
 'use client';
 
 import { useQuery } from '@tanstack/react-query';
-import { useMemo } from 'react';
+import { useCallback, useMemo } from 'react';
 import { ipc, type TerminalListResponse, type RegisterWithShiftStatus } from '../lib/transport';
 
 // ============================================================================
@@ -80,40 +80,38 @@ export interface LocalTerminal {
  * ```
  */
 export function useLocalTerminals(options?: { enabled?: boolean }) {
-  const query = useQuery({
+  // Transform data using select - TanStack Query handles memoization internally
+  // PERF-002: Stable reference for consumers (select only re-runs when data changes)
+  const selectTerminals = useCallback(
+    (response: TerminalListResponse): LocalTerminal[] | undefined => {
+      if (!response?.registers) {
+        return undefined;
+      }
+      return response.registers.map(
+        (register: RegisterWithShiftStatus): LocalTerminal => ({
+          id: register.id,
+          external_register_id: register.external_register_id,
+          name: register.description ?? `Register ${register.external_register_id}`,
+          active: register.active,
+        })
+      );
+    },
+    []
+  );
+
+  return useQuery({
     queryKey: localTerminalsKeys.list(),
     queryFn: async (): Promise<TerminalListResponse> => {
       const response = await ipc.terminals.list();
       return response;
     },
+    select: selectTerminals,
     enabled: options?.enabled !== false,
     refetchOnMount: 'always',
     refetchOnWindowFocus: true,
     staleTime: 60000, // Terminals change infrequently - 1 minute stale time
     retry: 2,
   });
-
-  // Memoize the transformed array to prevent unnecessary re-renders
-  // PERF-002: Stable reference for consumers
-  const terminals = useMemo((): LocalTerminal[] | undefined => {
-    if (!query.data?.registers) {
-      return undefined;
-    }
-
-    return query.data.registers.map(
-      (register: RegisterWithShiftStatus): LocalTerminal => ({
-        id: register.id,
-        external_register_id: register.external_register_id,
-        name: register.description ?? `Register ${register.external_register_id}`,
-        active: register.active,
-      })
-    );
-  }, [query.data?.registers]);
-
-  return {
-    ...query,
-    data: terminals,
-  };
 }
 
 /**

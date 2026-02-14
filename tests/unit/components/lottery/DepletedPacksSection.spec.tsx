@@ -34,9 +34,7 @@ vi.mock('lucide-react', () => ({
   AlertTriangle: (props: Record<string, unknown>) => (
     <div data-testid="alert-triangle-icon" {...props} />
   ),
-  ChevronRight: (props: Record<string, unknown>) => (
-    <div data-testid="chevron-icon" {...props} />
-  ),
+  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
 }));
 
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
@@ -74,10 +72,7 @@ vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
 // ============================================================================
 
 import { DepletedPacksSection } from '../../../../src/renderer/components/lottery/DepletedPacksSection';
-import type {
-  DepletedPackDay,
-  OpenBusinessPeriod,
-} from '../../../../src/renderer/lib/api/lottery';
+import type { DepletedPackDay, OpenBusinessPeriod } from '../../../../src/renderer/lib/api/lottery';
 
 // ============================================================================
 // Test Fixtures
@@ -99,9 +94,7 @@ function createPack(overrides: Partial<DepletedPackDay> = {}): DepletedPackDay {
   };
 }
 
-function createOpenPeriod(
-  overrides: Partial<OpenBusinessPeriod> = {}
-): OpenBusinessPeriod {
+function createOpenPeriod(overrides: Partial<OpenBusinessPeriod> = {}): OpenBusinessPeriod {
   return {
     started_at: '2026-02-02T08:00:00Z',
     last_closed_date: '2026-02-01',
@@ -125,9 +118,7 @@ describe('DepletedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Empty State Guard', () => {
     it('should return null for empty array', () => {
-      const { container } = render(
-        <DepletedPacksSection depletedPacks={[]} />
-      );
+      const { container } = render(<DepletedPacksSection depletedPacks={[]} />);
       expect(container.firstChild).toBeNull();
     });
 
@@ -157,9 +148,7 @@ describe('DepletedPacksSection', () => {
 
     it('should display title with count', () => {
       render(
-        <DepletedPacksSection
-          depletedPacks={[createPack(), createPack({ pack_id: 'dep-002' })]}
-        />
+        <DepletedPacksSection depletedPacks={[createPack(), createPack({ pack_id: 'dep-002' })]} />
       );
       expect(screen.getByText('Packs Sold Out (2)')).toBeInTheDocument();
     });
@@ -199,9 +188,7 @@ describe('DepletedPacksSection', () => {
           openBusinessPeriod={createOpenPeriod({ days_since_last_close: 3 })}
         />
       );
-      expect(
-        screen.getByText('Packs Sold Out - Current Period (1)')
-      ).toBeInTheDocument();
+      expect(screen.getByText('Packs Sold Out - Current Period (1)')).toBeInTheDocument();
     });
 
     it('should show "Packs Sold Out" for first period', () => {
@@ -267,9 +254,7 @@ describe('DepletedPacksSection', () => {
     });
 
     it('should start expanded when defaultOpen=true', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByTestId('depleted-packs-content')).toBeInTheDocument();
     });
 
@@ -287,46 +272,34 @@ describe('DepletedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Pack Row Data', () => {
     it('should render BinBadge with bin number', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const section = screen.getByTestId('depleted-packs-content');
       const binBadge = section.querySelector('span[class*="bg-blue-100"]');
       expect(binBadge!.textContent).toBe('2');
     });
 
     it('should display game name', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Cash 5')).toBeInTheDocument();
     });
 
     it('should display game price as currency', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('$10.00')).toBeInTheDocument();
     });
 
     it('should display pack number', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('PKG-DEP-001')).toBeInTheDocument();
     });
 
     it('should display tickets sold count', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('30')).toBeInTheDocument();
     });
 
     it('should display sales amount in the Amount cell', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       // Amount is in the last cell (index 7)
       const cells = row.querySelectorAll('td');
@@ -347,9 +320,7 @@ describe('DepletedPacksSection', () => {
     });
 
     it('should display Start column with 000', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       const cells = row.querySelectorAll('td');
       // Start column is the 5th cell (index 4)
@@ -370,17 +341,13 @@ describe('DepletedPacksSection', () => {
     });
 
     it('should have violet hover on rows', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       expect(row.className).toContain('hover:bg-violet-50');
     });
 
     it('should render row with data-testid', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByTestId('depleted-pack-row-dep-001')).toBeInTheDocument();
     });
   });
@@ -390,9 +357,7 @@ describe('DepletedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Start/End Columns', () => {
     it('should display "Start" and "End" column headers', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       expect(screen.getByText('Start')).toBeInTheDocument();
       expect(screen.getByText('End')).toBeInTheDocument();
     });
@@ -443,9 +408,7 @@ describe('DepletedPacksSection', () => {
     it('should show "--" for non-number tickets_sold_count', () => {
       render(
         <DepletedPacksSection
-          depletedPacks={[
-            createPack({ tickets_sold_count: null as unknown as number }),
-          ]}
+          depletedPacks={[createPack({ tickets_sold_count: null as unknown as number })]}
           defaultOpen={true}
         />
       );
@@ -473,17 +436,13 @@ describe('DepletedPacksSection', () => {
   // --------------------------------------------------------------------------
   describe('Accessibility', () => {
     it('should have aria-label on table region', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const region = screen.getByRole('region');
       expect(region).toHaveAttribute('aria-label', 'Sold out packs table');
     });
 
     it('should have column headers with scope="col"', () => {
-      render(
-        <DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />
-      );
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const headers = screen.getAllByRole('columnheader');
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');

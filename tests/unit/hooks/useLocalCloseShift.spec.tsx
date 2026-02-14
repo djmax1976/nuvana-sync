@@ -89,9 +89,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValueOnce(mockClosedShiftResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -110,9 +108,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValueOnce(mockClosedShiftResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       // Initially not pending
@@ -134,9 +130,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValueOnce(mockClosedShiftResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -157,9 +151,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockRejectedValueOnce(error);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -184,9 +176,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockRejectedValueOnce(error);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -215,9 +205,7 @@ describe('useLocalCloseShift', () => {
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -239,9 +227,7 @@ describe('useLocalCloseShift', () => {
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -263,9 +249,7 @@ describe('useLocalCloseShift', () => {
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -287,9 +271,7 @@ describe('useLocalCloseShift', () => {
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -312,9 +294,7 @@ describe('useLocalCloseShift', () => {
       const { wrapper, queryClient } = createWrapper();
       const invalidateSpy = vi.spyOn(queryClient, 'invalidateQueries');
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -342,9 +322,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValueOnce(zeroResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -369,9 +347,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValueOnce(decimalResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       await act(async () => {
@@ -392,9 +368,7 @@ describe('useLocalCloseShift', () => {
       mockShiftsClose.mockResolvedValue(mockClosedShiftResponse);
       const { wrapper } = createWrapper();
 
-      const { useLocalCloseShift } = await import(
-        '../../../src/renderer/hooks/useLocalShifts'
-      );
+      const { useLocalCloseShift } = await import('../../../src/renderer/hooks/useLocalShifts');
       const { result } = renderHook(() => useLocalCloseShift(), { wrapper });
 
       // First mutation

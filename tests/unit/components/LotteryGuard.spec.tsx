@@ -30,44 +30,48 @@ vi.mock('../../../src/renderer/hooks/usePOSConnectionType', () => ({
   useIsLotteryMode: () => mockIsLotteryMode.value,
 }));
 
-// Track navigation redirects
-const { mockNavigatedTo } = vi.hoisted(() => ({
-  mockNavigatedTo: { value: '' },
-}));
-
 // Mock react-router-dom
 vi.mock('react-router-dom', () => ({
   Navigate: ({ to, replace }: { to: string; replace?: boolean }) => {
-    mockNavigatedTo.value = to;
     return <div data-testid="navigate-redirect" data-to={to} data-replace={replace} />;
   },
-  MemoryRouter: ({ children, initialEntries }: { children: React.ReactNode; initialEntries?: string[] }) => (
+  MemoryRouter: ({
+    children,
+    initialEntries,
+  }: {
+    children: React.ReactNode;
+    initialEntries?: string[];
+  }) => (
     <div data-testid="memory-router" data-initial={initialEntries?.[0]}>
       {children}
     </div>
   ),
-  Routes: ({ children }: { children: React.ReactNode }) => <div data-testid="routes">{children}</div>,
+  Routes: ({ children }: { children: React.ReactNode }) => (
+    <div data-testid="routes">{children}</div>
+  ),
   Route: ({ path, element }: { path: string; element: React.ReactNode }) => (
     <div data-testid={`route-${path}`}>{element}</div>
   ),
 }));
 
-// Import Navigate from mock for LotteryGuard implementation
-const Navigate = ({ to, replace }: { to: string; replace?: boolean }) => {
-  mockNavigatedTo.value = to;
-  return <div data-testid="navigate-redirect" data-to={to} data-replace={String(replace)} />;
-};
-
 // ============================================================================
 // LotteryGuard Component (inline copy for testing)
 // This mirrors the implementation in router.tsx
+// Uses data attributes to track navigation instead of mutating external state
 // ============================================================================
+
+function NavigateRedirect({ to, replace }: { to: string; replace?: boolean }) {
+  // Track navigation via data attribute - checked by tests
+  return (
+    <div data-testid="navigate-redirect" data-to={to} data-replace={String(replace ?? false)} />
+  );
+}
 
 function LotteryGuard({ children }: { children: React.ReactNode }) {
   const isLotteryMode = mockIsLotteryMode.value;
 
   if (isLotteryMode) {
-    return <Navigate to="/" replace />;
+    return <NavigateRedirect to="/" replace />;
   }
 
   return <>{children}</>;
@@ -105,7 +109,6 @@ describe('LotteryGuard', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockIsLotteryMode.value = false;
-    mockNavigatedTo.value = '';
   });
 
   // --------------------------------------------------------------------------
@@ -186,7 +189,7 @@ describe('LotteryGuard', () => {
       );
 
       expect(screen.getByTestId('navigate-redirect')).toBeInTheDocument();
-      expect(mockNavigatedTo.value).toBe('/');
+      expect(screen.getByTestId('navigate-redirect')).toHaveAttribute('data-to', '/');
       expect(screen.queryByTestId('terminals-page')).not.toBeInTheDocument();
     });
 
@@ -203,7 +206,7 @@ describe('LotteryGuard', () => {
       );
 
       expect(screen.getByTestId('navigate-redirect')).toBeInTheDocument();
-      expect(mockNavigatedTo.value).toBe('/');
+      expect(screen.getByTestId('navigate-redirect')).toHaveAttribute('data-to', '/');
       expect(screen.queryByTestId('shifts-page')).not.toBeInTheDocument();
     });
 
@@ -220,7 +223,7 @@ describe('LotteryGuard', () => {
       );
 
       expect(screen.getByTestId('navigate-redirect')).toBeInTheDocument();
-      expect(mockNavigatedTo.value).toBe('/');
+      expect(screen.getByTestId('navigate-redirect')).toHaveAttribute('data-to', '/');
       expect(screen.queryByTestId('clock-in-out-page')).not.toBeInTheDocument();
     });
 
@@ -237,7 +240,7 @@ describe('LotteryGuard', () => {
       );
 
       expect(screen.getByTestId('navigate-redirect')).toBeInTheDocument();
-      expect(mockNavigatedTo.value).toBe('/');
+      expect(screen.getByTestId('navigate-redirect')).toHaveAttribute('data-to', '/');
       expect(screen.queryByTestId('transactions-page')).not.toBeInTheDocument();
     });
 

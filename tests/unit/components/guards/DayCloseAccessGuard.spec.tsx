@@ -66,23 +66,35 @@ vi.mock('../../../../src/renderer/hooks/use-toast', () => ({
 
 // Mock UI components to simplify testing
 vi.mock('../../../../src/renderer/components/ui/dialog', () => ({
-  Dialog: ({ open, children, onOpenChange }: { open: boolean; children: React.ReactNode; onOpenChange?: (open: boolean) => void }) => {
+  Dialog: ({
+    open,
+    children,
+    onOpenChange,
+  }: {
+    open: boolean;
+    children: React.ReactNode;
+    onOpenChange?: (open: boolean) => void;
+  }) => {
     if (!open) return null;
     return (
       <div role="dialog" data-testid="dialog" data-open={open}>
-        <button
-          aria-label="close"
-          data-testid="dialog-close"
-          onClick={() => onOpenChange?.(false)}
-        >
+        <button aria-label="close" data-testid="dialog-close" onClick={() => onOpenChange?.(false)}>
           Close
         </button>
         {children}
       </div>
     );
   },
-  DialogContent: ({ children, onKeyDown }: { children: React.ReactNode; onKeyDown?: (e: React.KeyboardEvent) => void }) => (
-    <div data-testid="dialog-content" onKeyDown={onKeyDown}>{children}</div>
+  DialogContent: ({
+    children,
+    onKeyDown,
+  }: {
+    children: React.ReactNode;
+    onKeyDown?: (e: React.KeyboardEvent) => void;
+  }) => (
+    <div data-testid="dialog-content" onKeyDown={onKeyDown}>
+      {children}
+    </div>
   ),
   DialogHeader: ({ children }: { children: React.ReactNode }) => (
     <div data-testid="dialog-header">{children}</div>
@@ -111,23 +123,19 @@ vi.mock('../../../../src/renderer/components/ui/button', () => ({
     variant?: string;
     [key: string]: unknown;
   }) => (
-    <button
-      onClick={onClick}
-      disabled={disabled}
-      type={type}
-      data-variant={variant}
-      {...rest}
-    >
+    <button onClick={onClick} disabled={disabled} type={type} data-variant={variant} {...rest}>
       {children}
     </button>
   ),
 }));
 
-vi.mock('../../../../src/renderer/components/ui/input', () => ({
-  Input: React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
+vi.mock('../../../../src/renderer/components/ui/input', () => {
+  const MockInput = React.forwardRef<HTMLInputElement, React.InputHTMLAttributes<HTMLInputElement>>(
     (props, ref) => <input ref={ref} {...props} />
-  ),
-}));
+  );
+  MockInput.displayName = 'MockInput';
+  return { Input: MockInput };
+});
 
 vi.mock('lucide-react', () => ({
   AlertCircle: () => <span data-testid="icon-alert-circle" />,
@@ -342,9 +350,7 @@ describe('3.T1: Guard shows PIN dialog on mount', () => {
       </DayCloseAccessGuard>
     );
 
-    expect(
-      screen.getByText(/Enter your PIN to access the Day Close wizard/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Enter your PIN to access the Day Close wizard/i)).toBeInTheDocument();
   });
 
   it('should show access requirement text', () => {

@@ -27,9 +27,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // ============================================================================
 
 vi.mock('lucide-react', () => ({
-  ChevronRight: (props: Record<string, unknown>) => (
-    <div data-testid="chevron-icon" {...props} />
-  ),
+  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
 }));
 
 // ============================================================================
@@ -227,10 +225,7 @@ describe('PackSectionHeader', () => {
 
   it('should render rightBadge when provided', () => {
     render(
-      <PackSectionHeader
-        {...defaultProps}
-        rightBadge={<span data-testid="badge">$100</span>}
-      />
+      <PackSectionHeader {...defaultProps} rightBadge={<span data-testid="badge">$100</span>} />
     );
     expect(screen.getByTestId('badge')).toBeInTheDocument();
     expect(screen.getByText('$100')).toBeInTheDocument();
@@ -242,9 +237,7 @@ describe('PackSectionHeader', () => {
   });
 
   it('should render subtitle when provided', () => {
-    render(
-      <PackSectionHeader {...defaultProps} subtitle="3 active, 2 sold out" />
-    );
+    render(<PackSectionHeader {...defaultProps} subtitle="3 active, 2 sold out" />);
     expect(screen.getByText('3 active, 2 sold out')).toBeInTheDocument();
   });
 
@@ -266,12 +259,7 @@ describe('PackSectionHeader', () => {
 
   // SEC-004: All title/count/subtitle values auto-escaped by JSX
   it('should safely render special characters in title via JSX escaping', () => {
-    render(
-      <PackSectionHeader
-        {...defaultProps}
-        title="Packs <script>alert('xss')</script>"
-      />
-    );
+    render(<PackSectionHeader {...defaultProps} title="Packs <script>alert('xss')</script>" />);
     // The script tag should appear as text, not execute
     const button = screen.getByRole('button');
     expect(button.textContent).toContain("<script>alert('xss')</script>");
