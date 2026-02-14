@@ -13,19 +13,23 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ============================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ============================================================================
 
 // Track prepared statement calls for SQL inspection
-const mockPrepare = vi.fn();
-const mockGet = vi.fn();
-const mockRun = vi.fn();
-const mockAll = vi.fn();
+const { mockPrepare, mockGet, mockRun, mockAll } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockGet: vi.fn(),
+  mockRun: vi.fn(),
+  mockAll: vi.fn(),
+}));
 
 // Mock database service
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
     prepare: mockPrepare,
-    transaction: vi.fn((fn) => fn),
+    transaction: vi.fn((fn: () => void) => fn),
   })),
   isDatabaseInitialized: vi.fn(() => true),
 }));

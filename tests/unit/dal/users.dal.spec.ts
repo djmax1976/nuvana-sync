@@ -9,9 +9,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock database service
-const mockPrepare = vi.fn();
-const mockTransaction = vi.fn((fn) => () => fn());
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { mockPrepare, mockTransaction, mockBcryptHash, mockBcryptCompare } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockTransaction: vi.fn((fn: () => void) => () => fn()),
+  mockBcryptHash: vi.fn(),
+  mockBcryptCompare: vi.fn(),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -25,10 +30,6 @@ vi.mock('../../../src/main/services/database.service', () => ({
 vi.mock('uuid', () => ({
   v4: vi.fn().mockReturnValue('mock-uuid-1234'),
 }));
-
-// Mock bcrypt
-const mockBcryptHash = vi.fn();
-const mockBcryptCompare = vi.fn();
 
 vi.mock('bcrypt', () => ({
   default: {

@@ -24,10 +24,14 @@ import { z } from 'zod';
 
 // ==========================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ==========================================================================
 
-const mockPrepare = vi.fn();
-const mockTransaction = vi.fn((fn: () => void) => () => fn());
+const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockTransaction: vi.fn((fn: () => void) => () => fn()),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({

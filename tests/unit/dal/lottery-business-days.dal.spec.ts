@@ -32,15 +32,19 @@ try {
   skipTests = true;
 }
 
-// Shared test database instance - will be set in beforeEach and used by mock
+// Use vi.hoisted() with a container object for mutable testDb reference
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+// v047: Also hoist mock functions for sync queue integration tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
-
-// v047: Hoist mock functions for sync queue integration tests
-const { mockSyncQueueEnqueue, mockLotteryGamesFindById } = vi.hoisted(() => ({
+const { testDbContainer, mockSyncQueueEnqueue, mockLotteryGamesFindById } = vi.hoisted(() => ({
+  testDbContainer: { db: null as any },
   mockSyncQueueEnqueue: vi.fn(),
   mockLotteryGamesFindById: vi.fn(),
 }));
+
+// Alias for easier access in tests
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let testDb: any = null;
 
 /**
  * Helper function to find a sync queue call by entity type and assert it exists.
@@ -69,8 +73,8 @@ function getSyncCall(entityType: string, storeId?: string): any[] {
 
 // Mock database service to return our in-memory test database
 vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: vi.fn(() => testDb),
-  isDatabaseInitialized: vi.fn(() => testDb !== null),
+  getDatabase: vi.fn(() => testDbContainer.db),
+  isDatabaseInitialized: vi.fn(() => testDbContainer.db !== null),
 }));
 
 // v047: Mock sync-queue.dal for sync queue integration tests
@@ -97,6 +101,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
     testDb = db;
+    testDbContainer.db = db;
 
     // Create required tables
     db.exec(`
