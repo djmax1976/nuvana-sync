@@ -41,10 +41,14 @@
 
 // ============================================================================
 // Mocks - Must be before any imports that use them
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ============================================================================
 
-const mockPrepare = vi.fn();
-const mockExec = vi.fn();
+const { mockPrepare, mockExec } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockExec: vi.fn(),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({

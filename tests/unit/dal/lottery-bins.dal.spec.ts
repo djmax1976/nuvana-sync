@@ -29,15 +29,22 @@ try {
   skipTests = true;
 }
 
-// Shared test database instance - will be set in beforeEach and used by mock
+// Use vi.hoisted() with a container object for mutable testDb reference
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
+const { testDbContainer } = vi.hoisted(() => ({
+  testDbContainer: { db: null as any },
+}));
 
 // Mock database service to return our in-memory test database
 vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: vi.fn(() => testDb),
-  isDatabaseInitialized: vi.fn(() => testDb !== null),
+  getDatabase: vi.fn(() => testDbContainer.db),
+  isDatabaseInitialized: vi.fn(() => testDbContainer.db !== null),
 }));
+
+// Alias for easier access in tests
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let testDb: any = null;
 
 describe.skipIf(skipTests)('Lottery Bins DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -49,6 +56,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
     testDb = db;
+    testDbContainer.db = db;
 
     // Create required tables with cloud-aligned schema
     db.exec(`

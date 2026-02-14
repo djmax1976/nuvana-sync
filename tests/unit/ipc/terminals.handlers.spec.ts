@@ -23,7 +23,17 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // ==========================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ==========================================================================
+
+const { mockGetConfiguredStore, mockDeactivateById, mockDeactivateByExternalId } = vi.hoisted(
+  () => ({
+    mockGetConfiguredStore: vi.fn(),
+    mockDeactivateById: vi.fn(),
+    mockDeactivateByExternalId: vi.fn(),
+  })
+);
 
 // Mock electron modules
 vi.mock('electron', () => ({
@@ -51,7 +61,6 @@ vi.mock('uuid', () => ({
 }));
 
 // Mock stores DAL
-const mockGetConfiguredStore = vi.fn();
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
     getConfiguredStore: mockGetConfiguredStore,
@@ -59,8 +68,6 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 }));
 
 // Mock POS terminal mappings DAL
-const mockDeactivateById = vi.fn();
-const mockDeactivateByExternalId = vi.fn();
 vi.mock('../../../src/main/dal/pos-id-mappings.dal', () => ({
   posTerminalMappingsDAL: {
     deactivateById: mockDeactivateById,
