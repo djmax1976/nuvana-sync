@@ -266,7 +266,7 @@ test.describe('Day Close Access Guard (5.T3)', () => {
       }
 
       // Capture URL before clicking
-      const urlBefore = await window.evaluate(() => window.location.hash);
+      const urlBefore = new URL(window.url()).hash;
 
       // Click Day Close button
       await getDayCloseButton(window).click();
@@ -313,8 +313,13 @@ test.describe('Day Close Access Guard (5.T3)', () => {
 
       if (isStillOnDialog) {
         // Verify error message is shown or input has error state
-        const errorElement = window.locator('[class*="error"], [class*="red"], [class*="destructive"]');
-        const hasError = await errorElement.first().isVisible().catch(() => false);
+        const errorElement = window.locator(
+          '[class*="error"], [class*="red"], [class*="destructive"]'
+        );
+        const hasError = await errorElement
+          .first()
+          .isVisible()
+          .catch(() => false);
 
         // PIN input should still be visible for retry
         await expect(pinInput).toBeVisible();
@@ -508,8 +513,14 @@ test.describe('Day Close Access Guard (5.T3)', () => {
       // Should either navigate or show error (submission happened)
       // The dialog should no longer be in "pending" state
       const isDialogVisible = await pinInput.isVisible().catch(() => false);
-      const isDayClosePage = await window.locator(DAY_CLOSE_SELECTORS.dayClosePage).isVisible().catch(() => false);
-      const isTerminals = await window.locator(DAY_CLOSE_SELECTORS.terminalsPage).isVisible().catch(() => false);
+      const isDayClosePage = await window
+        .locator(DAY_CLOSE_SELECTORS.dayClosePage)
+        .isVisible()
+        .catch(() => false);
+      const isTerminals = await window
+        .locator(DAY_CLOSE_SELECTORS.terminalsPage)
+        .isVisible()
+        .catch(() => false);
 
       // One of these states should be true (action was taken)
       expect(isDialogVisible || isDayClosePage || isTerminals).toBe(true);
@@ -543,8 +554,14 @@ test.describe('Day Close Access Guard (5.T3)', () => {
       await window.waitForTimeout(1500);
 
       // Should either be on DayClosePage (access granted) or terminals (denied)
-      const isDayClosePage = await window.locator(DAY_CLOSE_SELECTORS.dayClosePage).isVisible().catch(() => false);
-      const isTerminals = await window.locator(DAY_CLOSE_SELECTORS.terminalsPage).isVisible().catch(() => false);
+      const isDayClosePage = await window
+        .locator(DAY_CLOSE_SELECTORS.dayClosePage)
+        .isVisible()
+        .catch(() => false);
+      const isTerminals = await window
+        .locator(DAY_CLOSE_SELECTORS.terminalsPage)
+        .isVisible()
+        .catch(() => false);
       const isDialogStillOpen = await pinInput.isVisible().catch(() => false);
 
       // If denied for business rules (not INVALID_PIN), we should be redirected

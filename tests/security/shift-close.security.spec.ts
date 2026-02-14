@@ -163,19 +163,17 @@ describe('Shift Close Security Tests', () => {
 
         expect(result.success).toBe(false);
         if (!result.success) {
-          expect(result.error.issues.some((i) => i.path.includes('shift_id'))).toBe(
-            true
-          );
+          expect(result.error.issues.some((i) => i.path.includes('shift_id'))).toBe(true);
         }
       }
     });
 
     it('TEST: closing_cash with SQL injection attempt is rejected', () => {
       const stringPayloads = [
-        "100; DROP TABLE shifts;--",
+        '100; DROP TABLE shifts;--',
         "'100'",
         "100' OR '1'='1",
-        "100; DELETE FROM shifts",
+        '100; DELETE FROM shifts',
       ];
 
       for (const payload of stringPayloads) {
@@ -312,12 +310,7 @@ describe('Shift Close Security Tests', () => {
 
   describe('Input Abuse (SEC-014)', () => {
     it('TEST: Extremely large closing_cash (overflow attempt)', () => {
-      const overflowValues = [
-        Number.MAX_VALUE,
-        Number.MAX_SAFE_INTEGER,
-        1e100,
-        999999999999999,
-      ];
+      const overflowValues = [Number.MAX_VALUE, Number.MAX_SAFE_INTEGER, 1e100, 999999999999999];
 
       for (const value of overflowValues) {
         const result = CloseShiftInputSchema.safeParse({
@@ -459,12 +452,11 @@ describe('Shift Close Security Tests', () => {
 
     it('TEST: Insufficient role is rejected', () => {
       // User with 'cashier' role should not be able to close shifts
-      const userRole = 'cashier';
-      const requiredRole = 'shift_manager';
+      const userRole: string = 'cashier';
+      const requiredRole: string = 'shift_manager';
 
-      const hasPermission = userRole === requiredRole ||
-        userRole === 'store_manager' ||
-        userRole === 'admin';
+      const hasPermission =
+        userRole === requiredRole || userRole === 'store_manager' || userRole === 'admin';
 
       expect(hasPermission).toBe(false);
     });
@@ -473,9 +465,8 @@ describe('Shift Close Security Tests', () => {
       const userRole = 'shift_manager';
       const requiredRole = 'shift_manager';
 
-      const hasPermission = userRole === requiredRole ||
-        userRole === 'store_manager' ||
-        userRole === 'admin';
+      const hasPermission =
+        userRole === requiredRole || userRole === 'store_manager' || userRole === 'admin';
 
       expect(hasPermission).toBe(true);
     });
@@ -558,7 +549,7 @@ describe('Shift Close Security Tests', () => {
         opened_by: 'user-uuid',
         status: 'CLOSED',
         closed_at: '2026-02-12T16:00:00Z',
-        closing_cash: 250.50,
+        closing_cash: 250.5,
         external_register_id: 'REG-1',
         external_cashier_id: null,
         external_till_id: null,
