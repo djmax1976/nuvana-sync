@@ -21,7 +21,15 @@ import { describe, it, expect, beforeEach, vi, afterEach } from 'vitest';
 
 // ==========================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ==========================================================================
+
+// Hoist mock functions for cross-platform compatibility
+const { mockGetConfiguredStore, mockCheckAccess } = vi.hoisted(() => ({
+  mockGetConfiguredStore: vi.fn(),
+  mockCheckAccess: vi.fn(),
+}));
 
 // Mock electron modules
 vi.mock('electron', () => ({
@@ -44,7 +52,6 @@ vi.mock('../../../src/main/services/database.service', () => ({
 }));
 
 // Mock stores DAL
-const mockGetConfiguredStore = vi.fn();
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
     getConfiguredStore: mockGetConfiguredStore,
@@ -52,7 +59,6 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 }));
 
 // Mock day close access service
-const mockCheckAccess = vi.fn();
 vi.mock('../../../src/main/services/day-close-access.service', () => ({
   checkAccess: mockCheckAccess,
 }));

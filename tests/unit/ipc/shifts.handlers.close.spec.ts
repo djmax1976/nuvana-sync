@@ -21,10 +21,28 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // ============================================================================
 // Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // ============================================================================
 
+// Hoist mock functions for cross-platform compatibility
+const {
+  mockGetConfiguredStore,
+  mockFindById,
+  mockClose,
+  mockFindByShiftId,
+  mockCloseShiftSummary,
+  mockEnqueue,
+} = vi.hoisted(() => ({
+  mockGetConfiguredStore: vi.fn(),
+  mockFindById: vi.fn(),
+  mockClose: vi.fn(),
+  mockFindByShiftId: vi.fn(),
+  mockCloseShiftSummary: vi.fn(),
+  mockEnqueue: vi.fn(),
+}));
+
 // Mock stores DAL
-const mockGetConfiguredStore = vi.fn();
 vi.mock('../../../src/main/dal/stores.dal', () => ({
   storesDAL: {
     getConfiguredStore: mockGetConfiguredStore,
@@ -32,8 +50,6 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 }));
 
 // Mock shifts DAL
-const mockFindById = vi.fn();
-const mockClose = vi.fn();
 vi.mock('../../../src/main/dal/shifts.dal', () => ({
   shiftsDAL: {
     findById: mockFindById,
@@ -43,8 +59,6 @@ vi.mock('../../../src/main/dal/shifts.dal', () => ({
 }));
 
 // Mock shift summaries DAL
-const mockFindByShiftId = vi.fn();
-const mockCloseShiftSummary = vi.fn();
 vi.mock('../../../src/main/dal/shift-summaries.dal', () => ({
   shiftSummariesDAL: {
     findByShiftId: mockFindByShiftId,
@@ -54,7 +68,6 @@ vi.mock('../../../src/main/dal/shift-summaries.dal', () => ({
 }));
 
 // Mock sync queue DAL
-const mockEnqueue = vi.fn();
 vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
   syncQueueDAL: {
     enqueue: mockEnqueue,
