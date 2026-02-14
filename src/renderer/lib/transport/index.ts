@@ -354,7 +354,10 @@ export const ipc = {
      * @security SEC-006: Parameterized queries in backend
      */
     close: (shiftId: string, closingCash: number) =>
-      ipcClient.invoke<ShiftCloseResponse>('shifts:close', { shift_id: shiftId, closing_cash: closingCash }),
+      ipcClient.invoke<ShiftCloseResponse>('shifts:close', {
+        shift_id: shiftId,
+        closing_cash: closingCash,
+      }),
     /**
      * Get all open shifts with resolved terminal and cashier names
      *
@@ -383,7 +386,9 @@ export const ipc = {
      * Deletes old queue items and re-enqueues with correct field names
      */
     resync: (shiftId: string) =>
-      ipcClient.invoke<{ success: boolean; message: string }>('shifts:resync', { shift_id: shiftId }),
+      ipcClient.invoke<{ success: boolean; message: string }>('shifts:resync', {
+        shift_id: shiftId,
+      }),
   },
 
   // Day Summaries

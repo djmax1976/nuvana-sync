@@ -290,14 +290,18 @@ describeSuite('Day Close & Shift Guard Security Tests (Phase 4)', () => {
    * SEC-006: Parameterized query
    * DB-006: Store-scoped
    */
-  function findOpenDay(storeId?: string): { day_id: string; status: string; opened_by: string } | undefined {
+  function findOpenDay(
+    storeId?: string
+  ): { day_id: string; status: string; opened_by: string } | undefined {
     const stmt = db.prepare(`
       SELECT * FROM lottery_business_days
       WHERE store_id = ? AND status = 'OPEN'
       ORDER BY business_date DESC
       LIMIT 1
     `);
-    return stmt.get(storeId ?? ctx.storeId) as { day_id: string; status: string; opened_by: string } | undefined;
+    return stmt.get(storeId ?? ctx.storeId) as
+      | { day_id: string; status: string; opened_by: string }
+      | undefined;
   }
 
   /**
@@ -360,7 +364,8 @@ describeSuite('Day Close & Shift Guard Security Tests (Phase 4)', () => {
       return {
         success: false,
         error: IPCErrorCodes.VALIDATION_ERROR,
-        message: 'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
+        message:
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
       };
     }
 
@@ -621,8 +626,16 @@ describeSuite('Day Close & Shift Guard Security Tests (Phase 4)', () => {
       insertStoreStmt.run(otherStoreId, now, now);
 
       // Create open day for each store
-      const ourDay = seedLotteryDay({ status: 'OPEN', storeId: ctx.storeId, openedBy: 'our-opener' });
-      const otherDay = seedLotteryDay({ status: 'OPEN', storeId: otherStoreId, openedBy: 'other-opener' });
+      const ourDay = seedLotteryDay({
+        status: 'OPEN',
+        storeId: ctx.storeId,
+        openedBy: 'our-opener',
+      });
+      const otherDay = seedLotteryDay({
+        status: 'OPEN',
+        storeId: otherStoreId,
+        openedBy: 'other-opener',
+      });
 
       // Act: Find open day for each store
       const ourOpenDay = findOpenDay(ctx.storeId);
@@ -752,7 +765,9 @@ describeSuite('Day Close & Shift Guard Security Tests (Phase 4)', () => {
       expect(result.data?.shift_id).toBeDefined();
 
       // Verify shift exists in database
-      const shift = db.prepare(`SELECT * FROM shifts WHERE shift_id = ?`).get(result.data?.shift_id);
+      const shift = db
+        .prepare(`SELECT * FROM shifts WHERE shift_id = ?`)
+        .get(result.data?.shift_id);
       expect(shift).toBeDefined();
     });
 

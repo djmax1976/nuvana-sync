@@ -213,9 +213,7 @@ describe('useLocalStore Query Behavior', () => {
     });
 
     it('should handle database errors', async () => {
-      mockIpc.store.getConfigured.mockRejectedValue(
-        new Error('Database connection failed')
-      );
+      mockIpc.store.getConfigured.mockRejectedValue(new Error('Database connection failed'));
 
       await expect(mockIpc.store.getConfigured()).rejects.toThrow('Database connection failed');
     });
@@ -438,17 +436,13 @@ describe('useLocalStore Error Recovery', () => {
 
   describe('configuration scenarios', () => {
     it('should handle fresh install (no store configured)', async () => {
-      mockIpc.store.getConfigured.mockRejectedValue(
-        new Error('Store not configured')
-      );
+      mockIpc.store.getConfigured.mockRejectedValue(new Error('Store not configured'));
 
       await expect(mockIpc.store.getConfigured()).rejects.toThrow('Store not configured');
     });
 
     it('should handle corrupted config file', async () => {
-      mockIpc.store.getConfigured.mockRejectedValue(
-        new Error('Failed to parse configuration')
-      );
+      mockIpc.store.getConfigured.mockRejectedValue(new Error('Failed to parse configuration'));
 
       await expect(mockIpc.store.getConfigured()).rejects.toThrow('Failed to parse configuration');
     });

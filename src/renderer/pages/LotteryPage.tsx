@@ -350,7 +350,12 @@ export default function LotteryManagementPage() {
     onScanError: useCallback(
       (error: ScanError) => {
         // Phase 5.2: Handle duplicate scans with option to replace
-        if (error.type === 'DUPLICATE_SCAN' && error.existingSerial && error.newSerial && error.binNumber) {
+        if (
+          error.type === 'DUPLICATE_SCAN' &&
+          error.existingSerial &&
+          error.newSerial &&
+          error.binNumber
+        ) {
           // Find the bin_id from dayBinsData
           const bin = dayBinsData?.bins.find((b) => b.bin_number === error.binNumber);
           if (bin) {
@@ -514,10 +519,7 @@ export default function LotteryManagementPage() {
   const handleReplaceDuplicateScan = useCallback(() => {
     if (!pendingDuplicateScan) return;
 
-    const success = replaceScannedBin(
-      pendingDuplicateScan.binId,
-      pendingDuplicateScan.newSerial
-    );
+    const success = replaceScannedBin(pendingDuplicateScan.binId, pendingDuplicateScan.newSerial);
 
     setDuplicateScanDialogOpen(false);
 
@@ -584,9 +586,7 @@ export default function LotteryManagementPage() {
     // SEC-017: AUDIT_TRAILS - Real user ID required for traceability
     setManualEntryState({
       isActive: true,
-      authorizedBy: user
-        ? { userId: user.id, name: user.name }
-        : null,
+      authorizedBy: user ? { userId: user.id, name: user.name } : null,
       authorizedAt: new Date(),
     });
 
@@ -1607,8 +1607,8 @@ export default function LotteryManagementPage() {
             </DialogTitle>
             <DialogDescription>
               You have {scannedBins.length} scanned bin{scannedBins.length === 1 ? '' : 's'}.
-              Canceling will discard all scanned data and exit scanner mode.
-              This action cannot be undone.
+              Canceling will discard all scanned data and exit scanner mode. This action cannot be
+              undone.
             </DialogDescription>
           </DialogHeader>
           <DialogFooter className="gap-2 sm:gap-0">
@@ -1646,7 +1646,10 @@ export default function LotteryManagementPage() {
               {pendingDuplicateScan && (
                 <>
                   Bin {pendingDuplicateScan.binNumber} was already scanned with ending serial{' '}
-                  <span className="font-mono font-semibold">{pendingDuplicateScan.existingSerial}</span>.
+                  <span className="font-mono font-semibold">
+                    {pendingDuplicateScan.existingSerial}
+                  </span>
+                  .
                   <br />
                   <br />
                   Replace with new serial{' '}

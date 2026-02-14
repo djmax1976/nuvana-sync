@@ -97,192 +97,189 @@ const ROLE_HIERARCHY = {
 // Test Suite
 // ============================================================================
 
-describe.skipIf(SKIP_NATIVE_MODULE_TESTS)(
-  'BIZ-008: Day Close Authorization Security Tests',
-  () => {
-    beforeEach(() => {
-      vi.clearAllMocks();
+describe.skipIf(SKIP_NATIVE_MODULE_TESTS)('BIZ-008: Day Close Authorization Security Tests', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mockCurrentUser = null;
+  });
+
+  afterEach(() => {
+    vi.resetAllMocks();
+  });
+
+  // ========================================================================
+  // SEC-AUTH-001: Cashiers can call prepareDayClose
+  // ========================================================================
+  describe('SEC-AUTH-001: Cashier can prepare day close', () => {
+    it('should allow cashier role to access prepareDayClose', () => {
+      // Arrange
+      mockCurrentUser = {
+        user_id: 'cashier-user-uuid',
+        role: 'cashier',
+        name: 'Test Cashier',
+      };
+
+      // Assert: Cashier role meets minimum requirement
+      // The actual handler registration specifies requiredRole: 'cashier'
+      expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
+    });
+
+    it('should reject unauthenticated access to prepareDayClose', () => {
+      // Arrange
       mockCurrentUser = null;
+
+      // Assert: No user session means authentication fails
+      expect(mockCurrentUser).toBeNull();
     });
+  });
 
-    afterEach(() => {
-      vi.resetAllMocks();
+  // ========================================================================
+  // SEC-AUTH-002: Cashiers can call commitDayClose
+  // ========================================================================
+  describe('SEC-AUTH-002: Cashier can commit day close', () => {
+    it('should allow cashier role to access commitDayClose', () => {
+      // Arrange
+      mockCurrentUser = {
+        user_id: 'cashier-user-uuid',
+        role: 'cashier',
+        name: 'Test Cashier',
+      };
+
+      // Assert: Cashier role meets minimum requirement
+      expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
     });
+  });
 
-    // ========================================================================
-    // SEC-AUTH-001: Cashiers can call prepareDayClose
-    // ========================================================================
-    describe('SEC-AUTH-001: Cashier can prepare day close', () => {
-      it('should allow cashier role to access prepareDayClose', () => {
-        // Arrange
-        mockCurrentUser = {
-          user_id: 'cashier-user-uuid',
-          role: 'cashier',
-          name: 'Test Cashier',
-        };
+  // ========================================================================
+  // SEC-AUTH-003: Cashiers can call cancelDayClose
+  // ========================================================================
+  describe('SEC-AUTH-003: Cashier can cancel day close', () => {
+    it('should allow cashier role to access cancelDayClose', () => {
+      // Arrange
+      mockCurrentUser = {
+        user_id: 'cashier-user-uuid',
+        role: 'cashier',
+        name: 'Test Cashier',
+      };
 
-        // Assert: Cashier role meets minimum requirement
-        // The actual handler registration specifies requiredRole: 'cashier'
-        expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
-      });
+      // Assert: Cashier role meets minimum requirement
+      expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
+    });
+  });
 
-      it('should reject unauthenticated access to prepareDayClose', () => {
+  // ========================================================================
+  // SEC-AUTH-004: Unauthenticated users rejected for all handlers
+  // ========================================================================
+  describe('SEC-AUTH-004: Unauthenticated users rejected', () => {
+    DAY_CLOSE_HANDLERS.forEach((handler) => {
+      it(`should reject unauthenticated access to ${handler}`, () => {
         // Arrange
         mockCurrentUser = null;
 
-        // Assert: No user session means authentication fails
+        // Assert
         expect(mockCurrentUser).toBeNull();
+        // In production, the middleware would return NOT_AUTHENTICATED
       });
     });
+  });
 
-    // ========================================================================
-    // SEC-AUTH-002: Cashiers can call commitDayClose
-    // ========================================================================
-    describe('SEC-AUTH-002: Cashier can commit day close', () => {
-      it('should allow cashier role to access commitDayClose', () => {
+  // ========================================================================
+  // SEC-AUTH-005: Role hierarchy enforcement
+  // ========================================================================
+  describe('SEC-AUTH-005: Role hierarchy enforcement', () => {
+    const rolesWithAccess = ['cashier', 'shift_manager', 'store_manager', 'admin'];
+
+    rolesWithAccess.forEach((role) => {
+      it(`should allow ${role} to access day close handlers`, () => {
         // Arrange
         mockCurrentUser = {
-          user_id: 'cashier-user-uuid',
-          role: 'cashier',
-          name: 'Test Cashier',
+          user_id: `${role}-user-uuid`,
+          role: role,
+          name: `Test ${role}`,
         };
 
-        // Assert: Cashier role meets minimum requirement
-        expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
+        // Assert: All roles at or above cashier should have access
+        expect(ROLE_HIERARCHY[role as keyof typeof ROLE_HIERARCHY]).toBeGreaterThanOrEqual(
+          ROLE_HIERARCHY.cashier
+        );
       });
     });
+  });
 
-    // ========================================================================
-    // SEC-AUTH-003: Cashiers can call cancelDayClose
-    // ========================================================================
-    describe('SEC-AUTH-003: Cashier can cancel day close', () => {
-      it('should allow cashier role to access cancelDayClose', () => {
-        // Arrange
-        mockCurrentUser = {
-          user_id: 'cashier-user-uuid',
-          role: 'cashier',
-          name: 'Test Cashier',
-        };
-
-        // Assert: Cashier role meets minimum requirement
-        expect(ROLE_HIERARCHY.cashier).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
-      });
+  // ========================================================================
+  // SEC-010: AUTHZ - Backend role enforcement
+  // ========================================================================
+  describe('SEC-010: Backend role enforcement', () => {
+    it('should use requiredRole: cashier for prepareDayClose', () => {
+      // This test validates the handler registration
+      // The actual value is set in lottery.handlers.ts
+      const expectedRole = 'cashier';
+      expect(expectedRole).toBe('cashier');
     });
 
-    // ========================================================================
-    // SEC-AUTH-004: Unauthenticated users rejected for all handlers
-    // ========================================================================
-    describe('SEC-AUTH-004: Unauthenticated users rejected', () => {
+    it('should use requiredRole: cashier for commitDayClose', () => {
+      const expectedRole = 'cashier';
+      expect(expectedRole).toBe('cashier');
+    });
+
+    it('should use requiredRole: cashier for cancelDayClose', () => {
+      const expectedRole = 'cashier';
+      expect(expectedRole).toBe('cashier');
+    });
+  });
+
+  // ========================================================================
+  // API-SEC-005: Function-level authorization consistency
+  // ========================================================================
+  describe('API-SEC-005: Function-level auth consistency', () => {
+    it('should have consistent role requirements across all day close handlers', () => {
+      // All day close handlers should require the same minimum role
+      const requiredRole = 'cashier';
+
       DAY_CLOSE_HANDLERS.forEach((handler) => {
-        it(`should reject unauthenticated access to ${handler}`, () => {
-          // Arrange
-          mockCurrentUser = null;
-
-          // Assert
-          expect(mockCurrentUser).toBeNull();
-          // In production, the middleware would return NOT_AUTHENTICATED
-        });
+        // Each handler should enforce at least cashier role
+        expect(requiredRole).toBe('cashier');
       });
     });
 
-    // ========================================================================
-    // SEC-AUTH-005: Role hierarchy enforcement
-    // ========================================================================
-    describe('SEC-AUTH-005: Role hierarchy enforcement', () => {
-      const rolesWithAccess = ['cashier', 'shift_manager', 'store_manager', 'admin'];
+    it('should match frontend auth guard role', () => {
+      // Frontend uses useAuthGuard('cashier') for Close Day button
+      const frontendRole = 'cashier';
+      const backendRole = 'cashier';
 
-      rolesWithAccess.forEach((role) => {
-        it(`should allow ${role} to access day close handlers`, () => {
-          // Arrange
-          mockCurrentUser = {
-            user_id: `${role}-user-uuid`,
-            role: role,
-            name: `Test ${role}`,
-          };
+      // API-SEC-005: Frontend and backend must use consistent roles
+      expect(frontendRole).toBe(backendRole);
+    });
+  });
 
-          // Assert: All roles at or above cashier should have access
-          expect(
-            ROLE_HIERARCHY[role as keyof typeof ROLE_HIERARCHY]
-          ).toBeGreaterThanOrEqual(ROLE_HIERARCHY.cashier);
-        });
-      });
+  // ========================================================================
+  // SEC-017: Audit trail for authorization
+  // ========================================================================
+  describe('SEC-017: Authorization audit trail', () => {
+    it('should log user info on successful day close', () => {
+      // Arrange
+      mockCurrentUser = {
+        user_id: 'audit-test-user',
+        role: 'cashier',
+        name: 'Audit Test Cashier',
+      };
+
+      // Assert: User info is available for audit logging
+      expect(mockCurrentUser.user_id).toBe('audit-test-user');
+      expect(mockCurrentUser.name).toBe('Audit Test Cashier');
+      expect(mockCurrentUser.role).toBe('cashier');
     });
 
-    // ========================================================================
-    // SEC-010: AUTHZ - Backend role enforcement
-    // ========================================================================
-    describe('SEC-010: Backend role enforcement', () => {
-      it('should use requiredRole: cashier for prepareDayClose', () => {
-        // This test validates the handler registration
-        // The actual value is set in lottery.handlers.ts
-        const expectedRole = 'cashier';
-        expect(expectedRole).toBe('cashier');
-      });
+    it('should capture authorization failure details', () => {
+      // Arrange: No user
+      mockCurrentUser = null;
 
-      it('should use requiredRole: cashier for commitDayClose', () => {
-        const expectedRole = 'cashier';
-        expect(expectedRole).toBe('cashier');
-      });
-
-      it('should use requiredRole: cashier for cancelDayClose', () => {
-        const expectedRole = 'cashier';
-        expect(expectedRole).toBe('cashier');
-      });
+      // Assert: Can detect and log authorization failure
+      expect(mockCurrentUser).toBeNull();
+      // In production, this would trigger log.warn with details
     });
-
-    // ========================================================================
-    // API-SEC-005: Function-level authorization consistency
-    // ========================================================================
-    describe('API-SEC-005: Function-level auth consistency', () => {
-      it('should have consistent role requirements across all day close handlers', () => {
-        // All day close handlers should require the same minimum role
-        const requiredRole = 'cashier';
-
-        DAY_CLOSE_HANDLERS.forEach((handler) => {
-          // Each handler should enforce at least cashier role
-          expect(requiredRole).toBe('cashier');
-        });
-      });
-
-      it('should match frontend auth guard role', () => {
-        // Frontend uses useAuthGuard('cashier') for Close Day button
-        const frontendRole = 'cashier';
-        const backendRole = 'cashier';
-
-        // API-SEC-005: Frontend and backend must use consistent roles
-        expect(frontendRole).toBe(backendRole);
-      });
-    });
-
-    // ========================================================================
-    // SEC-017: Audit trail for authorization
-    // ========================================================================
-    describe('SEC-017: Authorization audit trail', () => {
-      it('should log user info on successful day close', () => {
-        // Arrange
-        mockCurrentUser = {
-          user_id: 'audit-test-user',
-          role: 'cashier',
-          name: 'Audit Test Cashier',
-        };
-
-        // Assert: User info is available for audit logging
-        expect(mockCurrentUser.user_id).toBe('audit-test-user');
-        expect(mockCurrentUser.name).toBe('Audit Test Cashier');
-        expect(mockCurrentUser.role).toBe('cashier');
-      });
-
-      it('should capture authorization failure details', () => {
-        // Arrange: No user
-        mockCurrentUser = null;
-
-        // Assert: Can detect and log authorization failure
-        expect(mockCurrentUser).toBeNull();
-        // In production, this would trigger log.warn with details
-      });
-    });
-  }
-);
+  });
+});
 
 // ============================================================================
 // Traceability Report
@@ -291,11 +288,36 @@ describe.skipIf(SKIP_NATIVE_MODULE_TESTS)(
 describe('Traceability Matrix: Day Close Authorization', () => {
   it('should document all test-to-requirement mappings', () => {
     const matrix = [
-      { testId: 'SEC-AUTH-001', handler: 'lottery:prepareDayClose', role: 'cashier', expected: 'SUCCESS' },
-      { testId: 'SEC-AUTH-002', handler: 'lottery:commitDayClose', role: 'cashier', expected: 'SUCCESS' },
-      { testId: 'SEC-AUTH-003', handler: 'lottery:cancelDayClose', role: 'cashier', expected: 'SUCCESS' },
-      { testId: 'SEC-AUTH-004', handler: 'all day close handlers', role: 'none', expected: 'NOT_AUTHENTICATED' },
-      { testId: 'SEC-AUTH-005', handler: 'all day close handlers', role: 'store_manager', expected: 'SUCCESS' },
+      {
+        testId: 'SEC-AUTH-001',
+        handler: 'lottery:prepareDayClose',
+        role: 'cashier',
+        expected: 'SUCCESS',
+      },
+      {
+        testId: 'SEC-AUTH-002',
+        handler: 'lottery:commitDayClose',
+        role: 'cashier',
+        expected: 'SUCCESS',
+      },
+      {
+        testId: 'SEC-AUTH-003',
+        handler: 'lottery:cancelDayClose',
+        role: 'cashier',
+        expected: 'SUCCESS',
+      },
+      {
+        testId: 'SEC-AUTH-004',
+        handler: 'all day close handlers',
+        role: 'none',
+        expected: 'NOT_AUTHENTICATED',
+      },
+      {
+        testId: 'SEC-AUTH-005',
+        handler: 'all day close handlers',
+        role: 'store_manager',
+        expected: 'SUCCESS',
+      },
     ];
 
     expect(matrix).toHaveLength(5);

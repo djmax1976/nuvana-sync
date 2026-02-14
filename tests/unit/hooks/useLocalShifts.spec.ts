@@ -107,7 +107,8 @@ describe('localShiftsKeys', () => {
       const keys = {
         all: ['local', 'shifts'] as const,
         openShifts: () => ['local', 'shifts', 'open'] as const,
-        detail: (shiftId: string | null | undefined) => ['local', 'shifts', 'detail', shiftId] as const,
+        detail: (shiftId: string | null | undefined) =>
+          ['local', 'shifts', 'detail', shiftId] as const,
       };
 
       expect(keys.all).toEqual(['local', 'shifts']);
@@ -207,9 +208,7 @@ describe('useLocalOpenShiftsCheck Query Behavior', () => {
   describe('edge cases', () => {
     it('should handle null external_register_id', async () => {
       const mockResponse: OpenShiftsResponse = {
-        open_shifts: [
-          createOpenShift({ external_register_id: null }),
-        ],
+        open_shifts: [createOpenShift({ external_register_id: null })],
       };
 
       mockIpc.shifts.getOpenShifts.mockResolvedValue(mockResponse);
@@ -221,9 +220,7 @@ describe('useLocalOpenShiftsCheck Query Behavior', () => {
 
     it('should handle null start_time', async () => {
       const mockResponse: OpenShiftsResponse = {
-        open_shifts: [
-          createOpenShift({ start_time: null }),
-        ],
+        open_shifts: [createOpenShift({ start_time: null })],
       };
 
       mockIpc.shifts.getOpenShifts.mockResolvedValue(mockResponse);
@@ -447,9 +444,7 @@ describe('Local Shift Hooks Integration Scenarios', () => {
     it('should support checking open shifts then fetching shift detail', async () => {
       // Step 1: Check for open shifts
       const openShiftsResponse: OpenShiftsResponse = {
-        open_shifts: [
-          createOpenShift({ shift_id: 'current-shift-001' }),
-        ],
+        open_shifts: [createOpenShift({ shift_id: 'current-shift-001' })],
       };
       mockIpc.shifts.getOpenShifts.mockResolvedValue(openShiftsResponse);
 
@@ -504,7 +499,7 @@ describe('Local Shift Hooks Integration Scenarios', () => {
         open_shifts: [
           createOpenShift({
             terminal_name: 'Register 1', // Pre-resolved by backend
-            cashier_name: 'John Smith',   // Pre-resolved by backend
+            cashier_name: 'John Smith', // Pre-resolved by backend
           }),
         ],
       };

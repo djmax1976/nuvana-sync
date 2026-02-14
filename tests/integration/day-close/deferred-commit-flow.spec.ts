@@ -170,7 +170,10 @@ import {
   type SessionUser,
   type UserRole,
 } from '../../../src/main/ipc/index';
-import { lotteryBusinessDaysDAL, type LotteryBusinessDay } from '../../../src/main/dal/lottery-business-days.dal';
+import {
+  lotteryBusinessDaysDAL,
+  type LotteryBusinessDay,
+} from '../../../src/main/dal/lottery-business-days.dal';
 import { lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
 import { daySummariesDAL } from '../../../src/main/dal/day-summaries.dal';
@@ -299,7 +302,16 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
         status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
     `);
-    stmt.run(gameId, ctx.storeId, gameCode, `Test Game ${gameCode}`, price, ticketsPerPack, now, now);
+    stmt.run(
+      gameId,
+      ctx.storeId,
+      gameCode,
+      `Test Game ${gameCode}`,
+      price,
+      ticketsPerPack,
+      now,
+      now
+    );
     return gameId;
   }
 
@@ -474,9 +486,7 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
 
       // Simulate Step 1: Scanner completes with deferred commit
       // (In real flow, scanner calls onPendingClosings with closings data)
-      const closings = [
-        { pack_id: packId, closing_serial: '050', is_sold_out: false },
-      ];
+      const closings = [{ pack_id: packId, closing_serial: '050', is_sold_out: false }];
 
       // Act: Simulate Steps 2-3 (lottery commit + shift close)
       const result = await simulateDeferredCommitFlow({
@@ -549,9 +559,7 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       syncQueueHistory.length = 0;
 
       // Mark pack as sold out (ending at last ticket)
-      const closings = [
-        { pack_id: packId, closing_serial: '099', is_sold_out: true },
-      ];
+      const closings = [{ pack_id: packId, closing_serial: '099', is_sold_out: true }];
 
       // Act
       const result = await simulateDeferredCommitFlow({
@@ -562,7 +570,9 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       // Assert: Pack should be DEPLETED
       expect(result.success).toBe(true);
 
-      const pack = db.prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`).get(packId) as { status: string };
+      const pack = db.prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`).get(packId) as {
+        status: string;
+      };
       expect(pack.status).toBe('DEPLETED');
 
       // Verify sync queue has pack depletion
@@ -622,15 +632,13 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       const beforeClose = new Date().toISOString();
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '025' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '025' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
       const closedDay = getDayById(day.day_id);
       expect(closedDay?.closed_at).toBeTruthy();
-      expect(closedDay?.closed_at! >= beforeClose).toBe(true);
+      expect(closedDay?.closed_at && closedDay.closed_at >= beforeClose).toBe(true);
     });
 
     it('should set closed_by to authenticated user', async () => {
@@ -644,9 +652,7 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '030' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '030' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -829,9 +835,7 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
 
       // Act: closing_serial is next ticket to sell (POSITION mode)
       // ending = 100 means tickets 000-099 sold = 100 tickets
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '100' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '100' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -879,16 +883,18 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '025' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '025' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: Can find day by CLOSED status
-      const closedDays = db.prepare(`
+      const closedDays = db
+        .prepare(
+          `
         SELECT * FROM lottery_business_days
         WHERE store_id = ? AND status = 'CLOSED'
-      `).all(ctx.storeId) as LotteryBusinessDay[];
+      `
+        )
+        .all(ctx.storeId) as LotteryBusinessDay[];
 
       expect(closedDays.length).toBe(1);
       expect(closedDays[0].day_id).toBe(day.day_id);
@@ -926,11 +932,15 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       lotteryBusinessDaysDAL.commitClose(day2.day_id, user.user_id);
 
       // Assert: Both have closed_at for sorting
-      const closedDays = db.prepare(`
+      const closedDays = db
+        .prepare(
+          `
         SELECT day_id, closed_at FROM lottery_business_days
         WHERE store_id = ? AND status = 'CLOSED'
         ORDER BY closed_at DESC
-      `).all(ctx.storeId) as Array<{ day_id: string; closed_at: string }>;
+      `
+        )
+        .all(ctx.storeId) as Array<{ day_id: string; closed_at: string }>;
 
       expect(closedDays.length).toBe(2);
       expect(closedDays[0].day_id).toBe(day2.day_id); // Most recently closed
@@ -1115,19 +1125,23 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       const otherStoreId = 'other-store-uuid';
       const now = new Date().toISOString();
 
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO stores (store_id, company_id, name, timezone, status, created_at, updated_at)
         VALUES (?, 'other-company', 'Other Store', 'America/New_York', 'ACTIVE', ?, ?)
-      `).run(otherStoreId, now, now);
+      `
+      ).run(otherStoreId, now, now);
 
       const gameId = seedLotteryGame();
       const otherPackId = `other-pack-${++uuidCounter}`;
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO lottery_packs (
           pack_id, store_id, game_id, pack_number, status, opening_serial,
           created_at, updated_at
         ) VALUES (?, ?, ?, 'OTHER001', 'ACTIVE', '000', ?, ?)
-      `).run(otherPackId, otherStoreId, gameId, now, now);
+      `
+      ).run(otherPackId, otherStoreId, gameId, now, now);
 
       // Act & Assert
       expect(() => {

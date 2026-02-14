@@ -157,7 +157,7 @@ class IPCClient {
       case 'shifts:getById': {
         // Mock includes cashier_name for dev mode (matches production handler)
         const mockShift = mockData.getMockShiftById(params as unknown as string);
-        return mockShift ? { ...mockShift, cashier_name: 'Mock Cashier' } as T : {} as T;
+        return mockShift ? ({ ...mockShift, cashier_name: 'Mock Cashier' } as T) : ({} as T);
       }
       case 'shifts:getSummary':
         return (mockData.getMockShiftSummary(params as unknown as string) || {}) as T;

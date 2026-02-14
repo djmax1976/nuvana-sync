@@ -162,11 +162,10 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
    * SEC-006: Parameterized query
    * DB-006: Store-scoped
    */
-  function seedUserWithPin(options: {
-    role?: UserRole;
-    name?: string;
-    pin?: string;
-  }): { user: User; pin: string } {
+  function seedUserWithPin(options: { role?: UserRole; name?: string; pin?: string }): {
+    user: User;
+    pin: string;
+  } {
     const userId = `user-${++uuidCounter}`;
     const role = options.role ?? 'cashier';
     const name = options.name ?? `Test ${role}`;
@@ -622,8 +621,12 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
       }
 
       // Verify tables still exist and have data
-      const userCount = (db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }).count;
-      const shiftCount = (db.prepare('SELECT COUNT(*) as count FROM shifts').get() as { count: number }).count;
+      const userCount = (
+        db.prepare('SELECT COUNT(*) as count FROM users').get() as { count: number }
+      ).count;
+      const shiftCount = (
+        db.prepare('SELECT COUNT(*) as count FROM shifts').get() as { count: number }
+      ).count;
       expect(userCount).toBeGreaterThan(0);
       expect(shiftCount).toBeGreaterThan(0);
 
@@ -652,7 +655,9 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
       }
 
       // Verify database integrity
-      const storeCount = (db.prepare('SELECT COUNT(*) as count FROM stores').get() as { count: number }).count;
+      const storeCount = (
+        db.prepare('SELECT COUNT(*) as count FROM stores').get() as { count: number }
+      ).count;
       expect(storeCount).toBeGreaterThan(0);
     });
   });

@@ -100,7 +100,11 @@ describe('Bin Collision Integration Tests (Phase 4 - Task 4.2.1)', () => {
   describe('4.2.1.1: Happy Path - Bin Collision Auto-Depletion', () => {
     it('should detect collision when ACTIVE pack exists in target bin', () => {
       // Simulate DAL findActiveInBin behavior
-      const mockFindActiveInBin = (storeId: string, binId: string, activePacksInBins: Map<string, object>) => {
+      const mockFindActiveInBin = (
+        storeId: string,
+        binId: string,
+        activePacksInBins: Map<string, object>
+      ) => {
         const key = `${storeId}:${binId}`;
         return activePacksInBins.get(key) || null;
       };
@@ -136,7 +140,10 @@ describe('Bin Collision Integration Tests (Phase 4 - Task 4.2.1)', () => {
       };
 
       // Calculate final serial: 000 + 300 - 1 = 299
-      const closingSerial = calculateFinalSerial(existingPack.opening_serial, gameInfo.tickets_per_pack);
+      const closingSerial = calculateFinalSerial(
+        existingPack.opening_serial,
+        gameInfo.tickets_per_pack
+      );
       expect(closingSerial).toBe('299');
 
       // Full pack sold
@@ -160,7 +167,9 @@ describe('Bin Collision Integration Tests (Phase 4 - Task 4.2.1)', () => {
         depletion_reason: 'AUTO_REPLACED',
       });
 
-      expect((depletionPayload as { depletion_reason: string }).depletion_reason).toBe('AUTO_REPLACED');
+      expect((depletionPayload as { depletion_reason: string }).depletion_reason).toBe(
+        'AUTO_REPLACED'
+      );
       expect((depletionPayload as { status: string }).status).toBe('DEPLETED');
     });
   });
@@ -369,7 +378,8 @@ describe('Bin Collision Integration Tests (Phase 4 - Task 4.2.1)', () => {
         // When game is not found during collision processing
         const errorResponse = {
           error: 'INTERNAL_ERROR',
-          message: 'Unable to process bin collision: game data missing for existing pack. Please contact support.',
+          message:
+            'Unable to process bin collision: game data missing for existing pack. Please contact support.',
         };
 
         expect(errorResponse.error).toBe('INTERNAL_ERROR');

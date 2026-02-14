@@ -52,11 +52,7 @@ const {
 // ============================================================================
 vi.mock('../../../src/main/ipc/index', () => ({
   registerHandler: vi.fn(
-    (
-      channel: string,
-      handler: (...args: unknown[]) => Promise<unknown>,
-      _options?: unknown
-    ) => {
+    (channel: string, handler: (...args: unknown[]) => Promise<unknown>, _options?: unknown) => {
       capturedHandlers[channel] = handler;
     }
   ),

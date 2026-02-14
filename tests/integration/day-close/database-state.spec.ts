@@ -157,11 +157,7 @@ vi.mock('uuid', () => ({
 // ============================================================================
 
 import { createServiceTestContext, type ServiceTestContext } from '../../helpers/test-context';
-import {
-  setCurrentUser,
-  type SessionUser,
-  type UserRole,
-} from '../../../src/main/ipc/index';
+import { setCurrentUser, type SessionUser, type UserRole } from '../../../src/main/ipc/index';
 import {
   lotteryBusinessDaysDAL,
   type LotteryBusinessDay,
@@ -246,7 +242,9 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       now
     );
 
-    return db.prepare(`SELECT * FROM lottery_business_days WHERE day_id = ?`).get(dayId) as LotteryBusinessDay;
+    return db
+      .prepare(`SELECT * FROM lottery_business_days WHERE day_id = ?`)
+      .get(dayId) as LotteryBusinessDay;
   }
 
   /**
@@ -285,7 +283,16 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
         status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
     `);
-    stmt.run(gameId, ctx.storeId, gameCode, `Test Game ${gameCode}`, price, ticketsPerPack, now, now);
+    stmt.run(
+      gameId,
+      ctx.storeId,
+      gameCode,
+      `Test Game ${gameCode}`,
+      price,
+      ticketsPerPack,
+      now,
+      now
+    );
     return gameId;
   }
 
@@ -334,19 +341,23 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
   /**
    * Get pack by ID
    */
-  function getPackById(packId: string): {
-    pack_id: string;
-    status: string;
-    closing_serial: string | null;
-  } | undefined {
+  function getPackById(packId: string):
+    | {
+        pack_id: string;
+        status: string;
+        closing_serial: string | null;
+      }
+    | undefined {
     const stmt = db.prepare(`
       SELECT pack_id, status, closing_serial FROM lottery_packs WHERE pack_id = ?
     `);
-    return stmt.get(packId) as {
-      pack_id: string;
-      status: string;
-      closing_serial: string | null;
-    } | undefined;
+    return stmt.get(packId) as
+      | {
+          pack_id: string;
+          status: string;
+          closing_serial: string | null;
+        }
+      | undefined;
   }
 
   /**
@@ -389,9 +400,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -412,9 +421,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const beforeClose = new Date();
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       const afterClose = new Date();
@@ -439,9 +446,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -489,9 +494,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       await new Promise((resolve) => setTimeout(resolve, 10));
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -544,9 +547,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -592,9 +593,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId, { openingSerial: '000' });
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '123' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '123' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -613,9 +612,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -641,9 +638,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId, { openingSerial: '000' });
 
       // Act: closing_serial 100 means position 100 (tickets 0-99 sold)
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '100' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '100' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: POSITION mode: 100 - 0 = 100 tickets
@@ -663,14 +658,14 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId, { openingSerial: '050' });
 
       // Update pack to have prev_ending_serial for carryforward
-      db.prepare(`
+      db.prepare(
+        `
         UPDATE lottery_packs SET prev_ending_serial = '050' WHERE pack_id = ?
-      `).run(packId);
+      `
+      ).run(packId);
 
       // Act: closing at 150 means tickets 50-149 sold (100 tickets)
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '150' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '150' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: 150 - 50 = 100 tickets
@@ -689,9 +684,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId, { openingSerial: '000' });
 
       // Act: closing at 000 means no tickets sold
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '000' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '000' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: 0 - 0 = 0 tickets
@@ -737,9 +730,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: 50 tickets * $5 = $250
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -779,10 +770,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
 
       // Verify individual records
       const dayPacks = getDayPacks(day.day_id);
-      const totalFromRecords = dayPacks.reduce(
-        (sum, p) => sum + (p.sales_amount || 0),
-        0
-      );
+      const totalFromRecords = dayPacks.reduce((sum, p) => sum + (p.sales_amount || 0), 0);
       expect(totalFromRecords).toBe(300);
     });
 
@@ -797,9 +785,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId, { openingSerial: '000' });
 
       // Act: No tickets sold
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '000' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '000' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -818,9 +804,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: 25 tickets * $0.50 = $12.50
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '025' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '025' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -845,9 +829,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Act: Auto-open next day
@@ -872,9 +854,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, closingUser.user_id);
 
       // Act
@@ -903,13 +883,15 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Close yesterday's day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Act
-      const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(ctx.storeId, todayDate, user.user_id);
+      const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+        ctx.storeId,
+        todayDate,
+        user.user_id
+      );
 
       // Assert: New day uses today's date
       expect(nextDay.business_date).toBe(todayDate);
@@ -928,9 +910,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const beforeOpen = new Date();
 
       // Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Act
@@ -960,9 +940,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       expect(countOpenDays()).toBe(1);
 
       // Act: Close and auto-open
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       const today = ctx.utils.today();
@@ -995,9 +973,7 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: All records have correct store_id
@@ -1015,19 +991,23 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const otherStoreId = 'other-store-uuid';
       const now = new Date().toISOString();
 
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO stores (store_id, company_id, name, timezone, status, created_at, updated_at)
         VALUES (?, 'other-company', 'Other Store', 'America/New_York', 'ACTIVE', ?, ?)
-      `).run(otherStoreId, now, now);
+      `
+      ).run(otherStoreId, now, now);
 
       // Create day in other store
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO lottery_business_days (
           day_id, store_id, business_date, status, opened_at, opened_by,
           total_sales, total_packs_sold, total_packs_activated,
           created_at, updated_at
         ) VALUES ('other-day-id', ?, ?, 'OPEN', ?, 'other-user', 0, 0, 0, ?, ?)
-      `).run(otherStoreId, ctx.utils.today(), now, now, now);
+      `
+      ).run(otherStoreId, ctx.utils.today(), now, now, now);
 
       // Set up our store
       const user = createTestUser('cashier');
@@ -1039,15 +1019,17 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: Close our store's day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: Other store's day unaffected
-      const otherDay = db.prepare(`
+      const otherDay = db
+        .prepare(
+          `
         SELECT * FROM lottery_business_days WHERE day_id = 'other-day-id'
-      `).get() as LotteryBusinessDay;
+      `
+        )
+        .get() as LotteryBusinessDay;
 
       expect(otherDay.status).toBe('OPEN'); // Still open
       expect(otherDay.closed_at).toBeNull();
@@ -1059,19 +1041,23 @@ describeSuite('Database State Verification (Phase 4.2)', () => {
       const otherStoreId = 'other-store-uuid';
       const now = new Date().toISOString();
 
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO stores (store_id, company_id, name, timezone, status, created_at, updated_at)
         VALUES (?, 'other-company', 'Other Store', 'America/New_York', 'ACTIVE', ?, ?)
-      `).run(otherStoreId, now, now);
+      `
+      ).run(otherStoreId, now, now);
 
       const gameId = seedLotteryGame();
       const otherPackId = 'other-pack-uuid';
-      db.prepare(`
+      db.prepare(
+        `
         INSERT INTO lottery_packs (
           pack_id, store_id, game_id, pack_number, status, opening_serial,
           created_at, updated_at
         ) VALUES (?, ?, ?, 'OTHER001', 'ACTIVE', '000', ?, ?)
-      `).run(otherPackId, otherStoreId, gameId, now, now);
+      `
+      ).run(otherPackId, otherStoreId, gameId, now, now);
 
       // Set up our store
       const user = createTestUser('cashier');

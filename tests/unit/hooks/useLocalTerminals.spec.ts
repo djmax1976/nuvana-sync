@@ -202,9 +202,7 @@ describe('useLocalTerminals Query Behavior', () => {
   describe('edge cases', () => {
     it('should handle null description', async () => {
       const mockResponse: TerminalListResponse = {
-        registers: [
-          createRegisterWithShiftStatus({ description: null }),
-        ],
+        registers: [createRegisterWithShiftStatus({ description: null })],
         total: 1,
       };
 
@@ -407,9 +405,7 @@ describe('useTerminalByRegisterId Query Behavior', () => {
 
     it('should return undefined for non-existent register ID', async () => {
       const mockResponse: TerminalListResponse = {
-        registers: [
-          createRegisterWithShiftStatus({ external_register_id: 'ext-001' }),
-        ],
+        registers: [createRegisterWithShiftStatus({ external_register_id: 'ext-001' })],
         total: 1,
       };
 
@@ -479,9 +475,9 @@ describe('Local Terminal Hooks Integration Scenarios', () => {
 
       // Simulate resolving terminal name for a shift
       const shiftRegisterId = 'ext-001';
-      const terminalName = terminals.find(
-        (t: LocalTerminal) => t.external_register_id === shiftRegisterId
-      )?.name ?? 'Unknown';
+      const terminalName =
+        terminals.find((t: LocalTerminal) => t.external_register_id === shiftRegisterId)?.name ??
+        'Unknown';
 
       expect(terminalName).toBe('Main Register');
     });

@@ -1329,10 +1329,7 @@ registerHandler<{ success: boolean; message: string } | ReturnType<typeof create
       // Look up the shift from database
       const shift = shiftsDAL.findById(params.shift_id);
       if (!shift || shift.store_id !== store.store_id) {
-        return createErrorResponse(
-          IPCErrorCodes.NOT_FOUND,
-          `Shift not found: ${params.shift_id}`
-        );
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, `Shift not found: ${params.shift_id}`);
       }
 
       // Delete any existing queue items for this shift (including failed ones)
@@ -1453,7 +1450,10 @@ registerHandler<OpenShiftsResponse | ReturnType<typeof createErrorResponse>>(
       const terminals = posTerminalMappingsDAL.findRegisters(store.store_id);
       const terminalMap = new Map<string, string>();
       for (const t of terminals) {
-        terminalMap.set(t.external_register_id, t.description || `Register ${t.external_register_id}`);
+        terminalMap.set(
+          t.external_register_id,
+          t.description || `Register ${t.external_register_id}`
+        );
       }
 
       // Get all users for this store (single query, then filter in memory)

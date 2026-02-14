@@ -224,7 +224,10 @@ describe('shifts:close Handler', () => {
     mockFindById.mockReturnValue(mockOpenShift);
     mockClose.mockReturnValue(mockClosedShift);
     mockFindByShiftId.mockReturnValue(mockShiftSummary);
-    mockCloseShiftSummary.mockReturnValue({ ...mockShiftSummary, shift_closed_at: mockClosedShift.end_time });
+    mockCloseShiftSummary.mockReturnValue({
+      ...mockShiftSummary,
+      shift_closed_at: mockClosedShift.end_time,
+    });
 
     // Create a handler function that mirrors the actual handler logic
     // This tests the same validation and business rules without requiring ipcMain
@@ -483,14 +486,14 @@ describe('shifts:close Handler', () => {
     it('TEST: Successfully closes OPEN shift with closing_cash', async () => {
       const result = await handleShiftClose(null, {
         shift_id: VALID_UUID,
-        closing_cash: 250.50,
+        closing_cash: 250.5,
       });
 
       expect(result).not.toHaveProperty('error');
       expect(result).toMatchObject({
         shift_id: VALID_UUID,
         status: 'CLOSED',
-        closing_cash: 250.50,
+        closing_cash: 250.5,
       });
       expect(mockClose).toHaveBeenCalledWith(VALID_UUID);
     });

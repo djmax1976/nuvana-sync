@@ -100,11 +100,7 @@ export default function ShiftEndWizardPage() {
 
   // ============ LOCAL IPC HOOKS ============
   // Use local IPC hooks for offline-first operation (no cloud API calls)
-  const {
-    data: storeData,
-    isLoading: storeLoading,
-    isError: storeError,
-  } = useLocalStore();
+  const { data: storeData, isLoading: storeLoading, isError: storeError } = useLocalStore();
 
   // Get store ID from local configuration
   const storeId = storeData?.store_id;

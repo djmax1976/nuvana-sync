@@ -94,7 +94,7 @@ vi.mock('../../src/main/services/database.service', () => ({
 // ============================================================================
 
 let mockPOSType = 'MANUAL'; // Non-LOTTERY for deferred commit testing
-let mockPOSConnectionType = 'MANUAL';
+const mockPOSConnectionType = 'MANUAL';
 vi.mock('../../src/main/services/settings.service', () => ({
   settingsService: {
     getPOSType: () => mockPOSType,
@@ -407,10 +407,7 @@ describeSuite('Day Close Deferred Commit Authorization Security Tests', () => {
    * SEC-010: Full auth flow simulation
    * DB-006: Tenant isolation validation
    */
-  async function simulateCommitDayClose(input: {
-    day_id: string;
-    fromWizard?: boolean;
-  }): Promise<{
+  async function simulateCommitDayClose(input: { day_id: string; fromWizard?: boolean }): Promise<{
     success: boolean;
     error?: string;
     message?: string;

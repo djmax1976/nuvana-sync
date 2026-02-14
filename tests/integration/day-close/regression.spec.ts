@@ -173,7 +173,10 @@ import {
   type SessionUser,
   type UserRole,
 } from '../../../src/main/ipc/index';
-import { lotteryBusinessDaysDAL, type LotteryBusinessDay } from '../../../src/main/dal/lottery-business-days.dal';
+import {
+  lotteryBusinessDaysDAL,
+  type LotteryBusinessDay,
+} from '../../../src/main/dal/lottery-business-days.dal';
 import { lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
 import { daySummariesDAL } from '../../../src/main/dal/day-summaries.dal';
@@ -302,7 +305,16 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
         status, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, ?, 'ACTIVE', ?, ?)
     `);
-    stmt.run(gameId, ctx.storeId, gameCode, `Test Game ${gameCode}`, price, ticketsPerPack, now, now);
+    stmt.run(
+      gameId,
+      ctx.storeId,
+      gameCode,
+      `Test Game ${gameCode}`,
+      price,
+      ticketsPerPack,
+      now,
+      now
+    );
     return gameId;
   }
 
@@ -424,16 +436,10 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       }
 
       // Phase 1: Prepare (no fromWizard flag needed for LOTTERY POS)
-      const prepareResult = lotteryBusinessDaysDAL.prepareClose(
-        openDay.day_id,
-        options.closings
-      );
+      const prepareResult = lotteryBusinessDaysDAL.prepareClose(openDay.day_id, options.closings);
 
       // Phase 2: Commit
-      const commitResult = lotteryBusinessDaysDAL.commitClose(
-        prepareResult.day_id,
-        options.userId
-      );
+      const commitResult = lotteryBusinessDaysDAL.commitClose(prepareResult.day_id, options.userId);
 
       // Auto-open next day (BIZ-007)
       const today = ctx.utils.today();
@@ -618,9 +624,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '025' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '025' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: Day appears in closed days query
@@ -642,15 +646,13 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const beforeClose = new Date().toISOString();
 
       // Act
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '015' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '015' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
       const closedDay = getDayById(day.day_id);
       expect(closedDay?.closed_at).toBeTruthy();
-      expect(closedDay?.closed_at! >= beforeClose).toBe(true);
+      expect(closedDay?.closed_at && closedDay.closed_at >= beforeClose).toBe(true);
     });
 
     it('should include total_sales in closed day record', () => {
@@ -664,9 +666,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: 50 tickets * $3 = $150
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert
@@ -778,9 +778,13 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       });
 
       // Assert: Shift still exists and is unaffected
-      const queriedShift = db.prepare(`
+      const queriedShift = db
+        .prepare(
+          `
         SELECT * FROM shifts WHERE shift_id = ?
-      `).get(shift.shift_id) as { shift_id: string; status: string };
+      `
+        )
+        .get(shift.shift_id) as { shift_id: string; status: string };
 
       expect(queriedShift.shift_id).toBe(shift.shift_id);
       expect(queriedShift.status).toBe('OPEN');
@@ -803,9 +807,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Prepare (moves to PENDING_CLOSE)
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       expect(getDayById(day.day_id)?.status).toBe('PENDING_CLOSE');
 
       // Act: Cancel
@@ -827,17 +829,19 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Prepare
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
 
       // Act: Cancel
       lotteryBusinessDaysDAL.cancelClose(day.day_id);
 
       // Assert: pending_closings cleared
-      const pending = db.prepare(`
+      const pending = db
+        .prepare(
+          `
         SELECT * FROM lottery_pending_closings WHERE day_id = ?
-      `).all(day.day_id);
+      `
+        )
+        .all(day.day_id);
       expect(pending.length).toBe(0);
     });
 
@@ -852,9 +856,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       expect(getDayById(day.day_id)?.status).toBe('CLOSED');
@@ -882,9 +884,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Prepare (moves to PENDING_CLOSE)
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
 
       // Simulate "refresh" - clear session, re-authenticate
       setCurrentUser(null);
@@ -905,9 +905,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Prepare
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
 
       // Simulate session restore
       setCurrentUser(null);
@@ -932,9 +930,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Prepare
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
 
       // Simulate session restore
       setCurrentUser(null);
@@ -982,9 +978,15 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       expect(result.closings_created).toBe(3);
 
       // Verify pack statuses
-      const pack1Status = db.prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`).get(pack1) as { status: string };
-      const pack2Status = db.prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`).get(pack2) as { status: string };
-      const pack3Status = db.prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`).get(pack3) as { status: string };
+      const pack1Status = db
+        .prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`)
+        .get(pack1) as { status: string };
+      const pack2Status = db
+        .prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`)
+        .get(pack2) as { status: string };
+      const pack3Status = db
+        .prepare(`SELECT status FROM lottery_packs WHERE pack_id = ?`)
+        .get(pack3) as { status: string };
 
       expect(pack1Status.status).toBe('DEPLETED');
       expect(pack2Status.status).toBe('ACTIVE'); // Still active
@@ -1097,9 +1099,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       // Act & Assert: Close should still work (local operation)
       // Note: This depends on the DAL not failing on sync queue errors
       // The current implementation may or may not throw - adjust test accordingly
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
 
       // Re-enable for commit to work
       syncQueueEnabled = true;
@@ -1152,9 +1152,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act: Close (simulates closing after midnight)
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Assert: Closed day still has yesterday's business_date
@@ -1206,9 +1204,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const pack1 = seedActivePack(gameId, binId);
 
       // First prepare
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: pack1, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: pack1, closing_serial: '050' }]);
 
       // Create another pack for second attempt
       const bin2 = seedLotteryBin('Bin 2', 2);
@@ -1233,9 +1229,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Close the day
-      lotteryBusinessDaysDAL.prepareClose(day.day_id, [
-        { pack_id: packId, closing_serial: '050' },
-      ]);
+      lotteryBusinessDaysDAL.prepareClose(day.day_id, [{ pack_id: packId, closing_serial: '050' }]);
       lotteryBusinessDaysDAL.commitClose(day.day_id, user.user_id);
 
       // Act & Assert: Second commit should fail
@@ -1261,10 +1255,14 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       });
 
       // Assert: Only one OPEN day exists
-      const openDays = db.prepare(`
+      const openDays = db
+        .prepare(
+          `
         SELECT COUNT(*) as count FROM lottery_business_days
         WHERE store_id = ? AND status = 'OPEN'
-      `).get(ctx.storeId) as { count: number };
+      `
+        )
+        .get(ctx.storeId) as { count: number };
 
       expect(openDays.count).toBe(1);
     });

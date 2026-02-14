@@ -644,19 +644,28 @@ describe('Reports Handlers', () => {
         allDays: [day1, day2, day3],
         bins: [
           createMockBinRow({
-            day_id: 'day-001', pack_id: 'pack-001',
-            starting_serial: '000', ending_serial: '000',
-            tickets_sold: 0, sales_amount: 0,
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            starting_serial: '000',
+            ending_serial: '000',
+            tickets_sold: 0,
+            sales_amount: 0,
           }),
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            starting_serial: '000', ending_serial: '001',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            starting_serial: '000',
+            ending_serial: '001',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
           createMockBinRow({
-            day_id: 'day-003', pack_id: 'pack-001',
-            starting_serial: '001', ending_serial: '002',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-003',
+            pack_id: 'pack-001',
+            starting_serial: '001',
+            ending_serial: '002',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
         ],
       });
@@ -694,12 +703,16 @@ describe('Reports Handlers', () => {
         allDays: [day1, day2],
         bins: [
           createMockBinRow({
-            day_id: 'day-001', pack_id: 'pack-001',
-            tickets_sold: 2, sales_amount: 60,
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            tickets_sold: 2,
+            sales_amount: 60,
           }),
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            tickets_sold: 3, sales_amount: 90,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            tickets_sold: 3,
+            sales_amount: 90,
           }),
         ],
       });
@@ -836,8 +849,10 @@ describe('Reports Handlers', () => {
         allDays: [day1, day2],
         bins: [
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
         ],
       });
@@ -872,16 +887,18 @@ describe('Reports Handlers', () => {
         returnSales: 0,
         totalSales: 30,
         totalTicketsSold: 1,
-        bins: [{
-          bin_number: 1,
-          game_name: 'Game A',
-          game_price: 30,
-          pack_number: 'PKG-001',
-          starting_serial: '000',
-          ending_serial: '004',
-          tickets_sold: 1,
-          sales_amount: 30,
-        }],
+        bins: [
+          {
+            bin_number: 1,
+            game_name: 'Game A',
+            game_price: 30,
+            pack_number: 'PKG-001',
+            starting_serial: '000',
+            ending_serial: '004',
+            tickets_sold: 1,
+            sales_amount: 30,
+          },
+        ],
         depletedPacks: [],
         returnedPacks: [],
         activatedPacks: [],
@@ -923,16 +940,22 @@ describe('Reports Handlers', () => {
         allDays: [day1, day2, day3],
         bins: [
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-late-001',
+            day_id: 'day-002',
+            pack_id: 'pack-late-001',
             pack_number: 'PKG-LATE',
-            starting_serial: '005', ending_serial: '006',
-            tickets_sold: 1, sales_amount: 30,
+            starting_serial: '005',
+            ending_serial: '006',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
           createMockBinRow({
-            day_id: 'day-003', pack_id: 'pack-late-001',
+            day_id: 'day-003',
+            pack_id: 'pack-late-001',
             pack_number: 'PKG-LATE',
-            starting_serial: '006', ending_serial: '008',
-            tickets_sold: 2, sales_amount: 60,
+            starting_serial: '006',
+            ending_serial: '008',
+            tickets_sold: 2,
+            sales_amount: 60,
           }),
         ],
       });
@@ -1090,9 +1113,24 @@ describe('Reports Handlers', () => {
           createMockBusinessDay({ day_id: 'day-003', total_sales: 60 }),
         ],
         bins: [
-          createMockBinRow({ day_id: 'day-001', pack_id: 'pack-001', tickets_sold: 0, sales_amount: 0 }),
-          createMockBinRow({ day_id: 'day-002', pack_id: 'pack-001', tickets_sold: 1, sales_amount: 30 }),
-          createMockBinRow({ day_id: 'day-003', pack_id: 'pack-001', tickets_sold: 2, sales_amount: 60 }),
+          createMockBinRow({
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            tickets_sold: 0,
+            sales_amount: 0,
+          }),
+          createMockBinRow({
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            tickets_sold: 1,
+            sales_amount: 30,
+          }),
+          createMockBinRow({
+            day_id: 'day-003',
+            pack_id: 'pack-001',
+            tickets_sold: 2,
+            sales_amount: 60,
+          }),
         ],
       });
 
@@ -1220,19 +1258,28 @@ describe('Reports Handlers', () => {
         allDays: [closedDay1, closedDay2, pendingDay],
         bins: [
           createMockBinRow({
-            day_id: 'day-001', pack_id: 'pack-001',
-            starting_serial: '000', ending_serial: '001',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            starting_serial: '000',
+            ending_serial: '001',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            starting_serial: '001', ending_serial: '003',
-            tickets_sold: 2, sales_amount: 60,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            starting_serial: '001',
+            ending_serial: '003',
+            tickets_sold: 2,
+            sales_amount: 60,
           }),
           createMockBinRow({
-            day_id: 'day-003', pack_id: 'pack-001',
-            starting_serial: '003', ending_serial: '004',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-003',
+            pack_id: 'pack-001',
+            starting_serial: '003',
+            ending_serial: '004',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
         ],
       });
@@ -1286,19 +1333,28 @@ describe('Reports Handlers', () => {
         // Per-session rows with zero tickets across all sessions
         bins: [
           createMockBinRow({
-            day_id: 'day-001', pack_id: 'pack-001',
-            starting_serial: '005', ending_serial: '005',
-            tickets_sold: 0, sales_amount: 0,
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            starting_serial: '005',
+            ending_serial: '005',
+            tickets_sold: 0,
+            sales_amount: 0,
           }),
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            starting_serial: '005', ending_serial: '005',
-            tickets_sold: 0, sales_amount: 0,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            starting_serial: '005',
+            ending_serial: '005',
+            tickets_sold: 0,
+            sales_amount: 0,
           }),
           createMockBinRow({
-            day_id: 'day-003', pack_id: 'pack-001',
-            starting_serial: '005', ending_serial: '005',
-            tickets_sold: 0, sales_amount: 0,
+            day_id: 'day-003',
+            pack_id: 'pack-001',
+            starting_serial: '005',
+            ending_serial: '005',
+            tickets_sold: 0,
+            sales_amount: 0,
           }),
         ],
       });
@@ -1430,14 +1486,20 @@ describe('Reports Handlers', () => {
         // Per-session rows for midnight-spanning closings
         bins: [
           createMockBinRow({
-            day_id: 'day-001', pack_id: 'pack-001',
-            starting_serial: '000', ending_serial: '001',
-            tickets_sold: 1, sales_amount: 30,
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            starting_serial: '000',
+            ending_serial: '001',
+            tickets_sold: 1,
+            sales_amount: 30,
           }),
           createMockBinRow({
-            day_id: 'day-002', pack_id: 'pack-001',
-            starting_serial: '001', ending_serial: '004',
-            tickets_sold: 3, sales_amount: 90,
+            day_id: 'day-002',
+            pack_id: 'pack-001',
+            starting_serial: '001',
+            ending_serial: '004',
+            tickets_sold: 3,
+            sales_amount: 90,
           }),
         ],
       });
@@ -1738,7 +1800,14 @@ describe('Reports Handlers', () => {
             total_tickets_sold: 20,
           }),
         ],
-        bins: [createMockBinRow({ day_id: 'day-001', pack_id: 'pack-001', sales_amount: 500, tickets_sold: 20 })],
+        bins: [
+          createMockBinRow({
+            day_id: 'day-001',
+            pack_id: 'pack-001',
+            sales_amount: 500,
+            tickets_sold: 20,
+          }),
+        ],
       });
 
       const result = await callLotteryDayReport(differentDate);
@@ -1789,23 +1858,15 @@ describe('Reports Handlers', () => {
       // Activated query (3rd prepare call): params are (storeId, periodStartUtc, periodEndUtc)
       expect(mockActivatedAll).toHaveBeenCalledWith(
         TEST_STORE_ID,
-        sessionOpenedAt,    // period starts at session open
-        sessionClosedAt     // period ends at session close
+        sessionOpenedAt, // period starts at session open
+        sessionClosedAt // period ends at session close
       );
 
       // Depleted query (4th prepare call)
-      expect(mockDepletedAll).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        sessionOpenedAt,
-        sessionClosedAt
-      );
+      expect(mockDepletedAll).toHaveBeenCalledWith(TEST_STORE_ID, sessionOpenedAt, sessionClosedAt);
 
       // Returned query (5th prepare call)
-      expect(mockReturnedAll).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        sessionOpenedAt,
-        sessionClosedAt
-      );
+      expect(mockReturnedAll).toHaveBeenCalledWith(TEST_STORE_ID, sessionOpenedAt, sessionClosedAt);
     });
 
     // ------------------------------------------------------------------
@@ -1847,11 +1908,7 @@ describe('Reports Handlers', () => {
       await callLotteryDayReport();
 
       // Period must span from first session's opened_at to last session's closed_at
-      expect(mockActivatedAll).toHaveBeenCalledWith(
-        TEST_STORE_ID,
-        firstOpenedAt,
-        lastClosedAt
-      );
+      expect(mockActivatedAll).toHaveBeenCalledWith(TEST_STORE_ID, firstOpenedAt, lastClosedAt);
     });
 
     // ------------------------------------------------------------------
@@ -2022,9 +2079,24 @@ describe('Reports Handlers', () => {
         setupPrepareChain({
           allDays: [closed1, closed2, closed3],
           bins: [
-            createMockBinRow({ day_id: 'day-closed-1', pack_id: 'pack-001', sales_amount: 50, tickets_sold: 2 }),
-            createMockBinRow({ day_id: 'day-closed-2', pack_id: 'pack-001', sales_amount: 75, tickets_sold: 3 }),
-            createMockBinRow({ day_id: 'day-closed-3', pack_id: 'pack-001', sales_amount: 100, tickets_sold: 4 }),
+            createMockBinRow({
+              day_id: 'day-closed-1',
+              pack_id: 'pack-001',
+              sales_amount: 50,
+              tickets_sold: 2,
+            }),
+            createMockBinRow({
+              day_id: 'day-closed-2',
+              pack_id: 'pack-001',
+              sales_amount: 75,
+              tickets_sold: 3,
+            }),
+            createMockBinRow({
+              day_id: 'day-closed-3',
+              pack_id: 'pack-001',
+              sales_amount: 100,
+              tickets_sold: 4,
+            }),
           ],
         });
 
@@ -2143,10 +2215,7 @@ describe('Reports Handlers', () => {
       mockPrepare.mockReturnValue({ all: mockShiftsByDaysAll });
     }
 
-    function callShiftsByDays(
-      startDate: string = '2026-02-01',
-      endDate: string = '2026-02-07'
-    ) {
+    function callShiftsByDays(startDate: string = '2026-02-01', endDate: string = '2026-02-07') {
       const handler = capturedHandlers['reports:getShiftsByDays'];
       return handler({} as unknown, { startDate, endDate }) as Promise<ShiftsByDaysResult>;
     }
@@ -2435,11 +2504,7 @@ describe('Reports Handlers', () => {
         await callShiftsByDays('2026-02-01', '2026-02-07');
 
         // Verify parameters passed to .all()
-        expect(mockShiftsByDaysAll).toHaveBeenCalledWith(
-          TEST_STORE_ID,
-          '2026-02-01',
-          '2026-02-07'
-        );
+        expect(mockShiftsByDaysAll).toHaveBeenCalledWith(TEST_STORE_ID, '2026-02-01', '2026-02-07');
       });
 
       it('should reject malformed date formats before query execution (defense in depth)', async () => {
@@ -2472,11 +2537,7 @@ describe('Reports Handlers', () => {
         expect(sql).not.toContain('2026-02-07');
 
         // Values passed as parameters to .all()
-        expect(mockShiftsByDaysAll).toHaveBeenCalledWith(
-          TEST_STORE_ID,
-          '2026-02-01',
-          '2026-02-07'
-        );
+        expect(mockShiftsByDaysAll).toHaveBeenCalledWith(TEST_STORE_ID, '2026-02-01', '2026-02-07');
       });
     });
 
@@ -2672,9 +2733,7 @@ describe('Reports Handlers', () => {
     describe('Edge cases', () => {
       it('should handle single day range (start equals end)', async () => {
         setupConfiguredStore();
-        setupShiftsByDaysPrepare([
-          createShiftsByDaysRow({ business_date: '2026-02-02' }),
-        ]);
+        setupShiftsByDaysPrepare([createShiftsByDaysRow({ business_date: '2026-02-02' })]);
 
         const result = await callShiftsByDays('2026-02-02', '2026-02-02');
 

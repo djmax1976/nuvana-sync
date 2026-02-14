@@ -214,9 +214,7 @@ describe('Transport Layer', () => {
         const error = new Error('IPC channel not available');
         mocks.invoke.mockRejectedValue(error);
 
-        await expect(ipc.shifts.getOpenShifts()).rejects.toThrow(
-          'IPC channel not available'
-        );
+        await expect(ipc.shifts.getOpenShifts()).rejects.toThrow('IPC channel not available');
       });
     });
   });
@@ -254,9 +252,7 @@ describe('Transport Layer', () => {
         const error = new Error('Shift not found');
         mocks.invoke.mockRejectedValue(error);
 
-        await expect(ipc.shifts.getById('nonexistent')).rejects.toThrow(
-          'Shift not found'
-        );
+        await expect(ipc.shifts.getById('nonexistent')).rejects.toThrow('Shift not found');
       });
     });
   });
@@ -400,9 +396,7 @@ describe('Transport Layer', () => {
         const error = new Error('Failed to retrieve cashiers');
         mocks.invoke.mockRejectedValue(error);
 
-        await expect(ipc.cashiers.list()).rejects.toThrow(
-          'Failed to retrieve cashiers'
-        );
+        await expect(ipc.cashiers.list()).rejects.toThrow('Failed to retrieve cashiers');
       });
     });
   });
@@ -438,9 +432,7 @@ describe('Transport Layer', () => {
         const error = new Error('Store not configured');
         mocks.invoke.mockRejectedValue(error);
 
-        await expect(ipc.store.getConfigured()).rejects.toThrow(
-          'Store not configured'
-        );
+        await expect(ipc.store.getConfigured()).rejects.toThrow('Store not configured');
       });
     });
 

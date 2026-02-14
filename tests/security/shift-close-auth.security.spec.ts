@@ -165,9 +165,7 @@ const ClosingCashSchema = z
  * - 4-6 digits only
  * - No letters or special characters
  */
-const PinSchema = z
-  .string()
-  .regex(/^\d{4,6}$/, 'PIN must be 4-6 digits');
+const PinSchema = z.string().regex(/^\d{4,6}$/, 'PIN must be 4-6 digits');
 
 // ============================================================================
 // Test Suite
@@ -730,7 +728,7 @@ describeSuite('Shift Close Authentication Security Tests (Phase 4)', () => {
       });
 
       it('should accept valid numeric values', () => {
-        const validCases = [0, 1, 100, 500.50, 999999.99];
+        const validCases = [0, 1, 100, 500.5, 999999.99];
 
         for (const value of validCases) {
           const result = ClosingCashSchema.safeParse(value);
@@ -796,8 +794,8 @@ describeSuite('Shift Close Authentication Security Tests (Phase 4)', () => {
 
         const sqlInjectionAttempts = [
           "' OR '1'='1",
-          "1; DROP TABLE shifts",
-          "1 UNION SELECT * FROM users",
+          '1; DROP TABLE shifts',
+          '1 UNION SELECT * FROM users',
           "' OR 1=1 --",
         ];
 

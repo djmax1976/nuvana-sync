@@ -464,9 +464,7 @@ describe('2.T3: Hook caches last result', () => {
     const firstResult = createAllowedResult({ openShiftCount: 1 });
     const secondResult = createDeniedResult('INVALID_PIN');
 
-    mockCheckAccess
-      .mockResolvedValueOnce(firstResult)
-      .mockResolvedValueOnce(secondResult);
+    mockCheckAccess.mockResolvedValueOnce(firstResult).mockResolvedValueOnce(secondResult);
 
     const { result } = renderHook(() => useDayCloseAccess());
 
@@ -652,9 +650,7 @@ describe('2.T4: Hook clears result on clearResult()', () => {
     const firstResult = createAllowedResult({ openShiftCount: 1 });
     const secondResult = createAllowedResult({ openShiftCount: 2 });
 
-    mockCheckAccess
-      .mockResolvedValueOnce(firstResult)
-      .mockResolvedValueOnce(secondResult);
+    mockCheckAccess.mockResolvedValueOnce(firstResult).mockResolvedValueOnce(secondResult);
 
     const { result } = renderHook(() => useDayCloseAccess());
 
