@@ -1018,7 +1018,7 @@ export const terminalsAPI = {
    * ```typescript
    * const result = await terminalsAPI.deactivate(terminalId);
    * if (result.success) {
-   *   console.log('Terminal deactivated:', result.message);
+   *   // Handle success - result.message contains confirmation
    * }
    * ```
    */

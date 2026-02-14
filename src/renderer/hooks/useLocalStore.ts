@@ -68,8 +68,7 @@ export interface LocalStoreData {
  * const { data: store, isLoading, error } = useLocalStore();
  *
  * if (store) {
- *   console.log(`Operating at: ${store.name}`);
- *   // Use store.store_id for other operations
+ *   // Access store.name for display, store.store_id for operations
  * }
  * ```
  */

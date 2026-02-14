@@ -122,8 +122,7 @@ export function useLocalOpenShiftsCheck(options?: { enabled?: boolean }) {
  * const { data: shift, isLoading } = useLocalShiftDetail(currentShiftId);
  *
  * if (shift) {
- *   // Display shift info header
- *   console.log(shift.status, shift.start_time);
+ *   // Display shift info: shift.status, shift.start_time
  * }
  * ```
  */
