@@ -51,7 +51,7 @@ const mockClosedShiftResponse = {
   external_cashier_id: null,
   external_register_id: 'REG-1',
   external_till_id: null,
-  closing_cash: 250.50,
+  closing_cash: 250.5,
   created_at: '2026-02-12T08:00:00Z',
   updated_at: '2026-02-12T16:00:00Z',
 };
@@ -77,21 +77,18 @@ describe('Transport shifts.close()', () => {
       const { ipc } = await import('../../../src/renderer/lib/transport');
       await ipc.shifts.close(VALID_UUID, 100);
 
-      expect(mockInvoke).toHaveBeenCalledWith(
-        'shifts:close',
-        expect.any(Object)
-      );
+      expect(mockInvoke).toHaveBeenCalledWith('shifts:close', expect.any(Object));
     });
 
     it('TEST: Passes shift_id and closing_cash as object', async () => {
       mockInvoke.mockResolvedValueOnce(mockClosedShiftResponse);
 
       const { ipc } = await import('../../../src/renderer/lib/transport');
-      await ipc.shifts.close(VALID_UUID, 250.50);
+      await ipc.shifts.close(VALID_UUID, 250.5);
 
       expect(mockInvoke).toHaveBeenCalledWith('shifts:close', {
         shift_id: VALID_UUID,
-        closing_cash: 250.50,
+        closing_cash: 250.5,
       });
     });
 
@@ -117,10 +114,10 @@ describe('Transport shifts.close()', () => {
       mockInvoke.mockResolvedValueOnce(mockClosedShiftResponse);
 
       const { ipc } = await import('../../../src/renderer/lib/transport');
-      const result = await ipc.shifts.close(VALID_UUID, 250.50);
+      const result = await ipc.shifts.close(VALID_UUID, 250.5);
 
       expect(result).toEqual(mockClosedShiftResponse);
-      expect(result.closing_cash).toBe(250.50);
+      expect(result.closing_cash).toBe(250.5);
     });
 
     it('TEST: Propagates IPC errors correctly', async () => {
@@ -166,7 +163,7 @@ describe('Transport shifts.close()', () => {
       mockInvoke.mockResolvedValueOnce(mockClosedShiftResponse);
 
       const { ipc } = await import('../../../src/renderer/lib/transport');
-      const result = await ipc.shifts.close(VALID_UUID, 250.50);
+      const result = await ipc.shifts.close(VALID_UUID, 250.5);
 
       // Verify ShiftCloseResponse type fields
       expect(result).toHaveProperty('shift_id');
@@ -182,7 +179,7 @@ describe('Transport shifts.close()', () => {
       mockInvoke.mockResolvedValueOnce(mockClosedShiftResponse);
 
       const { ipc } = await import('../../../src/renderer/lib/transport');
-      const result = await ipc.shifts.close(VALID_UUID, 250.50);
+      const result = await ipc.shifts.close(VALID_UUID, 250.5);
 
       expect(typeof result.closing_cash).toBe('number');
     });
@@ -240,9 +237,7 @@ describe('Transport shifts.close()', () => {
 
       const { ipc } = await import('../../../src/renderer/lib/transport');
 
-      await expect(ipc.shifts.close(VALID_UUID, 100)).rejects.toThrow(
-        'IPC call timed out'
-      );
+      await expect(ipc.shifts.close(VALID_UUID, 100)).rejects.toThrow('IPC call timed out');
     });
   });
 });

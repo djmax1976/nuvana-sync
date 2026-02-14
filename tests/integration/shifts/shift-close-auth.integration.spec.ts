@@ -115,7 +115,12 @@ vi.mock('uuid', () => ({
 // ============================================================================
 
 import { createServiceTestContext, type ServiceTestContext } from '../../helpers/test-context';
-import { setCurrentUser, getCurrentUser, type SessionUser, type UserRole } from '../../../src/main/ipc/index';
+import {
+  setCurrentUser,
+  getCurrentUser,
+  type SessionUser,
+  type UserRole,
+} from '../../../src/main/ipc/index';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
 
 // ============================================================================

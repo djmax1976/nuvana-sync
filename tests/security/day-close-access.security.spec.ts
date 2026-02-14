@@ -20,12 +20,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Hoist mock functions
-const {
-  mockGetAllOpenShifts,
-  mockFindByPin,
-  mockFindById,
-  mockFindRegisters,
-} = vi.hoisted(() => ({
+const { mockGetAllOpenShifts, mockFindByPin, mockFindById, mockFindRegisters } = vi.hoisted(() => ({
   mockGetAllOpenShifts: vi.fn(),
   mockFindByPin: vi.fn(),
   mockFindById: vi.fn(),
@@ -229,7 +224,9 @@ describe('Day Close Access Security', () => {
 
       // SQL injection attempt - service should handle this safely
       // because DAL uses parameterized queries
-      const result = await checkAccess(STORE_A, { pin: "'; DROP TABLE users; --" as unknown as string });
+      const result = await checkAccess(STORE_A, {
+        pin: "'; DROP TABLE users; --" as unknown as string,
+      });
 
       // Should simply fail authentication, not crash or inject SQL
       expect(result.allowed).toBe(false);

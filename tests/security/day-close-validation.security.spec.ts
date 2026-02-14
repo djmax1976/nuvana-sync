@@ -331,7 +331,8 @@ describe('Day Close Input Validation Security Tests', () => {
 
       // Document the expected pattern
       const parameterizedPattern = /\?/;
-      const exampleQuery = 'INSERT INTO lottery_day_packs (day_id, pack_id, closing_serial) VALUES (?, ?, ?)';
+      const exampleQuery =
+        'INSERT INTO lottery_day_packs (day_id, pack_id, closing_serial) VALUES (?, ?, ?)';
       expect(parameterizedPattern.test(exampleQuery)).toBe(true);
 
       // String interpolation pattern (what we DON'T use)

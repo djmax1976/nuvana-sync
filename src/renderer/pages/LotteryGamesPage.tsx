@@ -248,10 +248,7 @@ export default function LotteryGamesPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button
-            onClick={handleReceivePackClick}
-            data-testid="receive-pack-button"
-          >
+          <Button onClick={handleReceivePackClick} data-testid="receive-pack-button">
             <Plus className="mr-2 h-4 w-4" />
             Receive Pack
           </Button>

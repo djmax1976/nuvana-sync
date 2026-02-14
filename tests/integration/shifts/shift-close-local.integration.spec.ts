@@ -33,11 +33,13 @@ const SHIFT_ID = randomUUID();
 // ============================================================================
 
 // Capture handler registrations
-const registeredHandlers = new Map<string, Function>();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const registeredHandlers = new Map<string, (...args: any[]) => any>();
 
 // Mock the IPC registration
 vi.mock('../../../src/main/ipc/index', () => ({
-  registerHandler: vi.fn((channel: string, handler: Function) => {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  registerHandler: vi.fn((channel: string, handler: (...args: any[]) => any) => {
     registeredHandlers.set(channel, handler);
     return handler;
   }),
@@ -202,16 +204,16 @@ describe('Shift Close Local Integration', () => {
       // Create mock DALs that use the test database
       const mockStoresDAL = {
         getConfiguredStore: () =>
-          testDb
-            .prepare('SELECT * FROM stores WHERE is_configured = 1')
-            .get() as { store_id: string; name: string } | undefined,
+          testDb.prepare('SELECT * FROM stores WHERE is_configured = 1').get() as
+            | { store_id: string; name: string }
+            | undefined,
       };
 
       const mockShiftsDAL = {
         findById: (shiftId: string) =>
-          testDb
-            .prepare('SELECT * FROM shifts WHERE shift_id = ?')
-            .get(shiftId) as { shift_id: string; status: string; store_id: string } | undefined,
+          testDb.prepare('SELECT * FROM shifts WHERE shift_id = ?').get(shiftId) as
+            | { shift_id: string; status: string; store_id: string }
+            | undefined,
         close: (shiftId: string) => {
           const now = new Date().toISOString();
           testDb
@@ -219,18 +221,16 @@ describe('Shift Close Local Integration', () => {
               'UPDATE shifts SET end_time = ?, status = ?, updated_at = ? WHERE shift_id = ? AND end_time IS NULL'
             )
             .run(now, 'CLOSED', now, shiftId);
-          return testDb
-            .prepare('SELECT * FROM shifts WHERE shift_id = ?')
-            .get(shiftId) as { shift_id: string; status: string; end_time: string } | undefined;
+          return testDb.prepare('SELECT * FROM shifts WHERE shift_id = ?').get(shiftId) as
+            | { shift_id: string; status: string; end_time: string }
+            | undefined;
         },
       };
 
       const mockShiftSummariesDAL = {
         findByShiftId: (storeId: string, shiftId: string) =>
           testDb
-            .prepare(
-              'SELECT * FROM shift_summaries WHERE store_id = ? AND shift_id = ?'
-            )
+            .prepare('SELECT * FROM shift_summaries WHERE store_id = ? AND shift_id = ?')
             .get(storeId, shiftId) as { shift_summary_id: string } | undefined,
         closeShiftSummary: (
           storeId: string,
@@ -248,7 +248,14 @@ describe('Shift Close Local Integration', () => {
       };
 
       const mockSyncQueueDAL = {
-        enqueue: (entry: { entity_type: string; entity_id: string; operation: string; store_id: string; priority: number; payload: unknown }) => {
+        enqueue: (entry: {
+          entity_type: string;
+          entity_id: string;
+          operation: string;
+          store_id: string;
+          priority: number;
+          payload: unknown;
+        }) => {
           const now = new Date().toISOString();
           const syncId = randomUUID();
           testDb
@@ -271,7 +278,7 @@ describe('Shift Close Local Integration', () => {
       };
 
       // Simulate handler logic
-      const input = { shift_id: SHIFT_ID, closing_cash: 250.50 };
+      const input = { shift_id: SHIFT_ID, closing_cash: 250.5 };
 
       // Validate input
       expect(input.shift_id).toMatch(
@@ -295,10 +302,7 @@ describe('Shift Close Local Integration', () => {
       expect(closedShift!.end_time).toBeDefined();
 
       // Update shift summary
-      const summary = mockShiftSummariesDAL.findByShiftId(
-        store!.store_id,
-        input.shift_id
-      );
+      const summary = mockShiftSummariesDAL.findByShiftId(store!.store_id, input.shift_id);
       if (summary) {
         mockShiftSummariesDAL.closeShiftSummary(
           store!.store_id,
@@ -366,9 +370,7 @@ describe('Shift Close Local Integration', () => {
 
       // Close the shift
       testDb
-        .prepare(
-          'UPDATE shifts SET status = ?, end_time = ?, updated_at = ? WHERE shift_id = ?'
-        )
+        .prepare('UPDATE shifts SET status = ?, end_time = ?, updated_at = ? WHERE shift_id = ?')
         .run('CLOSED', now, now, SHIFT_ID);
 
       // Verify final state
@@ -494,16 +496,12 @@ describe('Shift Close Local Integration', () => {
       // The actual handler tests verify the real implementation
 
       // Example: Parameterized SELECT
-      const selectStmt = testDb.prepare(
-        'SELECT * FROM shifts WHERE shift_id = ?'
-      );
+      const selectStmt = testDb.prepare('SELECT * FROM shifts WHERE shift_id = ?');
       const shift = selectStmt.get(SHIFT_ID);
       expect(shift).toBeDefined();
 
       // Example: Parameterized UPDATE
-      const updateStmt = testDb.prepare(
-        'UPDATE shifts SET status = ? WHERE shift_id = ?'
-      );
+      const updateStmt = testDb.prepare('UPDATE shifts SET status = ? WHERE shift_id = ?');
       const result = updateStmt.run('OPEN', SHIFT_ID);
       expect(result.changes).toBeGreaterThanOrEqual(0);
 

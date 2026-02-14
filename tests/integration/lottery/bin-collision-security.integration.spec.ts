@@ -319,8 +319,8 @@ describe('Bin Collision Security Tests (Phase 4 - Task 4.3.2)', () => {
       const roles = ['CASHIER', 'MANAGER', 'OWNER'] as const;
 
       const hasMinimumRole = (userRole: string, requiredRole: string) => {
-        const userRoleIndex = roles.indexOf(userRole as typeof roles[number]);
-        const requiredRoleIndex = roles.indexOf(requiredRole as typeof roles[number]);
+        const userRoleIndex = roles.indexOf(userRole as (typeof roles)[number]);
+        const requiredRoleIndex = roles.indexOf(requiredRole as (typeof roles)[number]);
         return userRoleIndex >= requiredRoleIndex;
       };
 

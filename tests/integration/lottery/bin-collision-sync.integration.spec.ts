@@ -302,11 +302,7 @@ describe('Bin Collision Sync Compatibility Tests (Phase 4 - Task 4.2.2)', () => 
     /**
      * Cloud-compatible depletion reasons from schema.prisma:777-779
      */
-    const CLOUD_DEPLETION_REASONS = [
-      'SHIFT_CLOSE',
-      'AUTO_REPLACED',
-      'MANUAL_SOLD_OUT',
-    ] as const;
+    const CLOUD_DEPLETION_REASONS = ['SHIFT_CLOSE', 'AUTO_REPLACED', 'MANUAL_SOLD_OUT'] as const;
 
     it('AUTO_REPLACED should be a valid cloud depletion reason', () => {
       expect(CLOUD_DEPLETION_REASONS).toContain('AUTO_REPLACED');

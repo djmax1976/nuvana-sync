@@ -120,177 +120,175 @@ export interface ScannerInputHandle {
  * />
  * ```
  */
-export const ScannerInput = forwardRef<ScannerInputHandle, ScannerInputProps>(
-  function ScannerInput(
-    {
-      onScan,
-      onScanError,
-      disabled = false,
-      autoFocus = true,
-      placeholder = 'Scan barcode...',
-      className = '',
-      'data-testid': testId = 'scanner-input',
-    }: ScannerInputProps,
-    ref: ForwardedRef<ScannerInputHandle>
-  ) {
-    // Refs
-    const inputRef = useRef<HTMLInputElement>(null);
-    const valueRef = useRef<string>('');
-    const validationTimerRef = useRef<NodeJS.Timeout | null>(null);
+export const ScannerInput = forwardRef<ScannerInputHandle, ScannerInputProps>(function ScannerInput(
+  {
+    onScan,
+    onScanError,
+    disabled = false,
+    autoFocus = true,
+    placeholder = 'Scan barcode...',
+    className = '',
+    'data-testid': testId = 'scanner-input',
+  }: ScannerInputProps,
+  ref: ForwardedRef<ScannerInputHandle>
+) {
+  // Refs
+  const inputRef = useRef<HTMLInputElement>(null);
+  const valueRef = useRef<string>('');
+  const validationTimerRef = useRef<NodeJS.Timeout | null>(null);
 
-    // State for display (refs can't be accessed during render)
-    const [displayLength, setDisplayLength] = useState(0);
+  // State for display (refs can't be accessed during render)
+  const [displayLength, setDisplayLength] = useState(0);
 
-    // Expose imperative handle to parent
-    useImperativeHandle(
-      ref,
-      () => ({
-        focus: () => {
-          inputRef.current?.focus();
-        },
-        clear: () => {
-          if (inputRef.current) {
-            inputRef.current.value = '';
-            valueRef.current = '';
-            setDisplayLength(0);
-          }
-        },
-        getValue: () => valueRef.current,
-      }),
-      []
-    );
-
-    /**
-     * Clear input and refocus for next scan
-     * MCP: FE-001 - Clean state transitions
-     */
-    const clearAndFocus = useCallback(() => {
-      if (inputRef.current) {
-        inputRef.current.value = '';
-        valueRef.current = '';
-        setDisplayLength(0);
-        // Small delay ensures React has processed any pending updates
-        setTimeout(() => inputRef.current?.focus(), 50);
-      }
-    }, []);
-
-    /**
-     * Handle input change with validation debounce
-     *
-     * MCP: SEC-014 INPUT_VALIDATION
-     * - Only allows numeric digits (strict regex)
-     * - Validates length after 400ms timeout
-     * - Immediately processes 24-digit input
-     */
-    const handleChange = useCallback(
-      (e: ChangeEvent<HTMLInputElement>) => {
-        const rawValue = e.target.value;
-
-        // SEC-014: Strip non-numeric characters (sanitize input)
-        const cleanedValue = rawValue.replace(/\D/g, '');
-
-        // Clear any pending validation timer
-        if (validationTimerRef.current) {
-          clearTimeout(validationTimerRef.current);
-          validationTimerRef.current = null;
-        }
-
-        // Handle numeric input
-        if (cleanedValue.length > 0) {
-          // SEC-014: Reject if too long - immediate error
-          if (cleanedValue.length > SERIAL_LENGTH) {
-            onScanError?.(cleanedValue);
-            clearAndFocus();
-            return;
-          }
-
-          // Update value
-          valueRef.current = cleanedValue;
-          setDisplayLength(cleanedValue.length);
-          if (inputRef.current) {
-            inputRef.current.value = cleanedValue;
-          }
-
-          // If exactly 24 digits, process immediately
-          if (cleanedValue.length === SERIAL_LENGTH) {
-            // SEC-014: Final validation - must be exactly 24 digits
-            if (/^\d{24}$/.test(cleanedValue)) {
-              onScan(cleanedValue);
-              clearAndFocus();
-            } else {
-              // Should not happen due to prior sanitization, but defense-in-depth
-              onScanError?.(cleanedValue);
-              clearAndFocus();
-            }
-            return;
-          }
-
-          // Start 400ms validation timer
-          // If no more input comes and length != 24, show error
-          const capturedLength = cleanedValue.length;
-          validationTimerRef.current = setTimeout(() => {
-            if (capturedLength !== SERIAL_LENGTH && capturedLength > 0) {
-              onScanError?.(cleanedValue);
-              clearAndFocus();
-            }
-          }, SCAN_VALIDATION_TIMEOUT_MS);
-        } else {
-          // Input was cleared
+  // Expose imperative handle to parent
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => {
+        inputRef.current?.focus();
+      },
+      clear: () => {
+        if (inputRef.current) {
+          inputRef.current.value = '';
           valueRef.current = '';
           setDisplayLength(0);
-          if (inputRef.current) {
-            inputRef.current.value = '';
-          }
         }
       },
-      [onScan, onScanError, clearAndFocus]
-    );
+      getValue: () => valueRef.current,
+    }),
+    []
+  );
 
-    // Auto-focus on mount
-    useEffect(() => {
-      if (autoFocus && !disabled) {
-        const timeoutId = setTimeout(() => {
-          inputRef.current?.focus();
-        }, 100);
-        return () => clearTimeout(timeoutId);
+  /**
+   * Clear input and refocus for next scan
+   * MCP: FE-001 - Clean state transitions
+   */
+  const clearAndFocus = useCallback(() => {
+    if (inputRef.current) {
+      inputRef.current.value = '';
+      valueRef.current = '';
+      setDisplayLength(0);
+      // Small delay ensures React has processed any pending updates
+      setTimeout(() => inputRef.current?.focus(), 50);
+    }
+  }, []);
+
+  /**
+   * Handle input change with validation debounce
+   *
+   * MCP: SEC-014 INPUT_VALIDATION
+   * - Only allows numeric digits (strict regex)
+   * - Validates length after 400ms timeout
+   * - Immediately processes 24-digit input
+   */
+  const handleChange = useCallback(
+    (e: ChangeEvent<HTMLInputElement>) => {
+      const rawValue = e.target.value;
+
+      // SEC-014: Strip non-numeric characters (sanitize input)
+      const cleanedValue = rawValue.replace(/\D/g, '');
+
+      // Clear any pending validation timer
+      if (validationTimerRef.current) {
+        clearTimeout(validationTimerRef.current);
+        validationTimerRef.current = null;
       }
-    }, [autoFocus, disabled]);
 
-    // Cleanup timer on unmount
-    useEffect(() => {
-      return () => {
-        if (validationTimerRef.current) {
-          clearTimeout(validationTimerRef.current);
+      // Handle numeric input
+      if (cleanedValue.length > 0) {
+        // SEC-014: Reject if too long - immediate error
+        if (cleanedValue.length > SERIAL_LENGTH) {
+          onScanError?.(cleanedValue);
+          clearAndFocus();
+          return;
         }
-      };
-    }, []);
 
-    return (
-      <div className="relative">
-        <Input
-          ref={inputRef}
-          type="text"
-          inputMode="numeric"
-          pattern="[0-9]*"
-          maxLength={SERIAL_LENGTH}
-          onChange={handleChange}
-          disabled={disabled}
-          placeholder={placeholder}
-          className={`font-mono ${className}`}
-          data-testid={testId}
-          aria-label="Scan lottery serial number"
-          autoComplete="off"
-          autoCorrect="off"
-          autoCapitalize="off"
-          spellCheck={false}
-        />
-        <span
-          className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-mono pointer-events-none"
-          aria-hidden="true"
-        >
-          {displayLength}/{SERIAL_LENGTH}
-        </span>
-      </div>
-    );
-  }
-);
+        // Update value
+        valueRef.current = cleanedValue;
+        setDisplayLength(cleanedValue.length);
+        if (inputRef.current) {
+          inputRef.current.value = cleanedValue;
+        }
+
+        // If exactly 24 digits, process immediately
+        if (cleanedValue.length === SERIAL_LENGTH) {
+          // SEC-014: Final validation - must be exactly 24 digits
+          if (/^\d{24}$/.test(cleanedValue)) {
+            onScan(cleanedValue);
+            clearAndFocus();
+          } else {
+            // Should not happen due to prior sanitization, but defense-in-depth
+            onScanError?.(cleanedValue);
+            clearAndFocus();
+          }
+          return;
+        }
+
+        // Start 400ms validation timer
+        // If no more input comes and length != 24, show error
+        const capturedLength = cleanedValue.length;
+        validationTimerRef.current = setTimeout(() => {
+          if (capturedLength !== SERIAL_LENGTH && capturedLength > 0) {
+            onScanError?.(cleanedValue);
+            clearAndFocus();
+          }
+        }, SCAN_VALIDATION_TIMEOUT_MS);
+      } else {
+        // Input was cleared
+        valueRef.current = '';
+        setDisplayLength(0);
+        if (inputRef.current) {
+          inputRef.current.value = '';
+        }
+      }
+    },
+    [onScan, onScanError, clearAndFocus]
+  );
+
+  // Auto-focus on mount
+  useEffect(() => {
+    if (autoFocus && !disabled) {
+      const timeoutId = setTimeout(() => {
+        inputRef.current?.focus();
+      }, 100);
+      return () => clearTimeout(timeoutId);
+    }
+  }, [autoFocus, disabled]);
+
+  // Cleanup timer on unmount
+  useEffect(() => {
+    return () => {
+      if (validationTimerRef.current) {
+        clearTimeout(validationTimerRef.current);
+      }
+    };
+  }, []);
+
+  return (
+    <div className="relative">
+      <Input
+        ref={inputRef}
+        type="text"
+        inputMode="numeric"
+        pattern="[0-9]*"
+        maxLength={SERIAL_LENGTH}
+        onChange={handleChange}
+        disabled={disabled}
+        placeholder={placeholder}
+        className={`font-mono ${className}`}
+        data-testid={testId}
+        aria-label="Scan lottery serial number"
+        autoComplete="off"
+        autoCorrect="off"
+        autoCapitalize="off"
+        spellCheck={false}
+      />
+      <span
+        className="absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground font-mono pointer-events-none"
+        aria-hidden="true"
+      >
+        {displayLength}/{SERIAL_LENGTH}
+      </span>
+    </div>
+  );
+});

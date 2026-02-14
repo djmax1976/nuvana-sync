@@ -175,9 +175,7 @@ export function DepletedPacksSection({
                   <TableHead scope="col" className="text-center whitespace-nowrap">
                     Bin
                   </TableHead>
-                  <TableHead scope="col">
-                    Game
-                  </TableHead>
+                  <TableHead scope="col">Game</TableHead>
                   <TableHead scope="col" className="text-right whitespace-nowrap">
                     Price
                   </TableHead>
@@ -212,7 +210,9 @@ export function DepletedPacksSection({
                     >
                       <TableCell className="text-center border-b border-border/50">
                         <div className="flex justify-center">
-                          <BinBadge number={typeof pack.bin_number === 'number' ? pack.bin_number : 0} />
+                          <BinBadge
+                            number={typeof pack.bin_number === 'number' ? pack.bin_number : 0}
+                          />
                         </div>
                       </TableCell>
                       <TableCell className="text-xs sm:text-sm font-semibold text-foreground border-b border-border/50 truncate max-w-[200px]">

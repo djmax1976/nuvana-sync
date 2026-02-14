@@ -237,7 +237,8 @@ export function DayCloseScannerBar({
             <div className="text-[10px] sm:text-xs opacity-80">
               {progress.emptyBins > 0 ? (
                 <span>
-                  scanned <span className="text-primary-foreground/60">({progress.emptyBins} empty)</span>
+                  scanned{' '}
+                  <span className="text-primary-foreground/60">({progress.emptyBins} empty)</span>
                 </span>
               ) : (
                 'scanned'
@@ -291,9 +292,7 @@ export function DayCloseScannerBar({
             ) : (
               <ArrowRight className="w-4 h-4 sm:mr-1" aria-hidden="true" />
             )}
-            <span className="hidden sm:inline">
-              {isSubmitting ? 'Processing...' : 'Continue'}
-            </span>
+            <span className="hidden sm:inline">{isSubmitting ? 'Processing...' : 'Continue'}</span>
           </Button>
         </div>
 

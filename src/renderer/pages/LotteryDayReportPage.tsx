@@ -147,9 +147,13 @@ function BreakdownCard({
         isEmpty ? 'opacity-60' : ''
       }`}
     >
-      <span className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${dotColors[colorClass]}`} />
+      <span
+        className={`w-2 h-2 sm:w-2.5 sm:h-2.5 rounded-full flex-shrink-0 ${dotColors[colorClass]}`}
+      />
       <div className="flex-1 min-w-0">
-        <div className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wide truncate">{label}</div>
+        <div className="text-[9px] sm:text-[10px] text-muted-foreground uppercase tracking-wide truncate">
+          {label}
+        </div>
         <div
           className={`text-sm sm:text-base font-bold truncate ${isEmpty ? 'text-muted-foreground' : 'text-foreground'}`}
         >
@@ -243,7 +247,9 @@ function HeroHeader({
           <div className="flex items-center gap-3 sm:gap-4 sm:pr-6 md:pr-8 sm:border-r sm:border-white/20">
             <span className="text-3xl sm:text-4xl md:text-5xl font-bold text-white leading-none">
               {dateInfo.day}
-              <sup className="text-base sm:text-lg md:text-xl font-semibold">{dateInfo.ordinal}</sup>
+              <sup className="text-base sm:text-lg md:text-xl font-semibold">
+                {dateInfo.ordinal}
+              </sup>
             </span>
             <div className="flex flex-col gap-0.5">
               <span className="text-[10px] sm:text-xs font-semibold uppercase tracking-wider text-white/90">
@@ -297,14 +303,14 @@ function TableColGroup() {
   // Col 8 must fit stacked date/time (Activated) and currency amounts (Bins/Returned/Depleted)
   return (
     <colgroup>
-      <col className="w-[60px] md:w-[70px]" />    {/* Bin */}
-      <col />                                      {/* Game — remaining space */}
-      <col className="w-[80px] md:w-[95px]" />    {/* Price */}
-      <col className="w-[100px] md:w-[140px]" />  {/* Pack # */}
-      <col className="w-[60px] md:w-[80px]" />    {/* Start */}
-      <col className="w-[65px] md:w-[90px]" />    {/* End */}
-      <col className="w-[90px] md:w-[120px]" />   {/* Sold / Status */}
-      <col className="w-[110px] md:w-[160px]" />  {/* Amount / Activated */}
+      <col className="w-[60px] md:w-[70px]" /> {/* Bin */}
+      <col /> {/* Game — remaining space */}
+      <col className="w-[80px] md:w-[95px]" /> {/* Price */}
+      <col className="w-[100px] md:w-[140px]" /> {/* Pack # */}
+      <col className="w-[60px] md:w-[80px]" /> {/* Start */}
+      <col className="w-[65px] md:w-[90px]" /> {/* End */}
+      <col className="w-[90px] md:w-[120px]" /> {/* Sold / Status */}
+      <col className="w-[110px] md:w-[160px]" /> {/* Amount / Activated */}
     </colgroup>
   );
 }
@@ -422,9 +428,7 @@ function StackedDateTime({
  */
 function BinBadge({ number }: { number: number }) {
   return (
-    <span
-      className="rounded-lg sm:rounded-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold text-[13px] sm:text-[15px] flex items-center justify-center transition-all group-hover:bg-blue-500 group-hover:text-white group-hover:scale-105 w-8 h-8 sm:w-10 sm:h-10 min-w-[32px] sm:min-w-[40px]"
-    >
+    <span className="rounded-lg sm:rounded-[10px] bg-blue-100 dark:bg-blue-900/50 text-blue-700 dark:text-blue-300 font-bold text-[13px] sm:text-[15px] flex items-center justify-center transition-all group-hover:bg-blue-500 group-hover:text-white group-hover:scale-105 w-8 h-8 sm:w-10 sm:h-10 min-w-[32px] sm:min-w-[40px]">
       {number}
     </span>
   );
@@ -534,7 +538,9 @@ function BinsTable({ bins }: { bins: LotteryDayReportBin[] }) {
             >
               Bin Sales Total:
             </td>
-            <td className="px-2 sm:px-3 lg:px-5 py-2.5 sm:py-4 text-center text-xs sm:text-sm font-semibold whitespace-nowrap">{totalTickets}</td>
+            <td className="px-2 sm:px-3 lg:px-5 py-2.5 sm:py-4 text-center text-xs sm:text-sm font-semibold whitespace-nowrap">
+              {totalTickets}
+            </td>
             <td className="px-2 sm:px-3 lg:px-5 py-2.5 sm:py-4 text-right text-base sm:text-lg lg:text-xl font-bold text-blue-600 dark:text-blue-400 whitespace-nowrap">
               {formatCurrency(totalBinSales)}
             </td>
@@ -685,9 +691,7 @@ function MultiClosingBanner({
           <div className="w-8 h-8 sm:w-10 sm:h-10 bg-amber-400 dark:bg-amber-600 rounded-lg sm:rounded-[10px] flex items-center justify-center text-white flex-shrink-0">
             <Clock className="w-4 h-4 sm:w-5 sm:h-5" />
           </div>
-          <h4 className="text-xs sm:text-sm font-bold text-foreground">
-            Multiple Day Closings
-          </h4>
+          <h4 className="text-xs sm:text-sm font-bold text-foreground">Multiple Day Closings</h4>
         </div>
 
         {/* Combined button + Session Tabs */}
@@ -720,19 +724,25 @@ function MultiClosingBanner({
           <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             Day Close
           </span>
-          <span className="text-base sm:text-lg font-bold text-foreground">{displayData.label}</span>
+          <span className="text-base sm:text-lg font-bold text-foreground">
+            {displayData.label}
+          </span>
         </div>
         <div className="flex flex-col gap-0.5 sm:gap-1">
           <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {displayData.openLabel}
           </span>
-          <span className="text-xs sm:text-sm font-mono font-bold text-foreground">{displayData.openedAt}</span>
+          <span className="text-xs sm:text-sm font-mono font-bold text-foreground">
+            {displayData.openedAt}
+          </span>
         </div>
         <div className="flex flex-col gap-0.5 sm:gap-1">
           <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
             {displayData.closeLabel}
           </span>
-          <span className="text-xs sm:text-sm font-mono font-bold text-foreground">{displayData.closedAt}</span>
+          <span className="text-xs sm:text-sm font-mono font-bold text-foreground">
+            {displayData.closedAt}
+          </span>
         </div>
         <div className="flex flex-col gap-0.5 sm:gap-1">
           <span className="text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
@@ -1033,8 +1043,12 @@ function ActivatedPacksSection({
                     <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
                       {pack.pack_number}
                     </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">000</td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">---</td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      000
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      ---
+                    </td>
                     <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center border-b border-border">
                       <span
                         className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide ${config.className}`}

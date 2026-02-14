@@ -381,9 +381,7 @@ describe('useCashierById Query Behavior', () => {
 
     it('should return undefined for non-existent cashier ID', async () => {
       const mockResponse: CashiersListResponse = {
-        cashiers: [
-          createCashierInfo({ cashier_id: 'c1' }),
-        ],
+        cashiers: [createCashierInfo({ cashier_id: 'c1' })],
         total: 1,
       };
 
@@ -447,9 +445,8 @@ describe('Local Cashier Hooks Integration Scenarios', () => {
 
       // Simulate resolving cashier name for a shift
       const shiftCashierId = 'c1';
-      const cashierName = cashiers.find(
-        (c: LocalCashier) => c.cashier_id === shiftCashierId
-      )?.name ?? 'Unknown';
+      const cashierName =
+        cashiers.find((c: LocalCashier) => c.cashier_id === shiftCashierId)?.name ?? 'Unknown';
 
       expect(cashierName).toBe('Alice Smith');
     });

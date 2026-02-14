@@ -297,7 +297,9 @@ export function ShiftClosingForm({
                   Cancel
                 </Button>
                 <Button type="submit" disabled={isDisabled} data-testid="close-shift-button">
-                  {(isSubmitting || isChecking) && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+                  {(isSubmitting || isChecking) && (
+                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  )}
                   {isChecking ? 'Checking...' : 'Close Shift'}
                 </Button>
               </DialogFooter>

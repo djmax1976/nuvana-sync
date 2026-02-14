@@ -974,7 +974,13 @@ describe('Employee IPC Handlers', () => {
       it('should return active cashiers with correct schema', () => {
         const mockUsers = [
           { user_id: 'user-1', name: 'John Doe', role: 'cashier', active: 1, pin_hash: 'xxx' },
-          { user_id: 'user-2', name: 'Jane Smith', role: 'shift_manager', active: 1, pin_hash: 'yyy' },
+          {
+            user_id: 'user-2',
+            name: 'Jane Smith',
+            role: 'shift_manager',
+            active: 1,
+            pin_hash: 'yyy',
+          },
           { user_id: 'user-3', name: 'Bob Jones', role: 'cashier', active: 0, pin_hash: 'zzz' },
         ];
 

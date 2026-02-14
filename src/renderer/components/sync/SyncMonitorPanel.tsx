@@ -1574,7 +1574,11 @@ function DeadLetterReasonBadge({ reason }: DeadLetterReasonBadgeProps) {
     },
   };
 
-  const { label, className: badgeClass, icon } = config[reason] || {
+  const {
+    label,
+    className: badgeClass,
+    icon,
+  } = config[reason] || {
     label: reason,
     className: 'bg-muted text-muted-foreground',
     icon: <AlertTriangle className="h-3.5 w-3.5" />,

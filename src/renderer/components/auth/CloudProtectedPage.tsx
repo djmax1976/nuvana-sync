@@ -148,7 +148,9 @@ export function CloudProtectedPage({
   // Support both render prop and regular children patterns
   const content =
     typeof children === 'function'
-      ? authenticatedUser ? children(authenticatedUser) : null
+      ? authenticatedUser
+        ? children(authenticatedUser)
+        : null
       : children;
 
   // Layout: The parent <main> has p-6 padding. Child pages (e.g. Settings) use
@@ -168,9 +170,7 @@ export function CloudProtectedPage({
               Dev Mode: Cloud authentication bypassed
             </span>
           </div>
-          <span className="text-xs text-purple-600 dark:text-purple-400">
-            DEV_BYPASS
-          </span>
+          <span className="text-xs text-purple-600 dark:text-purple-400">DEV_BYPASS</span>
         </div>
       )}
       {/* Production authenticated user banner */}
@@ -189,9 +189,7 @@ export function CloudProtectedPage({
         </div>
       )}
       {/* Content wrapper: restores p-6 so child negative margins bleed correctly */}
-      <div className="flex-1 min-h-0 p-6">
-        {content}
-      </div>
+      <div className="flex-1 min-h-0 p-6">{content}</div>
     </div>
   );
 }

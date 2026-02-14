@@ -43,12 +43,7 @@ import {
   TableFooter,
 } from '@/components/ui/table';
 import { Input } from '@/components/ui/input';
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipProvider,
-  TooltipTrigger,
-} from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { BinBadge } from './SectionPrimitives';
 import { BinActionsMenu } from './BinActionsMenu';
 import type { DayBin } from '@/lib/api/lottery';
@@ -256,17 +251,11 @@ export function DayBinsTable({
 
       // Get ending serial - prefer scanned, then manual entry, then existing
       const endingSerial =
-        scannedBin?.closing_serial ||
-        endingValues[bin.bin_id] ||
-        bin.pack.ending_serial;
+        scannedBin?.closing_serial || endingValues[bin.bin_id] || bin.pack.ending_serial;
 
       if (endingSerial) {
         const isSoldOut = scannedBin?.is_sold_out ?? false;
-        const ticketsSold = calculateTicketsSold(
-          bin.pack.starting_serial,
-          endingSerial,
-          isSoldOut
-        );
+        const ticketsSold = calculateTicketsSold(bin.pack.starting_serial, endingSerial, isSoldOut);
 
         if (ticketsSold !== null && ticketsSold > 0) {
           const amount = ticketsSold * bin.pack.game_price;
@@ -442,32 +431,63 @@ export function DayBinsTable({
             </colgroup>
             <TableHeader className="sticky top-0 bg-muted/50 z-10 border-b">
               <TableRow>
-                <TableHead scope="col" className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Bin
                 </TableHead>
-                <TableHead scope="col" className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider">
+                <TableHead
+                  scope="col"
+                  className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider"
+                >
                   Game
                 </TableHead>
-                <TableHead scope="col" className="text-right text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-right text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Price
                 </TableHead>
-                <TableHead scope="col" className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Pack #
                 </TableHead>
-                <TableHead scope="col" className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Start
                 </TableHead>
-                <TableHead scope="col" className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   End
-                  {manualEntryMode && <span className="ml-1 text-xs text-primary normal-case tracking-normal">(Edit)</span>}
+                  {manualEntryMode && (
+                    <span className="ml-1 text-xs text-primary normal-case tracking-normal">
+                      (Edit)
+                    </span>
+                  )}
                 </TableHead>
-                <TableHead scope="col" className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Sold
                 </TableHead>
-                <TableHead scope="col" className="text-right text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-right text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   Amount
                 </TableHead>
-                <TableHead scope="col" className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap">
+                <TableHead
+                  scope="col"
+                  className="text-center text-[10px] sm:text-[11px] font-bold uppercase tracking-wider whitespace-nowrap"
+                >
                   <span className="sr-only">Actions</span>
                 </TableHead>
               </TableRow>
@@ -484,10 +504,7 @@ export function DayBinsTable({
                 // Disable row click in manual entry mode to prevent accidental navigation
                 // In scanner mode, clicking a scanned row undoes the scan
                 const isClickable =
-                  !isEmpty &&
-                  onRowClick &&
-                  !manualEntryMode &&
-                  !scannerModeActive;
+                  !isEmpty && onRowClick && !manualEntryMode && !scannerModeActive;
 
                 const isUndoClickable = isScanned && onUndoScan && scannerModeActive;
 
@@ -515,9 +532,7 @@ export function DayBinsTable({
 
                 // Calculate amount
                 const salesAmount =
-                  ticketsSold !== null && !isEmpty
-                    ? ticketsSold * bin.pack!.game_price
-                    : null;
+                  ticketsSold !== null && !isEmpty ? ticketsSold * bin.pack!.game_price : null;
 
                 // Determine row styling
                 let rowClassName = 'group transition-colors';
@@ -671,7 +686,9 @@ export function DayBinsTable({
                     {/* Sold Column - Calculated tickets sold */}
                     <TableCell
                       className={`text-center text-xs sm:text-sm border-b border-border/50 whitespace-nowrap ${
-                        isScanned ? 'font-semibold text-green-700 dark:text-green-400' : 'text-muted-foreground'
+                        isScanned
+                          ? 'font-semibold text-green-700 dark:text-green-400'
+                          : 'text-muted-foreground'
                       }`}
                       data-testid={`sold-${bin.bin_id}`}
                     >
@@ -719,7 +736,10 @@ export function DayBinsTable({
             {(totals.totalTickets > 0 || totals.scannedTickets > 0) && (
               <TableFooter>
                 <TableRow className="bg-muted/50" data-testid="totals-row">
-                  <TableCell colSpan={6} className="text-right text-xs sm:text-sm font-bold uppercase tracking-wider">
+                  <TableCell
+                    colSpan={6}
+                    className="text-right text-xs sm:text-sm font-bold uppercase tracking-wider"
+                  >
                     {showScannedTotals ? 'Scanned Total:' : 'Total:'}
                   </TableCell>
                   <TableCell

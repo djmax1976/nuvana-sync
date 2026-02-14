@@ -145,9 +145,7 @@ describe('parseSerializedNumber', () => {
     });
 
     it('should throw InvalidSerialNumberError for empty string', () => {
-      expect(() => parseSerializedNumber(INVALID_SERIALS.empty)).toThrow(
-        InvalidSerialNumberError
-      );
+      expect(() => parseSerializedNumber(INVALID_SERIALS.empty)).toThrow(InvalidSerialNumberError);
     });
 
     it('should throw InvalidSerialNumberError for whitespace-only string', () => {

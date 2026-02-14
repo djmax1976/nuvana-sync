@@ -312,7 +312,15 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
         status, opening_serial, created_at, updated_at
       ) VALUES (?, ?, ?, ?, ?, 'ACTIVE', '000', ?, ?)
     `);
-    stmt.run(packId, ctx.storeId, gameId, `PKG${String(uuidCounter).padStart(7, '0')}`, binId, now, now);
+    stmt.run(
+      packId,
+      ctx.storeId,
+      gameId,
+      `PKG${String(uuidCounter).padStart(7, '0')}`,
+      binId,
+      now,
+      now
+    );
     return packId;
   }
 
@@ -320,7 +328,9 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
    * Get lottery day by ID
    * SEC-006: Parameterized query
    */
-  function getDayById(dayId: string): { status: string; day_id: string; business_date: string } | undefined {
+  function getDayById(
+    dayId: string
+  ): { status: string; day_id: string; business_date: string } | undefined {
     const stmt = db.prepare(`SELECT * FROM lottery_business_days WHERE day_id = ?`);
     return stmt.get(dayId) as { status: string; day_id: string; business_date: string } | undefined;
   }
@@ -337,7 +347,9 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       ORDER BY business_date DESC
       LIMIT 1
     `);
-    return stmt.get(ctx.storeId) as { day_id: string; status: string; business_date: string } | undefined;
+    return stmt.get(ctx.storeId) as
+      | { day_id: string; status: string; business_date: string }
+      | undefined;
   }
 
   /**
@@ -350,7 +362,10 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
   /**
    * Find sync items by entity type and store
    */
-  function findSyncItemsByTypeAndStore(entityType: string, storeId: string): CreateSyncQueueItemData[] {
+  function findSyncItemsByTypeAndStore(
+    entityType: string,
+    storeId: string
+  ): CreateSyncQueueItemData[] {
     return syncQueueHistory.filter(
       (item) => item.entity_type === entityType && item.store_id === storeId
     );
@@ -378,7 +393,8 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       return {
         success: false,
         error: 'VALIDATION_ERROR',
-        message: 'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
+        message:
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
       };
     }
 
@@ -405,7 +421,10 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
    * Simulate day close commit
    * This mirrors BIZ-007 from lottery.handlers.ts
    */
-  function simulateDayCloseCommit(dayId: string, userId: string): {
+  function simulateDayCloseCommit(
+    dayId: string,
+    userId: string
+  ): {
     success: boolean;
     closingsCount: number;
     nextDay?: { day_id: string; business_date: string; status: string };
@@ -534,9 +553,9 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       const openDay = findOpenDay();
       expect(openDay).toBeDefined();
 
-      const fullDay = db.prepare(`SELECT opened_by FROM lottery_business_days WHERE day_id = ?`).get(
-        openDay!.day_id
-      ) as { opened_by: string };
+      const fullDay = db
+        .prepare(`SELECT opened_by FROM lottery_business_days WHERE day_id = ?`)
+        .get(openDay!.day_id) as { opened_by: string };
       expect(fullDay.opened_by).toBe(closingUser.user_id);
     });
 
@@ -778,16 +797,24 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
 
       // Now we have one OPEN day (existingOpenDay)
       // Act: Try to auto-open another day
-      const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(ctx.storeId, ctx.utils.today(), user.user_id);
+      const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(
+        ctx.storeId,
+        ctx.utils.today(),
+        user.user_id
+      );
 
       // Assert: Returns existing open day, no duplicate
       expect(nextDay.day_id).toBe(existingOpenDay.day_id);
 
       // Verify only one OPEN day exists
-      const openDays = db.prepare(`
+      const openDays = db
+        .prepare(
+          `
         SELECT COUNT(*) as count FROM lottery_business_days
         WHERE store_id = ? AND status = 'OPEN'
-      `).get(ctx.storeId) as { count: number };
+      `
+        )
+        .get(ctx.storeId) as { count: number };
       expect(openDays.count).toBe(1);
     });
   });
@@ -850,9 +877,9 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       expect(openDay?.status).toBe('OPEN');
 
       // Verify store_id matches
-      const fullDay = db.prepare(`SELECT store_id FROM lottery_business_days WHERE day_id = ?`).get(
-        openDay!.day_id
-      ) as { store_id: string };
+      const fullDay = db
+        .prepare(`SELECT store_id FROM lottery_business_days WHERE day_id = ?`)
+        .get(openDay!.day_id) as { store_id: string };
       expect(fullDay.store_id).toBe(ctx.storeId);
     });
   });
@@ -874,7 +901,11 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       let error: Error | null = null;
 
       try {
-        day = lotteryBusinessDaysDAL.getOrCreateForDate(ctx.storeId, ctx.utils.today(), user.user_id);
+        day = lotteryBusinessDaysDAL.getOrCreateForDate(
+          ctx.storeId,
+          ctx.utils.today(),
+          user.user_id
+        );
       } catch (e) {
         error = e as Error;
       }
@@ -992,9 +1023,13 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       expect(shiftResult.success).toBe(true);
 
       // Verify shift has correct business date
-      const shift = db.prepare(`
+      const shift = db
+        .prepare(
+          `
         SELECT business_date FROM shifts WHERE shift_id = ?
-      `).get(shiftResult.data?.shift_id) as { business_date: string };
+      `
+        )
+        .get(shiftResult.data?.shift_id) as { business_date: string };
       expect(shift.business_date).toBe(ctx.utils.today());
     });
   });

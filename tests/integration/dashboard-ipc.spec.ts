@@ -206,20 +206,20 @@ describe('Shifts IPC Integration', () => {
         shift_number: 1,
         status: 'CLOSED',
         end_time: '2026-01-11T16:00:00Z',
-        closing_cash: 250.50,
+        closing_cash: 250.5,
       };
 
       mockInvoke.mockResolvedValueOnce(closedShift);
 
       const { ipc } = await import('../../src/renderer/lib/transport');
-      const result = await ipc.shifts.close('shift-1', 250.50);
+      const result = await ipc.shifts.close('shift-1', 250.5);
 
       expect(mockInvoke).toHaveBeenCalledWith('shifts:close', {
         shift_id: 'shift-1',
-        closing_cash: 250.50,
+        closing_cash: 250.5,
       });
       expect(result.status).toBe('CLOSED');
-      expect(result.closing_cash).toBe(250.50);
+      expect(result.closing_cash).toBe(250.5);
     });
 
     it('should close shift with zero closing cash', async () => {

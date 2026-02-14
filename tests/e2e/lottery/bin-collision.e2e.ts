@@ -123,7 +123,9 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
       await expect(pageTitle).toBeVisible({ timeout: 10000 });
     });
 
-    test.skip('should display "Replace" badge when activating in occupied bin', async ({ window }) => {
+    test.skip('should display "Replace" badge when activating in occupied bin', async ({
+      window,
+    }) => {
       // Skip if no packs available
       await navigateToLottery(window);
 
@@ -140,17 +142,23 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
       await expect(activationForm).toBeVisible({ timeout: 10000 });
 
       // Select a bin that already has an active pack
-      const occupiedBin = window.locator('[data-testid^="bin-select-option-"][data-has-pack="true"]').first();
+      const occupiedBin = window
+        .locator('[data-testid^="bin-select-option-"][data-has-pack="true"]')
+        .first();
       if (await occupiedBin.isVisible()) {
         await occupiedBin.click();
 
         // Verify "Replace" badge is shown
-        const replaceBadge = window.locator('[data-testid="replace-badge"], .replace-badge, [data-replace-badge]');
+        const replaceBadge = window.locator(
+          '[data-testid="replace-badge"], .replace-badge, [data-replace-badge]'
+        );
         await expect(replaceBadge).toBeVisible({ timeout: 5000 });
       }
     });
 
-    test.skip('should show depleted pack in depleted section after collision', async ({ window }) => {
+    test.skip('should show depleted pack in depleted section after collision', async ({
+      window,
+    }) => {
       // This test requires specific database state - skip if prerequisites not met
       await navigateToLottery(window);
 
@@ -168,7 +176,9 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
 
       if (isVisible) {
         // Verify depleted packs are displayed with AUTO_REPLACED reason
-        const autoReplacedPacks = window.locator('[data-testid^="depleted-pack-"][data-depletion-reason="AUTO_REPLACED"]');
+        const autoReplacedPacks = window.locator(
+          '[data-testid^="depleted-pack-"][data-depletion-reason="AUTO_REPLACED"]'
+        );
         const count = await autoReplacedPacks.count();
 
         // Just verify the section is working - actual replacement requires full workflow
@@ -185,8 +195,13 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
       await navigateToLottery(window);
 
       // Look for bins table or bins section
-      const binsTable = window.locator('[data-testid="day-bins-table"], [data-testid="bins-section"], table');
-      const isVisible = await binsTable.first().isVisible().catch(() => false);
+      const binsTable = window.locator(
+        '[data-testid="day-bins-table"], [data-testid="bins-section"], table'
+      );
+      const isVisible = await binsTable
+        .first()
+        .isVisible()
+        .catch(() => false);
 
       // It's OK if there's no data - we just verify the structure loads
       expect(isVisible).toBeDefined();
@@ -222,8 +237,8 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
       await focusableElement.focus();
 
       // Verify element is focused
-      const isFocused = await focusableElement.evaluate((el) =>
-        el === document.activeElement || el.contains(document.activeElement)
+      const isFocused = await focusableElement.evaluate(
+        (el) => el === document.activeElement || el.contains(document.activeElement)
       );
 
       expect(isFocused).toBe(true);
@@ -247,7 +262,9 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
             (await input.getAttribute('aria-label')) !== null ||
             (await input.getAttribute('aria-labelledby')) !== null ||
             (await input.getAttribute('id'))?.match(
-              await window.locator(`label[for="${await input.getAttribute('id')}"]`).count() > 0 ? /.*/ : /^$/
+              (await window.locator(`label[for="${await input.getAttribute('id')}"]`).count()) > 0
+                ? /.*/
+                : /^$/
             );
 
           // Allow inputs without explicit labels (some may use placeholder or fieldset)
@@ -266,7 +283,9 @@ test.describe('Bin Collision E2E Tests (Phase 4 - Task 4.5.1)', () => {
 
       // Try to trigger an error by using invalid data
       // This is a resilience test - we just verify error handling exists
-      const errorToast = window.locator('[data-testid="error-toast"], [role="alert"], .toast-error');
+      const errorToast = window.locator(
+        '[data-testid="error-toast"], [role="alert"], .toast-error'
+      );
 
       // Error toast may or may not be visible depending on state
       // Just verify the selector doesn't throw
@@ -296,8 +315,13 @@ test.describe('Bin Collision Smoke Test', () => {
       await window.waitForTimeout(2000);
 
       // Verify no crash - page title should be visible
-      const pageContent = window.locator('[data-testid="lottery-management-page"], [data-testid="lottery-page"], main');
-      const isContentVisible = await pageContent.first().isVisible().catch(() => false);
+      const pageContent = window.locator(
+        '[data-testid="lottery-management-page"], [data-testid="lottery-page"], main'
+      );
+      const isContentVisible = await pageContent
+        .first()
+        .isVisible()
+        .catch(() => false);
 
       expect(isContentVisible).toBe(true);
     } else {

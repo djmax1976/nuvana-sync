@@ -148,9 +148,7 @@ describe('ShiftsDAL close methods', () => {
       dal.closeShift(VALID_UUID);
 
       // Verify the UPDATE query uses placeholders
-      const updateCall = mockPrepare.mock.calls.find((call) =>
-        call[0].includes('UPDATE shifts')
-      );
+      const updateCall = mockPrepare.mock.calls.find((call) => call[0].includes('UPDATE shifts'));
 
       expect(updateCall).toBeDefined();
       const query = updateCall![0];
@@ -191,9 +189,7 @@ describe('ShiftsDAL close methods', () => {
       dal.closeShift(VALID_UUID);
 
       // Verify the WHERE clause includes end_time IS NULL
-      const updateCall = mockPrepare.mock.calls.find((call) =>
-        call[0].includes('UPDATE shifts')
-      );
+      const updateCall = mockPrepare.mock.calls.find((call) => call[0].includes('UPDATE shifts'));
       const query = updateCall![0];
       expect(query).toContain('end_time IS NULL');
     });
@@ -261,9 +257,7 @@ describe('ShiftsDAL close methods', () => {
         expect(result).toBeUndefined();
 
         // Verify the query string does NOT contain the injection payload
-        const updateCall = mockPrepare.mock.calls.find((call) =>
-          call[0].includes('UPDATE shifts')
-        );
+        const updateCall = mockPrepare.mock.calls.find((call) => call[0].includes('UPDATE shifts'));
         const query = updateCall![0];
 
         expect(query).not.toContain('DROP');
@@ -338,13 +332,7 @@ describe('ShiftSummariesDAL closeShiftSummary', () => {
     mockGet.mockReturnValue(mockShiftSummary);
     mockRun.mockReturnValue({ changes: 1 });
 
-    summariesDAL.closeShiftSummary(
-      STORE_ID,
-      SUMMARY_ID,
-      '2026-02-12T16:00:00Z',
-      undefined,
-      555.55
-    );
+    summariesDAL.closeShiftSummary(STORE_ID, SUMMARY_ID, '2026-02-12T16:00:00Z', undefined, 555.55);
 
     // The update should include closing_cash
     const updateCall = mockPrepare.mock.calls.find((call) =>
@@ -418,13 +406,7 @@ describe('ShiftSummariesDAL closeShiftSummary', () => {
     mockGet.mockReturnValue(mockShiftSummary);
     mockRun.mockReturnValue({ changes: 1 });
 
-    summariesDAL.closeShiftSummary(
-      STORE_ID,
-      SUMMARY_ID,
-      '2026-02-12T16:00:00Z',
-      undefined,
-      100
-    );
+    summariesDAL.closeShiftSummary(STORE_ID, SUMMARY_ID, '2026-02-12T16:00:00Z', undefined, 100);
 
     // Check that update query uses placeholders
     const updateCall = mockPrepare.mock.calls.find((call) =>

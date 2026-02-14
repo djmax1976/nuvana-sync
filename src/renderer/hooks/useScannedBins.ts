@@ -302,8 +302,7 @@ export function useScannedBins({
   const updateScannedBins = useCallback(
     (updater: ScannedBin[] | ((prev: ScannedBin[]) => ScannedBin[])) => {
       if (isControlled) {
-        const newValue =
-          typeof updater === 'function' ? updater(value) : updater;
+        const newValue = typeof updater === 'function' ? updater(value) : updater;
         callbacksRef.current.onChange?.(newValue);
       } else {
         setInternalScannedBins(updater);
@@ -466,9 +465,7 @@ export function useScannedBins({
 
       // Update the scanned bin with new serial
       updateScannedBins((prev) =>
-        prev.map((s) =>
-          s.bin_id === binId ? { ...s, closing_serial: newSerial } : s
-        )
+        prev.map((s) => (s.bin_id === binId ? { ...s, closing_serial: newSerial } : s))
       );
 
       // Set as last scanned for animation

@@ -23,12 +23,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
 // Hoist mock functions
-const {
-  mockGetAllOpenShifts,
-  mockFindByPin,
-  mockFindById,
-  mockFindRegisters,
-} = vi.hoisted(() => ({
+const { mockGetAllOpenShifts, mockFindByPin, mockFindById, mockFindRegisters } = vi.hoisted(() => ({
   mockGetAllOpenShifts: vi.fn(),
   mockFindByPin: vi.fn(),
   mockFindById: vi.fn(),
