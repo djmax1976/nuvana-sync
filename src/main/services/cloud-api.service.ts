@@ -18,6 +18,7 @@ import Store from 'electron-store';
 import { z } from 'zod';
 import { createLogger } from '../utils/logger';
 import { licenseService, LicenseApiResponseSchema } from './license.service';
+import { syncSessionManager, type SyncSessionContext } from './sync-session-manager.service';
 import {
   TerminalSyncRecord,
   TerminalSyncRecordSchema,
@@ -191,6 +192,71 @@ export interface SyncSessionResponse {
   gracePeriodEndsAt: string | null;
   /** Lockout message if revoked */
   lockoutMessage?: string;
+}
+
+/**
+ * Sync configuration response from cloud
+ * API: GET /api/v1/sync/config
+ *
+ * Contains all batch limits and operation-specific configuration.
+ * Desktop clients MUST fetch this on sync start and use these limits.
+ */
+export interface SyncConfigResponse {
+  /** Configuration version for caching */
+  version: number;
+  /** Global limits */
+  limits: {
+    /** Maximum items per batch */
+    maxBatchItems: number;
+    /** Maximum payload size in bytes */
+    maxPayloadBytes: number;
+    /** Request timeout in milliseconds */
+    requestTimeoutMs: number;
+    /** Maximum concurrent batches per API key */
+    maxConcurrentBatchesPerKey: number;
+    /** Maximum in-flight operations per store */
+    maxInFlightPerStore: number;
+    /** Idempotency key TTL in seconds */
+    idempotencyTtlSeconds: number;
+  };
+  /** Per-operation limits */
+  operations: Record<string, { maxBatchItems: number; description?: string }>;
+  /** Rate limiting configuration */
+  rateLimit: {
+    /** Global requests per minute per API key */
+    globalRpm: number;
+    /** Batch commit requests per minute */
+    commitRpm: number;
+    /** Pull requests per minute */
+    pullRpm: number;
+  };
+}
+
+/**
+ * Session-aware operation options
+ * Per SYNC-5000-DESKTOP Phase 1: enables session reuse across operations
+ *
+ * When sessionId is provided:
+ * - Uses existing session instead of creating a new one
+ * - Does NOT call completeSyncSession (caller is responsible)
+ * - Enables consolidated session lifecycle management
+ */
+export interface SessionAwareOptions {
+  /** Existing session ID to reuse (skips startSyncSession/completeSyncSession) */
+  sessionId?: string;
+  /** Whether to skip session validation (for internal calls where session is known valid) */
+  skipRevocationCheck?: boolean;
+}
+
+/**
+ * Stats from a session-aware operation
+ * Used for aggregating stats when reusing sessions
+ */
+export interface OperationStats {
+  pulled: number;
+  pushed: number;
+  conflictsResolved: number;
+  lastSequence: number;
 }
 
 /**
@@ -2437,8 +2503,205 @@ export class CloudApiService {
   }
 
   // ==========================================================================
+  // Sync Configuration
+  // ==========================================================================
+
+  /**
+   * Cached sync configuration
+   * Fetched once per session and reused
+   */
+  private syncConfigCache: SyncConfigResponse | null = null;
+  private syncConfigCacheTimestamp: number = 0;
+  private static readonly SYNC_CONFIG_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
+
+  /**
+   * Get sync configuration from cloud
+   *
+   * Clients MUST call this on sync session start and use the returned
+   * limits for all batch operations. The configuration is cached for 5 minutes.
+   *
+   * API: GET /api/v1/sync/config
+   *
+   * @param forceRefresh - Force refresh even if cached
+   * @returns Sync configuration with batch limits
+   */
+  async getSyncConfig(forceRefresh = false): Promise<SyncConfigResponse> {
+    // Check cache validity
+    const now = Date.now();
+    if (
+      !forceRefresh &&
+      this.syncConfigCache &&
+      now - this.syncConfigCacheTimestamp < CloudApiService.SYNC_CONFIG_CACHE_TTL_MS
+    ) {
+      log.debug('Using cached sync config', {
+        cacheAgeMs: now - this.syncConfigCacheTimestamp,
+      });
+      return this.syncConfigCache;
+    }
+
+    log.info('Fetching sync config from cloud');
+
+    try {
+      const response = await this.request<{ success: boolean; data: SyncConfigResponse }>(
+        'GET',
+        '/api/v1/sync/config'
+      );
+
+      if (!response.success || !response.data) {
+        throw new Error('Invalid sync config response');
+      }
+
+      // Cache the config
+      this.syncConfigCache = response.data;
+      this.syncConfigCacheTimestamp = now;
+
+      log.info('Sync config fetched', {
+        version: response.data.version,
+        maxBatchItems: response.data.limits.maxBatchItems,
+        operations: Object.keys(response.data.operations),
+      });
+
+      return response.data;
+    } catch (error) {
+      // On error, return cached config if available, otherwise use defaults
+      if (this.syncConfigCache) {
+        log.warn('Using stale cached sync config due to fetch error', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        return this.syncConfigCache;
+      }
+
+      // Return conservative defaults if no cache available
+      log.warn('Using default sync config due to fetch error', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      return this.getDefaultSyncConfig();
+    }
+  }
+
+  /**
+   * Get default sync configuration (conservative fallback)
+   * Used when cloud config cannot be fetched
+   */
+  private getDefaultSyncConfig(): SyncConfigResponse {
+    return {
+      version: 0, // Version 0 indicates fallback
+      limits: {
+        maxBatchItems: 100, // Conservative default
+        maxPayloadBytes: 10 * 1024 * 1024,
+        requestTimeoutMs: 60000,
+        maxConcurrentBatchesPerKey: 4,
+        maxInFlightPerStore: 100,
+        idempotencyTtlSeconds: 86400,
+      },
+      operations: {
+        pack_receive: { maxBatchItems: 100 },
+        pack_activate: { maxBatchItems: 100 },
+        pack_deplete: { maxBatchItems: 100 },
+        pack_return: { maxBatchItems: 100 },
+        shift: { maxBatchItems: 50 },
+        shift_opening: { maxBatchItems: 50 },
+        shift_closing: { maxBatchItems: 50 },
+        day_open: { maxBatchItems: 10 },
+        day_close: { maxBatchItems: 10 },
+        transaction: { maxBatchItems: 100 },
+        employee: { maxBatchItems: 100 },
+      },
+      rateLimit: {
+        globalRpm: 100,
+        commitRpm: 60,
+        pullRpm: 120,
+      },
+    };
+  }
+
+  /**
+   * Get batch limit for a specific operation
+   *
+   * @param operationType - Operation type (e.g., 'pack_receive')
+   * @returns Maximum batch items for this operation
+   */
+  async getBatchLimitForOperation(operationType: string): Promise<number> {
+    const config = await this.getSyncConfig();
+    const opConfig = config.operations[operationType];
+    return opConfig?.maxBatchItems ?? config.limits.maxBatchItems;
+  }
+
+  /**
+   * Clear sync config cache
+   * Call this when switching stores or on auth errors
+   */
+  clearSyncConfigCache(): void {
+    this.syncConfigCache = null;
+    this.syncConfigCacheTimestamp = 0;
+    log.debug('Sync config cache cleared');
+  }
+
+  // ==========================================================================
   // Sync Session Management
   // ==========================================================================
+
+  /**
+   * Resolve session from centralized manager or start new session
+   *
+   * SYNC-5001: Single source of truth pattern - never reconstruct session from partial data.
+   * This method queries the authoritative SyncSessionManager instead of accepting
+   * sessionId parameters that could lead to incomplete session objects.
+   *
+   * Enterprise-grade implementation:
+   * - SEC-012: SESSION_TIMEOUT - Respects session lifecycle from manager
+   * - API-003: ERROR_HANDLING - Clear error messages for invalid sessions
+   * - DB-006: TENANT_ISOLATION - Session manager validates store context
+   *
+   * @returns Session response with revocationStatus and ownership flag
+   * @throws Error if session cannot be established or revocation status is invalid
+   */
+  private async resolveSession(): Promise<{
+    session: SyncSessionResponse;
+    ownSession: boolean;
+  }> {
+    // Query the authoritative session source (SYNC-5001)
+    const activeSession: SyncSessionContext | null = syncSessionManager.getActiveSession();
+
+    if (activeSession && activeSession.revocationStatus === 'VALID') {
+      // Use existing validated session from the manager
+      // The session was already validated during runSyncCycle startup
+      log.debug('Reusing active session from manager', {
+        sessionId: activeSession.sessionId,
+        revocationStatus: activeSession.revocationStatus,
+      });
+
+      return {
+        session: {
+          sessionId: activeSession.sessionId,
+          // Map VALID status (only status we accept for reuse)
+          revocationStatus: 'VALID' as const,
+          serverTime: new Date().toISOString(),
+          pullPendingCount: activeSession.pullPendingCount,
+          newKeyAvailable: false, // Not tracked in session context
+          gracePeriodEndsAt: null, // Not tracked in session context
+          lockoutMessage: activeSession.lockoutMessage,
+        },
+        ownSession: false,
+      };
+    }
+
+    // No active session or invalid status - start our own
+    // This path is taken for standalone operations outside runSyncCycle
+    log.debug('No active session in manager, starting new session', {
+      hasActiveSession: !!activeSession,
+      activeStatus: activeSession?.revocationStatus,
+    });
+
+    const session = await this.startSyncSession();
+
+    // Validate the new session status
+    if (session.revocationStatus !== 'VALID') {
+      throw new Error(`API key status: ${session.revocationStatus}`);
+    }
+
+    return { session, ownSession: true };
+  }
 
   /**
    * Start a sync session
@@ -2883,17 +3146,38 @@ export class CloudApiService {
    * - API-003: Centralized error handling
    * - SEC-017: Audit logging for all sync operations
    *
+   * SYNC-5000-DESKTOP Phase 1: Supports session reuse via sessionOptions.sessionId
+   * When sessionId is provided, uses existing session and does NOT complete it.
+   *
    * @param since - Optional timestamp for delta sync
+   * @param sessionOptions - Optional session reuse options (Phase 1 consolidation)
    * @returns Cloud bins with totalCount (all pages aggregated)
    */
-  async pullBins(since?: string): Promise<CloudBinsResponse> {
-    log.debug('Pulling bins from cloud', { since: since || 'full' });
+  async pullBins(
+    since?: string,
+    sessionOptions?: SessionAwareOptions
+  ): Promise<CloudBinsResponse & { stats?: OperationStats }> {
+    const usingExternalSession = Boolean(sessionOptions?.sessionId);
+    log.debug('Pulling bins from cloud', { since: since || 'full', usingExternalSession });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
+    // Determine session ID - reuse existing or create new
+    let sessionId: string;
+    let shouldCompleteSession = false;
 
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
+    if (sessionOptions?.sessionId) {
+      // SYNC-5000: Session reuse - caller manages lifecycle
+      sessionId = sessionOptions.sessionId;
+      log.debug('Reusing existing sync session for bins', { sessionId });
+    } else {
+      // Legacy behavior: create and manage own session
+      const session = await this.startSyncSession();
+
+      if (session.revocationStatus !== 'VALID') {
+        throw new Error(`API key status: ${session.revocationStatus}`);
+      }
+
+      sessionId = session.sessionId;
+      shouldCompleteSession = true;
     }
 
     // v039: Cloud and local schemas are now aligned - pass through directly
@@ -2917,7 +3201,7 @@ export class CloudApiService {
 
         // Build query parameters with session_id
         const params = new URLSearchParams();
-        params.set('session_id', session.sessionId);
+        params.set('session_id', sessionId);
         if (since) {
           params.set('since', since);
         }
@@ -3001,7 +3285,25 @@ export class CloudApiService {
         count: allBins.length,
         totalCount,
         pages: pageCount,
+        usingExternalSession,
       });
+
+      // Build operation stats for session manager tracking
+      const stats: OperationStats = {
+        pulled: allBins.length,
+        pushed: 0,
+        conflictsResolved: 0,
+        lastSequence: currentSequence,
+      };
+
+      // SYNC-5000: Complete session only if we created it (fix: was missing session completion)
+      if (shouldCompleteSession) {
+        await this.completeSyncSession(sessionId, currentSequence, {
+          pulled: allBins.length,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      }
 
       return {
         bins: allBins,
@@ -3010,11 +3312,26 @@ export class CloudApiService {
         currentSequence,
         serverTime,
         nextCursor: null,
+        stats,
       };
     } catch (error) {
       log.error('Failed to pull bins from cloud', {
         error: error instanceof Error ? error.message : 'Unknown error',
       });
+
+      // SYNC-5000: Complete session on error only if we created it (fix: was missing)
+      if (shouldCompleteSession) {
+        try {
+          await this.completeSyncSession(sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after bins pull error');
+        }
+      }
+
       throw error;
     }
   }
@@ -3209,25 +3526,53 @@ export class CloudApiService {
    * - Delta sync (since provided): Returns all games changed since timestamp, including INACTIVE
    * - Full sync (since not provided): Requires include_inactive=true to get all game statuses
    *
+   * SYNC-5000-DESKTOP Phase 1: Supports session reuse via sessionOptions.sessionId
+   * When sessionId is provided, uses existing session and does NOT complete it.
+   *
    * @param stateId - State ID for scoping (games are state-level)
    * @param since - Optional ISO timestamp for delta sync (from sync_timestamps table)
+   * @param sessionOptions - Optional session reuse options (Phase 1 consolidation)
    * @returns Cloud games response containing all games (active and inactive)
    */
-  async pullLotteryGames(stateId: string | null, since?: string): Promise<CloudGamesResponse> {
+  async pullLotteryGames(
+    stateId: string | null,
+    since?: string,
+    sessionOptions?: SessionAwareOptions
+  ): Promise<CloudGamesResponse & { stats?: OperationStats }> {
     const syncMode = since ? 'delta' : 'full';
-    log.debug('Pulling lottery games from cloud', { stateId, since: since || 'none', syncMode });
+    const usingExternalSession = Boolean(sessionOptions?.sessionId);
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
+    log.debug('Pulling lottery games from cloud', {
+      stateId,
+      since: since || 'none',
+      syncMode,
+      usingExternalSession,
+    });
 
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
+    // Determine session ID - reuse existing or create new
+    let sessionId: string;
+    let shouldCompleteSession = false;
+
+    if (sessionOptions?.sessionId) {
+      // SYNC-5000: Session reuse - caller manages lifecycle
+      sessionId = sessionOptions.sessionId;
+      log.debug('Reusing existing sync session', { sessionId });
+    } else {
+      // Legacy behavior: create and manage own session
+      const session = await this.startSyncSession();
+
+      if (session.revocationStatus !== 'VALID') {
+        throw new Error(`API key status: ${session.revocationStatus}`);
+      }
+
+      sessionId = session.sessionId;
+      shouldCompleteSession = true;
     }
 
     try {
       // Build query parameters with session_id and state_id
       const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
+      params.set('session_id', sessionId);
       if (stateId) {
         params.set('state_id', stateId);
       }
@@ -3291,26 +3636,38 @@ export class CloudApiService {
         }));
       }
 
-      log.info('Lottery games pulled successfully', { count: games.length });
+      log.info('Lottery games pulled successfully', { count: games.length, usingExternalSession });
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, 0, {
+      // Build operation stats for session manager tracking
+      const stats: OperationStats = {
         pulled: games.length,
         pushed: 0,
         conflictsResolved: 0,
-      });
+        lastSequence: 0,
+      };
 
-      return { games };
-    } catch (error) {
-      // Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
+      // Only complete session if we created it (legacy behavior)
+      if (shouldCompleteSession) {
+        await this.completeSyncSession(sessionId, 0, {
+          pulled: games.length,
           pushed: 0,
           conflictsResolved: 0,
         });
-      } catch {
-        log.warn('Failed to complete sync session after games pull error');
+      }
+
+      return { games, stats };
+    } catch (error) {
+      // Only complete session if we created it
+      if (shouldCompleteSession) {
+        try {
+          await this.completeSyncSession(sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after games pull error');
+        }
       }
       throw error;
     }
@@ -3779,34 +4136,35 @@ export class CloudApiService {
    * API: POST /api/v1/sync/lottery/packs/receive/batch
    *
    * Enterprise-grade batch implementation for efficient multi-pack sync.
-   * - API-001: Input validation via Zod schema
-   * - API-003: Centralized error handling with per-pack results
+   * Reduces HTTP overhead by sending multiple packs in a single request.
+   *
+   * Standards Applied:
+   * - API-001: VALIDATION - Input validated against cloud schema
+   * - API-003: ERROR_HANDLING - Per-pack error reporting
+   * - API-BP-005: API_BULK_OPERATIONS - Batch processing with per-item results
    * - SEC-008: HTTPS enforcement (via base request method)
-   * - DB-006: Store-scoped via session validation
+   * - DB-006: TENANT_ISOLATION - Store-scoped via session validation
    * - SEC-017: Audit logging for sync operations
    *
-   * @param packs - Array of pack receive data
+   * @param packs - Array of pack receive data (matches cloud schema)
    * @returns Success status with per-pack results
-   *
-   * Note: After cloud_id consolidation (v045 migration), pack_id IS the cloud ID.
-   * The cloud_pack_id in results is kept for backward compatibility but is
-   * now redundant - it will match the input pack_id.
    */
   async pushPackReceiveBatch(
     packs: Array<{
       pack_id: string;
-      store_id: string;
-      game_id: string;
+      game_code: string;
       pack_number: string;
+      serial_start: string;
+      serial_end: string;
       received_at: string;
-      received_by: string | null;
+      local_id?: string;
     }>
   ): Promise<{
     success: boolean;
     results: Array<{
       pack_id: string;
-      cloud_pack_id?: string;
-      status: 'synced' | 'failed';
+      local_id?: string;
+      status: 'synced' | 'failed' | 'duplicate';
       error?: string;
     }>;
   }> {
@@ -3814,61 +4172,85 @@ export class CloudApiService {
       return { success: true, results: [] };
     }
 
-    log.debug('Pushing pack receive batch to cloud', { count: packs.length });
+    log.info('Pushing pack receive batch to cloud', {
+      count: packs.length,
+    });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
-
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
-    }
+    // SYNC-5001: Resolve session from centralized manager
+    const { session, ownSession } = await this.resolveSession();
 
     try {
-      const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
+      const path = `/api/v1/sync/lottery/packs/receive/batch`;
 
-      const path = `/api/v1/sync/lottery/packs/receive/batch?${params.toString()}`;
+      // Build request body matching cloud schema
+      const requestBody = {
+        session_id: session.sessionId,
+        packs: packs.map((pack) => ({
+          pack_id: pack.pack_id,
+          game_code: pack.game_code,
+          pack_number: pack.pack_number,
+          serial_start: pack.serial_start,
+          serial_end: pack.serial_end,
+          received_at: pack.received_at,
+          local_id: pack.local_id,
+        })),
+      };
 
       const response = await this.request<{
         success: boolean;
         data?: {
           results: Array<{
             pack_id: string;
-            cloud_pack_id?: string;
-            status: 'synced' | 'failed';
+            local_id?: string;
+            status: 'synced' | 'failed' | 'duplicate';
             error?: string;
           }>;
+          summary?: {
+            total: number;
+            synced: number;
+            duplicates: number;
+            failed: number;
+          };
         };
-      }>('POST', path, { packs });
+      }>('POST', path, requestBody);
 
       const results = response.data?.results || [];
-      const synced = results.filter((r) => r.status === 'synced').length;
-      const failed = results.filter((r) => r.status === 'failed').length;
+      const summary = response.data?.summary || {
+        total: packs.length,
+        synced: results.filter((r) => r.status === 'synced').length,
+        duplicates: results.filter((r) => r.status === 'duplicate').length,
+        failed: results.filter((r) => r.status === 'failed').length,
+      };
 
-      // Complete sync session with stats
-      await this.completeSyncSession(session.sessionId, 0, {
-        pulled: 0,
-        pushed: synced,
-        conflictsResolved: 0,
-      });
+      // Complete sync session with stats if we own it
+      if (ownSession) {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: summary.synced + summary.duplicates, // Duplicates count as successful
+          conflictsResolved: 0,
+        });
+      }
 
       log.info('Pack receive batch pushed to cloud', {
-        total: packs.length,
-        synced,
-        failed,
+        total: summary.total,
+        synced: summary.synced,
+        duplicates: summary.duplicates,
+        failed: summary.failed,
       });
 
       return { success: response.success, results };
     } catch (error) {
-      // Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pack receive batch error');
+      // Try to complete session even on error (if we own it)
+      if (ownSession) {
+        try {
+          await this.completeSyncSession(session.sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pack receive batch error');
+        }
       }
       throw error;
     }
@@ -3924,12 +4306,8 @@ export class CloudApiService {
       packNumber: data.pack_number,
     });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
-
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
-    }
+    // SYNC-5001: Resolve session from centralized manager
+    const { session, ownSession } = await this.resolveSession();
 
     try {
       const path = `/api/v1/sync/lottery/packs/activate`;
@@ -3985,12 +4363,14 @@ export class CloudApiService {
         };
       }>('POST', path, requestBody);
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, 0, {
-        pulled: 0,
-        pushed: 1,
-        conflictsResolved: 0,
-      });
+      // SYNC-5000: Only complete session if we own it
+      if (ownSession) {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 1,
+          conflictsResolved: 0,
+        });
+      }
 
       const idempotent = response.data?.idempotent || false;
       log.info('Pack activation pushed to cloud', {
@@ -4002,15 +4382,17 @@ export class CloudApiService {
 
       return { success: response.success, idempotent };
     } catch (error) {
-      // Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pack activate error');
+      // Try to complete session even on error (only if we own it)
+      if (ownSession) {
+        try {
+          await this.completeSyncSession(session.sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pack activate error');
+        }
       }
       throw error;
     }
@@ -4059,12 +4441,8 @@ export class CloudApiService {
       salesAmount: data.sales_amount,
     });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
-
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
-    }
+    // SYNC-5001: Resolve session from centralized manager
+    const { session, ownSession } = await this.resolveSession();
 
     try {
       const path = `/api/v1/sync/lottery/packs/deplete`;
@@ -4096,12 +4474,14 @@ export class CloudApiService {
         data?: { packId?: string; status?: string; sequence?: number };
       }>('POST', path, requestBody);
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, 0, {
-        pulled: 0,
-        pushed: 1,
-        conflictsResolved: 0,
-      });
+      // SYNC-5000: Only complete session if we own it
+      if (ownSession) {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 1,
+          conflictsResolved: 0,
+        });
+      }
 
       log.info('Pack depletion pushed to cloud', {
         packId: data.pack_id,
@@ -4113,15 +4493,17 @@ export class CloudApiService {
 
       return { success: response.success };
     } catch (error) {
-      // Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pack deplete error');
+      // Try to complete session even on error (only if we own it)
+      if (ownSession) {
+        try {
+          await this.completeSyncSession(session.sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pack deplete error');
+        }
       }
       throw error;
     }
@@ -4173,12 +4555,8 @@ export class CloudApiService {
       hasClosingSerial: Boolean(data.closing_serial),
     });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
-
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
-    }
+    // SYNC-5001: Resolve session from centralized manager
+    const { session, ownSession } = await this.resolveSession();
 
     try {
       const path = `/api/v1/sync/lottery/packs/return`;
@@ -4214,12 +4592,14 @@ export class CloudApiService {
         data?: { packId?: string; status?: string; sequence?: number };
       }>('POST', path, requestBody);
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, 0, {
-        pulled: 0,
-        pushed: 1,
-        conflictsResolved: 0,
-      });
+      // SYNC-5000: Only complete session if we own it
+      if (ownSession) {
+        await this.completeSyncSession(session.sessionId, 0, {
+          pulled: 0,
+          pushed: 1,
+          conflictsResolved: 0,
+        });
+      }
 
       log.info('Pack return pushed to cloud', {
         packId: data.pack_id,
@@ -4230,15 +4610,17 @@ export class CloudApiService {
 
       return { success: response.success };
     } catch (error) {
-      // Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pack return error');
+      // Try to complete session even on error (only if we own it)
+      if (ownSession) {
+        try {
+          await this.completeSyncSession(session.sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pack return error');
+        }
       }
       throw error;
     }
@@ -5414,31 +5796,53 @@ export class CloudApiService {
    * - SEC-017: Audit logging for all sync operations
    * - API-002: Bounded pagination to prevent unbounded reads
    *
+   * SYNC-5000-DESKTOP Phase 1: Supports session reuse via sessionOptions.sessionId
+   * When sessionId is provided, uses existing session and does NOT complete it.
+   *
    * @param options - Optional parameters for delta/paginated sync
+   * @param sessionOptions - Optional session reuse options (Phase 1 consolidation)
    * @returns Received packs with sync metadata
    */
-  async pullReceivedPacks(options?: {
-    since?: string;
-    sinceSequence?: number;
-    limit?: number;
-  }): Promise<CloudPacksResponse> {
+  async pullReceivedPacks(
+    options?: {
+      since?: string;
+      sinceSequence?: number;
+      limit?: number;
+    },
+    sessionOptions?: SessionAwareOptions
+  ): Promise<CloudPacksResponse & { stats?: OperationStats }> {
+    const usingExternalSession = Boolean(sessionOptions?.sessionId);
     log.debug('Pulling received packs from cloud', {
       since: options?.since || 'full',
       sinceSequence: options?.sinceSequence,
       limit: options?.limit,
+      usingExternalSession,
     });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
+    // Determine session ID - reuse existing or create new
+    let sessionId: string;
+    let shouldCompleteSession = false;
 
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
+    if (sessionOptions?.sessionId) {
+      // SYNC-5000: Session reuse - caller manages lifecycle
+      sessionId = sessionOptions.sessionId;
+      log.debug('Reusing existing sync session for received packs', { sessionId });
+    } else {
+      // Legacy behavior: create and manage own session
+      const session = await this.startSyncSession();
+
+      if (session.revocationStatus !== 'VALID') {
+        throw new Error(`API key status: ${session.revocationStatus}`);
+      }
+
+      sessionId = session.sessionId;
+      shouldCompleteSession = true;
     }
 
     try {
       // API-001: Build query parameters with validation
       const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
+      params.set('session_id', sessionId);
 
       if (options?.since) {
         params.set('since', options.since);
@@ -5542,31 +5946,44 @@ export class CloudApiService {
         serverTime: new Date().toISOString(),
       };
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, syncMetadata.lastSequence, {
+      // Build operation stats for session manager tracking
+      const stats: OperationStats = {
         pulled: packs.length,
         pushed: 0,
         conflictsResolved: 0,
-      });
+        lastSequence: syncMetadata.lastSequence,
+      };
+
+      // SYNC-5000: Complete session only if we created it
+      if (shouldCompleteSession) {
+        await this.completeSyncSession(sessionId, syncMetadata.lastSequence, {
+          pulled: packs.length,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      }
 
       // SEC-017: Audit log
       log.info('Received packs pulled from cloud', {
         count: packs.length,
         hasMore: syncMetadata.hasMore,
         lastSequence: syncMetadata.lastSequence,
+        usingExternalSession,
       });
 
-      return { packs, syncMetadata };
+      return { packs, syncMetadata, stats };
     } catch (error) {
-      // API-003: Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pull received packs error');
+      // API-003: Try to complete session even on error (only if we created it)
+      if (shouldCompleteSession) {
+        try {
+          await this.completeSyncSession(sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pull received packs error');
+        }
       }
       throw error;
     }
@@ -5587,31 +6004,53 @@ export class CloudApiService {
    * - SEC-017: Audit logging for all sync operations
    * - API-002: Bounded pagination to prevent unbounded reads
    *
+   * SYNC-5000-DESKTOP Phase 1: Supports session reuse via sessionOptions.sessionId
+   * When sessionId is provided, uses existing session and does NOT complete it.
+   *
    * @param options - Optional parameters for delta/paginated sync
+   * @param sessionOptions - Optional session reuse options (Phase 1 consolidation)
    * @returns Activated packs with sync metadata
    */
-  async pullActivatedPacks(options?: {
-    since?: string;
-    sinceSequence?: number;
-    limit?: number;
-  }): Promise<CloudPacksResponse> {
+  async pullActivatedPacks(
+    options?: {
+      since?: string;
+      sinceSequence?: number;
+      limit?: number;
+    },
+    sessionOptions?: SessionAwareOptions
+  ): Promise<CloudPacksResponse & { stats?: OperationStats }> {
+    const usingExternalSession = Boolean(sessionOptions?.sessionId);
     log.debug('Pulling activated packs from cloud', {
       since: options?.since || 'full',
       sinceSequence: options?.sinceSequence,
       limit: options?.limit,
+      usingExternalSession,
     });
 
-    // Start a sync session (required by API)
-    const session = await this.startSyncSession();
+    // Determine session ID - reuse existing or create new
+    let sessionId: string;
+    let shouldCompleteSession = false;
 
-    if (session.revocationStatus !== 'VALID') {
-      throw new Error(`API key status: ${session.revocationStatus}`);
+    if (sessionOptions?.sessionId) {
+      // SYNC-5000: Session reuse - caller manages lifecycle
+      sessionId = sessionOptions.sessionId;
+      log.debug('Reusing existing sync session for activated packs', { sessionId });
+    } else {
+      // Legacy behavior: create and manage own session
+      const session = await this.startSyncSession();
+
+      if (session.revocationStatus !== 'VALID') {
+        throw new Error(`API key status: ${session.revocationStatus}`);
+      }
+
+      sessionId = session.sessionId;
+      shouldCompleteSession = true;
     }
 
     try {
       // API-001: Build query parameters with validation
       const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
+      params.set('session_id', sessionId);
 
       if (options?.since) {
         params.set('since', options.since);
@@ -5715,31 +6154,44 @@ export class CloudApiService {
         serverTime: new Date().toISOString(),
       };
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, syncMetadata.lastSequence, {
+      // Build operation stats for session manager tracking
+      const stats: OperationStats = {
         pulled: packs.length,
         pushed: 0,
         conflictsResolved: 0,
-      });
+        lastSequence: syncMetadata.lastSequence,
+      };
+
+      // SYNC-5000: Complete session only if we created it
+      if (shouldCompleteSession) {
+        await this.completeSyncSession(sessionId, syncMetadata.lastSequence, {
+          pulled: packs.length,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      }
 
       // SEC-017: Audit log
       log.info('Activated packs pulled from cloud', {
         count: packs.length,
         hasMore: syncMetadata.hasMore,
         lastSequence: syncMetadata.lastSequence,
+        usingExternalSession,
       });
 
-      return { packs, syncMetadata };
+      return { packs, syncMetadata, stats };
     } catch (error) {
-      // API-003: Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pull activated packs error');
+      // API-003: Try to complete session even on error (only if we created it)
+      if (shouldCompleteSession) {
+        try {
+          await this.completeSyncSession(sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pull activated packs error');
+        }
       }
       throw error;
     }
@@ -5760,53 +6212,75 @@ export class CloudApiService {
    * - SEC-017: Audit logging for all sync operations
    * - API-002: Bounded pagination to prevent unbounded reads
    *
+   * SYNC-5000-DESKTOP Phase 1: Supports session reuse via sessionOptions.sessionId
+   * When sessionId is provided, uses existing session and does NOT complete it.
+   *
    * @param options - Optional parameters for delta/paginated sync
+   * @param sessionOptions - Optional session reuse options (Phase 1 consolidation)
    * @returns Returned packs with sync metadata
    */
-  async pullReturnedPacks(options?: {
-    since?: string;
-    sinceSequence?: number;
-    limit?: number;
-  }): Promise<CloudPacksResponse> {
+  async pullReturnedPacks(
+    options?: {
+      since?: string;
+      sinceSequence?: number;
+      limit?: number;
+    },
+    sessionOptions?: SessionAwareOptions
+  ): Promise<CloudPacksResponse & { stats?: OperationStats }> {
     const pullStartTime = Date.now();
+    const usingExternalSession = Boolean(sessionOptions?.sessionId);
 
     log.info('DIAG: pullReturnedPacks STARTING', {
       since: options?.since || 'full',
       sinceSequence: options?.sinceSequence,
       limit: options?.limit,
+      usingExternalSession,
       timestamp: new Date().toISOString(),
     });
 
-    // Start a sync session (required by API)
-    log.info('DIAG: pullReturnedPacks - calling startSyncSession...');
-    let session;
-    try {
-      session = await this.startSyncSession();
-      log.info('DIAG: pullReturnedPacks - startSyncSession succeeded', {
-        sessionId: session.sessionId,
-        revocationStatus: session.revocationStatus,
-        elapsed: Date.now() - pullStartTime,
-      });
-    } catch (sessionError) {
-      log.error('DIAG: pullReturnedPacks - startSyncSession FAILED', {
-        error: sessionError instanceof Error ? sessionError.message : 'Unknown',
-        elapsed: Date.now() - pullStartTime,
-      });
-      throw sessionError;
-    }
+    // Determine session ID - reuse existing or create new
+    let sessionId: string;
+    let shouldCompleteSession = false;
 
-    if (session.revocationStatus !== 'VALID') {
-      log.error('DIAG: pullReturnedPacks - session revocationStatus is NOT VALID', {
-        revocationStatus: session.revocationStatus,
-        sessionId: session.sessionId,
-      });
-      throw new Error(`API key status: ${session.revocationStatus}`);
+    if (sessionOptions?.sessionId) {
+      // SYNC-5000: Session reuse - caller manages lifecycle
+      sessionId = sessionOptions.sessionId;
+      log.debug('Reusing existing sync session for returned packs', { sessionId });
+    } else {
+      // Legacy behavior: create and manage own session
+      log.info('DIAG: pullReturnedPacks - calling startSyncSession...');
+      let session;
+      try {
+        session = await this.startSyncSession();
+        log.info('DIAG: pullReturnedPacks - startSyncSession succeeded', {
+          sessionId: session.sessionId,
+          revocationStatus: session.revocationStatus,
+          elapsed: Date.now() - pullStartTime,
+        });
+      } catch (sessionError) {
+        log.error('DIAG: pullReturnedPacks - startSyncSession FAILED', {
+          error: sessionError instanceof Error ? sessionError.message : 'Unknown',
+          elapsed: Date.now() - pullStartTime,
+        });
+        throw sessionError;
+      }
+
+      if (session.revocationStatus !== 'VALID') {
+        log.error('DIAG: pullReturnedPacks - session revocationStatus is NOT VALID', {
+          revocationStatus: session.revocationStatus,
+          sessionId: session.sessionId,
+        });
+        throw new Error(`API key status: ${session.revocationStatus}`);
+      }
+
+      sessionId = session.sessionId;
+      shouldCompleteSession = true;
     }
 
     try {
       // API-001: Build query parameters with validation
       const params = new URLSearchParams();
-      params.set('session_id', session.sessionId);
+      params.set('session_id', sessionId);
 
       if (options?.since) {
         params.set('since', options.since);
@@ -5822,7 +6296,7 @@ export class CloudApiService {
 
       log.info('DIAG: pullReturnedPacks - making API request', {
         path,
-        sessionId: session.sessionId,
+        sessionId,
         elapsed: Date.now() - pullStartTime,
       });
 
@@ -5846,7 +6320,7 @@ export class CloudApiService {
         log.error('DIAG: pullReturnedPacks - API request FAILED', {
           error: requestError instanceof Error ? requestError.message : 'Unknown',
           path,
-          sessionId: session.sessionId,
+          sessionId,
           elapsed: Date.now() - pullStartTime,
         });
         throw requestError;
@@ -5949,31 +6423,44 @@ export class CloudApiService {
         serverTime: new Date().toISOString(),
       };
 
-      // Complete sync session
-      await this.completeSyncSession(session.sessionId, syncMetadata.lastSequence, {
+      // Build operation stats for session manager tracking
+      const stats: OperationStats = {
         pulled: packs.length,
         pushed: 0,
         conflictsResolved: 0,
-      });
+        lastSequence: syncMetadata.lastSequence,
+      };
+
+      // SYNC-5000: Complete session only if we created it
+      if (shouldCompleteSession) {
+        await this.completeSyncSession(sessionId, syncMetadata.lastSequence, {
+          pulled: packs.length,
+          pushed: 0,
+          conflictsResolved: 0,
+        });
+      }
 
       // SEC-017: Audit log
       log.info('Returned packs pulled from cloud', {
         count: packs.length,
         hasMore: syncMetadata.hasMore,
         lastSequence: syncMetadata.lastSequence,
+        usingExternalSession,
       });
 
-      return { packs, syncMetadata };
+      return { packs, syncMetadata, stats };
     } catch (error) {
-      // API-003: Try to complete session even on error
-      try {
-        await this.completeSyncSession(session.sessionId, 0, {
-          pulled: 0,
-          pushed: 0,
-          conflictsResolved: 0,
-        });
-      } catch {
-        log.warn('Failed to complete sync session after pull returned packs error');
+      // API-003: Try to complete session even on error (only if we created it)
+      if (shouldCompleteSession) {
+        try {
+          await this.completeSyncSession(sessionId, 0, {
+            pulled: 0,
+            pushed: 0,
+            conflictsResolved: 0,
+          });
+        } catch {
+          log.warn('Failed to complete sync session after pull returned packs error');
+        }
       }
       throw error;
     }

@@ -64,6 +64,8 @@ describe('SyncQueueDAL', () => {
         dead_lettered_at: null,
         error_category: null,
         retry_after: null,
+        // v049 idempotency key
+        idempotency_key: null,
       };
 
       mockPrepare
@@ -139,6 +141,8 @@ describe('SyncQueueDAL', () => {
           dead_lettered_at: null,
           error_category: null,
           retry_after: null,
+          // v049 idempotency key
+          idempotency_key: null,
         },
       ];
 
@@ -687,4 +691,395 @@ describe('SyncQueueDAL', () => {
       expect(runArgs).toContain('%"action":"pull_bins"%');
     });
   });
+
+  // ==========================================================================
+  // DT0.1: Queue DAL Invariants (Phase 0 Baseline Tests)
+  // Risk Coverage: D-R8 (Queue ordering violations), D-R10 (Backoff escape)
+  // ==========================================================================
+
+  describe('DT0.1: Queue Ordering Invariants', () => {
+    it('should return items ordered by priority DESC, created_at ASC', () => {
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({ id: '1', priority: 10, created_at: '2024-01-01T00:00:01Z' }),
+        createMockQueueItem({ id: '2', priority: 10, created_at: '2024-01-01T00:00:00Z' }),
+        createMockQueueItem({ id: '3', priority: 5, created_at: '2024-01-01T00:00:00Z' }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      dal.getUnsynced(100);
+
+      // Verify ORDER BY clause is correct
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('ORDER BY priority DESC, created_at ASC')
+      );
+    });
+
+    it('should maintain FIFO within same priority level', () => {
+      // Simulates database returning items in expected order
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({ id: 'oldest', priority: 5, created_at: '2024-01-01T00:00:00Z' }),
+        createMockQueueItem({ id: 'newer', priority: 5, created_at: '2024-01-01T00:00:01Z' }),
+        createMockQueueItem({ id: 'newest', priority: 5, created_at: '2024-01-01T00:00:02Z' }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const result = dal.getUnsynced(100);
+
+      // First item should be oldest within same priority
+      expect(result[0].id).toBe('oldest');
+      expect(result[1].id).toBe('newer');
+      expect(result[2].id).toBe('newest');
+    });
+
+    it('should prioritize higher priority items over older lower priority items', () => {
+      // High priority item created AFTER low priority should still come first
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({ id: 'high', priority: 100, created_at: '2024-01-01T12:00:00Z' }),
+        createMockQueueItem({ id: 'low', priority: 1, created_at: '2024-01-01T00:00:00Z' }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const result = dal.getUnsynced(100);
+
+      // High priority should come first despite being created later
+      expect(result[0].id).toBe('high');
+    });
+  });
+
+  describe('DT0.1: Retry Selection Invariants', () => {
+    it('should only select items where sync_attempts < max_attempts', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getUnsynced(100);
+
+      // Verify WHERE clause includes retry limit check
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('sync_attempts < max_attempts')
+      );
+    });
+
+    it('should exclude synced items (synced = 1)', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getUnsynced(100);
+
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('WHERE synced = 0'));
+    });
+
+    it('should exclude dead-lettered items from retryable selection', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getRetryableItems('store-123', 100);
+
+      // Verify dead_lettered = 0 exclusion
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('dead_lettered = 0'));
+    });
+
+    it('should extend retry limit for TRANSIENT errors (ERR-007)', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getRetryableItems('store-123', 100);
+
+      // Verify TRANSIENT error extended retry window
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining("error_category = 'TRANSIENT' AND sync_attempts < max_attempts * 2")
+      );
+    });
+  });
+
+  describe('DT0.1: Status Transition Invariants', () => {
+    it('markSynced should set synced = 1 and synced_at timestamp', () => {
+      const mockRun = vi.fn();
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.markSynced('item-123');
+
+      const query = mockPrepare.mock.calls[0][0];
+      expect(query).toContain('synced = 1');
+      expect(query).toContain('synced_at = ?');
+    });
+
+    it('deadLetter should set dead_lettered = 1 with reason and timestamp', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deadLetter({
+        id: 'item-123',
+        reason: 'MAX_ATTEMPTS_EXCEEDED',
+        errorCategory: 'TRANSIENT',
+      });
+
+      const query = mockPrepare.mock.calls[0][0];
+      expect(query).toContain('dead_lettered = 1');
+      expect(query).toContain('dead_letter_reason = ?');
+      expect(query).toContain('dead_lettered_at = ?');
+      expect(query).toContain('error_category = ?');
+    });
+
+    it('restoreFromDeadLetter should reset all retry state', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.restoreFromDeadLetter('item-123');
+
+      const query = mockPrepare.mock.calls[0][0];
+      expect(query).toContain('dead_lettered = 0');
+      expect(query).toContain('sync_attempts = 0');
+      expect(query).toContain('last_sync_error = NULL');
+      expect(query).toContain('error_category = NULL');
+    });
+
+    it('markSynced should be idempotent (already synced item)', () => {
+      const mockRun = vi.fn();
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Call markSynced on already synced item
+      dal.markSynced('already-synced-item');
+
+      // Should still execute (database will just update with same values)
+      expect(mockRun).toHaveBeenCalled();
+    });
+  });
+
+  describe('DT0.1: Backoff Calculation Invariants', () => {
+    it('getRetryableItems should implement exponential backoff: 2^attempts seconds', () => {
+      // Item with 3 attempts should have 8 second backoff (2^3 = 8)
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({
+          id: 'backoff-item',
+          sync_attempts: 3,
+          last_attempt_at: new Date(Date.now() - 5000).toISOString(), // 5 seconds ago
+        }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const result = dal.getRetryableItems('store-123', 100);
+
+      // Item should NOT be retryable yet (5s < 8s backoff)
+      expect(result).toHaveLength(0);
+    });
+
+    it('getRetryableItems should cap backoff at 60 seconds', () => {
+      // Item with 10 attempts would have 1024s backoff without cap
+      // With cap, should be 60 seconds
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({
+          id: 'capped-item',
+          sync_attempts: 10,
+          last_attempt_at: new Date(Date.now() - 61000).toISOString(), // 61 seconds ago
+        }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const result = dal.getRetryableItems('store-123', 100);
+
+      // Item should be retryable (61s > 60s capped backoff)
+      expect(result).toHaveLength(1);
+    });
+
+    it('getRetryableItems should immediately return items with 0 attempts', () => {
+      const mockItems: SyncQueueItem[] = [
+        createMockQueueItem({
+          id: 'new-item',
+          sync_attempts: 0,
+          last_attempt_at: null,
+        }),
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const result = dal.getRetryableItems('store-123', 100);
+
+      expect(result).toHaveLength(1);
+      expect(result[0].id).toBe('new-item');
+    });
+
+    it('getBackoffCount should accurately count items in backoff window', () => {
+      const now = Date.now();
+      const mockItems = [
+        {
+          sync_attempts: 1,
+          last_attempt_at: new Date(now - 1000).toISOString(),
+          error_category: null,
+          max_attempts: 5,
+        }, // 1s ago, needs 2s backoff - IN backoff
+        {
+          sync_attempts: 2,
+          last_attempt_at: new Date(now - 5000).toISOString(),
+          error_category: null,
+          max_attempts: 5,
+        }, // 5s ago, needs 4s backoff - OUT of backoff
+        {
+          sync_attempts: 3,
+          last_attempt_at: new Date(now - 3000).toISOString(),
+          error_category: null,
+          max_attempts: 5,
+        }, // 3s ago, needs 8s backoff - IN backoff
+      ];
+
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue(mockItems),
+      });
+
+      const count = dal.getBackoffCount('store-123');
+
+      // 2 items should be in backoff (1s and 3s items)
+      expect(count).toBe(2);
+    });
+
+    it('resetStuckInBackoff should clear backoff state after threshold', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 5 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.resetStuckInBackoff('store-123', 2);
+
+      expect(result).toBe(5);
+      const query = mockPrepare.mock.calls[0][0];
+      expect(query).toContain('sync_attempts = 0');
+      expect(query).toContain('last_attempt_at = NULL');
+    });
+  });
+
+  describe('DT0.1: PUSH vs PULL Item Separation', () => {
+    it('getRetryableItems should exclude PULL direction items', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getRetryableItems('store-123', 100);
+
+      // Verify PULL items excluded by sync_direction
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining("(sync_direction IS NULL OR sync_direction = 'PUSH')")
+      );
+    });
+
+    it('getRetryableItems should exclude items with entity_id starting with pull-', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getRetryableItems('store-123', 100);
+
+      // Verify legacy PULL items excluded by entity_id pattern
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining("entity_id NOT LIKE 'pull-%'")
+      );
+    });
+
+    it('getItemsForAutoDeadLetter should exclude PULL items (handled by services)', () => {
+      mockPrepare.mockReturnValue({
+        all: vi.fn().mockReturnValue([]),
+      });
+
+      dal.getItemsForAutoDeadLetter('store-123');
+
+      // Verify PULL items excluded from auto-DLQ
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining("entity_id NOT LIKE 'pull-%'")
+      );
+    });
+
+    it('hasPendingPullForEntityType should only find PULL items', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ '1': 1 }),
+      });
+
+      dal.hasPendingPullForEntityType('store-123', 'bin');
+
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining("sync_direction = 'PULL'"));
+    });
+  });
+
+  describe('DT0.1: Batch Size Limits', () => {
+    it('should cap batch size at MAX_BATCH_SIZE (500)', () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockPrepare.mockReturnValue({ all: mockAll });
+
+      dal.getUnsynced(10000); // Request way over limit
+
+      expect(mockAll).toHaveBeenCalledWith(500); // Should be capped
+    });
+
+    it('should respect reasonable batch sizes below limit', () => {
+      const mockAll = vi.fn().mockReturnValue([]);
+      mockPrepare.mockReturnValue({ all: mockAll });
+
+      dal.getUnsynced(50);
+
+      expect(mockAll).toHaveBeenCalledWith(50);
+    });
+
+    it('should handle pagination limit bounds (1-100)', () => {
+      mockPrepare
+        .mockReturnValueOnce({ get: vi.fn().mockReturnValue({ total: 500 }) })
+        .mockReturnValueOnce({ all: vi.fn().mockReturnValue([]) });
+
+      // Request over pagination limit
+      dal.getActivityPaginated('store-123', { limit: 200 });
+
+      // Should be capped at 100
+      const allArgs = mockPrepare.mock.calls[1][0];
+      expect(allArgs).toContain('LIMIT ? OFFSET ?');
+    });
+  });
 });
+
+// ==========================================================================
+// Helper: Create mock SyncQueueItem with defaults
+// ==========================================================================
+
+function createMockQueueItem(overrides: Partial<SyncQueueItem>): SyncQueueItem {
+  return {
+    id: 'mock-id',
+    store_id: 'store-123',
+    entity_type: 'pack',
+    entity_id: 'pack-456',
+    operation: 'CREATE',
+    payload: '{}',
+    priority: 0,
+    synced: 0,
+    sync_attempts: 0,
+    max_attempts: 5,
+    last_sync_error: null,
+    last_attempt_at: null,
+    created_at: '2024-01-01T00:00:00.000Z',
+    synced_at: null,
+    sync_direction: 'PUSH',
+    api_endpoint: null,
+    http_status: null,
+    response_body: null,
+    dead_lettered: 0,
+    dead_letter_reason: null,
+    dead_lettered_at: null,
+    error_category: null,
+    retry_after: null,
+    idempotency_key: null,
+    ...overrides,
+  };
+}

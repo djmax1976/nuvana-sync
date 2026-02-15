@@ -84,6 +84,25 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:deleteDeadLetterItem', // Permanently delete DLQ item
   'sync:cleanupDeadLetter', // Cleanup old DLQ items
   'sync:manualDeadLetter', // Manually move item to DLQ
+  // Observability (Phase 6 - D6.4)
+  'sync:getMetrics', // Get current sync metrics snapshot
+  'sync:getMetricsHistory', // Get metrics history
+  'sync:getSLOConfig', // Get SLO configuration
+  'sync:updateSLOConfig', // Update SLO configuration
+  'sync:startMetricsCollection', // Start periodic metrics collection
+  'sync:stopMetricsCollection', // Stop periodic metrics collection
+  'sync:getAlerts', // Get active alerts and summary
+  'sync:getAlertHistory', // Get alert history
+  'sync:acknowledgeAlert', // Acknowledge an alert
+  'sync:resolveAlert', // Resolve an alert manually
+  'sync:getAlertThresholds', // Get alert thresholds
+  'sync:updateAlertThresholds', // Update alert thresholds
+  'sync:clearAllAlerts', // Clear all active alerts
+  'sync:getHealth', // Get sync health assessment
+  'sync:exportDiagnostics', // Generate diagnostic export
+  'sync:exportDiagnosticsToFile', // Export diagnostics to file
+  'sync:getErrorAnalysis', // Get error analysis
+  'sync:getSLODashboard', // Get SLO dashboard data
   // Dashboard
   'dashboard:getStats',
   'dashboard:getTodaySales',

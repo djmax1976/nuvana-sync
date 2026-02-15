@@ -753,9 +753,9 @@ describe('LotteryPage Scanner Loading States', () => {
     expect(screen.queryByTestId('close-day-button')).not.toBeInTheDocument();
   });
 
-  it('hides Close Day button but shows Manual Entry when can_close_independently is false', () => {
-    // Only scanner-based Close Day is hidden for non-lottery POS
-    // Manual Entry remains available for all POS types
+  it('hides both Close Day and Manual Entry buttons when can_close_independently is false (SEC-010)', () => {
+    // SEC-010: Non-LOTTERY POS types must use Day Close wizard
+    // Both independent close options are hidden for non-lottery POS
     const nonLotteryMockData = {
       ...createMockDayBins(),
       can_close_independently: false,
@@ -770,10 +770,10 @@ describe('LotteryPage Scanner Loading States', () => {
 
     render(<LotteryPage />);
 
-    // Close Day (scanner) button hidden for non-lottery POS
+    // SEC-010: Both buttons hidden for non-lottery POS
+    // These stores close lottery via Day Close Wizard (Step 1)
     expect(screen.queryByTestId('close-day-button')).not.toBeInTheDocument();
-    // Manual Entry available for ALL POS types
-    expect(screen.getByTestId('manual-entry-button')).toBeInTheDocument();
+    expect(screen.queryByTestId('manual-entry-button')).not.toBeInTheDocument();
   });
 
   it('shows Close Day button when can_close_independently is true (lottery POS)', () => {
@@ -856,8 +856,10 @@ describe('SEC-010: Close Day Button Authorization', () => {
     });
   });
 
-  describe('Manual Entry Availability (All POS Types)', () => {
-    it('SEC-010-UI-003: Manual Entry visible when can_close_independently is false', () => {
+  describe('Manual Entry Visibility (SEC-010 Enforcement)', () => {
+    it('SEC-010-UI-003: Manual Entry HIDDEN when can_close_independently is false', () => {
+      // SEC-010: Non-LOTTERY stores cannot close lottery independently
+      // They must use the Day Close wizard instead
       const mockData = {
         ...createMockDayBins(),
         can_close_independently: false,
@@ -872,10 +874,12 @@ describe('SEC-010: Close Day Button Authorization', () => {
 
       render(<LotteryPage />);
 
-      expect(screen.getByTestId('manual-entry-button')).toBeInTheDocument();
+      // SEC-010: Manual Entry button is hidden for non-LOTTERY stores
+      expect(screen.queryByTestId('manual-entry-button')).not.toBeInTheDocument();
     });
 
     it('SEC-010-UI-004: Manual Entry visible when can_close_independently is true', () => {
+      // SEC-010: LOTTERY POS type can close independently
       const mockData = {
         ...createMockDayBins(),
         can_close_independently: true,
@@ -890,6 +894,7 @@ describe('SEC-010: Close Day Button Authorization', () => {
 
       render(<LotteryPage />);
 
+      // LOTTERY stores can use Manual Entry
       expect(screen.getByTestId('manual-entry-button')).toBeInTheDocument();
     });
   });

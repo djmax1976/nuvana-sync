@@ -19,7 +19,17 @@
  * @security API-003: Centralized error handling
  */
 
-import { cloudApiService, type CloudGame, type CloudPack } from './cloud-api.service';
+import {
+  cloudApiService,
+  type CloudGame,
+  type CloudPack,
+  type SessionAwareOptions,
+} from './cloud-api.service';
+import {
+  syncSessionManager,
+  type SyncSessionContext,
+  type SyncCycleResult,
+} from './sync-session-manager.service';
 import { userSyncService } from './user-sync.service';
 import { lotteryBinsDAL } from '../dal/lottery-bins.dal';
 import { lotteryGamesDAL } from '../dal/lottery-games.dal';
@@ -1649,6 +1659,490 @@ export class BidirectionalSyncService {
   // ==========================================================================
 
   /**
+   * Sync all bidirectional entities with consolidated session management
+   *
+   * SYNC-5000-DESKTOP Phase 1: Uses a single session for all operations
+   * - Exactly one startSyncSession call at the beginning
+   * - Exactly one completeSyncSession call at the end
+   * - All operations share the same session context
+   * - Failure-safe completion with accurate stats
+   *
+   * Sync order is intentional for FK dependencies:
+   * 1. Users - packs reference users (received_by, activated_by, etc.)
+   * 2. Bins - packs reference bins (current_bin_id)
+   * 3. Games - packs reference games (game_id)
+   * 4. Packs (received → activated → returned)
+   *
+   * @security DB-006: Store-scoped via storeId propagation
+   * @security API-003: Session always completed, even on error
+   *
+   * @returns Combined sync results with session lifecycle stats
+   */
+  async syncAllWithConsolidatedSession(): Promise<{
+    cycleResult: SyncCycleResult;
+    bins: BidirectionalSyncResult;
+    games: BidirectionalSyncResult;
+    packs: {
+      received: BidirectionalSyncResult;
+      activated: BidirectionalSyncResult;
+      returned: BidirectionalSyncResult;
+    };
+  }> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    // Ensure cloudApiService is configured for session manager
+    syncSessionManager.setCloudApiService(cloudApiService);
+
+    log.info('Starting consolidated bidirectional sync (SYNC-5000 Phase 1)', {
+      storeId: store.store_id,
+    });
+
+    // Initialize result containers
+    let binsResult: BidirectionalSyncResult = { pushed: 0, pulled: 0, conflicts: 0, errors: [] };
+    let gamesResult: BidirectionalSyncResult = { pushed: 0, pulled: 0, conflicts: 0, errors: [] };
+    let packsResult = {
+      received: { pushed: 0, pulled: 0, conflicts: 0, errors: [] } as BidirectionalSyncResult,
+      activated: { pushed: 0, pulled: 0, conflicts: 0, errors: [] } as BidirectionalSyncResult,
+      returned: { pushed: 0, pulled: 0, conflicts: 0, errors: [] } as BidirectionalSyncResult,
+    };
+
+    // Run all sync operations within a single session
+    const cycleResult = await syncSessionManager.runSyncCycle(
+      store.store_id,
+      async (ctx: SyncSessionContext) => {
+        const sessionOptions: SessionAwareOptions = { sessionId: ctx.sessionId };
+
+        // Step 1: Sync users (FK dependency for packs)
+        try {
+          log.info('Syncing users before packs (FK dependency)', { sessionId: ctx.sessionId });
+          await userSyncService.syncUsers();
+          syncSessionManager.recordOperationStats('users', { pulled: 1 });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          log.warn('User sync failed, continuing with entity sync', { error: errorMsg });
+          syncSessionManager.recordOperationStats('users', { errors: 1 });
+        }
+
+        // Step 2: Sync bins with session reuse
+        try {
+          binsResult = await this.syncBinsWithSession(sessionOptions);
+          syncSessionManager.recordOperationStats('bins', {
+            pulled: binsResult.pulled,
+            errors: binsResult.errors.length,
+          });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          binsResult.errors.push(`Bins sync failed: ${errorMsg}`);
+          syncSessionManager.recordOperationStats('bins', { errors: 1 });
+        }
+
+        // Step 3: Sync games with session reuse
+        try {
+          gamesResult = await this.syncGamesWithSession(sessionOptions);
+          syncSessionManager.recordOperationStats('games', {
+            pulled: gamesResult.pulled,
+            pushed: gamesResult.pushed,
+            errors: gamesResult.errors.length,
+          });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          gamesResult.errors.push(`Games sync failed: ${errorMsg}`);
+          syncSessionManager.recordOperationStats('games', { errors: 1 });
+        }
+
+        // Step 4: Sync packs with session reuse (received → activated → returned)
+        try {
+          packsResult = await this.syncPacksWithSession(sessionOptions);
+          syncSessionManager.recordOperationStats('packs_received', {
+            pulled: packsResult.received.pulled,
+            errors: packsResult.received.errors.length,
+          });
+          syncSessionManager.recordOperationStats('packs_activated', {
+            pulled: packsResult.activated.pulled,
+            errors: packsResult.activated.errors.length,
+          });
+          syncSessionManager.recordOperationStats('packs_returned', {
+            pulled: packsResult.returned.pulled,
+            errors: packsResult.returned.errors.length,
+          });
+        } catch (error) {
+          const errorMsg = error instanceof Error ? error.message : 'Unknown error';
+          packsResult.received.errors.push(`Pack sync failed: ${errorMsg}`);
+          syncSessionManager.recordOperationStats('packs', { errors: 1 });
+        }
+      }
+    );
+
+    log.info('Consolidated bidirectional sync completed (SYNC-5000 Phase 1)', {
+      sessionSuccess: cycleResult.success,
+      durationMs: cycleResult.durationMs,
+      totalPulled: cycleResult.stats.pulled,
+      totalPushed: cycleResult.stats.pushed,
+      totalErrors: cycleResult.stats.errors,
+      bins: { pulled: binsResult.pulled },
+      games: { pushed: gamesResult.pushed, pulled: gamesResult.pulled },
+      packs: {
+        received: { pulled: packsResult.received.pulled },
+        activated: { pulled: packsResult.activated.pulled },
+        returned: { pulled: packsResult.returned.pulled },
+      },
+    });
+
+    return {
+      cycleResult,
+      bins: binsResult,
+      games: gamesResult,
+      packs: packsResult,
+    };
+  }
+
+  /**
+   * Sync bins with an existing session (internal session-aware method)
+   * Used by syncAllWithConsolidatedSession for session reuse
+   */
+  private async syncBinsWithSession(
+    sessionOptions: SessionAwareOptions
+  ): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = {
+      pushed: 0,
+      pulled: 0,
+      conflicts: 0,
+      errors: [],
+    };
+
+    const storeId = store.store_id;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'bins');
+
+    log.info('Syncing bins with session reuse', {
+      storeId,
+      lastPull: lastPull || 'full',
+      sessionId: sessionOptions.sessionId,
+    });
+
+    try {
+      // Pull bins with session reuse
+      const pullResponse = await cloudApiService.pullBins(lastPull || undefined, sessionOptions);
+
+      const cloudBins = pullResponse.bins || [];
+
+      if (cloudBins.length === 0) {
+        log.info('No bins to sync from cloud (session reuse)');
+        return result;
+      }
+
+      // Same processing logic as syncBins()
+      const activeBins = cloudBins.filter((bin) => !bin.deleted_at);
+      const activeCloudIds = new Set<string>(activeBins.map((b) => b.bin_id));
+
+      if (activeBins.length > 0) {
+        const binData = activeBins.map((cloudBin) => ({
+          bin_id: cloudBin.bin_id,
+          store_id: storeId,
+          name: cloudBin.name,
+          location: cloudBin.location,
+          display_order: cloudBin.display_order ?? 0,
+          is_active: cloudBin.is_active ?? true,
+        }));
+
+        const upsertResult = lotteryBinsDAL.batchUpsertFromCloud(binData, storeId);
+        result.pulled += upsertResult.created + upsertResult.updated;
+        result.errors.push(...upsertResult.errors);
+      }
+
+      // Soft delete bins not in cloud
+      const deletedCount = lotteryBinsDAL.batchSoftDeleteNotInCloudIds(storeId, activeCloudIds);
+      if (deletedCount > 0) {
+        log.info('Bins removed from cloud soft deleted locally', { deletedCount });
+      }
+
+      // Update timestamp on success
+      if (result.errors.length === 0) {
+        syncTimestampsDAL.setLastPullAt(storeId, 'bins', new Date().toISOString());
+      }
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull failed: ${message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync games with an existing session (internal session-aware method)
+   * Used by syncAllWithConsolidatedSession for session reuse
+   */
+  private async syncGamesWithSession(
+    sessionOptions: SessionAwareOptions
+  ): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = {
+      pushed: 0,
+      pulled: 0,
+      conflicts: 0,
+      errors: [],
+    };
+
+    const storeId = store.store_id;
+    const stateId = store.state_id || null;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'games');
+
+    log.info('Syncing games with session reuse', {
+      storeId,
+      stateId,
+      lastPull: lastPull || 'full',
+      sessionId: sessionOptions.sessionId,
+    });
+
+    try {
+      // Pull games with session reuse
+      const pullResponse = await cloudApiService.pullLotteryGames(
+        stateId,
+        lastPull || undefined,
+        sessionOptions
+      );
+
+      const cloudGames = pullResponse.games || [];
+
+      // Apply cloud changes with last-write-wins
+      for (const cloudGame of cloudGames) {
+        try {
+          const localGame = lotteryGamesDAL.findById(cloudGame.game_id);
+          let shouldUpdate = true;
+
+          if (localGame) {
+            const cloudTime = new Date(cloudGame.updated_at);
+            const localTime = new Date(localGame.updated_at);
+            if (localTime >= cloudTime) {
+              shouldUpdate = false;
+              result.conflicts++;
+            }
+          }
+
+          if (shouldUpdate) {
+            lotteryGamesDAL.upsertFromCloud({
+              game_id: cloudGame.game_id,
+              store_id: storeId,
+              game_code: cloudGame.game_code,
+              name: cloudGame.name,
+              price: cloudGame.price,
+              pack_value: cloudGame.pack_value,
+              tickets_per_pack: cloudGame.tickets_per_pack,
+              status: cloudGame.status,
+              updated_at: cloudGame.updated_at,
+            });
+            result.pulled++;
+          }
+        } catch (error) {
+          const message = error instanceof Error ? error.message : 'Unknown error';
+          result.errors.push(`Apply game ${cloudGame.game_id}: ${message}`);
+        }
+      }
+
+      // Update timestamp on success
+      syncTimestampsDAL.setLastPullAt(storeId, 'games', new Date().toISOString());
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull failed: ${message}`);
+      throw error;
+    }
+  }
+
+  /**
+   * Sync all packs with an existing session (internal session-aware method)
+   * Used by syncAllWithConsolidatedSession for session reuse
+   */
+  private async syncPacksWithSession(sessionOptions: SessionAwareOptions): Promise<{
+    received: BidirectionalSyncResult;
+    activated: BidirectionalSyncResult;
+    returned: BidirectionalSyncResult;
+  }> {
+    const received = await this.syncReceivedPacksWithSession(sessionOptions);
+    const activated = await this.syncActivatedPacksWithSession(sessionOptions);
+    const returned = await this.syncReturnedPacksWithSession(sessionOptions);
+
+    return { received, activated, returned };
+  }
+
+  /**
+   * Sync received packs with an existing session
+   */
+  private async syncReceivedPacksWithSession(
+    sessionOptions: SessionAwareOptions
+  ): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = { pushed: 0, pulled: 0, conflicts: 0, errors: [] };
+    const storeId = store.store_id;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'packs_received');
+
+    try {
+      let hasMore = true;
+      let sinceSequence: number | undefined;
+      const MAX_PAGES = 100;
+
+      for (let page = 0; hasMore && page < MAX_PAGES; page++) {
+        const pullResponse = await cloudApiService.pullReceivedPacks(
+          { since: lastPull || undefined, sinceSequence, limit: 500 },
+          sessionOptions
+        );
+
+        const cloudPacks = pullResponse.packs || [];
+        if (cloudPacks.length === 0 && page === 0) break;
+
+        const mappedPacks = cloudPacks.map((cp) => this.mapCloudPackToLocal(cp, storeId));
+        const validatedPacks = this.validateUserForeignKeysBatch(mappedPacks);
+
+        if (validatedPacks.length > 0) {
+          const upsertResult = lotteryPacksDAL.batchUpsertFromCloud(validatedPacks, storeId);
+          result.pulled += upsertResult.created + upsertResult.updated;
+          result.errors.push(...upsertResult.errors);
+        }
+
+        hasMore = pullResponse.syncMetadata.hasMore;
+        sinceSequence = pullResponse.syncMetadata.lastSequence;
+      }
+
+      if (result.errors.length === 0) {
+        syncTimestampsDAL.setLastPullAt(storeId, 'packs_received', new Date().toISOString());
+      }
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull received packs failed: ${message}`);
+      return result;
+    }
+  }
+
+  /**
+   * Sync activated packs with an existing session
+   */
+  private async syncActivatedPacksWithSession(
+    sessionOptions: SessionAwareOptions
+  ): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = { pushed: 0, pulled: 0, conflicts: 0, errors: [] };
+    const storeId = store.store_id;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'packs_activated');
+
+    try {
+      let hasMore = true;
+      let sinceSequence: number | undefined;
+      const MAX_PAGES = 100;
+
+      for (let page = 0; hasMore && page < MAX_PAGES; page++) {
+        const pullResponse = await cloudApiService.pullActivatedPacks(
+          { since: lastPull || undefined, sinceSequence, limit: 500 },
+          sessionOptions
+        );
+
+        const cloudPacks = pullResponse.packs || [];
+        if (cloudPacks.length === 0 && page === 0) break;
+
+        const mappedPacks = cloudPacks.map((cp) => this.mapCloudPackToLocal(cp, storeId));
+        const validatedPacks = this.validateUserForeignKeysBatch(mappedPacks);
+
+        if (validatedPacks.length > 0) {
+          const upsertResult = lotteryPacksDAL.batchUpsertFromCloud(validatedPacks, storeId);
+          result.pulled += upsertResult.created + upsertResult.updated;
+          result.errors.push(...upsertResult.errors);
+        }
+
+        hasMore = pullResponse.syncMetadata.hasMore;
+        sinceSequence = pullResponse.syncMetadata.lastSequence;
+      }
+
+      if (result.errors.length === 0) {
+        syncTimestampsDAL.setLastPullAt(storeId, 'packs_activated', new Date().toISOString());
+      }
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull activated packs failed: ${message}`);
+      return result;
+    }
+  }
+
+  /**
+   * Sync returned packs with an existing session
+   */
+  private async syncReturnedPacksWithSession(
+    sessionOptions: SessionAwareOptions
+  ): Promise<BidirectionalSyncResult> {
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      throw new Error('Store not configured');
+    }
+
+    const result: BidirectionalSyncResult = { pushed: 0, pulled: 0, conflicts: 0, errors: [] };
+    const storeId = store.store_id;
+    const lastPull = syncTimestampsDAL.getLastPullAt(storeId, 'packs_returned');
+
+    try {
+      let hasMore = true;
+      let sinceSequence: number | undefined;
+      const MAX_PAGES = 100;
+
+      for (let page = 0; hasMore && page < MAX_PAGES; page++) {
+        const pullResponse = await cloudApiService.pullReturnedPacks(
+          { since: lastPull || undefined, sinceSequence, limit: 500 },
+          sessionOptions
+        );
+
+        const cloudPacks = pullResponse.packs || [];
+        if (cloudPacks.length === 0 && page === 0) break;
+
+        const mappedPacks = cloudPacks.map((cp) => this.mapCloudPackToLocal(cp, storeId));
+        const fkValidatedPacks = this.validateUserForeignKeysBatch(mappedPacks);
+        const { validPacks, errors } = this.validatePackDataIntegrity(fkValidatedPacks, 'returned');
+        result.errors.push(...errors);
+
+        if (validPacks.length > 0) {
+          const upsertResult = lotteryPacksDAL.batchUpsertFromCloud(validPacks, storeId);
+          result.pulled += upsertResult.created + upsertResult.updated;
+          result.errors.push(...upsertResult.errors);
+        }
+
+        hasMore = pullResponse.syncMetadata.hasMore;
+        sinceSequence = pullResponse.syncMetadata.lastSequence;
+      }
+
+      if (result.errors.length === 0) {
+        syncTimestampsDAL.setLastPullAt(storeId, 'packs_returned', new Date().toISOString());
+      }
+
+      return result;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : 'Unknown error';
+      result.errors.push(`Pull returned packs failed: ${message}`);
+      return result;
+    }
+  }
+
+  /**
    * Sync all bidirectional entities (bins, games, and packs)
    *
    * Sync order is intentional for FK dependencies:
@@ -1657,6 +2151,7 @@ export class BidirectionalSyncService {
    * 3. Games - packs reference games (game_id)
    * 4. Packs (received → activated → returned)
    *
+   * @deprecated Use syncAllWithConsolidatedSession() for SYNC-5000 compliance
    * @returns Combined sync results
    */
   async syncAll(): Promise<{

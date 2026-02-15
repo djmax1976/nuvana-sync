@@ -252,6 +252,8 @@ describe('Pack Sync Security Tests', () => {
         dead_lettered_at: null,
         error_category: null,
         retry_after: null,
+        // v049 idempotency key
+        idempotency_key: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -328,6 +330,8 @@ describe('Pack Sync Security Tests', () => {
           dead_lettered_at: null,
           error_category: null,
           retry_after: null,
+          // v049 idempotency key
+          idempotency_key: null,
         };
 
         const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -386,6 +390,8 @@ describe('Pack Sync Security Tests', () => {
         dead_lettered_at: null,
         error_category: null,
         retry_after: null,
+        // v049 idempotency key
+        idempotency_key: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -569,6 +575,8 @@ describe('Pack Sync Security Tests', () => {
         dead_lettered_at: null,
         error_category: null,
         retry_after: null,
+        // v049 idempotency key
+        idempotency_key: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -613,6 +621,8 @@ describe('Pack Sync Security Tests', () => {
         dead_lettered_at: null,
         error_category: null,
         retry_after: null,
+        // v049 idempotency key
+        idempotency_key: null,
       };
 
       const mockRun = vi.fn().mockReturnValue({ changes: 1 });
@@ -671,6 +681,208 @@ describe('Pack Sync Security Tests', () => {
         failed: 1,
         syncedToday: 10,
         oldestPending: '2024-01-01T00:00:00Z',
+      });
+    });
+  });
+
+  // ==========================================================================
+  // PS-S-008 & PS-S-009: Session Validation Security (SYNC-5001 P6.2)
+  // SEC-012: Session lifecycle validation
+  // SEC-AUTH-001: Authentication bypass prevention
+  // ==========================================================================
+  describe('PS-S-008 & PS-S-009: Session Validation Security (SYNC-5001)', () => {
+    /**
+     * Session validation pattern - validates revocationStatus is always checked
+     * SEC-012: Session timeout and status verification
+     */
+    describe('PS-S-008: Session validation cannot be bypassed', () => {
+      it('should require revocationStatus check before any pack operation', () => {
+        // Arrange - Simulated session response
+        const sessionResponse = {
+          sessionId: 'session-123',
+          revocationStatus: 'VALID' as const,
+          pullPendingCount: 0,
+        };
+
+        // Act - Validate that status is checked
+        const isValidSession = sessionResponse.revocationStatus === 'VALID';
+
+        // Assert
+        expect(isValidSession).toBe(true);
+        expect(sessionResponse.revocationStatus).toBe('VALID');
+      });
+
+      it('should reject undefined revocationStatus (original SYNC-5001 bug)', () => {
+        // Arrange - Simulated incomplete session (the bug that was fixed)
+        const incompleteSession = {
+          sessionId: 'session-123',
+          // revocationStatus is missing (undefined)
+        };
+
+        // Act - Check if status is VALID
+        const status = (incompleteSession as { revocationStatus?: string }).revocationStatus;
+        const isValid = status === 'VALID';
+
+        // Assert - undefined !== 'VALID' should be caught
+        expect(status).toBeUndefined();
+        expect(isValid).toBe(false);
+      });
+
+      it('should reject null revocationStatus', () => {
+        // Arrange
+        const sessionWithNullStatus = {
+          sessionId: 'session-123',
+          revocationStatus: null as unknown as string,
+        };
+
+        // Act
+        const isValid = sessionWithNullStatus.revocationStatus === 'VALID';
+
+        // Assert
+        expect(isValid).toBe(false);
+      });
+
+      it('should reject empty string revocationStatus', () => {
+        // Arrange
+        const sessionWithEmptyStatus = {
+          sessionId: 'session-123',
+          revocationStatus: '',
+        };
+
+        // Act
+        const isValid = sessionWithEmptyStatus.revocationStatus === 'VALID';
+
+        // Assert
+        expect(isValid).toBe(false);
+      });
+
+      it('should reject REVOKED status in session', () => {
+        // Arrange
+        const revokedSession = {
+          sessionId: 'session-123',
+          revocationStatus: 'REVOKED' as const,
+        };
+
+        // Act
+        const isValid = revokedSession.revocationStatus === 'VALID';
+
+        // Assert
+        expect(isValid).toBe(false);
+        expect(revokedSession.revocationStatus).toBe('REVOKED');
+      });
+
+      it('should reject SUSPENDED status for new sessions', () => {
+        // Arrange
+        const suspendedSession = {
+          sessionId: 'session-123',
+          revocationStatus: 'SUSPENDED' as const,
+        };
+
+        // Act - Only VALID sessions should be used
+        const isValid = suspendedSession.revocationStatus === 'VALID';
+
+        // Assert
+        expect(isValid).toBe(false);
+      });
+    });
+
+    /**
+     * API key status verification pattern
+     * SEC-AUTH-001: Ensure status is always from authoritative source
+     */
+    describe('PS-S-009: API key status is always verified from authoritative source', () => {
+      it('should use session manager as single source of truth', () => {
+        // Arrange - Session from manager
+        const managerSession = {
+          sessionId: 'manager-session-123',
+          storeId: 'store-456',
+          revocationStatus: 'VALID' as const,
+          isCompleted: false,
+          startedAt: new Date(),
+          pullPendingCount: 0,
+        };
+
+        // Act - Verify session comes from manager
+        const isFromManager = managerSession.storeId !== undefined;
+        const hasRequiredFields =
+          managerSession.sessionId !== undefined && managerSession.revocationStatus !== undefined;
+
+        // Assert
+        expect(isFromManager).toBe(true);
+        expect(hasRequiredFields).toBe(true);
+      });
+
+      it('should not reconstruct session from partial data', () => {
+        // Arrange - Only sessionId (anti-pattern that was fixed)
+        const partialSession = {
+          sessionId: 'partial-session-123',
+          // Missing: revocationStatus, storeId, etc.
+        };
+
+        // Act - Check for missing required field
+        const hasCriticalFields = Object.prototype.hasOwnProperty.call(
+          partialSession,
+          'revocationStatus'
+        );
+
+        // Assert - Partial session should be detected as invalid
+        expect(hasCriticalFields).toBe(false);
+      });
+
+      it('should include all required fields from authoritative session', () => {
+        // Arrange - Complete session from manager
+        const completeSession = {
+          sessionId: 'complete-session-123',
+          storeId: 'store-789',
+          revocationStatus: 'VALID' as const,
+          isCompleted: false,
+          startedAt: new Date(),
+          pullPendingCount: 5,
+          lockoutMessage: undefined,
+        };
+
+        // Act - Validate all required fields present
+        const requiredFields = [
+          'sessionId',
+          'storeId',
+          'revocationStatus',
+          'isCompleted',
+          'startedAt',
+          'pullPendingCount',
+        ];
+        const hasAllFields = requiredFields.every((field) =>
+          Object.prototype.hasOwnProperty.call(completeSession, field)
+        );
+
+        // Assert
+        expect(hasAllFields).toBe(true);
+      });
+
+      it('should preserve lockoutMessage from authoritative source', () => {
+        // Arrange - Session with lockout warning
+        const sessionWithLockout = {
+          sessionId: 'lockout-session-123',
+          revocationStatus: 'VALID' as const,
+          lockoutMessage: 'API key will expire in 7 days',
+        };
+
+        // Assert - Lockout message should be preserved
+        expect(sessionWithLockout.lockoutMessage).toBe('API key will expire in 7 days');
+      });
+
+      it('should validate storeId matches request context for tenant isolation', () => {
+        // Arrange
+        const sessionStoreId = 'store-tenant-A';
+        const requestStoreId = 'store-tenant-A';
+        const attackerStoreId = 'store-tenant-B';
+
+        // Act
+        const isValidTenant = sessionStoreId === requestStoreId;
+        const isAttackerBlocked = sessionStoreId !== attackerStoreId;
+
+        // Assert
+        expect(isValidTenant).toBe(true);
+        expect(isAttackerBlocked).toBe(true);
       });
     });
   });

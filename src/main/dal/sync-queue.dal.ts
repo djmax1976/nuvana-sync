@@ -31,25 +31,32 @@ export type SyncDirection = 'PUSH' | 'PULL';
  * Error category for classification (per ERR-007)
  * Used to determine retry vs dead-letter routing
  *
+ * Phase 4 (D4.2): Enhanced classification with CONFLICT support
+ *
  * - TRANSIENT: Network errors, 5xx, rate limits - retry with exponential backoff
  * - PERMANENT: 400, 404, 422 - dead letter immediately (no retry will succeed)
  * - STRUCTURAL: Missing required fields - dead letter immediately
+ * - CONFLICT: 409 duplicate/conflict - may be resolvable, limited retries
  * - UNKNOWN: Unclassified errors - retry with extended backoff, then dead letter
  */
-export type ErrorCategory = 'TRANSIENT' | 'PERMANENT' | 'STRUCTURAL' | 'UNKNOWN';
+export type ErrorCategory = 'TRANSIENT' | 'PERMANENT' | 'STRUCTURAL' | 'CONFLICT' | 'UNKNOWN';
 
 /**
  * Dead letter reason - why item was moved to DLQ (per MQ-002)
  *
+ * Phase 4 (D4.2): Added CONFLICT_ERROR for 409 duplicate handling
+ *
  * - MAX_ATTEMPTS_EXCEEDED: Hit max_attempts with non-transient error
  * - PERMANENT_ERROR: Cloud returned permanent error (400, 404, 422)
  * - STRUCTURAL_FAILURE: Missing required fields, invalid payload structure
+ * - CONFLICT_ERROR: Duplicate/conflict error (409) - may need manual resolution
  * - MANUAL: Manually dead-lettered by operator
  */
 export type DeadLetterReason =
   | 'MAX_ATTEMPTS_EXCEEDED'
   | 'PERMANENT_ERROR'
   | 'STRUCTURAL_FAILURE'
+  | 'CONFLICT_ERROR'
   | 'MANUAL';
 
 /**
@@ -81,6 +88,8 @@ export interface SyncQueueItem extends StoreEntity {
   dead_lettered_at: string | null;
   error_category: ErrorCategory | null;
   retry_after: string | null;
+  // Idempotency key for deduplication (v049 migration)
+  idempotency_key: string | null;
 }
 
 /**
@@ -920,6 +929,158 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Check if a pending item exists with the given idempotency key
+   *
+   * MQ-001: Idempotency check before enqueue to prevent duplicates
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param idempotencyKey - Idempotency key to check
+   * @returns true if pending item exists with this key
+   */
+  hasPendingIdempotencyKey(storeId: string, idempotencyKey: string): boolean {
+    const stmt = this.db.prepare(`
+      SELECT 1 FROM sync_queue
+      WHERE store_id = ?
+        AND idempotency_key = ?
+        AND synced = 0
+        AND dead_lettered = 0
+      LIMIT 1
+    `);
+
+    return stmt.get(storeId, idempotencyKey) !== undefined;
+  }
+
+  /**
+   * Find pending item by idempotency key
+   *
+   * MQ-001: Retrieve existing item for deduplication or update
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param idempotencyKey - Idempotency key to search
+   * @returns Pending item or null if not found
+   */
+  findPendingByIdempotencyKey(storeId: string, idempotencyKey: string): SyncQueueItem | null {
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND idempotency_key = ?
+        AND synced = 0
+        AND dead_lettered = 0
+      LIMIT 1
+    `);
+
+    const result = stmt.get(storeId, idempotencyKey) as SyncQueueItem | undefined;
+    return result || null;
+  }
+
+  /**
+   * Enqueue with idempotency key and deduplication
+   *
+   * If an item with the same idempotency key exists, updates its payload
+   * instead of creating a duplicate entry.
+   *
+   * MQ-001: Idempotent enqueue via idempotency key
+   * SEC-006: Parameterized INSERT/UPDATE
+   * DB-006: TENANT_ISOLATION - store_id included
+   *
+   * @param data - Item to enqueue
+   * @param idempotencyKey - Pre-computed idempotency key
+   * @returns Created or updated queue item with dedupe flag
+   */
+  enqueueWithIdempotency(
+    data: CreateSyncQueueItemData,
+    idempotencyKey: string
+  ): { item: SyncQueueItem; deduplicated: boolean } {
+    // Check for existing pending item with same idempotency key
+    const existing = this.findPendingByIdempotencyKey(data.store_id, idempotencyKey);
+
+    if (existing) {
+      // Update existing item's payload instead of creating duplicate
+      const now = this.now();
+      const stmt = this.db.prepare(`
+        UPDATE sync_queue SET
+          payload = ?,
+          priority = CASE WHEN ? > priority THEN ? ELSE priority END
+        WHERE id = ?
+      `);
+
+      const priority = data.priority || 0;
+      stmt.run(JSON.stringify(data.payload), priority, priority, existing.id);
+
+      log.debug('Deduplicated sync queue item (updated existing)', {
+        idempotencyKey,
+        existingId: existing.id,
+        entityType: data.entity_type,
+        entityId: data.entity_id,
+      });
+
+      // Re-fetch updated item
+      const updated = this.findById(existing.id);
+      if (!updated) {
+        throw new Error(`Failed to retrieve updated sync queue item: ${existing.id}`);
+      }
+
+      return { item: updated, deduplicated: true };
+    }
+
+    // Create new item with idempotency key
+    const id = this.generateId();
+    const now = this.now();
+
+    // SEC-006: Validate sync_direction against allowlist
+    const ALLOWED_DIRECTIONS: SyncDirection[] = ['PUSH', 'PULL'];
+    const direction: SyncDirection =
+      data.sync_direction && ALLOWED_DIRECTIONS.includes(data.sync_direction)
+        ? data.sync_direction
+        : 'PUSH';
+
+    // PULL items are tracking-only, use lower retry count
+    const maxAttempts = direction === 'PULL' ? PULL_MAX_ATTEMPTS : DEFAULT_MAX_ATTEMPTS;
+
+    const stmt = this.db.prepare(`
+      INSERT INTO sync_queue (
+        id, store_id, entity_type, entity_id, operation,
+        payload, priority, synced, sync_attempts, max_attempts,
+        created_at, sync_direction, idempotency_key
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, 0, 0, ?, ?, ?, ?)
+    `);
+
+    stmt.run(
+      id,
+      data.store_id,
+      data.entity_type,
+      data.entity_id,
+      data.operation,
+      JSON.stringify(data.payload),
+      data.priority || 0,
+      maxAttempts,
+      now,
+      direction,
+      idempotencyKey
+    );
+
+    log.debug('Sync item enqueued with idempotency key', {
+      id,
+      idempotencyKey,
+      entityType: data.entity_type,
+      entityId: data.entity_id,
+      operation: data.operation,
+      direction,
+    });
+
+    const created = this.findById(id);
+    if (!created) {
+      throw new Error(`Failed to retrieve created sync queue item: ${id}`);
+    }
+
+    return { item: created, deduplicated: false };
+  }
+
+  /**
    * Check if there's already a pending PULL operation for an entity type
    *
    * Used to prevent creating duplicate PULL tracking items every sync cycle.
@@ -991,12 +1152,14 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
    */
   getPendingPullItemByAction(storeId: string, action: string): SyncQueueItem | null {
     // SEC-006: Allowlist validation for action to prevent injection via JSON LIKE
+    // Phase 5 (D5.3): Added 'pull_returned_packs' to support all pack sync operations
     const ALLOWED_ACTIONS = [
       'pull_bins',
       'pull_games',
       'pull_users',
       'pull_received_packs',
       'pull_activated_packs',
+      'pull_returned_packs',
     ];
 
     if (!ALLOWED_ACTIONS.includes(action)) {
@@ -1104,7 +1267,10 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     const allItems = stmt.all(storeId) as SyncQueueItem[];
 
-    // Filter items based on exponential backoff
+    // Filter items based on:
+    // 1. Server-specified retry_after (for 429 rate limits)
+    // 2. Jittered exponential backoff (prevents thundering herd)
+    // Phase 4 (D4.1): Align retry picker with stored retry scheduling fields
     const retryableItems: SyncQueueItem[] = [];
 
     for (const item of allItems) {
@@ -1116,17 +1282,39 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
         continue;
       }
 
-      // Calculate backoff delay in seconds: min(2^attempts, 60)
-      const backoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+      // D4.1: Respect server-specified retry_after (for 429 responses)
+      if (item.retry_after) {
+        const retryAfterTime = new Date(item.retry_after).getTime();
+        if (now.getTime() < retryAfterTime) {
+          // Still waiting for server-specified retry time
+          continue;
+        }
+      }
+
+      // D4.3: Calculate jittered exponential backoff
+      // Base formula: min(2^attempts, 60) * (1 + random * 0.3)
+      // Jitter prevents thundering herd when many items retry simultaneously
+      const baseBackoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+
+      // Apply jitter: ±30% variation
+      // Note: For deterministic testing, jitter is only applied to base delay
+      const jitterFactor = 0.3;
+      const jitterMultiplier = 1 + (Math.random() - 0.5) * 2 * jitterFactor;
+      const jitteredBackoffSeconds = baseBackoffSeconds * jitterMultiplier;
+
+      // Extended backoff for UNKNOWN errors (more cautious retry)
+      const categoryMultiplier = item.error_category === 'UNKNOWN' ? 1.5 : 1;
+      const finalBackoffMs = jitteredBackoffSeconds * categoryMultiplier * 1000;
+
       const lastAttempt = new Date(item.last_attempt_at);
-      const nextRetryTime = new Date(lastAttempt.getTime() + backoffSeconds * 1000);
+      const nextRetryTime = new Date(lastAttempt.getTime() + finalBackoffMs);
 
       if (now >= nextRetryTime) {
         retryableItems.push(item);
       }
     }
 
-    log.debug('Got retryable items with backoff', {
+    log.debug('Got retryable items with jittered backoff', {
       storeId,
       totalCandidates: allItems.length,
       retryable: retryableItems.length,
@@ -1155,8 +1343,9 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     // Excludes PULL tracking items by sync_direction AND entity_id pattern
     // Excludes dead_lettered items
     // Includes TRANSIENT items in extended retry window (max_attempts to max_attempts * 2)
+    // D4.1: Also select retry_after for accurate backoff counting
     const stmt = this.db.prepare(`
-      SELECT sync_attempts, last_attempt_at, error_category, max_attempts FROM sync_queue
+      SELECT sync_attempts, last_attempt_at, error_category, max_attempts, retry_after FROM sync_queue
       WHERE store_id = ? AND synced = 0 AND dead_lettered = 0
         AND sync_attempts > 0 AND last_attempt_at IS NOT NULL
         AND (sync_direction IS NULL OR sync_direction = 'PUSH')
@@ -1172,13 +1361,30 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       last_attempt_at: string;
       error_category: string | null;
       max_attempts: number;
+      retry_after: string | null;
     }>;
 
     let inBackoff = 0;
+    const nowMs = now.getTime();
+
     for (const item of items) {
-      const backoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+      // D4.1: Check server-specified retry_after first
+      if (item.retry_after) {
+        const retryAfterTime = new Date(item.retry_after).getTime();
+        if (nowMs < retryAfterTime) {
+          inBackoff++;
+          continue;
+        }
+      }
+
+      // D4.3: Use base backoff (no jitter for count - deterministic)
+      const baseBackoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+      // Extended backoff for UNKNOWN errors
+      const categoryMultiplier = item.error_category === 'UNKNOWN' ? 1.5 : 1;
+      const backoffMs = baseBackoffSeconds * categoryMultiplier * 1000;
+
       const lastAttempt = new Date(item.last_attempt_at);
-      const nextRetryTime = new Date(lastAttempt.getTime() + backoffSeconds * 1000);
+      const nextRetryTime = new Date(lastAttempt.getTime() + backoffMs);
 
       if (now < nextRetryTime) {
         inBackoff++;
@@ -1833,12 +2039,14 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
    */
   cleanupStalePullTracking(storeId: string, actionPattern: string, excludeId: string): number {
     // SEC-006: Allowlist validation for actionPattern to prevent injection via JSON LIKE
+    // Phase 5 (D5.3): Added 'pull_returned_packs' to support all pack sync operations
     const ALLOWED_ACTIONS = [
       'pull_bins',
       'pull_games',
       'pull_users',
       'pull_received_packs',
       'pull_activated_packs',
+      'pull_returned_packs',
     ];
 
     if (!ALLOWED_ACTIONS.includes(actionPattern)) {
@@ -2259,6 +2467,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       MAX_ATTEMPTS_EXCEEDED: 0,
       PERMANENT_ERROR: 0,
       STRUCTURAL_FAILURE: 0,
+      CONFLICT_ERROR: 0,
       MANUAL: 0,
     };
     for (const row of reasonRows) {
@@ -2304,6 +2513,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
       TRANSIENT: 0,
       PERMANENT: 0,
       STRUCTURAL: 0,
+      CONFLICT: 0,
       UNKNOWN: 0,
     };
     for (const row of errorCategoryRows) {
@@ -2481,6 +2691,321 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
     `);
 
     return stmt.all(storeId) as SyncQueueItem[];
+  }
+
+  // ==========================================================================
+  // Phase 3: Batching, Partitioned Dispatch, and Backpressure Methods
+  // ==========================================================================
+
+  /**
+   * Get pending item counts grouped by entity type (partition depths)
+   *
+   * Used by BatchDispatcher to determine partition sizes and prioritize processing.
+   * Returns counts for each entity type with pending items (not synced, not dead-lettered).
+   *
+   * SEC-006: Parameterized GROUP BY query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Single aggregation query, uses entity_type index
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Object with entity types as keys and pending counts as values
+   */
+  getPartitionDepths(storeId: string): Record<string, number> {
+    const stmt = this.db.prepare(`
+      SELECT entity_type, COUNT(*) as count
+      FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+      GROUP BY entity_type
+    `);
+
+    const rows = stmt.all(storeId) as Array<{ entity_type: string; count: number }>;
+
+    const depths: Record<string, number> = {};
+    for (const row of rows) {
+      depths[row.entity_type] = row.count;
+    }
+
+    return depths;
+  }
+
+  /**
+   * Get the timestamp of the oldest pending item
+   *
+   * Used by BatchDispatcher to calculate queue age for monitoring and alerting.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Uses idx_sync_queue_created (store_id, synced, created_at)
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns ISO 8601 timestamp or null if no pending items
+   */
+  getOldestPendingTimestamp(storeId: string): string | null {
+    const stmt = this.db.prepare(`
+      SELECT created_at FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+      ORDER BY created_at ASC
+      LIMIT 1
+    `);
+
+    const result = stmt.get(storeId) as { created_at: string } | undefined;
+    return result?.created_at || null;
+  }
+
+  /**
+   * Get retryable items for a specific entity type (partition)
+   *
+   * Used by BatchDispatcher for partitioned processing. Returns items that are
+   * eligible for retry based on backoff schedule and error category.
+   *
+   * SEC-006: Parameterized query with validated entity type
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * API-002: Built-in rate limiting via backoff
+   * PERF: Uses entity_type + created_at ordering
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param entityType - Entity type to filter (validated against allowlist)
+   * @param limit - Maximum items to return (bounded to MAX_BATCH_SIZE)
+   * @returns Array of retryable items for the specified partition
+   */
+  getRetryableItemsByEntityType(
+    storeId: string,
+    entityType: string,
+    limit: number = DEFAULT_BATCH_SIZE
+  ): SyncQueueItem[] {
+    const safeLimit = Math.min(limit, MAX_BATCH_SIZE);
+    const now = new Date();
+
+    // SEC-006: Validate entity type against allowlist to prevent injection
+    const ALLOWED_ENTITY_TYPES = [
+      'pack',
+      'game',
+      'bin',
+      'shift',
+      'user',
+      'employee',
+      'day_close',
+      'day_open',
+      'shift_opening',
+      'shift_closing',
+      'variance_approval',
+    ];
+
+    if (!ALLOWED_ENTITY_TYPES.includes(entityType)) {
+      log.warn('Invalid entity type for partitioned query - rejected', {
+        storeId,
+        entityType,
+        allowed: ALLOWED_ENTITY_TYPES,
+      });
+      return [];
+    }
+
+    // Get all candidates for this entity type, then filter by backoff
+    // Excludes PULL tracking items
+    const stmt = this.db.prepare(`
+      SELECT * FROM sync_queue
+      WHERE store_id = ?
+        AND entity_type = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND (sync_direction IS NULL OR sync_direction = 'PUSH')
+        AND entity_id NOT LIKE 'pull-%'
+        AND (
+          sync_attempts < max_attempts
+          OR (error_category = 'TRANSIENT' AND sync_attempts < max_attempts * 2)
+        )
+      ORDER BY priority DESC, created_at ASC
+    `);
+
+    const allItems = stmt.all(storeId, entityType) as SyncQueueItem[];
+
+    // Filter items based on:
+    // 1. Server-specified retry_after (for 429 rate limits)
+    // 2. Jittered exponential backoff (prevents thundering herd)
+    // Phase 4 (D4.1): Align retry picker with stored retry scheduling fields
+    const retryableItems: SyncQueueItem[] = [];
+
+    for (const item of allItems) {
+      if (retryableItems.length >= safeLimit) break;
+
+      // First attempt or never attempted
+      if (item.sync_attempts === 0 || !item.last_attempt_at) {
+        retryableItems.push(item);
+        continue;
+      }
+
+      // D4.1: Respect server-specified retry_after (for 429 responses)
+      if (item.retry_after) {
+        const retryAfterTime = new Date(item.retry_after).getTime();
+        if (now.getTime() < retryAfterTime) {
+          // Still waiting for server-specified retry time
+          continue;
+        }
+      }
+
+      // D4.3: Calculate jittered exponential backoff
+      const baseBackoffSeconds = Math.min(Math.pow(2, item.sync_attempts), 60);
+
+      // Apply jitter: ±30% variation
+      const jitterFactor = 0.3;
+      const jitterMultiplier = 1 + (Math.random() - 0.5) * 2 * jitterFactor;
+      const jitteredBackoffSeconds = baseBackoffSeconds * jitterMultiplier;
+
+      // Extended backoff for UNKNOWN errors
+      const categoryMultiplier = item.error_category === 'UNKNOWN' ? 1.5 : 1;
+      const finalBackoffMs = jitteredBackoffSeconds * categoryMultiplier * 1000;
+
+      const lastAttempt = new Date(item.last_attempt_at);
+      const nextRetryTime = new Date(lastAttempt.getTime() + finalBackoffMs);
+
+      if (now >= nextRetryTime) {
+        retryableItems.push(item);
+      }
+    }
+
+    return retryableItems;
+  }
+
+  /**
+   * Update the payload of an existing pending item
+   *
+   * Used by BatchDispatcher for COALESCE backpressure policy.
+   * When a duplicate operation arrives and queue is full, the existing item's
+   * payload is updated instead of creating a new entry.
+   *
+   * SEC-006: Parameterized UPDATE query
+   * MQ-001: Supports idempotent message coalescing
+   *
+   * @param id - Queue item ID
+   * @param payload - New payload JSON string
+   */
+  updatePayload(id: string, payload: string): void {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        payload = ?
+      WHERE id = ? AND synced = 0 AND dead_lettered = 0
+    `);
+
+    const result = stmt.run(payload, id);
+
+    if (result.changes > 0) {
+      log.debug('Sync queue item payload updated (coalesced)', { id });
+    }
+  }
+
+  /**
+   * Mark an item as deferred due to backpressure
+   *
+   * Used by BatchDispatcher for DEFER backpressure policy.
+   * Deferred items are still in queue but have lower processing priority.
+   *
+   * Implementation note: Sets priority to -1 (below normal priority 0)
+   * to deprioritize deferred items while keeping them in the queue.
+   *
+   * SEC-006: Parameterized UPDATE query
+   *
+   * @param id - Queue item ID
+   */
+  markDeferred(id: string): void {
+    // Use priority -1 to indicate deferred status (below normal priority 0)
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        priority = -1
+      WHERE id = ? AND synced = 0 AND dead_lettered = 0
+    `);
+
+    const result = stmt.run(id);
+
+    if (result.changes > 0) {
+      log.info('Sync queue item marked as deferred', { id });
+    }
+  }
+
+  /**
+   * Get count of deferred items
+   *
+   * Used for monitoring backpressure state.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Count of deferred items (priority < 0)
+   */
+  getDeferredCount(storeId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND priority < 0
+    `);
+
+    const result = stmt.get(storeId) as { count: number };
+    return result.count;
+  }
+
+  /**
+   * Restore deferred items to normal priority
+   *
+   * Called when queue depth drops below threshold to resume normal processing.
+   *
+   * SEC-006: Parameterized UPDATE query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Number of items restored
+   */
+  restoreDeferredItems(storeId: string): number {
+    const stmt = this.db.prepare(`
+      UPDATE sync_queue SET
+        priority = 0
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+        AND priority < 0
+    `);
+
+    const result = stmt.run(storeId);
+
+    if (result.changes > 0) {
+      log.info('Deferred items restored to normal priority', {
+        storeId,
+        count: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
+   * Get queue size estimate in bytes
+   *
+   * Estimates total payload size of pending items for backpressure decisions.
+   * Uses SUM(LENGTH(payload)) for accurate size calculation.
+   *
+   * SEC-006: Parameterized query
+   * DB-006: TENANT_ISOLATION - Query scoped to store_id
+   * PERF: Single aggregation query
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @returns Estimated queue size in bytes
+   */
+  getQueueSizeBytes(storeId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT COALESCE(SUM(LENGTH(payload)), 0) as size_bytes
+      FROM sync_queue
+      WHERE store_id = ?
+        AND synced = 0
+        AND dead_lettered = 0
+    `);
+
+    const result = stmt.get(storeId) as { size_bytes: number };
+    return result.size_bytes;
   }
 }
 

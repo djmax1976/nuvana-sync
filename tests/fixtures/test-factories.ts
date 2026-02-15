@@ -45,6 +45,30 @@ export const POS_TYPES = {
   UNKNOWN: 'UNKNOWN',
 } as const satisfies Record<string, POSSystemType>;
 
+/**
+ * Array of non-LOTTERY POS types for parameterized security tests.
+ * SEC-010: These POS types CANNOT close lottery independently.
+ * They must use the Day Close wizard (fromWizard=true).
+ *
+ * @see tests/security/lottery.handlers.pos-type-enforcement.spec.ts
+ */
+export const NON_LOTTERY_POS_TYPES = [
+  POS_TYPES.GILBARCO_PASSPORT,
+  POS_TYPES.GILBARCO_NAXML,
+  POS_TYPES.VERIFONE_RUBY2,
+  POS_TYPES.VERIFONE_COMMANDER,
+  POS_TYPES.SQUARE_REST,
+  POS_TYPES.CLOVER_REST,
+  POS_TYPES.NCR_RADIANT,
+  POS_TYPES.INFOR_POS,
+  POS_TYPES.ORACLE_SIMPHONY,
+  POS_TYPES.CUSTOM_API,
+  POS_TYPES.FILE_BASED,
+  POS_TYPES.MANUAL,
+  POS_TYPES.MANUAL_ENTRY,
+  POS_TYPES.UNKNOWN,
+] as const;
+
 export const POS_CONNECTION_TYPES = {
   FILE: 'FILE',
   API: 'API',

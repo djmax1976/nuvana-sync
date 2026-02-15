@@ -40,6 +40,8 @@ const TRANSIENT_HTTP_CODES = new Set([
 /**
  * HTTP status codes that indicate permanent (non-retryable) errors
  * Per MQ-002: Dead letter immediately
+ *
+ * Note: 409 moved to CONFLICT_HTTP_CODES for special handling (D4.2)
  */
 const PERMANENT_HTTP_CODES = new Set([
   400, // Bad Request
@@ -47,12 +49,19 @@ const PERMANENT_HTTP_CODES = new Set([
   403, // Forbidden
   404, // Not Found
   405, // Method Not Allowed
-  409, // Conflict (duplicate)
   410, // Gone
   413, // Payload Too Large
   415, // Unsupported Media Type
   422, // Unprocessable Entity (validation error)
   451, // Unavailable For Legal Reasons
+]);
+
+/**
+ * HTTP status codes that indicate conflict errors (D4.2)
+ * These may be resolvable with limited retries or need manual intervention
+ */
+const CONFLICT_HTTP_CODES = new Set([
+  409, // Conflict (duplicate, concurrent update)
 ]);
 
 // ============================================================================
@@ -111,8 +120,6 @@ const TRANSIENT_ERROR_PATTERNS = [
 const PERMANENT_ERROR_PATTERNS = [
   /not found/i,
   /does not exist/i,
-  /already exists/i,
-  /duplicate/i,
   /unauthorized/i,
   /forbidden/i,
   /permission denied/i,
@@ -120,6 +127,24 @@ const PERMANENT_ERROR_PATTERNS = [
   /invalid credentials/i,
   /token expired/i,
   /bad request/i,
+  /unsupported/i,
+  /method not allowed/i,
+];
+
+/**
+ * Error patterns that indicate conflict errors (D4.2)
+ * May be resolvable or need manual intervention
+ */
+const CONFLICT_ERROR_PATTERNS = [
+  /already exists/i,
+  /duplicate/i,
+  /conflict/i,
+  /concurrent update/i,
+  /version mismatch/i,
+  /optimistic lock/i,
+  /unique constraint/i,
+  /duplicate key/i,
+  /record exists/i,
 ];
 
 // ============================================================================
@@ -190,14 +215,22 @@ export function classifyError(
       let retryAfter: string | undefined;
       if (retryAfterHeader) {
         // Parse Retry-After header (can be seconds or HTTP date)
+        // SEC-014: Cap at reasonable maximum (7 days = 604800 seconds) to prevent overflow
+        const MAX_RETRY_AFTER_SECONDS = 604800;
         const seconds = parseInt(retryAfterHeader, 10);
-        if (!isNaN(seconds)) {
+        if (!isNaN(seconds) && seconds >= 0 && seconds <= MAX_RETRY_AFTER_SECONDS) {
           retryAfter = new Date(Date.now() + seconds * 1000).toISOString();
+        } else if (!isNaN(seconds) && seconds > MAX_RETRY_AFTER_SECONDS) {
+          // Cap extremely large values at maximum
+          retryAfter = new Date(Date.now() + MAX_RETRY_AFTER_SECONDS * 1000).toISOString();
         } else {
           // Try parsing as HTTP date
           const date = new Date(retryAfterHeader);
           if (!isNaN(date.getTime())) {
-            retryAfter = date.toISOString();
+            // Also cap parsed dates at maximum
+            const maxDate = Date.now() + MAX_RETRY_AFTER_SECONDS * 1000;
+            const boundedTime = Math.min(date.getTime(), maxDate);
+            retryAfter = new Date(boundedTime).toISOString();
           }
         }
       }
@@ -207,6 +240,18 @@ export function classifyError(
         action: 'RETRY',
         extendedBackoff: true,
         retryAfter,
+      };
+    }
+
+    // Check for conflict HTTP errors (D4.2)
+    // 409 errors may be resolvable - allow limited retries before dead-lettering
+    if (CONFLICT_HTTP_CODES.has(httpStatus)) {
+      log.debug('Error classified as CONFLICT (HTTP status)', { httpStatus });
+      return {
+        category: 'CONFLICT',
+        action: 'RETRY', // Allow limited retries - may resolve with stale data refresh
+        deadLetterReason: 'CONFLICT_ERROR',
+        extendedBackoff: false,
       };
     }
 
@@ -246,6 +291,21 @@ export function classifyError(
     }
   }
 
+  // Check error message patterns for conflict errors (D4.2)
+  for (const pattern of CONFLICT_ERROR_PATTERNS) {
+    if (pattern.test(message)) {
+      log.debug('Error classified as CONFLICT (message pattern)', {
+        pattern: pattern.source,
+      });
+      return {
+        category: 'CONFLICT',
+        action: 'RETRY', // Allow limited retries
+        deadLetterReason: 'CONFLICT_ERROR',
+        extendedBackoff: false,
+      };
+    }
+  }
+
   // Check error message patterns for permanent errors
   for (const pattern of PERMANENT_ERROR_PATTERNS) {
     if (pattern.test(message)) {
@@ -276,9 +336,12 @@ export function classifyError(
  * Per ERR-007: Set maximum retry attempts (3-5)
  * Per MQ-002: Configure DLQ after N retry attempts
  *
+ * Phase 4 (D4.2): Enhanced with CONFLICT handling
+ *
  * Rules:
  * - STRUCTURAL errors: dead letter immediately (no retries)
  * - PERMANENT errors: dead letter after max_attempts
+ * - CONFLICT errors: limited retries, dead letter after max_attempts
  * - TRANSIENT errors: keep retrying up to max_attempts * 2
  * - UNKNOWN errors: dead letter after max_attempts
  *
@@ -305,6 +368,15 @@ export function shouldDeadLetter(
     return {
       shouldDeadLetter: true,
       reason: 'PERMANENT_ERROR',
+    };
+  }
+
+  // D4.2: Conflict errors get limited retries (same as max_attempts)
+  // They may resolve if local data is refreshed or conflict is resolved
+  if (errorCategory === 'CONFLICT' && syncAttempts >= maxAttempts) {
+    return {
+      shouldDeadLetter: true,
+      reason: 'CONFLICT_ERROR',
     };
   }
 

@@ -18,6 +18,8 @@ import { createLogger } from '../utils/logger';
 
 /**
  * Sync timestamp entity
+ *
+ * Phase 5 (D5.1): Extended with sequence tracking for convergent apply
  */
 export interface SyncTimestamp extends StoreEntity {
   id: string;
@@ -25,6 +27,10 @@ export interface SyncTimestamp extends StoreEntity {
   entity_type: string;
   last_push_at: string | null;
   last_pull_at: string | null;
+  /** Phase 5: Highest sequence number successfully applied locally */
+  last_applied_sequence: number | null;
+  /** Phase 5: Highest sequence number seen from cloud (may be ahead of applied) */
+  last_seen_sequence: number | null;
   created_at: string;
   updated_at: string;
 }
@@ -302,6 +308,226 @@ export class SyncTimestampsDAL extends StoreBasedDAL<SyncTimestamp> {
     }
 
     return summary;
+  }
+
+  // ==========================================================================
+  // Phase 5 (D5.1): Sequence Tracking Methods
+  // ==========================================================================
+
+  /**
+   * Get the last applied sequence for an entity type
+   *
+   * Phase 5: Used for convergent apply to skip already-processed records.
+   * SEC-006: Parameterized query
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @returns Sequence number or null if never applied
+   */
+  getLastAppliedSequence(storeId: string, entityType: string): number | null {
+    const stmt = this.db.prepare(`
+      SELECT last_applied_sequence FROM sync_timestamps
+      WHERE store_id = ? AND entity_type = ?
+    `);
+
+    const result = stmt.get(storeId, entityType) as
+      | { last_applied_sequence: number | null }
+      | undefined;
+
+    return result?.last_applied_sequence ?? null;
+  }
+
+  /**
+   * Set the last applied sequence for an entity type
+   *
+   * Phase 5: Updates only if the new sequence is higher (monotonic).
+   * SEC-006: Parameterized query (upsert pattern)
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @param sequence - Sequence number to record
+   */
+  setLastAppliedSequence(storeId: string, entityType: string, sequence: number): void {
+    const existing = this.findByStoreAndType(storeId, entityType);
+    const now = this.now();
+
+    if (existing) {
+      // Only update if new sequence is higher (monotonic progress)
+      const currentSeq = existing.last_applied_sequence ?? -1;
+      if (sequence <= currentSeq) {
+        log.debug('Skipping sequence update - not higher than current', {
+          storeId,
+          entityType,
+          currentSeq,
+          newSeq: sequence,
+        });
+        return;
+      }
+
+      const stmt = this.db.prepare(`
+        UPDATE sync_timestamps SET
+          last_applied_sequence = ?,
+          updated_at = ?
+        WHERE id = ? AND (last_applied_sequence IS NULL OR last_applied_sequence < ?)
+      `);
+      stmt.run(sequence, now, existing.id, sequence);
+    } else {
+      // Insert new record
+      const id = this.generateId();
+      const stmt = this.db.prepare(`
+        INSERT INTO sync_timestamps (
+          id, store_id, entity_type, last_applied_sequence, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, storeId, entityType, sequence, now, now);
+    }
+
+    log.debug('Last applied sequence updated', { storeId, entityType, sequence });
+  }
+
+  /**
+   * Get the last seen sequence for an entity type
+   *
+   * Phase 5: Tracks highest sequence from cloud (may be ahead of applied).
+   * SEC-006: Parameterized query
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @returns Sequence number or null
+   */
+  getLastSeenSequence(storeId: string, entityType: string): number | null {
+    const stmt = this.db.prepare(`
+      SELECT last_seen_sequence FROM sync_timestamps
+      WHERE store_id = ? AND entity_type = ?
+    `);
+
+    const result = stmt.get(storeId, entityType) as
+      | { last_seen_sequence: number | null }
+      | undefined;
+
+    return result?.last_seen_sequence ?? null;
+  }
+
+  /**
+   * Set the last seen sequence for an entity type
+   *
+   * Phase 5: Updates only if the new sequence is higher.
+   * SEC-006: Parameterized query (upsert pattern)
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @param sequence - Sequence number seen
+   */
+  setLastSeenSequence(storeId: string, entityType: string, sequence: number): void {
+    const existing = this.findByStoreAndType(storeId, entityType);
+    const now = this.now();
+
+    if (existing) {
+      const currentSeq = existing.last_seen_sequence ?? -1;
+      if (sequence <= currentSeq) {
+        return; // Already seen a higher sequence
+      }
+
+      const stmt = this.db.prepare(`
+        UPDATE sync_timestamps SET
+          last_seen_sequence = ?,
+          updated_at = ?
+        WHERE id = ? AND (last_seen_sequence IS NULL OR last_seen_sequence < ?)
+      `);
+      stmt.run(sequence, now, existing.id, sequence);
+    } else {
+      const id = this.generateId();
+      const stmt = this.db.prepare(`
+        INSERT INTO sync_timestamps (
+          id, store_id, entity_type, last_seen_sequence, created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, storeId, entityType, sequence, now, now);
+    }
+
+    log.debug('Last seen sequence updated', { storeId, entityType, sequence });
+  }
+
+  /**
+   * Update both sequences atomically
+   *
+   * Phase 5: Convenience method for updating both sequence values at once.
+   * SEC-006: Parameterized query
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @param appliedSequence - Highest applied sequence
+   * @param seenSequence - Highest seen sequence
+   */
+  updateSequences(
+    storeId: string,
+    entityType: string,
+    appliedSequence: number,
+    seenSequence: number
+  ): void {
+    const existing = this.findByStoreAndType(storeId, entityType);
+    const now = this.now();
+
+    if (existing) {
+      const stmt = this.db.prepare(`
+        UPDATE sync_timestamps SET
+          last_applied_sequence = CASE
+            WHEN ? > COALESCE(last_applied_sequence, -1) THEN ?
+            ELSE last_applied_sequence
+          END,
+          last_seen_sequence = CASE
+            WHEN ? > COALESCE(last_seen_sequence, -1) THEN ?
+            ELSE last_seen_sequence
+          END,
+          updated_at = ?
+        WHERE id = ?
+      `);
+      stmt.run(appliedSequence, appliedSequence, seenSequence, seenSequence, now, existing.id);
+    } else {
+      const id = this.generateId();
+      const stmt = this.db.prepare(`
+        INSERT INTO sync_timestamps (
+          id, store_id, entity_type, last_applied_sequence, last_seen_sequence,
+          created_at, updated_at
+        ) VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      stmt.run(id, storeId, entityType, appliedSequence, seenSequence, now, now);
+    }
+
+    log.debug('Sequences updated', { storeId, entityType, appliedSequence, seenSequence });
+  }
+
+  /**
+   * Get sequence gap (seen - applied)
+   *
+   * Phase 5: Indicates how many records are pending apply.
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @returns Gap count or null if no data
+   */
+  getSequenceGap(storeId: string, entityType: string): number | null {
+    const record = this.findByStoreAndType(storeId, entityType);
+    if (!record) return null;
+
+    const applied = record.last_applied_sequence ?? 0;
+    const seen = record.last_seen_sequence ?? 0;
+
+    return Math.max(0, seen - applied);
+  }
+
+  /**
+   * Check if entity type is caught up
+   *
+   * Phase 5: Returns true if applied sequence equals seen sequence.
+   *
+   * @param storeId - Store identifier
+   * @param entityType - Entity type
+   * @returns true if caught up (or no data)
+   */
+  isCaughtUp(storeId: string, entityType: string): boolean {
+    const gap = this.getSequenceGap(storeId, entityType);
+    return gap === null || gap === 0;
   }
 }
 

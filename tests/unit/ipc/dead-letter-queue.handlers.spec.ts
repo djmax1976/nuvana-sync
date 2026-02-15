@@ -377,6 +377,7 @@ describe('Dead Letter Queue IPC Handlers', () => {
           PERMANENT_ERROR: 5,
           MAX_ATTEMPTS_EXCEEDED: 3,
           STRUCTURAL_FAILURE: 2,
+          CONFLICT_ERROR: 0,
           MANUAL: 0,
         },
         byEntityType: {
@@ -386,6 +387,7 @@ describe('Dead Letter Queue IPC Handlers', () => {
         byErrorCategory: {
           PERMANENT: 6,
           STRUCTURAL: 2,
+          CONFLICT: 0,
           UNKNOWN: 2,
           TRANSIENT: 0,
         },
@@ -805,6 +807,7 @@ describe('Dead Letter Queue IPC Handlers', () => {
           MAX_ATTEMPTS_EXCEEDED: 0,
           PERMANENT_ERROR: 0,
           STRUCTURAL_FAILURE: 0,
+          CONFLICT_ERROR: 0,
         },
         byEntityType: {},
         byErrorCategory: {
@@ -812,6 +815,7 @@ describe('Dead Letter Queue IPC Handlers', () => {
           TRANSIENT: 0,
           PERMANENT: 0,
           STRUCTURAL: 0,
+          CONFLICT: 0,
         },
         oldestItem: null,
         newestItem: null,
