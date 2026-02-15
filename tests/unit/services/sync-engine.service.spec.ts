@@ -168,6 +168,36 @@ vi.mock('../../../src/main/services/bidirectional-sync.service', () => ({
   },
 }));
 
+// SYNC-5001: Mock syncSessionManager to bypass session management in unit tests
+// The sync engine now uses syncSessionManager.runSyncCycle() to wrap all operations.
+// This mock executes the operations callback immediately with a mock session context,
+// allowing tests to verify individual operation mocks (pushPackDeplete, etc.) are called.
+vi.mock('../../../src/main/services/sync-session-manager.service', () => ({
+  syncSessionManager: {
+    setCloudApiService: vi.fn(),
+    getActiveSession: vi.fn().mockReturnValue({
+      sessionId: 'mock-session-id',
+      storeId: 'store-123',
+      revocationStatus: 'VALID',
+      pullPendingCount: 0,
+    }),
+    runSyncCycle: vi
+      .fn()
+      .mockImplementation(async (_storeId: string, operations: (ctx: unknown) => Promise<void>) => {
+        // Execute operations callback with mock session context
+        const mockCtx = {
+          sessionId: 'mock-session-id',
+          storeId: 'store-123',
+          revocationStatus: 'VALID',
+          pullPendingCount: 0,
+        };
+        await operations(mockCtx);
+        return mockCtx;
+      }),
+    recordOperationStats: vi.fn(),
+  },
+}));
+
 // Mock electron-store (used by cloud-api.service)
 vi.mock('electron-store', () => ({
   default: vi.fn().mockImplementation(() => ({
