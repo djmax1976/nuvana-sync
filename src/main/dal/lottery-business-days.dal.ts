@@ -11,7 +11,7 @@
 
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
-import { lotteryPacksDAL, type LotteryPack } from './lottery-packs.dal';
+import { lotteryPacksDAL } from './lottery-packs.dal';
 import { lotteryGamesDAL } from './lottery-games.dal';
 import { syncQueueDAL } from './sync-queue.dal';
 
@@ -603,7 +603,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
           // Calculate serial_start and serial_end for API compliance
           const serialStart = '000';
           const serialEnd = String(ticketsPerPack - 1).padStart(3, '0');
-          const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
+          const _effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
 
           syncPackData.push({
             pack_id: closing.pack_id,
@@ -1058,7 +1058,11 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       businessDate: day.business_date,
     });
 
-    return this.findById(dayId)!;
+    const reopenedDay = this.findById(dayId);
+    if (!reopenedDay) {
+      throw new Error(`Failed to retrieve reopened business day: ${dayId}`);
+    }
+    return reopenedDay;
   }
 
   /**

@@ -1170,7 +1170,9 @@ export class POSFuelGradeMappingsDAL extends StoreBasedDAL<POSFuelGradeMapping> 
       '300': 'DEF',
       '085': 'E85',
     };
-    return gradeMap[externalGradeId] || null;
+    return Object.prototype.hasOwnProperty.call(gradeMap, externalGradeId)
+      ? gradeMap[externalGradeId]
+      : null;
   }
 
   /**
@@ -1186,7 +1188,9 @@ export class POSFuelGradeMappingsDAL extends StoreBasedDAL<POSFuelGradeMapping> 
       '300': 'DEF',
       '085': 'E85',
     };
-    return nameMap[externalGradeId] || null;
+    return Object.prototype.hasOwnProperty.call(nameMap, externalGradeId)
+      ? nameMap[externalGradeId]
+      : null;
   }
 }
 
@@ -1755,7 +1759,9 @@ export class POSPriceTierMappingsDAL extends StoreBasedDAL<POSPriceTierMapping> 
       '0003': 'FLEET',
       '0004': 'LOYALTY',
     };
-    return tierMap[externalTierCode] || null;
+    return Object.prototype.hasOwnProperty.call(tierMap, externalTierCode)
+      ? tierMap[externalTierCode]
+      : null;
   }
 
   /**
@@ -1768,7 +1774,9 @@ export class POSPriceTierMappingsDAL extends StoreBasedDAL<POSPriceTierMapping> 
       '0003': 'Fleet Price',
       '0004': 'Loyalty Price',
     };
-    return nameMap[externalTierCode] || null;
+    return Object.prototype.hasOwnProperty.call(nameMap, externalTierCode)
+      ? nameMap[externalTierCode]
+      : null;
   }
 }
 

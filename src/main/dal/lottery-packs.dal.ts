@@ -790,8 +790,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     if (/^\d{4}-\d{2}-\d{2}$/.test(input)) {
       return `${input}T00:00:00`;
     }
-    // Full ISO timestamp: YYYY-MM-DDTHH:MM:SS with optional fractional seconds and Z
-    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d+)?Z?$/.test(input)) {
+    // Full ISO timestamp: YYYY-MM-DDTHH:MM:SS with optional fractional seconds (1-9 digits) and Z
+    // SEC-014: Using bounded quantifier {1,9} to prevent ReDoS
+    if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,9})?Z?$/.test(input)) {
       return input;
     }
     throw new Error('Invalid date/timestamp format. Expected YYYY-MM-DD or ISO 8601 timestamp');

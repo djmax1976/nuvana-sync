@@ -14,7 +14,7 @@
  * @security DB-001: ORM-like patterns with safe query building
  */
 
-import { StoreBasedDAL, type StoreEntity, type PaginatedResult } from './base.dal';
+import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
