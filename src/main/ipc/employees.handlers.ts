@@ -730,5 +730,89 @@ registerHandler(
   }
 );
 
+// ============================================================================
+// Cashiers List Handler (Task 1.5 - Day Close Page)
+// ============================================================================
+
+/**
+ * Cashier info for dropdown/display
+ */
+interface CashierInfo {
+  /** User ID (UUID) */
+  cashier_id: string;
+  /** Display name */
+  name: string;
+  /** Role */
+  role: string;
+}
+
+/**
+ * Response for cashiers list
+ */
+interface CashiersListResponse {
+  /** Array of active cashiers */
+  cashiers: CashierInfo[];
+  /** Total count */
+  total: number;
+}
+
+/**
+ * List active cashiers for the current store
+ *
+ * Used by DayClosePage for cashier name resolution and dropdowns.
+ * Returns only active users (is_active = 1).
+ *
+ * Performance characteristics:
+ * - Single query to users table with indexed columns (store_id, active)
+ * - O(1) via index lookup
+ *
+ * @security SEC-006: Parameterized queries via DAL
+ * @security DB-006: Store-scoped for tenant isolation
+ * @security SEC-001: Returns only safe user data (no PIN hash)
+ *
+ * Channel: cashiers:list
+ */
+registerHandler<CashiersListResponse | ReturnType<typeof createErrorResponse>>(
+  'cashiers:list',
+  async () => {
+    // DB-006: Get configured store for tenant isolation
+    const storeResult = getStoreIdOrError();
+    if ('error' in storeResult) return storeResult.error;
+
+    try {
+      // SEC-006: Parameterized query via DAL
+      // DB-006: Store-scoped query
+      const result = usersDAL.findByStore(storeResult.storeId, { limit: 1000 });
+
+      // Filter to active users only
+      const activeUsers = result.data.filter((user) => user.active === 1);
+
+      // Map to cashier info (SEC-001: exclude pin_hash)
+      const cashiers: CashierInfo[] = activeUsers.map((user) => ({
+        cashier_id: user.user_id,
+        name: user.name,
+        role: user.role,
+      }));
+
+      log.debug('Cashiers list retrieved', {
+        storeId: storeResult.storeId,
+        count: cashiers.length,
+      });
+
+      return {
+        cashiers,
+        total: cashiers.length,
+      };
+    } catch (error) {
+      log.error('Failed to list cashiers', { error });
+      return createErrorResponse(IPCErrorCodes.INTERNAL_ERROR, 'Failed to retrieve cashiers');
+    }
+  },
+  {
+    requiresAuth: false, // No auth required - used for display purposes
+    description: 'List active cashiers for the store',
+  }
+);
+
 // Log handler registration
 log.info('Employee IPC handlers registered');

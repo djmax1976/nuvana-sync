@@ -24,6 +24,7 @@ import { Badge } from '@/components/ui/badge';
 import { getPackStatusBadgeVariant, getPackStatusText } from './pack-status-badge';
 import { Loader2, Package, Calendar, MapPin } from 'lucide-react';
 import { useDateFormat } from '@/hooks/useDateFormat';
+import { calculateTicketsRemainingFromSerials } from '../../../shared/lottery/ticket-calculations';
 
 export type PackStatus = 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
 
@@ -86,30 +87,40 @@ interface PackDetailsModalProps {
 }
 
 /**
- * Calculate tickets remaining from serial range
+ * Get tickets remaining for display
  *
- * @param serialStart - Starting serial number
- * @param serialEnd - Ending serial number
- * @param providedRemaining - Optional pre-calculated remaining count
+ * Priority:
+ * 1. Use backend-provided value (most accurate - considers current position)
+ * 2. Fall back to centralized calculation utility (for total pack count)
+ *
+ * @param serialStart - Starting serial number (0-based index)
+ * @param serialEnd - Ending serial number (0-based index)
+ * @param currentPosition - Current selling position (if known)
+ * @param providedRemaining - Pre-calculated remaining count from backend
  * @returns Number of tickets remaining
  *
  * MCP Guidance Applied:
- * - SEC-014: INPUT_VALIDATION - Validates numeric input before calculation
+ * - SEC-014: INPUT_VALIDATION - Uses centralized utility with bounds checking
+ * @see shared/lottery/ticket-calculations.ts
  */
-function calculateTicketsRemaining(
+function getTicketsRemainingForDisplay(
   serialStart: string,
   serialEnd: string,
+  currentPosition: string | undefined,
   providedRemaining?: number
 ): number {
+  // Priority 1: Use backend-provided value (most accurate)
   if (providedRemaining !== undefined) {
     return providedRemaining;
   }
-  const start = parseInt(serialStart, 10);
-  const end = parseInt(serialEnd, 10);
-  if (!isNaN(start) && !isNaN(end) && end >= start) {
-    return end - start + 1;
-  }
-  return 0;
+
+  // Priority 2: Calculate using centralized utility
+  // If we have current position, calculate remaining from there
+  // Otherwise calculate total tickets in pack (fallback for RECEIVED status)
+  const positionToUse = currentPosition || serialStart;
+  const result = calculateTicketsRemainingFromSerials(serialStart, serialEnd, positionToUse);
+
+  return result.success ? result.value : 0;
 }
 
 /**
@@ -162,8 +173,15 @@ export function PackDetailsModal({
 
   const statusVariant = pack ? getPackStatusBadgeVariant(pack.status) : 'outline';
   const statusText = pack ? getPackStatusText(pack.status) : '';
+  // Use backend-provided tickets_remaining (calculated with current position)
+  // Falls back to centralized calculation if not provided
   const ticketsRemaining = pack
-    ? calculateTicketsRemaining(pack.serial_start, pack.serial_end, pack.tickets_remaining)
+    ? getTicketsRemainingForDisplay(
+        pack.serial_start,
+        pack.serial_end,
+        undefined, // Current position not available in modal - backend provides accurate count
+        pack.tickets_remaining
+      )
     : 0;
 
   return (

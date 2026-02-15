@@ -152,9 +152,6 @@ function RegisterCard({
             </Badge>
           )}
         </div>
-        <CardDescription className="text-xs">
-          Register ID: {register.external_register_id}
-        </CardDescription>
       </CardHeader>
       <CardContent>
         {register.activeShift ? (
@@ -195,11 +192,7 @@ function RegisterCard({
               </p>
             )}
           </div>
-        ) : (
-          <div className="mb-4">
-            <p className="text-sm text-muted-foreground">No open shift on this register</p>
-          </div>
-        )}
+        ) : null}
 
         <div className="flex gap-2">
           {register.activeShift ? (
@@ -220,25 +213,12 @@ function RegisterCard({
                 ? 'Complete Day Close'
                 : 'Complete Shift Close'}
             </Button>
-          ) : (
-            <Button
-              onClick={handleViewShifts}
-              className="flex-1 text-xs sm:text-sm"
-              variant="outline"
-            >
-              View Shift History
-            </Button>
-          )}
+          ) : null}
         </div>
 
         {/* Manual Mode: Start/End Shift Buttons */}
         {isManualMode && (
           <div className="mt-3 pt-3 border-t border-dashed border-blue-300 dark:border-blue-700">
-            <div className="flex items-center gap-1 mb-2">
-              <span className="text-xs font-medium text-blue-600 dark:text-blue-400">
-                Manual Mode - Shift Controls
-              </span>
-            </div>
             <div className="flex gap-2">
               {register.activeShift ? (
                 <Button
@@ -368,6 +348,17 @@ export default function TerminalsPage() {
   /**
    * Handle navigation to the appropriate close wizard
    * Clears the highlight for this register after navigation
+   *
+   * For DAY_CLOSE:
+   * - DayCloseAccessGuard handles PIN verification and access control
+   * - Guard provides validated shift/user data via context
+   * - No state needed in navigation
+   *
+   * For SHIFT_CLOSE:
+   * - Navigates to shift-end wizard with shift context
+   * - Shift context is needed for the wizard to load the correct shift
+   *
+   * @security SEC-010: Day close authorization enforced by backend via guard
    */
   const handleNavigateToClose = useCallback(
     (event: ShiftClosedEvent) => {
@@ -382,14 +373,10 @@ export default function TerminalsPage() {
 
       // Navigate to appropriate wizard based on close type
       if (event.closeType === 'DAY_CLOSE') {
-        navigate('/day-close', {
-          state: {
-            shiftId: event.shiftId,
-            businessDate: event.businessDate,
-            fromShiftClose: true,
-          },
-        });
+        // Guard handles all validation and context - just navigate
+        navigate('/day-close');
       } else {
+        // Shift-end wizard still needs shift context
         navigate('/shift-end', {
           state: {
             shiftId: event.shiftId,
@@ -466,22 +453,20 @@ export default function TerminalsPage() {
 
   /**
    * MANUAL MODE: Start the day close process
-   * Navigates to day-close wizard
+   *
+   * Navigates to day-close wizard. The DayCloseAccessGuard handles:
+   * - PIN verification and user authentication
+   * - Shift condition validation (exactly one open shift)
+   * - Access control (shift owner or manager override)
+   * - Providing validated shift/user data via context
+   *
+   * @see DayCloseAccessGuard for access validation logic
+   * @security SEC-010: Authorization enforced by backend via guard
    */
   const handleManualDayClose = useCallback(() => {
-    // Find an active shift to get the business date
-    const registerWithActiveShift = terminalsData?.registers?.find((r) => r.activeShift !== null);
-    const activeShift = registerWithActiveShift?.activeShift;
-
-    navigate('/day-close', {
-      state: {
-        shiftId: activeShift?.shift_id,
-        businessDate: activeShift?.business_date,
-        fromShiftClose: true,
-        isManualMode: true, // Flag for manual data entry
-      },
-    });
-  }, [navigate, terminalsData?.registers]);
+    // Guard handles all validation and context - just navigate
+    navigate('/day-close');
+  }, [navigate]);
 
   /**
    * Subscribe to shift closed events from the main process
@@ -550,41 +535,25 @@ export default function TerminalsPage() {
 
   return (
     <div className="space-y-6" data-testid="terminals-page">
-      {/* Manual Mode Banner */}
-      {isManualMode && (
-        <div className="bg-blue-100 dark:bg-blue-900/30 border border-blue-300 dark:border-blue-700 rounded-lg p-3">
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-2">
-              <Play className="h-5 w-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
-              <div>
-                <p className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                  Manual Mode - Shift Controls Available
-                </p>
-                <p className="text-xs text-blue-600 dark:text-blue-400">
-                  Use the Start/End Shift buttons on each register card to manage shifts.
-                </p>
-              </div>
-            </div>
-            {/*
-              Day Close button - ONLY rendered when backend confirms open shifts exist
+      {/*
+        Day Close button - ONLY rendered when backend confirms open shifts exist
 
-              BUSINESS RULE: Button visibility is determined by backend's hasOpenShifts flag.
-              This ensures the UI accurately reflects server-side business state.
-              DO NOT compute this locally - always use backend-provided dayStatusData.
+        BUSINESS RULE: Button visibility is determined by backend's hasOpenShifts flag.
+        This ensures the UI accurately reflects server-side business state.
+        DO NOT compute this locally - always use backend-provided dayStatusData.
 
-              @security DB-006: Backend enforces store-scoped tenant isolation
-            */}
-            {dayStatusData?.hasOpenShifts && (
-              <Button
-                onClick={handleManualDayClose}
-                variant="outline"
-                className="border-amber-500 text-amber-700 hover:bg-amber-100 dark:border-amber-400 dark:text-amber-400 dark:hover:bg-amber-900/30 flex-shrink-0"
-              >
-                <Moon className="mr-2 h-4 w-4" />
-                Day Close
-              </Button>
-            )}
-          </div>
+        @security DB-006: Backend enforces store-scoped tenant isolation
+      */}
+      {isManualMode && dayStatusData?.hasOpenShifts && (
+        <div className="flex justify-end">
+          <Button
+            onClick={handleManualDayClose}
+            variant="outline"
+            className="border-amber-500 text-amber-700 hover:bg-amber-100 dark:border-amber-400 dark:text-amber-400 dark:hover:bg-amber-900/30"
+          >
+            <Moon className="mr-2 h-4 w-4" />
+            Day Close
+          </Button>
         </div>
       )}
 

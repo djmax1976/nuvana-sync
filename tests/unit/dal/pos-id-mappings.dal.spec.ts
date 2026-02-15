@@ -16,9 +16,12 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock database service
-const mockPrepare = vi.fn();
-const mockTransaction = vi.fn((fn: () => void) => () => fn());
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockTransaction: vi.fn((fn: () => void) => () => fn()),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -434,6 +437,254 @@ describe('POSTerminalMappingsDAL', () => {
       expect(selectQuery).not.toContain('DROP TABLE');
       expect(selectQuery).toContain('store_id = ?');
       expect(mockAll).toHaveBeenCalledWith(sqlInjectionStoreId);
+    });
+  });
+
+  // ==========================================================================
+  // deactivateById Tests (Phase 5 - Terminal Delete Sync)
+  // SEC-006: Parameterized queries
+  // DB-006: Tenant isolation via store_id
+  // ==========================================================================
+
+  describe('deactivateById', () => {
+    // T-DAL-001: Should deactivate existing register and return true
+    it('T-DAL-001: should deactivate existing register and return true', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateById('store-tenant-001', 'mapping-uuid-001');
+
+      expect(result).toBe(true);
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      // SEC-006: Verify parameterized query structure
+      expect(updateQuery).toContain('UPDATE pos_terminal_mappings');
+      expect(updateQuery).toContain('SET active = 0');
+      expect(updateQuery).toContain('updated_at = ?');
+      expect(updateQuery).toContain('WHERE id = ? AND store_id = ? AND active = 1');
+      // Verify parameters are passed correctly (updated_at, id, store_id)
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String), // updated_at timestamp
+        'mapping-uuid-001', // id
+        'store-tenant-001' // store_id
+      );
+    });
+
+    // T-DAL-002: Should return false when register not found
+    it('T-DAL-002: should return false when register not found', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateById('store-tenant-001', 'nonexistent-uuid');
+
+      expect(result).toBe(false);
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'nonexistent-uuid',
+        'store-tenant-001'
+      );
+    });
+
+    // T-DAL-003: Should only deactivate for matching store_id (DB-006)
+    it('T-DAL-003: should include store_id in WHERE clause for tenant isolation (DB-006)', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deactivateById('store-tenant-xyz', 'mapping-uuid-001');
+
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      // DB-006: Verify store_id is part of the WHERE clause
+      expect(updateQuery).toContain('store_id = ?');
+      // Verify store_id is passed as parameter
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'mapping-uuid-001',
+        'store-tenant-xyz'
+      );
+    });
+
+    // T-DAL-004: Should not affect other stores' registers (tenant isolation)
+    it('T-DAL-004: should not affect other stores registers when store_id does not match', () => {
+      // Simulate no rows affected when wrong store_id is used
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Register belongs to store-A, but we try with store-B
+      const result = dal.deactivateById('store-B', 'mapping-uuid-from-store-A');
+
+      expect(result).toBe(false);
+      // Verify the query was still executed with the provided store_id
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'mapping-uuid-from-store-A',
+        'store-B'
+      );
+    });
+
+    // T-DAL-005: Should handle already-inactive register gracefully
+    it('T-DAL-005: should handle already-inactive register gracefully (idempotent)', () => {
+      // active = 1 condition prevents update on inactive records
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateById('store-tenant-001', 'already-inactive-mapping');
+
+      expect(result).toBe(false);
+      // Verify query includes active = 1 condition for idempotency
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).toContain('AND active = 1');
+    });
+
+    // T-DAL-006: Should use parameterized query preventing SQL injection (SEC-006)
+    it('T-DAL-006: should use parameterized query preventing SQL injection (SEC-006)', () => {
+      const sqlInjectionId = "'; DROP TABLE pos_terminal_mappings;--";
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deactivateById('store-tenant-001', sqlInjectionId);
+
+      // SEC-006: Verify the malicious payload is NOT in the query string
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).not.toContain('DROP TABLE');
+      expect(updateQuery).not.toContain(sqlInjectionId);
+      // Verify the payload is passed as a parameter (safely escaped by SQLite)
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        sqlInjectionId, // passed as parameter, not interpolated
+        'store-tenant-001'
+      );
+    });
+
+    // T-DAL-007: Should set updated_at timestamp on deactivation
+    it('T-DAL-007: should set updated_at timestamp on deactivation', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deactivateById('store-tenant-001', 'mapping-uuid-001');
+
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).toContain('updated_at = ?');
+      // Verify timestamp is a valid ISO 8601 string
+      const timestampParam = mockRun.mock.calls[0][0] as string;
+      expect(() => new Date(timestampParam)).not.toThrow();
+      expect(new Date(timestampParam).toISOString()).toBe(timestampParam);
+    });
+  });
+
+  // ==========================================================================
+  // deactivateByExternalId Tests (Phase 5 - Terminal Delete Sync)
+  // SEC-006: Parameterized queries
+  // DB-006: Tenant isolation via store_id
+  // ==========================================================================
+
+  describe('deactivateByExternalId', () => {
+    // T-DAL-008: Should deactivate cloud-synced register by external ID
+    it('T-DAL-008: should deactivate cloud-synced register by external ID', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateByExternalId('store-tenant-001', 'cloud-uuid-001');
+
+      expect(result).toBe(true);
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).toContain('UPDATE pos_terminal_mappings');
+      expect(updateQuery).toContain('SET active = 0');
+      expect(updateQuery).toContain('WHERE external_register_id = ?');
+      expect(updateQuery).toContain('AND store_id = ?');
+      expect(updateQuery).toContain('AND pos_system_type = ?');
+      // Verify parameters (updated_at, external_register_id, store_id, pos_system_type)
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String), // updated_at
+        'cloud-uuid-001', // external_register_id
+        'store-tenant-001', // store_id
+        'generic' // default pos_system_type
+      );
+    });
+
+    // T-DAL-009: Should filter by pos_system_type when provided
+    it('T-DAL-009: should filter by pos_system_type when provided', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deactivateByExternalId('store-tenant-001', 'REG-001', 'gilbarco');
+
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'REG-001',
+        'store-tenant-001',
+        'gilbarco' // specified pos_system_type
+      );
+    });
+
+    // T-DAL-010: Should default to 'generic' pos_system_type
+    it('T-DAL-010: should default to generic pos_system_type for cloud registers', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 1 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Call without specifying pos_system_type
+      dal.deactivateByExternalId('store-tenant-001', 'cloud-uuid-001');
+
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        'cloud-uuid-001',
+        'store-tenant-001',
+        'generic' // default value
+      );
+    });
+
+    // T-DAL-011: Should return false for non-existent external ID
+    it('T-DAL-011: should return false for non-existent external ID', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateByExternalId('store-tenant-001', 'nonexistent-external-id');
+
+      expect(result).toBe(false);
+    });
+
+    // T-DAL-012: Should enforce store_id tenant isolation (DB-006)
+    it('T-DAL-012: should enforce store_id tenant isolation (DB-006)', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      // Try to deactivate register with wrong store_id
+      const result = dal.deactivateByExternalId('wrong-store-id', 'cloud-uuid-001');
+
+      expect(result).toBe(false);
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).toContain('AND store_id = ?');
+    });
+
+    // T-DAL-013: Should handle SQL injection in externalRegisterId (SEC-006)
+    it('T-DAL-013: should safely handle SQL injection in externalRegisterId (SEC-006)', () => {
+      const sqlInjectionPayload = "cloud-uuid'; DROP TABLE pos_terminal_mappings;--";
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      dal.deactivateByExternalId('store-tenant-001', sqlInjectionPayload);
+
+      // SEC-006: Verify payload is not in query string
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).not.toContain('DROP TABLE');
+      // Verify payload is passed as parameter
+      expect(mockRun).toHaveBeenCalledWith(
+        expect.any(String),
+        sqlInjectionPayload,
+        'store-tenant-001',
+        'generic'
+      );
+    });
+
+    // T-DAL-014: Should handle already-inactive register (idempotent)
+    it('T-DAL-014: should handle already-inactive register gracefully (idempotent)', () => {
+      const mockRun = vi.fn().mockReturnValue({ changes: 0 });
+      mockPrepare.mockReturnValue({ run: mockRun });
+
+      const result = dal.deactivateByExternalId('store-tenant-001', 'already-inactive-external-id');
+
+      expect(result).toBe(false);
+      // Verify query includes active = 1 condition
+      const updateQuery = mockPrepare.mock.calls[0][0] as string;
+      expect(updateQuery).toContain('AND active = 1');
     });
   });
 

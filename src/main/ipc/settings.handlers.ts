@@ -1466,12 +1466,12 @@ registerHandler(
 );
 
 /**
- * Get POS connection type only
+ * Get POS connection type and POS system type
  *
- * Lightweight handler that returns only the connection type without full config.
- * Useful for UI to determine if manual mode is enabled.
+ * Lightweight handler that returns connection type and POS system type without full config.
+ * Useful for UI to determine manual mode and lottery-only mode.
  *
- * @returns { connectionType: POSConnectionType | null }
+ * @returns { connectionType: POSConnectionType | null, posType: POSSystemType | null }
  *
  * Channel: settings:getPOSConnectionType
  */
@@ -1484,7 +1484,7 @@ registerHandler(
     return createSuccessResponse({ connectionType, posType });
   },
   {
-    description: 'Get POS connection type (MANUAL, FILE, API, etc.)',
+    description: 'Get POS connection type and POS system type for UI mode detection',
   }
 );
 

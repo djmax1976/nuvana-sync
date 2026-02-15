@@ -30,15 +30,22 @@ try {
   skipTests = true;
 }
 
-// Shared test database instance - will be set in beforeEach and used by mock
+// Use vi.hoisted() with a container object for mutable testDb reference
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
+const { testDbContainer } = vi.hoisted(() => ({
+  testDbContainer: { db: null as any },
+}));
 
 // Mock database service to return our in-memory test database
 vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: vi.fn(() => testDb),
-  isDatabaseInitialized: vi.fn(() => testDb !== null),
+  getDatabase: vi.fn(() => testDbContainer.db),
+  isDatabaseInitialized: vi.fn(() => testDbContainer.db !== null),
 }));
+
+// Alias for easier access in tests
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+let testDb: any = null;
 
 describe.skipIf(skipTests)('Lottery Packs DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -50,6 +57,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
     testDb = db;
+    testDbContainer.db = db;
 
     // Create required tables
     db.exec(`
@@ -629,14 +637,170 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
         opening_serial: '000',
       });
 
-      const found = dal.findActiveInBin('bin-1');
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', 'bin-1');
 
       expect(found).toBeDefined();
       expect(found?.pack_id).toBe(pack.pack_id);
     });
 
     it('should return undefined when bin has no active pack', () => {
-      const found = dal.findActiveInBin('bin-1');
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', 'bin-1');
+
+      expect(found).toBeUndefined();
+    });
+
+    it('should not find pack from different store (tenant isolation)', () => {
+      // DB-006: TENANT_ISOLATION test
+      const pack = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG1234567',
+      });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+
+      // Query with different store_id should not find the pack
+      const found = dal.findActiveInBin('store-2', 'bin-1');
+
+      expect(found).toBeUndefined();
+    });
+
+    it('should return undefined when bin has only DEPLETED pack', () => {
+      // BIN-001: Depleted pack does not block bin
+      const pack = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG1234567',
+      });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+      // Deplete the pack
+      dal.settle(pack.pack_id, {
+        store_id: 'store-1',
+        closing_serial: '299',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'MANUAL_SOLD_OUT',
+      });
+
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', 'bin-1');
+
+      expect(found).toBeUndefined();
+    });
+
+    it('should return undefined when bin has only RETURNED pack', () => {
+      // BIN-001: Returned pack does not block bin
+      const pack = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG1234567',
+      });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+      // Return the pack
+      dal.returnPack(pack.pack_id, {
+        store_id: 'store-1',
+        closing_serial: '050',
+        tickets_sold_count: 50,
+        sales_amount: 50,
+        return_reason: 'DAMAGED',
+      });
+
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', 'bin-1');
+
+      expect(found).toBeUndefined();
+    });
+
+    it('should return only the ACTIVE pack when bin has multiple packs in history', () => {
+      // BIN-001: Only return ACTIVE pack, not historical packs
+      // First pack - activate and deplete
+      const pack1 = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG0000001',
+      });
+      dal.activate(pack1.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+      dal.settle(pack1.pack_id, {
+        store_id: 'store-1',
+        closing_serial: '299',
+        tickets_sold_count: 300,
+        sales_amount: 300,
+        depletion_reason: 'AUTO_REPLACED',
+      });
+
+      // Second pack - currently active
+      const pack2 = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG0000002',
+      });
+      dal.activate(pack2.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', 'bin-1');
+
+      expect(found).toBeDefined();
+      expect(found?.pack_id).toBe(pack2.pack_id);
+      expect(found?.status).toBe('ACTIVE');
+    });
+
+    it('should use parameterized query preventing SQL injection (SEC-006)', () => {
+      // SEC-006: SQL injection attempt in bin_id should be treated as literal string
+      const pack = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG1234567',
+      });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+
+      // SQL injection attempt - should return undefined (no match), not error
+      const found = dal.findActiveInBin('store-1', "'; DROP TABLE lottery_packs; --");
+
+      expect(found).toBeUndefined();
+      // Verify original pack still exists (DB-006: use tenant-isolated method)
+      const originalPack = dal.findByIdForStore('store-1', pack.pack_id);
+      expect(originalPack).toBeDefined();
+    });
+
+    it('should handle empty string bin_id gracefully', () => {
+      const pack = dal.receive({
+        store_id: 'store-1',
+        game_id: 'game-1',
+        pack_number: 'PKG1234567',
+      });
+      dal.activate(pack.pack_id, {
+        store_id: 'store-1',
+        current_bin_id: 'bin-1',
+        opening_serial: '000',
+      });
+
+      // DB-006: Pass store_id for tenant isolation
+      const found = dal.findActiveInBin('store-1', '');
 
       expect(found).toBeUndefined();
     });

@@ -138,8 +138,8 @@ class IPCClient {
 
       // Settings
       case 'settings:getPOSConnectionType':
-        // Mock as MANUAL for testing manual shift functionality
-        return { connectionType: 'MANUAL' } as T;
+        // Mock as MANUAL with MANUAL_ENTRY posType for testing manual shift functionality
+        return { connectionType: 'MANUAL', posType: 'MANUAL_ENTRY' } as T;
 
       // Dashboard
       case 'dashboard:getStats':
@@ -154,17 +154,20 @@ class IPCClient {
         return mockData.getMockShiftList(
           params as Parameters<typeof mockData.getMockShiftList>[0]
         ) as T;
-      case 'shifts:getById':
-        return (mockData.getMockShiftById(params as unknown as string) || {}) as T;
+      case 'shifts:getById': {
+        // Mock includes cashier_name for dev mode (matches production handler)
+        const mockShift = mockData.getMockShiftById(params as unknown as string);
+        return mockShift ? ({ ...mockShift, cashier_name: 'Mock Cashier' } as T) : ({} as T);
+      }
       case 'shifts:getSummary':
         return (mockData.getMockShiftSummary(params as unknown as string) || {}) as T;
       case 'shifts:findOpenShifts':
         return mockData.getMockOpenShifts() as T;
       case 'shifts:close': {
-        // Simulate close - return the shift with CLOSED status
+        // Simulate close - return the shift with CLOSED status and cashier_name
         const shiftId = params as unknown as string;
         const shift = mockData.getMockShiftById(shiftId);
-        return (shift ? { ...shift, status: 'CLOSED' } : {}) as T;
+        return (shift ? { ...shift, status: 'CLOSED', cashier_name: 'Mock Cashier' } : {}) as T;
       }
       case 'shifts:manualStart': {
         // Simulate manual shift start - return a new mock shift
@@ -432,6 +435,22 @@ class IPCClient {
           started_at: new Date().toISOString(),
           status: 'OPEN',
         } as T;
+      case 'shifts:getOpenShifts': {
+        // Mock open shifts with resolved names for DayClosePage
+        const mockOpenShifts = mockData.getMockOpenShifts();
+        return {
+          open_shifts: mockOpenShifts.map((shift, idx) => ({
+            shift_id: shift.shift_id,
+            terminal_name: `Register ${idx + 1}`,
+            cashier_name: `Cashier ${idx + 1}`,
+            shift_number: shift.shift_number,
+            status: shift.status,
+            external_register_id: shift.register_id,
+            business_date: shift.business_date,
+            start_time: shift.start_time,
+          })),
+        } as T;
+      }
 
       // Terminals/Registers
       case 'terminals:list':
@@ -473,6 +492,27 @@ class IPCClient {
       case 'employees:listActive':
         // Return only active employees for shift selection
         return mockData.getMockEmployees() as T;
+      case 'cashiers:list': {
+        // Mock cashiers list for DayClosePage
+        const mockEmployees = mockData.getMockEmployees();
+        return {
+          cashiers: mockEmployees.employees.map((emp) => ({
+            cashier_id: emp.user_id,
+            name: emp.name,
+            role: emp.role,
+          })),
+          total: mockEmployees.employees.length,
+        } as T;
+      }
+
+      // Store
+      case 'store:getConfigured': {
+        // Mock configured store for DayClosePage
+        return {
+          store_id: 'store-1',
+          name: 'Test Gas Station',
+        } as T;
+      }
       case 'employees:create':
         return {
           employee: {
@@ -962,6 +1002,28 @@ export const terminalsAPI = {
   /** Update a register's description */
   update: (params: UpdateRegisterParams) =>
     ipcClient.invoke<RegisterResponse>('terminals:update', params),
+  /**
+   * Deactivate a terminal mapping in the local database
+   *
+   * Called after successful cloud API deletion to synchronize local state.
+   * Sets the terminal's active flag to 0 (soft delete, not hard delete).
+   *
+   * @param terminalId - Terminal mapping ID or external register ID (UUID format)
+   * @returns Promise<DeactivateTerminalResponse> with success status and message
+   *
+   * @security SEC-014: terminalId validated as UUID in IPC handler
+   * @security DB-006: Operation scoped to configured store via IPC handler
+   *
+   * @example
+   * ```typescript
+   * const result = await terminalsAPI.deactivate(terminalId);
+   * if (result.success) {
+   *   // Handle success - result.message contains confirmation
+   * }
+   * ```
+   */
+  deactivate: (terminalId: string) =>
+    ipcClient.invoke<DeactivateTerminalResponse>('terminals:deactivate', { terminalId }),
   /**
    * Get business day status for day close availability
    *
@@ -1664,6 +1726,23 @@ export interface RegisterResponse {
 }
 
 /**
+ * Response for terminal deactivation operation
+ * Returned by terminals:deactivate IPC handler after local database update
+ *
+ * Used to synchronize local state after cloud terminal deletion.
+ * Success indicates the terminal was found and deactivated (or was already inactive).
+ * Failure indicates the terminal was not found in the local database.
+ */
+export interface DeactivateTerminalResponse {
+  /** Whether the deactivation was successful */
+  success: boolean;
+  /** The terminal ID that was processed */
+  terminalId: string;
+  /** Human-readable result message */
+  message: string;
+}
+
+/**
  * Day status response for determining day close availability
  *
  * This is the authoritative source for UI rendering decisions
@@ -1705,10 +1784,36 @@ export type ShiftCloseType = 'SHIFT_CLOSE' | 'DAY_CLOSE';
 export type POSConnectionType = 'NETWORK' | 'API' | 'WEBHOOK' | 'FILE' | 'MANUAL';
 
 /**
+ * POS System Type
+ * SEC-014: Strict allowlist validation
+ *
+ * Identifies the POS system for protocol-specific handling.
+ * Must match POSSystemTypeSchema from src/shared/types/config.types.ts
+ */
+export type POSSystemType =
+  | 'GILBARCO_PASSPORT'
+  | 'GILBARCO_NAXML'
+  | 'VERIFONE_RUBY2'
+  | 'VERIFONE_COMMANDER'
+  | 'SQUARE_REST'
+  | 'CLOVER_REST'
+  | 'NCR_RADIANT'
+  | 'INFOR_POS'
+  | 'ORACLE_SIMPHONY'
+  | 'CUSTOM_API'
+  | 'FILE_BASED'
+  | 'MANUAL'
+  | 'MANUAL_ENTRY'
+  | 'LOTTERY'
+  | 'UNKNOWN';
+
+/**
  * Response from getPOSConnectionType
+ * Returns both connection method and POS system type for UI mode detection
  */
 export interface POSConnectionTypeResponse {
   connectionType: POSConnectionType | null;
+  posType: POSSystemType | null;
 }
 
 /**

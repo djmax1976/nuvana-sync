@@ -14,7 +14,7 @@
  * @security DB-001: ORM-like patterns with safe query building
  */
 
-import { StoreBasedDAL, type StoreEntity, type PaginatedResult } from './base.dal';
+import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
@@ -498,21 +498,28 @@ export class ShiftSummariesDAL extends StoreBasedDAL<ShiftSummary> {
   }
 
   /**
-   * Close shift summary with final totals
-   * SEC-006: Parameterized UPDATE
-   * DB-006: Store-scoped
+   * Close shift summary with final totals and closing cash
+   *
+   * Updates the shift summary with close timestamp, duration calculation,
+   * and closing cash amount. The closing_cash is stored for cash drawer
+   * reconciliation and cloud sync.
+   *
+   * @security SEC-006: Parameterized UPDATE via this.update()
+   * @security DB-006: Store-scoped via storeId parameter
    *
    * @param storeId - Store identifier (from auth context)
    * @param shiftSummaryId - Shift summary ID
-   * @param closedAt - Close timestamp
-   * @param closedByUserId - User who closed the shift
-   * @returns Updated summary
+   * @param closedAt - Close timestamp (ISO format)
+   * @param closedByUserId - User who closed the shift (optional)
+   * @param closingCash - Cash amount in drawer at close (optional, non-negative)
+   * @returns Updated summary or undefined if not found
    */
   closeShiftSummary(
     storeId: string,
     shiftSummaryId: string,
     closedAt: string,
-    closedByUserId?: string
+    closedByUserId?: string,
+    closingCash?: number
   ): ShiftSummary | undefined {
     // Get existing to calculate duration
     const existing = this.findByIdForStore(storeId, shiftSummaryId);
@@ -527,11 +534,19 @@ export class ShiftSummariesDAL extends StoreBasedDAL<ShiftSummary> {
       durationMins = Math.round((closedAtDate.getTime() - openedAt.getTime()) / 60000);
     }
 
-    return this.update(storeId, shiftSummaryId, {
+    // Build update data with closing_cash if provided
+    const updateData: UpdateShiftSummaryData = {
       shift_closed_at: closedAt,
       shift_duration_mins: durationMins,
       closed_by_user_id: closedByUserId,
-    });
+    };
+
+    // Only include closing_cash if provided (preserves existing value if not set)
+    if (closingCash !== undefined) {
+      updateData.closing_cash = closingCash;
+    }
+
+    return this.update(storeId, shiftSummaryId, updateData);
   }
 }
 

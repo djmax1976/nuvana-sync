@@ -845,6 +845,38 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
   }
 
   /**
+   * Delete all sync queue items for a specific entity by ID
+   * SEC-006: Parameterized DELETE
+   * DB-006: Scoped to store_id for tenant isolation
+   *
+   * Use this to clean up failed/pending items before re-enqueueing
+   *
+   * @param storeId - Store ID
+   * @param entityType - Entity type (e.g., 'shift')
+   * @param entityId - Entity ID (e.g., shift_id)
+   * @returns Number of items deleted
+   */
+  deleteByEntityId(storeId: string, entityType: string, entityId: string): number {
+    const stmt = this.db.prepare(`
+      DELETE FROM sync_queue
+      WHERE store_id = ? AND entity_type = ? AND entity_id = ?
+    `);
+
+    const result = stmt.run(storeId, entityType, entityId);
+
+    if (result.changes > 0) {
+      log.info('Sync queue items deleted by entity ID', {
+        storeId,
+        entityType,
+        entityId,
+        count: result.changes,
+      });
+    }
+
+    return result.changes;
+  }
+
+  /**
    * Delete all sync queue items by entity type for a store
    * SEC-006: Parameterized DELETE
    * DB-006: Scoped to store_id for tenant isolation
@@ -2453,10 +2485,54 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 }
 
 // ============================================================================
-// Singleton Export
+// Lazy Singleton Export
 // ============================================================================
 
 /**
- * Singleton instance for sync queue operations
+ * Lazy singleton instance holder
+ * @internal
  */
-export const syncQueueDAL = new SyncQueueDAL();
+let _syncQueueDALInstance: SyncQueueDAL | null = null;
+
+/**
+ * Get or create the singleton instance
+ * Defers creation until first access to support test mocking
+ * @internal
+ */
+function getSyncQueueDAL(): SyncQueueDAL {
+  if (!_syncQueueDALInstance) {
+    _syncQueueDALInstance = new SyncQueueDAL();
+  }
+  return _syncQueueDALInstance;
+}
+
+/**
+ * Reset the singleton instance (for testing only)
+ * @internal
+ */
+export function _resetSyncQueueDAL(): void {
+  _syncQueueDALInstance = null;
+}
+
+/**
+ * Lazy singleton proxy for sync queue operations
+ *
+ * Uses Proxy pattern to defer instance creation until first property access.
+ * This ensures tests can set up database mocks before the DAL is instantiated.
+ */
+export const syncQueueDAL: SyncQueueDAL = new Proxy({} as SyncQueueDAL, {
+  get(_target, prop: string | symbol) {
+    const instance = getSyncQueueDAL();
+    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+    // Bind methods to the instance to preserve `this` context
+    if (typeof value === 'function') {
+      return value.bind(instance);
+    }
+    return value;
+  },
+  set(_target, prop: string | symbol, value: unknown) {
+    const instance = getSyncQueueDAL();
+    (instance as unknown as Record<string | symbol, unknown>)[prop] = value;
+    return true;
+  },
+});

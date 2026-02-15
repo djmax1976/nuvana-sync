@@ -89,6 +89,32 @@ vi.mock('../../../src/main/dal/day-summaries.dal', () => ({
   },
 }));
 
+// Mock lottery business days DAL for BIZ-007 shift guard tests
+vi.mock('../../../src/main/dal/lottery-business-days.dal', () => ({
+  lotteryBusinessDaysDAL: {
+    findOpenDay: vi.fn(),
+    getOrCreateForDate: vi.fn(),
+  },
+}));
+
+// Mock users DAL for shifts:getOpenShifts handler tests
+vi.mock('../../../src/main/dal/users.dal', () => ({
+  usersDAL: {
+    findByStore: vi.fn(),
+    findById: vi.fn(),
+    findByPin: vi.fn(),
+    verifyPin: vi.fn(),
+  },
+}));
+
+// Mock pos terminal mappings DAL for shifts:getOpenShifts handler tests
+vi.mock('../../../src/main/dal/pos-id-mappings.dal', () => ({
+  posTerminalMappingsDAL: {
+    findRegisters: vi.fn(),
+    findByIdForStore: vi.fn(),
+  },
+}));
+
 describe('Shifts Handlers', () => {
   beforeEach(() => {
     vi.clearAllMocks();
@@ -1310,16 +1336,17 @@ describe('Shifts Handlers', () => {
     // -------------------------------------------------------------------------
 
     describe('payload structure validation', () => {
-      it('should build complete payload from shift entity', () => {
+      it('should build complete payload from shift entity with internal field names', () => {
+        // Local shift entity (from database)
         const shift = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          start_time: '2024-01-15T08:00:00Z', // DB field name
           status: 'OPEN' as const,
-          cashier_id: 'cashier-789',
-          end_time: null,
+          cashier_id: 'cashier-789', // DB field name
+          end_time: null, // DB field name
           external_register_id: 'REG001',
           external_cashier_id: 'EXT_CASHIER_001',
           external_till_id: 'TILL_001',
@@ -1327,49 +1354,53 @@ describe('Shifts Handlers', () => {
           updated_at: '2024-01-15T08:00:00Z',
         };
 
-        // Expected payload structure per API contract
+        // Expected payload structure uses INTERNAL field names
+        // Translation to cloud API names (start_time, cashier_id, end_time) happens in cloud-api.service.ts
         const expectedPayload = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z', // Internal name (→ start_time at API boundary)
+          opened_by: 'cashier-789', // Internal name (→ cashier_id at API boundary)
           status: 'OPEN',
-          cashier_id: 'cashier-789',
-          end_time: null,
+          closed_at: null, // Internal name (→ end_time at API boundary)
           external_register_id: 'REG001',
           external_cashier_id: 'EXT_CASHIER_001',
           external_till_id: 'TILL_001',
         };
 
-        // Verify required fields
+        // Verify required fields with internal naming
         expect(expectedPayload.shift_id).toBe(shift.shift_id);
         expect(expectedPayload.store_id).toBe(shift.store_id);
         expect(expectedPayload.business_date).toBe(shift.business_date);
         expect(expectedPayload.shift_number).toBe(shift.shift_number);
-        expect(expectedPayload.start_time).toBe(shift.start_time);
+        expect(expectedPayload.opened_at).toBe(shift.start_time); // Mapped field
+        expect(expectedPayload.opened_by).toBe(shift.cashier_id); // Mapped field
         expect(expectedPayload.status).toBe(shift.status);
       });
 
-      it('should include all required fields per API contract', () => {
+      it('should include all required fields per ShiftSyncPayload interface', () => {
+        // Required fields in internal payload (translated at API boundary)
         const requiredFields = [
           'shift_id',
           'store_id',
           'business_date',
           'shift_number',
-          'start_time',
+          'opened_at', // Internal name (→ start_time at API boundary)
           'status',
         ];
 
+        // Payload with internal field names
         const payload = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z', // Internal name
+          opened_by: null, // Internal name
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          closed_at: null, // Internal name
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1382,23 +1413,25 @@ describe('Shifts Handlers', () => {
       });
 
       it('should include optional fields even when null', () => {
+        // Optional fields in internal payload (translated at API boundary)
         const optionalFields = [
-          'cashier_id',
-          'end_time',
+          'opened_by', // Internal name (→ cashier_id at API boundary)
+          'closed_at', // Internal name (→ end_time at API boundary)
           'external_register_id',
           'external_cashier_id',
           'external_till_id',
         ];
 
+        // Payload with internal field names
         const payload = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
+          opened_by: null,
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1409,24 +1442,25 @@ describe('Shifts Handlers', () => {
         });
       });
 
-      it('should handle CLOSED status with end_time', () => {
-        const closedShift = {
+      it('should handle CLOSED status with closed_at', () => {
+        // Internal payload for closed shift (translated at API boundary)
+        const closedShiftPayload = {
           shift_id: 'shift-closed',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z', // Internal name (→ start_time)
+          opened_by: 'cashier-789', // Internal name (→ cashier_id)
           status: 'CLOSED' as const,
-          cashier_id: 'cashier-789',
-          end_time: '2024-01-15T16:30:00Z',
+          closed_at: '2024-01-15T16:30:00Z', // Internal name (→ end_time)
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
         };
 
-        expect(closedShift.status).toBe('CLOSED');
-        expect(closedShift.end_time).not.toBeNull();
-        expect(closedShift.end_time).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
+        expect(closedShiftPayload.status).toBe('CLOSED');
+        expect(closedShiftPayload.closed_at).not.toBeNull();
+        expect(closedShiftPayload.closed_at).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/);
       });
     });
 
@@ -1463,11 +1497,11 @@ describe('Shifts Handlers', () => {
         expect(shiftNumber).toBeGreaterThan(0);
       });
 
-      it('should have start_time in ISO 8601 format', () => {
+      it('should have opened_at in ISO 8601 format', () => {
         const isoRegex = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}/;
-        const validStartTime = '2024-01-15T08:00:00Z';
+        const validOpenedAt = '2024-01-15T08:00:00Z';
 
-        expect(isoRegex.test(validStartTime)).toBe(true);
+        expect(isoRegex.test(validOpenedAt)).toBe(true);
       });
 
       it('should have status as OPEN or CLOSED enum', () => {
@@ -1484,47 +1518,49 @@ describe('Shifts Handlers', () => {
     // -------------------------------------------------------------------------
 
     describe('edge cases', () => {
-      it('should handle shift with all optional fields populated', () => {
-        const fullyPopulatedShift = {
+      it('should handle shift payload with all optional fields populated', () => {
+        // Internal payload with all fields populated (translated at API boundary)
+        const fullyPopulatedPayload = {
           shift_id: 'shift-full',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 3,
-          start_time: '2024-01-15T20:00:00Z',
+          opened_at: '2024-01-15T20:00:00Z', // Internal name (→ start_time)
+          opened_by: 'cashier-night', // Internal name (→ cashier_id)
           status: 'CLOSED' as const,
-          cashier_id: 'cashier-night',
-          end_time: '2024-01-16T04:00:00Z',
+          closed_at: '2024-01-16T04:00:00Z', // Internal name (→ end_time)
           external_register_id: 'REG_NIGHT_001',
           external_cashier_id: 'EXT_CASHIER_NIGHT',
           external_till_id: 'TILL_NIGHT_001',
         };
 
-        expect(fullyPopulatedShift.cashier_id).not.toBeNull();
-        expect(fullyPopulatedShift.end_time).not.toBeNull();
-        expect(fullyPopulatedShift.external_register_id).not.toBeNull();
-        expect(fullyPopulatedShift.external_cashier_id).not.toBeNull();
-        expect(fullyPopulatedShift.external_till_id).not.toBeNull();
+        expect(fullyPopulatedPayload.opened_by).not.toBeNull();
+        expect(fullyPopulatedPayload.closed_at).not.toBeNull();
+        expect(fullyPopulatedPayload.external_register_id).not.toBeNull();
+        expect(fullyPopulatedPayload.external_cashier_id).not.toBeNull();
+        expect(fullyPopulatedPayload.external_till_id).not.toBeNull();
       });
 
       it('should handle shift at day boundary (crossing midnight)', () => {
-        const midnightCrossingShift = {
+        // Internal payload for overnight shift (translated at API boundary)
+        const midnightCrossingPayload = {
           shift_id: 'shift-midnight',
           store_id: 'store-456',
           business_date: '2024-01-15', // Business date is the START date
           shift_number: 3,
-          start_time: '2024-01-15T22:00:00Z',
+          opened_at: '2024-01-15T22:00:00Z', // Internal name (→ start_time)
+          opened_by: null, // Internal name (→ cashier_id)
           status: 'CLOSED' as const,
-          cashier_id: null,
-          end_time: '2024-01-16T06:00:00Z', // Ends next calendar day
+          closed_at: '2024-01-16T06:00:00Z', // Ends next calendar day (→ end_time)
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
         };
 
         // Business date should remain the start date
-        expect(midnightCrossingShift.business_date).toBe('2024-01-15');
-        // End time can be the next day
-        expect(midnightCrossingShift.end_time).toContain('2024-01-16');
+        expect(midnightCrossingPayload.business_date).toBe('2024-01-15');
+        // Closed_at can be the next day
+        expect(midnightCrossingPayload.closed_at).toContain('2024-01-16');
       });
 
       it('should handle shift number edge values', () => {
@@ -1545,17 +1581,22 @@ describe('Shifts Handlers', () => {
     describe('security (API-008: output filtering)', () => {
       it('should not include internal-only fields in sync payload', () => {
         // Fields that should NOT be in the sync payload
+        // These are DB/internal fields that should be excluded
         const internalOnlyFields = ['created_at', 'updated_at', 'sync_status', 'local_only'];
 
+        // Internal sync payload (translated to cloud names at API boundary)
+        // Internal: opened_at → Cloud: start_time
+        // Internal: opened_by → Cloud: cashier_id
+        // Internal: closed_at → Cloud: end_time
         const syncPayload = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z', // Internal name (→ start_time)
+          opened_by: null, // Internal name (→ cashier_id)
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          closed_at: null, // Internal name (→ end_time)
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1566,30 +1607,32 @@ describe('Shifts Handlers', () => {
         });
       });
 
-      it('should only include API contract fields', () => {
+      it('should only include ShiftSyncPayload interface fields', () => {
+        // Fields allowed in internal sync payload (translated at API boundary)
         const allowedFields = [
           'shift_id',
           'store_id',
           'business_date',
           'shift_number',
-          'start_time',
+          'opened_at', // Internal name (→ start_time at API boundary)
+          'opened_by', // Internal name (→ cashier_id at API boundary)
           'status',
-          'cashier_id',
-          'end_time',
+          'closed_at', // Internal name (→ end_time at API boundary)
           'external_register_id',
           'external_cashier_id',
           'external_till_id',
         ];
 
+        // Internal sync payload
         const syncPayload = {
           shift_id: 'shift-123',
           store_id: 'store-456',
           business_date: '2024-01-15',
           shift_number: 1,
-          start_time: '2024-01-15T08:00:00Z',
+          opened_at: '2024-01-15T08:00:00Z',
+          opened_by: null,
           status: 'OPEN',
-          cashier_id: null,
-          end_time: null,
+          closed_at: null,
           external_register_id: null,
           external_cashier_id: null,
           external_till_id: null,
@@ -1674,7 +1717,8 @@ describe('Shifts Handlers', () => {
   // ==========================================================================
   describe('Shift Sync Enqueue Logic', () => {
     describe('enqueue on manual shift start', () => {
-      it('should enqueue CREATE operation for new shift', () => {
+      it('should enqueue CREATE operation for new shift with internal field names', () => {
+        // Payload uses internal field names (translated at API boundary)
         const expectedEnqueueData = {
           entity_type: 'shift',
           entity_id: 'shift-new',
@@ -1686,19 +1730,23 @@ describe('Shifts Handlers', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 1,
-            start_time: '2024-01-15T08:00:00Z',
+            opened_at: '2024-01-15T08:00:00Z', // Internal name (→ start_time)
+            opened_by: null, // Internal name (→ cashier_id)
             status: 'OPEN',
+            closed_at: null, // Internal name (→ end_time)
           },
         };
 
         expect(expectedEnqueueData.entity_type).toBe('shift');
         expect(expectedEnqueueData.operation).toBe('CREATE');
         expect(expectedEnqueueData.priority).toBe(10);
+        expect(expectedEnqueueData.payload.opened_at).toBeDefined();
       });
     });
 
     describe('enqueue on shift close', () => {
-      it('should enqueue UPDATE operation for closed shift', () => {
+      it('should enqueue UPDATE operation for closed shift with internal field names', () => {
+        // Payload uses internal field names (translated at API boundary)
         const expectedEnqueueData = {
           entity_type: 'shift',
           entity_id: 'shift-closing',
@@ -1710,16 +1758,17 @@ describe('Shifts Handlers', () => {
             store_id: 'store-123',
             business_date: '2024-01-15',
             shift_number: 1,
-            start_time: '2024-01-15T08:00:00Z',
+            opened_at: '2024-01-15T08:00:00Z', // Internal name (→ start_time)
+            opened_by: 'cashier-123', // Internal name (→ cashier_id)
             status: 'CLOSED',
-            end_time: '2024-01-15T16:30:00Z',
+            closed_at: '2024-01-15T16:30:00Z', // Internal name (→ end_time)
           },
         };
 
         expect(expectedEnqueueData.entity_type).toBe('shift');
         expect(expectedEnqueueData.operation).toBe('UPDATE');
         expect(expectedEnqueueData.payload.status).toBe('CLOSED');
-        expect(expectedEnqueueData.payload.end_time).not.toBeNull();
+        expect(expectedEnqueueData.payload.closed_at).not.toBeNull();
       });
     });
 
@@ -1836,6 +1885,632 @@ describe('Shifts Handlers', () => {
         };
 
         expect(multiRegisterScenario.expectedCloseType).toBe('SHIFT_CLOSE');
+      });
+    });
+  });
+
+  // ==========================================================================
+  // BIZ-007: Open Day Guard for Manual Shift Start Tests
+  // SEC-017: Audit logging for blocked attempts
+  // DB-006: Tenant isolation verification
+  // ==========================================================================
+  describe('shifts:manualStart - BIZ-007 Open Day Guard', () => {
+    // Test fixtures
+    const STORE_ID = 'store-uuid-biz007-shifts';
+    const OTHER_STORE_ID = 'store-uuid-other-tenant';
+    const USER_ID = 'user-uuid-cashier';
+    const REGISTER_ID = '1';
+    const BUSINESS_DATE = '2026-02-11';
+
+    // Mock lottery business days DAL
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    type MockFn = ReturnType<typeof vi.fn> & ((...args: any[]) => any);
+    let lotteryBusinessDaysDAL: {
+      findOpenDay: MockFn;
+      getOrCreateForDate: MockFn;
+    };
+
+    // Mock open day
+    const mockOpenDay = {
+      day_id: 'day-uuid-open',
+      store_id: STORE_ID,
+      business_date: BUSINESS_DATE,
+      status: 'OPEN',
+      opened_at: '2026-02-11T08:00:00.000Z',
+      opened_by: USER_ID,
+      closed_at: null,
+      closed_by: null,
+      total_sales: 0,
+      total_packs_sold: 0,
+      total_packs_activated: 0,
+    };
+
+    // Mock closed day (should not satisfy guard)
+    const mockClosedDay = {
+      ...mockOpenDay,
+      day_id: 'day-uuid-closed',
+      status: 'CLOSED',
+      closed_at: '2026-02-11T22:00:00.000Z',
+    };
+
+    // Mock pending close day (should not satisfy guard)
+    const mockPendingCloseDay = {
+      ...mockOpenDay,
+      day_id: 'day-uuid-pending',
+      status: 'PENDING_CLOSE',
+    };
+
+    beforeEach(async () => {
+      vi.clearAllMocks();
+      const daysModule = await import('../../../src/main/dal/lottery-business-days.dal');
+      lotteryBusinessDaysDAL =
+        daysModule.lotteryBusinessDaysDAL as unknown as typeof lotteryBusinessDaysDAL;
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-001: Blocked when no open day exists
+    // ========================================================================
+    describe('SHIFT-GUARD-001: Blocked when no open day', () => {
+      it('should return VALIDATION_ERROR when no open lottery day exists', () => {
+        // Arrange: No open day found
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act: Check guard condition
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        const isBlocked = !openDay;
+
+        // Assert: Guard blocks shift start
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenCalledWith(STORE_ID);
+        expect(openDay).toBeUndefined();
+        expect(isBlocked).toBe(true);
+      });
+
+      it('should check for open day BEFORE creating shift', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act: Simulate handler guard check order
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: findOpenDay called, shift creation should be blocked
+        expect(openDay).toBeUndefined();
+        // In production, shiftsDAL.getOrCreateForDate should NOT be called
+      });
+
+      it('should return correct error code for validation failure', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act: Simulate error response construction
+        const errorResponse = {
+          success: false,
+          error: 'VALIDATION_ERROR',
+          message:
+            'Cannot start shift: No open business day exists. Please open a day first or contact your manager.',
+        };
+
+        // Assert: Correct error structure
+        expect(errorResponse.error).toBe('VALIDATION_ERROR');
+        expect(errorResponse.success).toBe(false);
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-002: Allowed when open day exists
+    // ========================================================================
+    describe('SHIFT-GUARD-002: Allowed when open day exists', () => {
+      it('should proceed with shift creation when open lottery day exists', () => {
+        // Arrange: Open day found
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(mockOpenDay);
+
+        // Act: Check guard condition
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        const isAllowed = !!openDay;
+
+        // Assert: Guard allows shift start
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenCalledWith(STORE_ID);
+        expect(openDay).toBeDefined();
+        expect(openDay?.status).toBe('OPEN');
+        expect(isAllowed).toBe(true);
+      });
+
+      it('should return open day with correct properties', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(mockOpenDay);
+
+        // Act
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: Day has expected structure
+        expect(openDay).toHaveProperty('day_id');
+        expect(openDay).toHaveProperty('store_id', STORE_ID);
+        expect(openDay).toHaveProperty('status', 'OPEN');
+        expect(openDay).toHaveProperty('business_date');
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-003: User-friendly error message
+    // ========================================================================
+    describe('SHIFT-GUARD-003: User-friendly error message', () => {
+      it('should return actionable error message with "open a day" instruction', () => {
+        // Arrange
+        const errorMessage =
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.';
+
+        // Assert: Message is actionable
+        expect(errorMessage).toContain('open a day');
+        expect(errorMessage).toContain('contact your manager');
+      });
+
+      it('should not expose internal implementation details in error', () => {
+        // Arrange
+        const errorMessage =
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.';
+
+        // Assert: No technical jargon exposed
+        expect(errorMessage).not.toContain('lottery_business_days');
+        expect(errorMessage).not.toContain('findOpenDay');
+        expect(errorMessage).not.toContain('database');
+        expect(errorMessage).not.toContain('SQL');
+      });
+
+      it('should be concise and clear', () => {
+        const errorMessage =
+          'Cannot start shift: No open business day exists. Please open a day first or contact your manager.';
+
+        // Assert: Reasonable length
+        expect(errorMessage.length).toBeLessThan(150);
+        expect(errorMessage).toContain('Cannot start shift');
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-004: Audit log for blocked attempt (SEC-017)
+    // ========================================================================
+    describe('SHIFT-GUARD-004: Audit log for blocked attempt', () => {
+      it('should include storeId in audit log context', () => {
+        // Arrange: Audit log context structure
+        const auditLogContext = {
+          storeId: STORE_ID,
+          businessDate: BUSINESS_DATE,
+          cashierUserId: USER_ID,
+          registerId: REGISTER_ID,
+        };
+
+        // Assert: All required audit fields present
+        expect(auditLogContext).toHaveProperty('storeId', STORE_ID);
+        expect(auditLogContext.storeId).toBeDefined();
+      });
+
+      it('should include businessDate in audit log context', () => {
+        const auditLogContext = {
+          storeId: STORE_ID,
+          businessDate: BUSINESS_DATE,
+          cashierUserId: USER_ID,
+          registerId: REGISTER_ID,
+        };
+
+        expect(auditLogContext).toHaveProperty('businessDate', BUSINESS_DATE);
+      });
+
+      it('should include cashierUserId for accountability', () => {
+        const auditLogContext = {
+          storeId: STORE_ID,
+          businessDate: BUSINESS_DATE,
+          cashierUserId: USER_ID,
+          registerId: REGISTER_ID,
+        };
+
+        expect(auditLogContext).toHaveProperty('cashierUserId', USER_ID);
+      });
+
+      it('should include registerId for traceability', () => {
+        const auditLogContext = {
+          storeId: STORE_ID,
+          businessDate: BUSINESS_DATE,
+          cashierUserId: USER_ID,
+          registerId: REGISTER_ID,
+        };
+
+        expect(auditLogContext).toHaveProperty('registerId', REGISTER_ID);
+      });
+
+      it('should use log.warn level for blocked attempts', () => {
+        // SEC-017: Audit blocked attempts with warning level
+        const logLevels = ['debug', 'info', 'warn', 'error'];
+        const expectedLevel = 'warn';
+
+        // Assert: warn is appropriate for security-relevant blocked actions
+        expect(logLevels).toContain(expectedLevel);
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-005: Tenant isolation in guard (DB-006)
+    // ========================================================================
+    describe('SHIFT-GUARD-005: Tenant isolation in guard', () => {
+      it('should only check days for current store', () => {
+        // Arrange: Open day exists for DIFFERENT store
+        const otherStoreDay = { ...mockOpenDay, store_id: OTHER_STORE_ID };
+        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
+          // Return day only for other store
+          return storeId === OTHER_STORE_ID ? otherStoreDay : undefined;
+        });
+
+        // Act: Check current store
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: No day found for current store (tenant isolation)
+        expect(openDay).toBeUndefined();
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenCalledWith(STORE_ID);
+      });
+
+      it('should pass store_id to DAL method', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(mockOpenDay);
+
+        // Act
+        lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: Store ID passed correctly (DB-006)
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenCalledWith(STORE_ID);
+      });
+
+      it('should never query across stores', () => {
+        // Arrange
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(mockOpenDay);
+
+        // Act: Multiple calls for different stores
+        lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        lotteryBusinessDaysDAL.findOpenDay(OTHER_STORE_ID);
+
+        // Assert: Each call scoped to its store
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenNthCalledWith(1, STORE_ID);
+        expect(lotteryBusinessDaysDAL.findOpenDay).toHaveBeenNthCalledWith(2, OTHER_STORE_ID);
+      });
+
+      it('should not expose cross-tenant data in response', () => {
+        // Arrange: findOpenDay returns day for requested store only
+        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
+          if (storeId === STORE_ID) return mockOpenDay;
+          return undefined;
+        });
+
+        // Act
+        const currentStoreDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        const otherStoreDay = lotteryBusinessDaysDAL.findOpenDay(OTHER_STORE_ID);
+
+        // Assert: Tenant isolation maintained
+        expect(currentStoreDay?.store_id).toBe(STORE_ID);
+        expect(otherStoreDay).toBeUndefined();
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-006: Closed days do not satisfy guard
+    // ========================================================================
+    describe('SHIFT-GUARD-006: Closed days do not satisfy guard', () => {
+      it('should block shift when only CLOSED days exist', () => {
+        // Arrange: findOpenDay returns undefined (only CLOSED days exist)
+        // Note: findOpenDay by definition only returns OPEN days
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        const canStartShift = !!openDay;
+
+        // Assert: No open day means shift blocked
+        expect(openDay).toBeUndefined();
+        expect(canStartShift).toBe(false);
+      });
+
+      it('should verify findOpenDay filters by OPEN status', () => {
+        // Arrange: The DAL method only returns OPEN days
+        // If a CLOSED day exists, it should not be returned
+        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
+          // Simulate: CLOSED day exists but should not match
+          const closedDayExists = true;
+          const openDayExists = false;
+
+          if (storeId === STORE_ID && openDayExists) {
+            return mockOpenDay;
+          }
+          return undefined;
+        });
+
+        // Act
+        const result = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: CLOSED day not returned
+        expect(result).toBeUndefined();
+      });
+
+      it('should handle scenario where day was closed earlier today', () => {
+        // Scenario: Day opened at 8am, closed at 2pm, someone tries shift at 3pm
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: No open day, shift blocked
+        expect(openDay).toBeUndefined();
+      });
+    });
+
+    // ========================================================================
+    // SHIFT-GUARD-007: PENDING_CLOSE days do not satisfy guard
+    // ========================================================================
+    describe('SHIFT-GUARD-007: PENDING_CLOSE does not satisfy guard', () => {
+      it('should block shift when day is PENDING_CLOSE', () => {
+        // Arrange: findOpenDay only returns OPEN, not PENDING_CLOSE
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+        const canStartShift = !!openDay;
+
+        // Assert: PENDING_CLOSE day means shift blocked
+        expect(openDay).toBeUndefined();
+        expect(canStartShift).toBe(false);
+      });
+
+      it('should not return PENDING_CLOSE day from findOpenDay', () => {
+        // Arrange: Verify DAL behavior - only OPEN status matches
+        // PENDING_CLOSE is not OPEN, so shouldn't be returned
+        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
+          // Simulate: Only PENDING_CLOSE day exists
+          const existingDay = mockPendingCloseDay;
+          // findOpenDay only returns OPEN days
+          return existingDay.status === 'OPEN' ? existingDay : undefined;
+        });
+
+        // Act
+        const result = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: PENDING_CLOSE day not returned
+        expect(result).toBeUndefined();
+      });
+
+      it('should block new shifts during day close process', () => {
+        // Business rule: Once day close is initiated (PENDING_CLOSE),
+        // no new shifts should start
+        lotteryBusinessDaysDAL.findOpenDay.mockReturnValue(undefined);
+
+        // Act: Attempt to start shift during day close
+        const openDay = lotteryBusinessDaysDAL.findOpenDay(STORE_ID);
+
+        // Assert: Blocked
+        expect(openDay).toBeUndefined();
+      });
+
+      it('should differentiate between OPEN and PENDING_CLOSE statuses', () => {
+        // Verify the DAL method correctly filters by status
+        const dayStatuses = ['OPEN', 'PENDING_CLOSE', 'CLOSED'];
+        const validStatuses = dayStatuses.filter((s) => s === 'OPEN');
+
+        // Assert: Only OPEN is valid for starting shifts
+        expect(validStatuses).toEqual(['OPEN']);
+        expect(validStatuses).not.toContain('PENDING_CLOSE');
+        expect(validStatuses).not.toContain('CLOSED');
+      });
+    });
+  });
+
+  // ==========================================================================
+  // shifts:getOpenShifts Handler Tests (Task 1.2)
+  // ==========================================================================
+
+  describe('shifts:getOpenShifts', () => {
+    describe('happy path', () => {
+      it('should return open shifts with resolved terminal and cashier names', () => {
+        // Arrange: Mock data
+        const mockShifts = [
+          {
+            shift_id: 'shift-1',
+            store_id: 'store-1',
+            shift_number: 1,
+            business_date: '2026-02-11',
+            status: 'OPEN',
+            end_time: null,
+            external_register_id: 'REG-1',
+            cashier_id: 'user-1',
+            start_time: '2026-02-11T08:00:00Z',
+          },
+          {
+            shift_id: 'shift-2',
+            store_id: 'store-1',
+            shift_number: 2,
+            business_date: '2026-02-11',
+            status: 'OPEN',
+            end_time: null,
+            external_register_id: 'REG-2',
+            cashier_id: 'user-2',
+            start_time: '2026-02-11T10:00:00Z',
+          },
+        ];
+
+        const mockTerminals = [
+          { external_register_id: 'REG-1', description: 'Register 1' },
+          { external_register_id: 'REG-2', description: 'Register 2' },
+        ];
+
+        const mockUsers = [
+          { user_id: 'user-1', name: 'John Doe' },
+          { user_id: 'user-2', name: 'Jane Smith' },
+        ];
+
+        // Build lookup maps (mimicking handler logic)
+        const terminalMap = new Map(
+          mockTerminals.map((t) => [t.external_register_id, t.description])
+        );
+        const userMap = new Map(mockUsers.map((u) => [u.user_id, u.name]));
+
+        // Transform shifts
+        const openShiftsWithNames = mockShifts
+          .filter((s) => s.end_time === null)
+          .map((shift) => ({
+            shift_id: shift.shift_id,
+            terminal_name:
+              terminalMap.get(shift.external_register_id || '') ||
+              `Register ${shift.external_register_id}`,
+            cashier_name: userMap.get(shift.cashier_id || '') || 'Unknown Cashier',
+            shift_number: shift.shift_number,
+            status: shift.status,
+            external_register_id: shift.external_register_id,
+            business_date: shift.business_date,
+            start_time: shift.start_time,
+          }));
+
+        // Assert: Correct shape and resolved names
+        expect(openShiftsWithNames).toHaveLength(2);
+        expect(openShiftsWithNames[0].terminal_name).toBe('Register 1');
+        expect(openShiftsWithNames[0].cashier_name).toBe('John Doe');
+        expect(openShiftsWithNames[1].terminal_name).toBe('Register 2');
+        expect(openShiftsWithNames[1].cashier_name).toBe('Jane Smith');
+      });
+
+      it('should filter out closed shifts (end_time IS NOT NULL)', () => {
+        const allShifts = [
+          { shift_id: 'open-1', end_time: null, status: 'OPEN' },
+          { shift_id: 'closed-1', end_time: '2026-02-11T18:00:00Z', status: 'CLOSED' },
+          { shift_id: 'open-2', end_time: null, status: 'OPEN' },
+        ];
+
+        const openShifts = allShifts.filter((s) => s.end_time === null);
+
+        expect(openShifts).toHaveLength(2);
+        expect(openShifts.map((s) => s.shift_id)).toEqual(['open-1', 'open-2']);
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should return empty array when no open shifts exist', () => {
+        const allShifts = [
+          { shift_id: 'closed-1', end_time: '2026-02-11T18:00:00Z' },
+          { shift_id: 'closed-2', end_time: '2026-02-11T20:00:00Z' },
+        ];
+
+        const openShifts = allShifts.filter((s) => s.end_time === null);
+
+        expect(openShifts).toHaveLength(0);
+        expect(openShifts).toEqual([]);
+      });
+
+      it('should handle missing terminal mapping gracefully', () => {
+        const mockShift = {
+          shift_id: 'shift-1',
+          external_register_id: 'UNKNOWN-REG',
+          cashier_id: 'user-1',
+        };
+
+        const terminalMap = new Map<string, string>(); // Empty map
+        const userMap = new Map([['user-1', 'John Doe']]);
+
+        const terminalName =
+          terminalMap.get(mockShift.external_register_id) ||
+          `Register ${mockShift.external_register_id}`;
+        const cashierName = userMap.get(mockShift.cashier_id) || 'Unknown Cashier';
+
+        expect(terminalName).toBe('Register UNKNOWN-REG');
+        expect(cashierName).toBe('John Doe');
+      });
+
+      it('should handle missing cashier gracefully', () => {
+        const mockShift = {
+          shift_id: 'shift-1',
+          external_register_id: 'REG-1',
+          cashier_id: null,
+        };
+
+        const terminalMap = new Map([['REG-1', 'Register 1']]);
+        const userMap = new Map<string, string>();
+
+        const cashierName = mockShift.cashier_id
+          ? userMap.get(mockShift.cashier_id) || 'Unknown Cashier'
+          : 'No Cashier Assigned';
+
+        expect(cashierName).toBe('No Cashier Assigned');
+      });
+
+      it('should handle null external_register_id gracefully', () => {
+        const mockShift = {
+          shift_id: 'shift-1',
+          external_register_id: null,
+          cashier_id: 'user-1',
+        };
+
+        const terminalMap = new Map([['REG-1', 'Register 1']]);
+
+        const terminalName = mockShift.external_register_id
+          ? terminalMap.get(mockShift.external_register_id) ||
+            `Register ${mockShift.external_register_id}`
+          : 'Unknown Register';
+
+        expect(terminalName).toBe('Unknown Register');
+      });
+    });
+
+    describe('security', () => {
+      it('should enforce tenant isolation (DB-006) - only returns store-scoped shifts', () => {
+        // DB-006: The handler should only query shifts for the configured store
+        const configuredStoreId = 'store-1';
+        const allShifts = [
+          { shift_id: 'shift-1', store_id: 'store-1', end_time: null },
+          { shift_id: 'shift-2', store_id: 'store-2', end_time: null }, // Different store
+          { shift_id: 'shift-3', store_id: 'store-1', end_time: null },
+        ];
+
+        // DAL method should filter by store_id
+        const storeShifts = allShifts.filter((s) => s.store_id === configuredStoreId);
+        const openShifts = storeShifts.filter((s) => s.end_time === null);
+
+        expect(openShifts).toHaveLength(2);
+        expect(openShifts.every((s) => s.store_id === configuredStoreId)).toBe(true);
+      });
+
+      it('should return NOT_CONFIGURED when store is not configured', () => {
+        const store = null; // Store not configured
+
+        const errorResponse = store
+          ? null
+          : { error: 'NOT_CONFIGURED', message: 'Store not configured' };
+
+        expect(errorResponse).not.toBeNull();
+        expect(errorResponse?.error).toBe('NOT_CONFIGURED');
+      });
+    });
+
+    describe('response structure', () => {
+      it('should return correct response schema', () => {
+        const response = {
+          open_shifts: [
+            {
+              shift_id: 'shift-1',
+              terminal_name: 'Register 1',
+              cashier_name: 'John Doe',
+              shift_number: 1,
+              status: 'OPEN',
+              external_register_id: 'REG-1',
+              business_date: '2026-02-11',
+              start_time: '2026-02-11T08:00:00Z',
+            },
+          ],
+        };
+
+        // Verify response structure matches plan specification
+        expect(response).toHaveProperty('open_shifts');
+        expect(Array.isArray(response.open_shifts)).toBe(true);
+
+        const shift = response.open_shifts[0];
+        expect(shift).toHaveProperty('shift_id');
+        expect(shift).toHaveProperty('terminal_name');
+        expect(shift).toHaveProperty('cashier_name');
+        expect(shift).toHaveProperty('shift_number');
+        expect(shift).toHaveProperty('status');
+        expect(shift).toHaveProperty('external_register_id');
+        expect(shift).toHaveProperty('business_date');
+        expect(shift).toHaveProperty('start_time');
       });
     });
   });

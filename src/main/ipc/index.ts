@@ -305,6 +305,7 @@ export async function initializeIPC(): Promise<void> {
   await import('./license.handlers');
   await import('./employees.handlers');
   await import('./terminals.handlers');
+  await import('./day-close.handlers');
 
   log.info('IPC handlers initialized', {
     totalHandlers: handlerRegistry.size,

@@ -507,15 +507,18 @@ export function EnhancedPackActivationForm({
       }
 
       // SEC-010: Backend gets activated_by from session
-      // Frontend only sends pack_id, bin_id, opening_serial
+      // Frontend sends pack_id, bin_id, opening_serial, and deplete_previous
+      // BIN-001: deplete_previous enables auto-depletion of existing pack in bin
       const activationData: FullActivatePackInput = {
         pack_id: pending.pack_id,
         bin_id: pending.bin_id,
         opening_serial: pending.custom_serial_start,
+        deplete_previous: pending.deplete_previous,
       };
 
       try {
-        await fullActivationMutation.mutateAsync({
+        // Capture response to check for auto-depleted pack (BIN-001)
+        const response = await fullActivationMutation.mutateAsync({
           storeId,
           data: activationData,
         });
@@ -526,6 +529,16 @@ export function EnhancedPackActivationForm({
         setPendingActivations((prev) =>
           prev.map((p) => (p.id === pending.id ? { ...p, result: 'success' } : p))
         );
+
+        // BIN-001: Show toast when existing pack was auto-depleted
+        // FE-001: XSS safe - using framework-provided toast component
+        if (response.data?.depletedPack) {
+          const { pack_number, game_name } = response.data.depletedPack;
+          toast({
+            title: 'Pack Replaced',
+            description: `${game_name || 'Pack'} #${pack_number} was automatically sold out.`,
+          });
+        }
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Failed to activate pack';
 

@@ -8,10 +8,13 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-// Mock database service
-const mockPrepare = vi.fn();
-// transaction returns a function that executes the transaction when called
-const mockTransaction = vi.fn((fn) => () => fn());
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  // transaction returns a function that executes the transaction when called
+  mockTransaction: vi.fn((fn: () => void) => () => fn()),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -27,15 +30,19 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => `mock-uuid-${++uuidCounter}`),
 }));
 
-import {
-  TransactionsDAL,
-  type Transaction,
-  type TransactionLineItem,
-  type TransactionPayment,
+// Import actual DAL module (use importActual to prevent mock leakage from other test files)
+const { TransactionsDAL } = await vi.importActual<
+  typeof import('../../../src/main/dal/transactions.dal')
+>('../../../src/main/dal/transactions.dal');
+
+import type {
+  Transaction,
+  TransactionLineItem,
+  TransactionPayment,
 } from '../../../src/main/dal/transactions.dal';
 
 describe('TransactionsDAL', () => {
-  let dal: TransactionsDAL;
+  let dal: InstanceType<typeof TransactionsDAL>;
 
   const mockTransactionData: Transaction = {
     transaction_id: 'txn-123',

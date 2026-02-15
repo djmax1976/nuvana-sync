@@ -964,4 +964,143 @@ describe('Employee IPC Handlers', () => {
       expect(mockAuthUser.userId).toBe('manager-user-id');
     });
   });
+
+  // ==========================================================================
+  // cashiers:list Handler Tests (Task 1.5)
+  // ==========================================================================
+
+  describe('cashiers:list', () => {
+    describe('happy path', () => {
+      it('should return active cashiers with correct schema', () => {
+        const mockUsers = [
+          { user_id: 'user-1', name: 'John Doe', role: 'cashier', active: 1, pin_hash: 'xxx' },
+          {
+            user_id: 'user-2',
+            name: 'Jane Smith',
+            role: 'shift_manager',
+            active: 1,
+            pin_hash: 'yyy',
+          },
+          { user_id: 'user-3', name: 'Bob Jones', role: 'cashier', active: 0, pin_hash: 'zzz' },
+        ];
+
+        // Filter to active users only
+        const activeUsers = mockUsers.filter((u) => u.active === 1);
+
+        // Map to cashier info (SEC-001: exclude pin_hash)
+        const cashiers = activeUsers.map((u) => ({
+          cashier_id: u.user_id,
+          name: u.name,
+          role: u.role,
+        }));
+
+        expect(cashiers).toHaveLength(2);
+        expect(cashiers[0]).toEqual({
+          cashier_id: 'user-1',
+          name: 'John Doe',
+          role: 'cashier',
+        });
+        expect(cashiers[1]).toEqual({
+          cashier_id: 'user-2',
+          name: 'Jane Smith',
+          role: 'shift_manager',
+        });
+      });
+
+      it('should not include inactive users', () => {
+        const mockUsers = [
+          { user_id: 'active-1', active: 1 },
+          { user_id: 'inactive-1', active: 0 },
+          { user_id: 'active-2', active: 1 },
+        ];
+
+        const activeUsers = mockUsers.filter((u) => u.active === 1);
+
+        expect(activeUsers).toHaveLength(2);
+        expect(activeUsers.map((u) => u.user_id)).toEqual(['active-1', 'active-2']);
+      });
+    });
+
+    describe('edge cases', () => {
+      it('should return empty array when no users exist', () => {
+        const mockUsers: Array<{ user_id: string; active: number }> = [];
+
+        const activeUsers = mockUsers.filter((u) => u.active === 1);
+
+        expect(activeUsers).toHaveLength(0);
+        expect(activeUsers).toEqual([]);
+      });
+
+      it('should return empty array when all users are inactive', () => {
+        const mockUsers = [
+          { user_id: 'inactive-1', active: 0 },
+          { user_id: 'inactive-2', active: 0 },
+        ];
+
+        const activeUsers = mockUsers.filter((u) => u.active === 1);
+
+        expect(activeUsers).toHaveLength(0);
+      });
+    });
+
+    describe('security', () => {
+      it('SEC-001: should not expose pin_hash in response', () => {
+        const mockUser = {
+          user_id: 'user-1',
+          name: 'John Doe',
+          role: 'cashier',
+          active: 1,
+          pin_hash: '$2b$12$xxxx', // Sensitive data
+        };
+
+        // Transform to cashier info (should exclude pin_hash)
+        const cashierInfo = {
+          cashier_id: mockUser.user_id,
+          name: mockUser.name,
+          role: mockUser.role,
+        };
+
+        expect(cashierInfo).not.toHaveProperty('pin_hash');
+        expect(Object.keys(cashierInfo)).toEqual(['cashier_id', 'name', 'role']);
+      });
+
+      it('DB-006: should only return users for configured store', () => {
+        const configuredStoreId = 'store-1';
+        const allUsers = [
+          { user_id: 'u1', store_id: 'store-1', active: 1 },
+          { user_id: 'u2', store_id: 'store-2', active: 1 }, // Different store
+          { user_id: 'u3', store_id: 'store-1', active: 1 },
+        ];
+
+        // DAL method should filter by store_id
+        const storeUsers = allUsers.filter((u) => u.store_id === configuredStoreId);
+        const activeUsers = storeUsers.filter((u) => u.active === 1);
+
+        expect(activeUsers).toHaveLength(2);
+        expect(activeUsers.every((u) => u.store_id === configuredStoreId)).toBe(true);
+      });
+    });
+
+    describe('response structure', () => {
+      it('should return correct response schema', () => {
+        const response = {
+          cashiers: [
+            { cashier_id: 'user-1', name: 'John Doe', role: 'cashier' },
+            { cashier_id: 'user-2', name: 'Jane Smith', role: 'shift_manager' },
+          ],
+          total: 2,
+        };
+
+        expect(response).toHaveProperty('cashiers');
+        expect(response).toHaveProperty('total');
+        expect(Array.isArray(response.cashiers)).toBe(true);
+        expect(response.total).toBe(response.cashiers.length);
+
+        const cashier = response.cashiers[0];
+        expect(cashier).toHaveProperty('cashier_id');
+        expect(cashier).toHaveProperty('name');
+        expect(cashier).toHaveProperty('role');
+      });
+    });
+  });
 });

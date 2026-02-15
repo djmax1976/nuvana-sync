@@ -160,24 +160,30 @@ interface BinValidationError {
 /**
  * Pending closings data for deferred commit mode
  * Contains everything needed to call the close API later
+ *
+ * SEC-014: is_sold_out flag determines ticket calculation mode
+ * - true: Use INDEX mode (closing_serial is last ticket index)
+ * - false/undefined: Use POSITION mode (closing_serial is next position pointer)
  */
 export interface PendingClosingsData {
   closings: Array<{
     pack_id: string;
     closing_serial: string;
+    /** True if pack was marked sold out/depleted - affects ticket count formula */
+    is_sold_out?: boolean;
   }>;
   entry_method: 'SCAN' | 'MANUAL';
   authorized_by_user_id?: string;
 }
 
 /**
- * Props interface for DayCloseModeScanner
+ * Base props for DayCloseModeScanner (shared by all modes)
  *
  * MCP Guidance Applied:
  * - SEC-014: INPUT_VALIDATION - Strict type definitions for component props
  * - FE-001: STATE_MANAGEMENT - Clear separation of controlled vs uncontrolled state
  */
-interface DayCloseModeScannerProps {
+interface DayCloseModeScannerBaseProps {
   /** Store UUID for API calls */
   storeId: string;
   /** Bins with pack information from useLotteryDayBins hook */
@@ -194,17 +200,6 @@ interface DayCloseModeScannerProps {
   onScannedBinsChange?: (bins: ScannedBin[]) => void;
   /** Optional: Open shifts blocking day close (empty array = not blocked) */
   blockingShifts?: BlockingShiftInfo[];
-  /**
-   * Defer database commit until Step 3 completes
-   * When true:
-   * - Does NOT call the close API
-   * - Calculates totals locally from scanned bins
-   * - Returns pending closings data for the parent to commit later
-   * - onPendingClosings callback is required when this is true
-   */
-  deferCommit?: boolean;
-  /** Callback with pending closings data when deferCommit is true */
-  onPendingClosings?: (data: PendingClosingsData) => void;
   /** Returned packs for the current business period (enterprise close-to-close model) */
   returnedPacks?: ReturnedPackDay[];
   /** Depleted packs for the current business period (enterprise close-to-close model) */
@@ -214,6 +209,35 @@ interface DayCloseModeScannerProps {
   /** Open business period metadata for context display */
   openBusinessPeriod?: OpenBusinessPeriod;
 }
+
+/**
+ * Props for immediate commit mode (LOTTERY POS types)
+ * deferCommit is false or undefined, onPendingClosings is optional
+ */
+interface ImmediateCommitProps extends DayCloseModeScannerBaseProps {
+  deferCommit?: false;
+  onPendingClosings?: (data: PendingClosingsData) => void;
+}
+
+/**
+ * Props for deferred commit mode (non-LOTTERY POS types)
+ * deferCommit is true, onPendingClosings is REQUIRED
+ *
+ * SEC-010: When deferCommit=true, the scanner skips API calls and parent
+ * must commit later via prepareLotteryDayClose + commitLotteryDayClose
+ * with fromWizard=true flag.
+ */
+interface DeferredCommitProps extends DayCloseModeScannerBaseProps {
+  deferCommit: true;
+  /** Required when deferCommit=true: Callback with pending closings data */
+  onPendingClosings: (data: PendingClosingsData) => void;
+}
+
+/**
+ * Props interface for DayCloseModeScanner
+ * Discriminated union ensures onPendingClosings is required when deferCommit=true
+ */
+type DayCloseModeScannerProps = ImmediateCommitProps | DeferredCommitProps;
 
 /**
  * SCAN_VALIDATION_TIMEOUT_MS - Time to wait after last keystroke before validating
@@ -240,6 +264,8 @@ export function DayCloseModeScanner({
   scannedBins: externalScannedBins,
   onScannedBinsChange,
   blockingShifts = [],
+  deferCommit = false,
+  onPendingClosings,
   returnedPacks,
   depletedPacks,
   activatedPacks,
@@ -993,6 +1019,13 @@ export function DayCloseModeScanner({
    * Submit closing data to API (scan mode)
    * Now uses two-phase commit: prepare-close stores pending data,
    * actual commit happens in Step 3 when day close is confirmed.
+   *
+   * When deferCommit is true (non-LOTTERY POS types using Day Close wizard):
+   * - Does NOT call the API (which would fail for non-LOTTERY POS)
+   * - Calculates totals locally from scanned bins
+   * - Calls onPendingClosings with data for parent to commit later
+   * - Calls onSuccess with locally-calculated result
+   *
    * MCP: API-001 VALIDATION - Validated data to backend
    */
   const handleSubmit = useCallback(async () => {
@@ -1016,6 +1049,66 @@ export function DayCloseModeScanner({
         is_sold_out: bin.is_sold_out === true,
       }));
 
+      // ========================================================================
+      // deferCommit mode: Skip API call, calculate locally
+      // Used by Day Close wizard for non-LOTTERY POS types
+      // ========================================================================
+      if (deferCommit) {
+        // Call onPendingClosings to save data for later commit
+        onPendingClosings?.({
+          closings,
+          entry_method: 'SCAN',
+        });
+
+        // Inline calculation functions to avoid dependency ordering issues
+        const calcTickets = (ending: string, starting: string, isSoldOut: boolean): number => {
+          const endNum = parseInt(ending, 10);
+          const startNum = parseInt(starting, 10);
+          if (Number.isNaN(endNum) || Number.isNaN(startNum)) return 0;
+          // Sold out: (serial_end + 1) - starting; Normal: ending - starting
+          return isSoldOut ? Math.max(0, endNum + 1 - startNum) : Math.max(0, endNum - startNum);
+        };
+
+        // Build local bins preview for UI display
+        let totalSales = 0;
+        const binsPreview = scannedBins.map((scanned) => {
+          const bin = activeBins.find((b) => b.bin_id === scanned.bin_id);
+          const isSoldOut = scanned.is_sold_out === true;
+          const ticketsSold = calcTickets(
+            scanned.closing_serial,
+            bin?.pack?.starting_serial || '000',
+            isSoldOut
+          );
+          const salesAmount = ticketsSold * (bin?.pack?.game_price || 0);
+          totalSales += salesAmount;
+
+          return {
+            bin_number: scanned.bin_number,
+            game_name: scanned.game_name,
+            game_price: bin?.pack?.game_price || 0,
+            pack_number: scanned.pack_number,
+            starting_serial: bin?.pack?.starting_serial || '000',
+            closing_serial: scanned.closing_serial,
+            tickets_sold: ticketsSold,
+            sales_amount: salesAmount,
+          };
+        });
+
+        playSuccess();
+        setScannedBins([]);
+        setInputValue('');
+        onSuccess({
+          closings_created: closings.length,
+          business_date: new Date().toISOString().split('T')[0],
+          lottery_total: totalSales,
+          bins_closed: binsPreview,
+        });
+        return;
+      }
+
+      // ========================================================================
+      // Normal mode: Call API for LOTTERY POS types
+      // ========================================================================
       // Phase 1: Prepare close - validates and stores pending data
       // Does NOT commit lottery records - that happens in Step 3
       const response = await prepareLotteryDayClose({
@@ -1077,6 +1170,9 @@ export function DayCloseModeScanner({
     onSuccess,
     playSuccess,
     playError,
+    deferCommit,
+    onPendingClosings,
+    activeBins,
   ]);
 
   /**
@@ -1085,6 +1181,12 @@ export function DayCloseModeScanner({
    * actual commit happens in Step 3 when day close is confirmed.
    * Combines already-scanned bins with manually entered values
    * Includes audit trail with authorizing user
+   *
+   * When deferCommit is true (non-LOTTERY POS types using Day Close wizard):
+   * - Does NOT call the API (which would fail for non-LOTTERY POS)
+   * - Calculates totals locally
+   * - Calls onPendingClosings with data for parent to commit later
+   * - Calls onSuccess with locally-calculated result
    */
   const handleManualSubmit = useCallback(async () => {
     if (!canCloseManualEntry) {
@@ -1118,6 +1220,77 @@ export function DayCloseModeScanner({
         };
       });
 
+      // ========================================================================
+      // deferCommit mode: Skip API call, calculate locally
+      // Used by Day Close wizard for non-LOTTERY POS types
+      // ========================================================================
+      if (deferCommit) {
+        // Call onPendingClosings to save data for later commit
+        onPendingClosings?.({
+          closings,
+          entry_method: 'MANUAL',
+          authorized_by_user_id: manualEntryState.authorizedBy?.userId,
+        });
+
+        // Inline calculation function to avoid dependency ordering issues
+        const calcTickets = (ending: string, starting: string, isSoldOut: boolean): number => {
+          const endNum = parseInt(ending, 10);
+          const startNum = parseInt(starting, 10);
+          if (Number.isNaN(endNum) || Number.isNaN(startNum)) return 0;
+          // Sold out: (serial_end + 1) - starting; Normal: ending - starting
+          return isSoldOut ? Math.max(0, endNum + 1 - startNum) : Math.max(0, endNum - startNum);
+        };
+
+        // Build local bins preview for UI display
+        let totalSales = 0;
+        const binsPreview = activeBins.map((bin) => {
+          const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
+          const closingSerial = scannedBin?.closing_serial || manualEndingValues[bin.bin_id];
+          const isSoldOut = scannedBin?.is_sold_out === true;
+          const ticketsSold = calcTickets(
+            closingSerial,
+            bin.pack?.starting_serial || '000',
+            isSoldOut
+          );
+          const salesAmount = ticketsSold * (bin.pack?.game_price || 0);
+          totalSales += salesAmount;
+
+          return {
+            bin_number: bin.bin_number,
+            game_name: bin.pack?.game_name || '',
+            game_price: bin.pack?.game_price || 0,
+            pack_number: bin.pack?.pack_number || '',
+            starting_serial: bin.pack?.starting_serial || '000',
+            closing_serial: closingSerial,
+            tickets_sold: ticketsSold,
+            sales_amount: salesAmount,
+          };
+        });
+
+        playSuccess();
+        setScannedBins([]);
+        setInputValue('');
+        setManualEntryState({
+          isActive: false,
+          authorizedBy: null,
+          authorizedAt: null,
+        });
+        setManualEndingValues({});
+        setValidationErrors({});
+        setPendingValidations(new Set());
+
+        onSuccess({
+          closings_created: closings.length,
+          business_date: new Date().toISOString().split('T')[0],
+          lottery_total: totalSales,
+          bins_closed: binsPreview,
+        });
+        return;
+      }
+
+      // ========================================================================
+      // Normal mode: Call API for LOTTERY POS types
+      // ========================================================================
       // Phase 1: Prepare close - validates and stores pending data
       // Does NOT commit lottery records - that happens in Step 3
       const response = await prepareLotteryDayClose({
@@ -1186,6 +1359,8 @@ export function DayCloseModeScanner({
     onSuccess,
     playSuccess,
     playError,
+    deferCommit,
+    onPendingClosings,
   ]);
 
   /**
@@ -1981,7 +2156,7 @@ export function DayCloseModeScanner({
         open={manualEntryPinDialogOpen}
         onClose={() => setManualEntryPinDialogOpen(false)}
         onVerified={handleManualEntryPinVerified}
-        requiredRole="cashier"
+        requiredRole="shift_manager"
         title="Verify PIN for Manual Entry"
         description="Enter your PIN to enable manual entry mode. This action will be recorded for audit purposes."
       />

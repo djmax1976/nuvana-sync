@@ -15,9 +15,18 @@ declare global {
 
 globalThis.__mockStoreData = new Map<string, unknown>();
 
+// ============================================================================
+// Mock Setup
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+// ============================================================================
+
+const { mockMachineIdSync } = vi.hoisted(() => ({
+  mockMachineIdSync: vi.fn(() => 'mock-device-fingerprint-12345'),
+}));
+
 // Mock node-machine-id (used by startSyncSession for device fingerprint)
 // Note: The code uses dynamic import and checks both machineIdSync and default.machineIdSync
-const mockMachineIdSync = vi.fn(() => 'mock-device-fingerprint-12345');
 vi.mock('node-machine-id', () => ({
   machineIdSync: mockMachineIdSync,
   default: {

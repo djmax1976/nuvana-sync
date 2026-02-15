@@ -6,11 +6,14 @@
  * @security DB-006: Verifies tenant isolation
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
 
-// Mock database service
-const mockPrepare = vi.fn();
-const mockTransaction = vi.fn((fn) => () => fn());
+// Use vi.hoisted() to ensure mock functions are available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { mockPrepare, mockTransaction } = vi.hoisted(() => ({
+  mockPrepare: vi.fn(),
+  mockTransaction: vi.fn((fn: () => void) => () => fn()),
+}));
 
 vi.mock('../../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => ({
@@ -29,14 +32,15 @@ vi.mock('crypto', async (importOriginal) => {
   };
 });
 
-import {
-  DaySummariesDAL,
-  type DaySummary,
-  type DaySummaryStatus,
-} from '../../../src/main/dal/day-summaries.dal';
+// Import actual DAL module (use importActual to prevent mock leakage from other test files)
+const { DaySummariesDAL } = await vi.importActual<
+  typeof import('../../../src/main/dal/day-summaries.dal')
+>('../../../src/main/dal/day-summaries.dal');
+
+import type { DaySummary, DaySummaryStatus } from '../../../src/main/dal/day-summaries.dal';
 
 describe('DaySummariesDAL', () => {
-  let dal: DaySummariesDAL;
+  let dal: InstanceType<typeof DaySummariesDAL>;
 
   const mockSummary: DaySummary = {
     day_summary_id: 'summary-123',

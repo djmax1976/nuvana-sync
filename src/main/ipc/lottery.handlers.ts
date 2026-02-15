@@ -29,6 +29,10 @@ import { parseBarcode, validateBarcode } from '../services/scanner.service';
 import { settingsService } from '../services/settings.service';
 import { createLogger } from '../utils/logger';
 import { ReturnReasonSchema } from '../../shared/types/lottery.types';
+import {
+  calculateTicketsRemainingFromSerials,
+  formatSerial,
+} from '../../shared/lottery/ticket-calculations';
 
 // ============================================================================
 // Logger
@@ -78,11 +82,22 @@ const ReceivePackSchema = z.object({
 
 /**
  * Activate pack input
+ *
+ * API-001: VALIDATION - Strict schema validation for pack activation
+ * SEC-014: INPUT_VALIDATION - Boolean field with safe default
+ *
+ * @property pack_id - UUID of the pack to activate
+ * @property bin_id - UUID of the target bin
+ * @property opening_serial - 3-digit serial number of first ticket
+ * @property deplete_previous - When true (default), auto-deplete existing pack in bin
+ *                              with reason AUTO_REPLACED for cloud sync compatibility
  */
 const ActivatePackSchema = z.object({
   pack_id: UUIDSchema,
   bin_id: UUIDSchema,
   opening_serial: SerialSchema,
+  /** Default true ensures safety - always check for bin collisions unless explicitly disabled */
+  deplete_previous: z.boolean().optional().default(true),
 });
 
 /**
@@ -122,6 +137,13 @@ const PrepareCloseSchema = z.object({
       is_sold_out: z.boolean().optional(),
     })
   ),
+  /**
+   * When true, bypasses POS type restriction for wizard-initiated close.
+   * SEC-010: Only Day Close wizard should set this flag.
+   * Business Rule: Independent lottery close blocked for non-LOTTERY POS,
+   * but wizard-initiated close is allowed for all POS types.
+   */
+  fromWizard: z.boolean().optional().default(false),
 });
 
 /**
@@ -129,6 +151,13 @@ const PrepareCloseSchema = z.object({
  */
 const CommitCloseSchema = z.object({
   day_id: UUIDSchema,
+  /**
+   * When true, bypasses POS type restriction for wizard-initiated close.
+   * SEC-010: Only Day Close wizard should set this flag.
+   * Business Rule: Independent lottery close blocked for non-LOTTERY POS,
+   * but wizard-initiated close is allowed for all POS types.
+   */
+  fromWizard: z.boolean().optional().default(false),
 });
 
 // ============================================================================
@@ -672,10 +701,16 @@ registerHandler(
       // Note: If no user authenticated, day is created locally but sync won't be queued (offline-first)
       const businessDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today, openedBy);
 
-      // Get last closed day for business period info
-      // This determines the start date for enterprise close-to-close model
+      // Get most recently closed day for business period info
+      // This determines the start timestamp for enterprise close-to-close model
+      // Sort by closed_at DESC to correctly handle multiple closings on the same business_date
       const closedDays = lotteryBusinessDaysDAL.findByStatus(storeId, 'CLOSED');
-      const lastClosedDay = closedDays.length > 0 ? closedDays[0] : null;
+      const lastClosedDay =
+        closedDays.length > 0
+          ? closedDays.reduce((latest, day) =>
+              (day.closed_at ?? '') > (latest.closed_at ?? '') ? day : latest
+            )
+          : null;
 
       // Calculate days since last close
       let daysSinceLastClose: number | null = null;
@@ -690,33 +725,33 @@ registerHandler(
       // ========================================================================
       // Enterprise Close-to-Close Model Implementation
       // ========================================================================
-      // The business period starts from the day AFTER the last closed day.
-      // If no day has ever been closed, we query for the earliest pack action
-      // to ensure ALL historical data is visible (not just today's data).
+      // The business period starts at the EXACT close timestamp of the last
+      // closed day — not at a calendar date boundary. This prevents packs
+      // activated/returned/depleted during the previous session from appearing
+      // as "ghost" entries in the current open day when sessions cross midnight.
       //
-      // Example 1: Last close was Jan 15. Today is Jan 17.
-      // - sinceDate = Jan 16 (day after last close)
-      // - Shows all packs activated on Jan 16 and Jan 17
-      // - Includes packs that were activated then returned/settled
+      // Example 1: Last day closed at 2026-02-05T00:34:36Z. New day opens.
+      // - sinceTimestamp = 2026-02-05T00:34:36Z
+      // - Only shows packs with timestamps >= the close time
+      // - Packs from the closed session are correctly excluded
       //
-      // Example 2: No day close ever done. First pack activated Jan 10. Today is Jan 17.
-      // - sinceDate = Jan 10 (earliest pack action date)
+      // Example 2: No day close ever done. First pack activated Jan 10.
+      // - sinceTimestamp = 2024-01-10T00:00:00
       // - Shows ALL packs ever activated/returned/settled
-      // - This is the correct behavior for "first-ever business period"
       // ========================================================================
 
-      let periodStartDate: string;
-      if (lastClosedDay) {
-        // Start from the day AFTER the last closed day
-        const lastCloseDate = new Date(lastClosedDay.business_date);
-        lastCloseDate.setDate(lastCloseDate.getDate() + 1);
-        periodStartDate = lastCloseDate.toISOString().split('T')[0];
+      let periodStartTimestamp: string;
+      if (lastClosedDay && lastClosedDay.closed_at) {
+        // Close-to-close model: period starts at the exact close timestamp
+        // Packs with timestamps before this belong to the closed day
+        periodStartTimestamp = lastClosedDay.closed_at;
       } else {
-        // No previous close - first-ever business period
+        // No previous close — first-ever business period
         // Query for the earliest pack action date to show ALL historical data
         const earliestPackDate = lotteryPacksDAL.findEarliestPackActionDate(storeId);
-        // Use earliest pack date if packs exist, otherwise today (new store with no packs yet)
-        periodStartDate = earliestPackDate ?? today;
+        periodStartTimestamp = earliestPackDate
+          ? `${earliestPackDate}T00:00:00`
+          : `${today}T00:00:00`;
       }
 
       // ========================================================================
@@ -734,10 +769,10 @@ registerHandler(
       // ========================================================================
 
       // Get ALL packs activated since period start, regardless of current status
-      // This is the key fix: we query by activation date, not current status
+      // Uses close-to-close timestamp to exclude packs from the previous closed session
       const activatedPacksSincePeriodStart = lotteryPacksDAL.findPacksActivatedSince(
         storeId,
-        periodStartDate
+        periodStartTimestamp
       );
 
       // Transform to API response format with current status preserved
@@ -756,7 +791,7 @@ registerHandler(
       // Get depleted packs (settled since period start)
       const settledPacksSincePeriodStart = lotteryPacksDAL.findPacksSettledSince(
         storeId,
-        periodStartDate
+        periodStartTimestamp
       );
 
       // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
@@ -779,7 +814,7 @@ registerHandler(
       // Get returned packs (returned since period start)
       const returnedPacksSincePeriodStart = lotteryPacksDAL.findPacksReturnedSince(
         storeId,
-        periodStartDate
+        periodStartTimestamp
       );
 
       // v039 Cloud-aligned: bin_display_order (0-indexed) maps to bin_number (1-indexed) for UI
@@ -801,6 +836,22 @@ registerHandler(
         return_sales_amount: p.sales_amount ?? 0,
         returned_by_name: null,
       }));
+
+      // ========================================================================
+      // SEC-010: AUTHZ - Capability flag for frontend authorization
+      // ========================================================================
+      // Determine if independent lottery close is allowed based on POS type.
+      // This flag tells the frontend whether to show the "Close Day" button.
+      //
+      // LOTTERY POS type → can_close_independently: true (standalone close)
+      // All other POS types → can_close_independently: false (use Day Close Wizard)
+      //
+      // The backend enforces this in prepareDayClose/commitDayClose handlers,
+      // but providing the flag allows the frontend to hide the button entirely
+      // rather than showing a disabled button or letting users attempt and fail.
+      // ========================================================================
+      const posType = settingsService.getPOSType();
+      const canCloseIndependently = posType === 'LOTTERY';
 
       // Construct response matching DayBinsResponse interface
       const response = {
@@ -848,12 +899,15 @@ registerHandler(
                 bins_closed: [], // Would need to query lottery_day_packs for full detail
               }
             : null,
+        // SEC-010: Capability flag - true only for LOTTERY POS type
+        // Frontend uses this to determine if Close Day button should be shown
+        can_close_independently: canCloseIndependently,
       };
 
       log.debug('Day bins fetched', {
         storeId,
         binsCount: dayBins.length,
-        periodStartDate,
+        periodStartTimestamp,
         activatedCount: recentlyActivated.length,
         depletedCount: recentlyDepleted.length,
         returnedCount: recentlyReturned.length,
@@ -975,15 +1029,44 @@ registerHandler(
       // API-008: Transform flat DAL response to nested API contract
       const response = transformPackToResponse(pack);
 
-      // Calculate serial_end: opening_serial + tickets_per_pack - 1
-      // This is the last ticket number in the pack (0-based index)
+      // ========================================================================
+      // Calculate Pack Serial Range and Tickets Remaining
+      // ========================================================================
+      // Uses centralized ticket-calculations utility for consistency
+      // SEC-014: All calculations validated with bounds checking
+      // @see shared/lottery/ticket-calculations.ts
+      // ========================================================================
       let serialEnd: string | undefined;
+      let ticketsRemaining: number | undefined;
+
       if (pack.opening_serial && pack.game_tickets_per_pack) {
         const openingNum = parseInt(pack.opening_serial, 10);
         if (!isNaN(openingNum) && pack.game_tickets_per_pack > 0) {
+          // serial_end = last ticket index in pack (0-based)
+          // Example: 60-ticket pack starting at 0 -> serial_end = 59
           const lastTicketNum = openingNum + pack.game_tickets_per_pack - 1;
-          // Format as 3-digit string (e.g., "299")
-          serialEnd = lastTicketNum.toString().padStart(3, '0');
+          serialEnd = formatSerial(lastTicketNum) || undefined;
+
+          // Calculate tickets remaining based on current position
+          // For ACTIVE packs: use prev_ending_serial as current position
+          // For DEPLETED/RETURNED: tickets_remaining = 0
+          if (pack.status === 'ACTIVE') {
+            // Current position = prev_ending_serial (from last closed day) or opening_serial
+            const currentPosition = pack.prev_ending_serial || pack.opening_serial;
+
+            // Use centralized calculation utility
+            const remainingResult = calculateTicketsRemainingFromSerials(
+              openingNum,
+              lastTicketNum,
+              currentPosition
+            );
+
+            if (remainingResult.success) {
+              ticketsRemaining = remainingResult.value;
+            }
+          } else if (pack.status === 'DEPLETED' || pack.status === 'RETURNED') {
+            ticketsRemaining = 0;
+          }
         }
       }
 
@@ -993,9 +1076,24 @@ registerHandler(
         tickets_sold: pack.tickets_sold_count,
         sales_amount: pack.sales_amount,
         serial_end: serialEnd,
+        tickets_remaining: ticketsRemaining,
       };
 
-      log.debug('Pack details retrieved', { packId: pack_id, status: pack.status, serialEnd });
+      log.debug('Pack details retrieved', {
+        packId: pack_id,
+        status: pack.status,
+        openingSerial: pack.opening_serial,
+        prevEndingSerial: pack.prev_ending_serial,
+        serialEnd,
+        ticketsRemaining,
+        calculationInputs:
+          pack.status === 'ACTIVE'
+            ? {
+                currentPosition: pack.prev_ending_serial || pack.opening_serial,
+                fallbackUsed: !pack.prev_ending_serial,
+              }
+            : undefined,
+      });
       return createSuccessResponse(detailResponse);
     } catch (error) {
       // API-003: Log full error server-side, return generic message to client
@@ -1377,7 +1475,7 @@ registerHandler(
     log.debug('Validation passed', { data: parseResult.data });
 
     try {
-      const { pack_id, bin_id, opening_serial } = parseResult.data;
+      const { pack_id, bin_id, opening_serial, deplete_previous } = parseResult.data;
       const storeId = getStoreId();
       log.debug('Got store ID', { storeId });
 
@@ -1490,6 +1588,135 @@ registerHandler(
         gameStatus: game.status,
       });
 
+      // ========================================================================
+      // Bin Collision Detection (BIN-001: One Active Pack Per Bin)
+      // ========================================================================
+      // Business Rule: A bin can only have ONE active pack at a time.
+      // When activating a new pack in a bin that already has an active pack,
+      // the existing pack must be auto-depleted with reason AUTO_REPLACED.
+      //
+      // SEC-006: Parameterized queries in DAL method
+      // DB-006: TENANT_ISOLATION - store_id passed to findActiveInBin
+      // SYNC-001: Depleted pack sync queued BEFORE new pack sync
+      // ========================================================================
+
+      // Track depleted pack info for response (nullable)
+      let depletedPackInfo: {
+        pack_id: string;
+        pack_number: string;
+        game_name: string | null;
+        depletion_reason: string;
+      } | null = null;
+
+      if (deplete_previous) {
+        // DB-006: Pass store_id for tenant isolation
+        const existingPack = lotteryPacksDAL.findActiveInBin(storeId, bin_id);
+
+        if (existingPack) {
+          log.info('Bin collision detected - auto-depleting existing pack', {
+            binId: bin_id,
+            existingPackId: existingPack.pack_id,
+            existingPackNumber: existingPack.pack_number,
+            newPackId: pack_id,
+            storeId,
+            userId: activated_by,
+          });
+
+          // DB-006: Get existing pack's game info for depletion calculations
+          const existingPackGame = lotteryGamesDAL.findByIdForStore(storeId, existingPack.game_id);
+
+          if (!existingPackGame) {
+            // Critical error: game missing for existing pack - log and continue without collision handling
+            log.error('Game not found for existing pack during collision detection', {
+              existingPackId: existingPack.pack_id,
+              existingGameId: existingPack.game_id,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to process bin collision: game data missing for existing pack. Please contact support.'
+            );
+          }
+
+          // ====================================================================
+          // Calculate Depletion Values (Pack Sold Out / Fully Depleted)
+          // ====================================================================
+          // When a pack is replaced, we assume it was fully sold (sold out).
+          // final_serial = opening_serial + tickets_per_pack - 1
+          // tickets_sold_count = tickets_per_pack
+          // sales_amount = tickets_per_pack * price
+          // ====================================================================
+          const existingOpeningSerial = existingPack.opening_serial || '000';
+          const ticketsPerPack = existingPackGame.tickets_per_pack || 300;
+          const gamePrice = existingPackGame.price || 0;
+
+          // Calculate final serial: opening + tickets_per_pack - 1 (zero-indexed)
+          const openingSerialNum = parseInt(existingOpeningSerial, 10);
+          const finalSerialNum = openingSerialNum + ticketsPerPack - 1;
+          const closingSerial = String(finalSerialNum).padStart(3, '0');
+
+          // Full pack sold
+          const ticketsSoldCount = ticketsPerPack;
+          const salesAmount = ticketsSoldCount * gamePrice;
+
+          // SEC-010: AUTHZ - depleted_by comes from session, not request
+          // AUDIT-001: Record who and when auto-depleted
+          const settledPack = lotteryPacksDAL.settle(existingPack.pack_id, {
+            store_id: storeId,
+            closing_serial: closingSerial,
+            tickets_sold_count: ticketsSoldCount,
+            sales_amount: salesAmount,
+            depleted_by: activated_by,
+            depleted_shift_id: shift_id,
+            depletion_reason: 'AUTO_REPLACED',
+          });
+
+          // Prepare depletedPack info for response (matches cloud API format)
+          depletedPackInfo = {
+            pack_id: settledPack.pack_id,
+            pack_number: settledPack.pack_number,
+            game_name: existingPackGame.name,
+            depletion_reason: 'AUTO_REPLACED',
+          };
+
+          // SYNC-001: Enqueue depleted pack sync BEFORE new pack activation sync
+          // This ensures cloud receives depletion first for proper state management
+          // DB-006: TENANT_ISOLATION - store_id included in sync payload
+          // SEC-010: AUTHZ - depleted_by and shift context included for audit trail
+          syncQueueDAL.enqueue({
+            store_id: storeId,
+            entity_type: 'pack',
+            entity_id: settledPack.pack_id,
+            operation: 'UPDATE',
+            payload: buildPackSyncPayload(
+              settledPack,
+              existingPackGame.game_code,
+              existingPackGame.tickets_per_pack,
+              null,
+              {
+                depleted_shift_id: shift_id,
+                depleted_by: activated_by,
+                depletion_reason: 'AUTO_REPLACED',
+              }
+            ),
+          });
+
+          log.info('Pack auto-depleted due to bin collision', {
+            depletedPackId: settledPack.pack_id,
+            depletedPackNumber: settledPack.pack_number,
+            newPackId: pack_id,
+            binId: bin_id,
+            depletionReason: 'AUTO_REPLACED',
+            ticketsSoldCount,
+            salesAmount,
+            closingSerial,
+            depletedBy: activated_by,
+            shiftId: shift_id,
+            syncQueued: true,
+          });
+        }
+      }
+
       // DB-006: Pass store_id for tenant isolation validation
       // v029 API Alignment: Map bin_id to current_bin_id for DAL
       log.debug('Calling DAL.activate', {
@@ -1536,10 +1763,16 @@ registerHandler(
         activatedBy: activated_by,
         shiftId: shift_id,
         userRole,
+        hadCollision: depletedPackInfo !== null,
+        depletedPackId: depletedPackInfo?.pack_id || null,
         syncQueued: true,
       });
 
-      return createSuccessResponse(pack);
+      // Return response with optional depletedPack info (matches cloud API format)
+      return createSuccessResponse({
+        pack,
+        depletedPack: depletedPackInfo,
+      });
     } catch (error) {
       // API-003: Log full error server-side
       const errorMessage = error instanceof Error ? error.message : 'Unknown error';
@@ -1867,6 +2100,47 @@ registerHandler(
       const storeId = getStoreId();
       const today = getCurrentBusinessDate();
 
+      // ========================================================================
+      // SEC-010: AUTHZ - Function-level authorization check
+      // API-SEC-005: Enforce function-level access control based on POS type
+      // ========================================================================
+      // Independent lottery day close is ONLY allowed for LOTTERY POS type.
+      // For all other POS types (GILBARCO, VERIFONE, SQUARE, etc.), lottery
+      // close must happen through the Day Close Wizard which coordinates
+      // shift close, lottery close, and day summary in a single transaction.
+      //
+      // Business Rule: Non-lottery stores integrate lottery close into their
+      // existing day close workflow rather than allowing independent closure.
+      //
+      // Exception: When fromWizard=true, the call is from the Day Close wizard
+      // and is allowed for all POS types. This enables deferred commit pattern
+      // where lottery is scanned in Step 1 and committed in Step 3.
+      // ========================================================================
+      const { fromWizard } = parseResult.data;
+      const posType = settingsService.getPOSType();
+      if (posType !== 'LOTTERY' && !fromWizard) {
+        log.warn('Independent lottery day close rejected for non-lottery POS type', {
+          storeId,
+          posType,
+          action: 'prepareDayClose',
+        });
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Independent lottery day close is not available for this POS configuration. ' +
+            'Please use the Day Close wizard to close lottery as part of the regular day close process.'
+        );
+      }
+
+      // Log wizard-initiated close for audit trail
+      if (fromWizard && posType !== 'LOTTERY') {
+        log.info('Wizard-initiated lottery day close for non-LOTTERY POS type', {
+          storeId,
+          posType,
+          action: 'prepareDayClose',
+          fromWizard: true,
+        });
+      }
+
       // SEC-010: Get opened_by from authenticated session (not frontend)
       // opened_by is REQUIRED by the cloud API - must have a valid user UUID
       const currentUser = getCurrentUser();
@@ -1913,7 +2187,10 @@ registerHandler(
   },
   {
     requiresAuth: true,
-    requiredRole: 'shift_manager',
+    // BIZ-008: Cashiers can close lottery day (2026-02-12)
+    // API-SEC-005: Function-level auth aligned with frontend requirement
+    // SEC-010: AUTHZ - Backend enforces same role as frontend auth guard
+    requiredRole: 'cashier',
     description: 'Prepare lottery day close',
   }
 );
@@ -1938,7 +2215,38 @@ registerHandler(
     }
 
     try {
-      const { day_id } = parseResult.data;
+      const { day_id, fromWizard } = parseResult.data;
+
+      // ========================================================================
+      // SEC-010: AUTHZ - Function-level authorization check
+      // Consistent with prepareDayClose - independent close only for LOTTERY POS
+      //
+      // Exception: When fromWizard=true, the call is from the Day Close wizard
+      // and is allowed for all POS types. This enables deferred commit pattern
+      // where lottery is scanned in Step 1 and committed in Step 3.
+      // ========================================================================
+      const posType = settingsService.getPOSType();
+      if (posType !== 'LOTTERY' && !fromWizard) {
+        log.warn('Independent lottery day close commit rejected for non-lottery POS type', {
+          dayId: day_id,
+          posType,
+          action: 'commitDayClose',
+        });
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Independent lottery day close is not available for this POS configuration.'
+        );
+      }
+
+      // Log wizard-initiated close for audit trail
+      if (fromWizard && posType !== 'LOTTERY') {
+        log.info('Wizard-initiated lottery day close commit for non-LOTTERY POS type', {
+          dayId: day_id,
+          posType,
+          action: 'commitDayClose',
+          fromWizard: true,
+        });
+      }
 
       // SEC-010: Get user ID from authenticated session
       const currentUser = getCurrentUser();
@@ -1950,15 +2258,54 @@ registerHandler(
       }
       const userId = currentUser.user_id;
 
+      // ========================================================================
+      // DB-006: Tenant isolation - validate day_id belongs to configured store
+      // BEFORE performing any operations. This prevents cross-tenant attacks
+      // where an attacker from Store A attempts to close a day from Store B.
+      // SEC-010: Return NOT_FOUND to avoid information disclosure about
+      // existence of days in other stores.
+      // ========================================================================
+      const storeId = getStoreId();
+      const day = lotteryBusinessDaysDAL.findByIdForStore(storeId, day_id);
+      if (!day) {
+        log.warn('Day close commit rejected - day not found or belongs to different store', {
+          dayId: day_id,
+          storeId,
+          action: 'commitDayClose',
+        });
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Lottery day not found');
+      }
+
       const result = lotteryBusinessDaysDAL.commitClose(day_id, userId);
 
-      log.info('Day close committed', {
-        dayId: day_id,
+      // ========================================================================
+      // BIZ-007: Auto-open next day after successful close
+      // This ensures a day is always available for shifts and pack operations.
+      // Uses current business date (not the closed day's date) to handle
+      // midnight-crossing closures correctly.
+      // SEC-010: Uses authenticated user as opened_by
+      // DB-006: Store already validated above
+      // ========================================================================
+      const today = getCurrentBusinessDate();
+      const nextDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today, userId);
+
+      log.info('Day close committed and next day opened', {
+        closedDayId: day_id,
         closingsCount: result.closings_created,
         totalSales: result.lottery_total,
+        newDayId: nextDay.day_id,
+        newDayDate: nextDay.business_date,
+        newDayStatus: nextDay.status,
       });
 
-      return createSuccessResponse(result);
+      return createSuccessResponse({
+        ...result,
+        next_day: {
+          day_id: nextDay.day_id,
+          business_date: nextDay.business_date,
+          status: nextDay.status,
+        },
+      });
     } catch (error) {
       // API-003: Log full error server-side, return generic message
       log.error('Failed to commit day close', {
@@ -1973,7 +2320,10 @@ registerHandler(
   },
   {
     requiresAuth: true,
-    requiredRole: 'shift_manager',
+    // BIZ-008: Cashiers can close lottery day (2026-02-12)
+    // API-SEC-005: Function-level auth aligned with frontend requirement
+    // SEC-010: AUTHZ - Backend enforces same role as frontend auth guard
+    requiredRole: 'cashier',
     description: 'Commit lottery day close',
   }
 );
@@ -2000,9 +2350,25 @@ registerHandler(
     try {
       const { day_id } = parseResult.data;
 
+      // ========================================================================
+      // DB-006: Tenant isolation - validate day_id belongs to configured store
+      // BEFORE performing any operations. This prevents cross-tenant attacks.
+      // SEC-010: Return NOT_FOUND to avoid information disclosure.
+      // ========================================================================
+      const storeId = getStoreId();
+      const day = lotteryBusinessDaysDAL.findByIdForStore(storeId, day_id);
+      if (!day) {
+        log.warn('Day close cancel rejected - day not found or belongs to different store', {
+          dayId: day_id,
+          storeId,
+          action: 'cancelDayClose',
+        });
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Lottery day not found');
+      }
+
       lotteryBusinessDaysDAL.cancelClose(day_id);
 
-      log.info('Day close cancelled', { dayId: day_id });
+      log.info('Day close cancelled', { dayId: day_id, storeId });
 
       return createSuccessResponse({ cancelled: true });
     } catch (error) {
@@ -2019,7 +2385,10 @@ registerHandler(
   },
   {
     requiresAuth: true,
-    requiredRole: 'shift_manager',
+    // BIZ-008: Cashiers can cancel their own day close (2026-02-12)
+    // API-SEC-005: Function-level auth aligned with frontend requirement
+    // SEC-010: AUTHZ - Backend enforces same role as frontend auth guard
+    requiredRole: 'cashier',
     description: 'Cancel pending lottery day close',
   }
 );

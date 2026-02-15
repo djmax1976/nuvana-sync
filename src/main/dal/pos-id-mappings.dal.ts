@@ -598,6 +598,100 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
   }
 
   /**
+   * Deactivate a terminal mapping by its internal UUID.
+   *
+   * This is a single-record deactivation optimized for use after successful
+   * cloud deletion. Unlike setActive(), returns a boolean for simpler
+   * success/failure handling in IPC handlers.
+   *
+   * @security SEC-006: Parameterized UPDATE with bound parameters — no string interpolation
+   * @security DB-006: Store-scoped for tenant isolation — only affects records matching store_id
+   *
+   * @param storeId - Store identifier for tenant isolation (required for DB-006 compliance)
+   * @param id - Internal UUID of the terminal mapping to deactivate
+   * @returns true if record was deactivated, false if not found or already inactive
+   *
+   * @performance Uses index: PRIMARY KEY (id) with store_id filter
+   * @idempotent Safe to call multiple times — returns false if already inactive
+   */
+  deactivateById(storeId: string, id: string): boolean {
+    // SEC-006: Parameterized UPDATE — all values bound via prepared statement
+    // DB-006: WHERE includes store_id to prevent cross-tenant modification
+    // Condition: active = 1 ensures we only count real deactivations
+    const stmt = this.db.prepare(`
+      UPDATE pos_terminal_mappings
+      SET active = 0, updated_at = ?
+      WHERE id = ? AND store_id = ? AND active = 1
+    `);
+    const result = stmt.run(this.now(), id, storeId);
+
+    const deactivated = result.changes > 0;
+
+    if (deactivated) {
+      log.info('Deactivated terminal mapping by ID', { storeId, id });
+    } else {
+      log.debug('Terminal mapping not deactivated (not found, wrong store, or already inactive)', {
+        storeId,
+        id,
+      });
+    }
+
+    return deactivated;
+  }
+
+  /**
+   * Deactivate a terminal mapping by its external register ID.
+   *
+   * This is the preferred method for cloud-synced registers where the external_register_id
+   * matches the cloud terminal UUID. Defaults to pos_system_type='generic' which is used
+   * for all cloud-synced registers.
+   *
+   * @security SEC-006: Parameterized UPDATE with bound parameters — no string interpolation
+   * @security DB-006: Store-scoped for tenant isolation — only affects records matching store_id
+   *
+   * @param storeId - Store identifier for tenant isolation (required for DB-006 compliance)
+   * @param externalRegisterId - External register ID (typically the cloud terminal UUID)
+   * @param posSystemType - POS system type filter, defaults to 'generic' for cloud-synced registers
+   * @returns true if record was deactivated, false if not found or already inactive
+   *
+   * @performance Uses index: idx_pos_terminal_map_lookup (store_id, external_register_id, pos_system_type)
+   * @idempotent Safe to call multiple times — returns false if already inactive
+   */
+  deactivateByExternalId(
+    storeId: string,
+    externalRegisterId: string,
+    posSystemType: POSSystemType = 'generic'
+  ): boolean {
+    // SEC-006: Parameterized UPDATE — all values bound via prepared statement
+    // DB-006: WHERE includes store_id to prevent cross-tenant modification
+    // Condition: active = 1 ensures we only count real deactivations
+    const stmt = this.db.prepare(`
+      UPDATE pos_terminal_mappings
+      SET active = 0, updated_at = ?
+      WHERE external_register_id = ? AND store_id = ? AND pos_system_type = ? AND active = 1
+    `);
+    const result = stmt.run(this.now(), externalRegisterId, storeId, posSystemType);
+
+    const deactivated = result.changes > 0;
+
+    if (deactivated) {
+      log.info('Deactivated terminal mapping by external ID', {
+        storeId,
+        externalRegisterId,
+        posSystemType,
+      });
+    } else {
+      log.debug('Terminal mapping not deactivated (not found, wrong store, or already inactive)', {
+        storeId,
+        externalRegisterId,
+        posSystemType,
+      });
+    }
+
+    return deactivated;
+  }
+
+  /**
    * Deactivate cloud-sourced registers that are no longer in the cloud response.
    * Only affects registers with pos_system_type = 'generic' (cloud-synced).
    * Registers created by POS data parsing (gilbarco, verifone, etc.) are never touched.
@@ -1076,7 +1170,9 @@ export class POSFuelGradeMappingsDAL extends StoreBasedDAL<POSFuelGradeMapping> 
       '300': 'DEF',
       '085': 'E85',
     };
-    return gradeMap[externalGradeId] || null;
+    return Object.prototype.hasOwnProperty.call(gradeMap, externalGradeId)
+      ? gradeMap[externalGradeId]
+      : null;
   }
 
   /**
@@ -1092,7 +1188,9 @@ export class POSFuelGradeMappingsDAL extends StoreBasedDAL<POSFuelGradeMapping> 
       '300': 'DEF',
       '085': 'E85',
     };
-    return nameMap[externalGradeId] || null;
+    return Object.prototype.hasOwnProperty.call(nameMap, externalGradeId)
+      ? nameMap[externalGradeId]
+      : null;
   }
 }
 
@@ -1661,7 +1759,9 @@ export class POSPriceTierMappingsDAL extends StoreBasedDAL<POSPriceTierMapping> 
       '0003': 'FLEET',
       '0004': 'LOYALTY',
     };
-    return tierMap[externalTierCode] || null;
+    return Object.prototype.hasOwnProperty.call(tierMap, externalTierCode)
+      ? tierMap[externalTierCode]
+      : null;
   }
 
   /**
@@ -1674,7 +1774,9 @@ export class POSPriceTierMappingsDAL extends StoreBasedDAL<POSPriceTierMapping> 
       '0003': 'Fleet Price',
       '0004': 'Loyalty Price',
     };
-    return nameMap[externalTierCode] || null;
+    return Object.prototype.hasOwnProperty.call(nameMap, externalTierCode)
+      ? nameMap[externalTierCode]
+      : null;
   }
 }
 

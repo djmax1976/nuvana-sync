@@ -218,7 +218,11 @@ export class ShiftDepartmentSummariesDAL extends BaseDAL<ShiftDepartmentSummary>
         existing.id
       );
 
-      return this.findById(existing.id)!;
+      const updated = this.findById(existing.id);
+      if (!updated) {
+        throw new Error(`Failed to retrieve updated department summary: ${existing.id}`);
+      }
+      return updated;
     }
 
     return this.create(data);

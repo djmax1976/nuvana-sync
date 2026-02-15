@@ -219,15 +219,38 @@ export interface ReceivePackResponse {
 
 /**
  * Activate pack input for IPC
+ *
+ * SEC-014: INPUT_VALIDATION - Type-safe interface matching backend Zod schema
+ *
+ * @property pack_id - UUID of the pack to activate
+ * @property bin_id - UUID of the target bin
+ * @property opening_serial - 3-digit serial number of first ticket
+ * @property deplete_previous - When true (default), auto-deplete existing pack in bin
  */
 export interface ActivatePackInput {
   pack_id: string;
   bin_id: string;
   opening_serial: string;
+  /** Default true on backend - auto-deplete existing pack in bin with AUTO_REPLACED reason */
+  deplete_previous?: boolean;
+}
+
+/**
+ * Depleted pack info returned when bin collision auto-depletes existing pack
+ * Matches cloud API format for SYNC-001 compatibility
+ */
+export interface DepletedPackInfo {
+  pack_id: string;
+  pack_number: string;
+  game_name: string | null;
+  depletion_reason: string;
 }
 
 /**
  * Activate pack response
+ *
+ * BIN-001: Response includes depletedPack when auto-depletion occurred
+ * SYNC-001: depletedPack format matches cloud API for sync compatibility
  */
 export interface ActivatePackResponse {
   pack_id: string;
@@ -246,6 +269,8 @@ export interface ActivatePackResponse {
     name: string;
     display_order: number;
   };
+  /** Populated when an existing pack was auto-depleted due to bin collision */
+  depletedPack?: DepletedPackInfo | null;
 }
 
 /**
@@ -305,12 +330,23 @@ export interface UpdatePackInput {
 
 /**
  * Full activate pack input (with bin assignment)
+ *
+ * SEC-014: INPUT_VALIDATION - Type-safe interface matching backend schema
+ *
+ * @property pack_id - UUID of the pack to activate
+ * @property bin_id - UUID of the target bin
+ * @property opening_serial - 3-digit serial number of first ticket
+ * @property shift_id - Optional shift UUID for audit trail
+ * @property deplete_previous - When true (default), auto-deplete existing pack in bin
+ *                              with reason AUTO_REPLACED for cloud sync compatibility
  */
 export interface FullActivatePackInput {
   pack_id: string;
   bin_id: string;
   opening_serial: string;
   shift_id?: string;
+  /** Default true on backend - auto-deplete existing pack in bin with AUTO_REPLACED reason */
+  deplete_previous?: boolean;
 }
 
 /**
@@ -624,6 +660,16 @@ export interface DayBinsResponse {
   activated_packs: ActivatedPackDay[];
   returned_packs: ReturnedPackDay[];
   day_close_summary: DayCloseSummary | null;
+  /**
+   * SEC-010: Backend capability flag for independent lottery close.
+   *
+   * - true: Store uses LOTTERY POS type, can close lottery independently
+   * - false: Store uses other POS type, lottery close is part of Day Close Wizard
+   *
+   * Frontend uses this to determine whether to show the "Close Day" button.
+   * Backend enforces this in prepareDayClose/commitDayClose handlers.
+   */
+  can_close_independently: boolean;
 }
 
 // ============ Day Status & Initialization Types ============
@@ -689,6 +735,13 @@ export interface PrepareLotteryDayCloseInput {
     closing_serial: string;
     is_sold_out?: boolean;
   }>;
+  /**
+   * When true, bypasses POS type restriction for wizard-initiated close.
+   * SEC-010: Only Day Close wizard should set this flag.
+   * Business Rule: Independent lottery close blocked for non-LOTTERY POS,
+   * but wizard-initiated close is allowed for all POS types.
+   */
+  fromWizard?: boolean;
 }
 
 /**
@@ -719,6 +772,13 @@ export interface PrepareLotteryDayCloseResponse {
  */
 export interface CommitLotteryDayCloseInput {
   day_id: string;
+  /**
+   * When true, bypasses POS type restriction for wizard-initiated close.
+   * SEC-010: Only Day Close wizard should set this flag.
+   * Business Rule: Independent lottery close blocked for non-LOTTERY POS,
+   * but wizard-initiated close is allowed for all POS types.
+   */
+  fromWizard?: boolean;
 }
 
 /**
@@ -1175,9 +1235,14 @@ export async function deletePack(packId: string): Promise<ApiResponse<{ deleted:
 /**
  * Full pack activation (with bin assignment)
  * IPC: lottery:activatePack
+ *
+ * BIN-001: Supports deplete_previous flag for auto-depletion of existing pack
+ * SEC-010: store_id derived from session in handler, not passed from frontend
+ * SYNC-001: Response includes depletedPack info for cloud sync compatibility
+ *
  * @param storeId - Store UUID (passed for interface consistency, handler uses session)
- * @param data - Full activation data
- * @returns Activated pack response
+ * @param data - Full activation data including optional deplete_previous flag
+ * @returns Activated pack response with optional depletedPack info
  */
 export async function activatePackFull(
   _storeId: string,
@@ -1186,10 +1251,12 @@ export async function activatePackFull(
   try {
     // Note: store_id is derived from session in the handler via getStoreId()
     // shift_id is optional and not used by current handler (for future use)
+    // deplete_previous defaults to true on backend if not specified
     const result = await ipcClient.invoke<ActivatePackResponse>('lottery:activatePack', {
       pack_id: data.pack_id,
       bin_id: data.bin_id,
       opening_serial: data.opening_serial,
+      deplete_previous: data.deplete_previous,
     });
     return wrapSuccess(result);
   } catch (error) {

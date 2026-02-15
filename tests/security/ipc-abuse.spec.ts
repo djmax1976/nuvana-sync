@@ -335,10 +335,11 @@ describe('IPC Security', () => {
       { channel: 'lottery:depletePack', requiresAuth: true, requiredRole: 'cashier' },
       { channel: 'auth:logout', requiresAuth: true },
       { channel: 'auth:updateActivity', requiresAuth: true },
+      // BIZ-008: Day close handlers allow cashier role (2026-02-12)
+      { channel: 'lottery:prepareDayClose', requiresAuth: true, requiredRole: 'cashier' },
+      { channel: 'lottery:commitDayClose', requiresAuth: true, requiredRole: 'cashier' },
       // Require shift_manager role (matches lottery.handlers.ts:1191)
       { channel: 'lottery:returnPack', requiresAuth: true, requiredRole: 'shift_manager' },
-      { channel: 'lottery:prepareDayClose', requiresAuth: true, requiredRole: 'shift_manager' },
-      { channel: 'lottery:commitDayClose', requiresAuth: true, requiredRole: 'shift_manager' },
       { channel: 'lottery:markSoldOut', requiresAuth: true, requiredRole: 'shift_manager' },
       // Require store_manager role
       { channel: 'settings:update', requiresAuth: true, requiredRole: 'store_manager' },

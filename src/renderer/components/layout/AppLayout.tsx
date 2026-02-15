@@ -5,9 +5,11 @@
  * Uses the MyStore dashboard layout design for the Electron desktop app.
  *
  * @module renderer/components/layout/AppLayout
+ *
+ * @security FE-001: STATE_MANAGEMENT - Fetches store timezone from backend settings
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import { MyStoreSidebar } from './MyStoreSidebar';
 import { Header } from './Header';
@@ -17,6 +19,7 @@ import { Toaster } from '../ui/toaster';
 import { Menu } from 'lucide-react';
 import { ClientAuthProvider } from '../../contexts/ClientAuthContext';
 import { StoreProvider, type StoreContextValue } from '../../contexts/StoreContext';
+import { ipcClient } from '../../lib/api/ipc-client';
 
 /**
  * Check if running in Electron environment
@@ -26,19 +29,33 @@ const isElectron = typeof window !== 'undefined' && window.nuvanaAPI !== undefin
 
 /**
  * Default store context value for development/fallback
+ * Uses America/New_York as default (matches backend default in settings.service.ts)
  */
 const defaultStoreValue: StoreContextValue = {
   storeId: 'dev-store',
-  timezone: 'America/Denver',
+  timezone: 'America/New_York',
   storeName: 'Development Store',
   companyId: null,
   clientId: null,
 };
 
+/**
+ * Settings response shape from settings:get IPC
+ * Only includes fields needed for StoreContext
+ */
+interface SettingsResponse {
+  storeId?: string;
+  storeName?: string;
+  timezone?: string;
+  companyId?: string;
+}
+
 export function AppLayout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   // In non-Electron dev mode, assume configured to allow testing UI
   const [isConfigured, setIsConfigured] = useState<boolean | null>(isElectron ? null : true);
+  // Store context state - populated from settings:get
+  const [storeSettings, setStoreSettings] = useState<SettingsResponse | null>(null);
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -56,6 +73,20 @@ export function AppLayout() {
       }
     });
 
+    // Fetch full settings to get store timezone
+    // FE-001: STATE_MANAGEMENT - Centralized timezone from backend
+    ipcClient
+      .invoke<SettingsResponse | null>('settings:get')
+      .then((settings) => {
+        if (settings) {
+          setStoreSettings(settings);
+        }
+      })
+      .catch((err) => {
+        // Log but don't fail - will use default timezone
+        console.warn('Failed to fetch settings for timezone:', err);
+      });
+
     // Listen for navigation events from main process (tray menu)
     const unsubscribe = window.nuvanaAPI.onNavigate((path) => {
       navigate(path);
@@ -63,6 +94,26 @@ export function AppLayout() {
 
     return unsubscribe;
   }, [navigate, location.pathname]);
+
+  /**
+   * Build store context value from fetched settings
+   * Falls back to defaults if settings not loaded
+   *
+   * FE-001: STATE_MANAGEMENT - Memoized to prevent unnecessary re-renders
+   */
+  const storeContextValue: StoreContextValue = useMemo(() => {
+    if (!storeSettings) {
+      return defaultStoreValue;
+    }
+
+    return {
+      storeId: storeSettings.storeId || defaultStoreValue.storeId,
+      timezone: storeSettings.timezone || defaultStoreValue.timezone,
+      storeName: storeSettings.storeName || defaultStoreValue.storeName,
+      companyId: storeSettings.companyId || null,
+      clientId: null, // Not needed for current use cases
+    };
+  }, [storeSettings]);
 
   // Loading state while checking configuration
   if (isConfigured === null) {
@@ -75,12 +126,12 @@ export function AppLayout() {
 
   return (
     <ClientAuthProvider>
-      <StoreProvider value={defaultStoreValue}>
+      <StoreProvider value={storeContextValue}>
         {/* Toast notifications container */}
         <Toaster />
         <div className="flex h-screen overflow-hidden" data-testid="app-layout">
           {/* Desktop Sidebar */}
-          <aside className="hidden lg:block">
+          <aside className="hidden xl:block">
             <MyStoreSidebar />
           </aside>
 
@@ -102,7 +153,7 @@ export function AppLayout() {
           {/* Main Content Area */}
           <div className="flex flex-1 flex-col overflow-hidden">
             {/* Mobile Header with Menu Button */}
-            <div className="lg:hidden">
+            <div className="xl:hidden">
               <div className="flex h-16 items-center justify-between border-b bg-background px-4">
                 <Button
                   variant="ghost"
@@ -119,7 +170,7 @@ export function AppLayout() {
             </div>
 
             {/* Desktop Header */}
-            <div className="hidden lg:block">
+            <div className="hidden xl:block">
               <Header variant="full" />
             </div>
 

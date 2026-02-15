@@ -1,11 +1,10 @@
 import { useState, useMemo, useCallback, useEffect, useRef } from 'react';
 import { useClientAuth } from '@/contexts/ClientAuthContext';
 import { useClientDashboard } from '@/lib/api/client-dashboard';
-import { Loader2, AlertCircle, Plus, Zap, PenLine, X, Save, CalendarCheck } from 'lucide-react';
+import { Loader2, AlertCircle, Zap, PenLine, X, Save, CalendarCheck, ScanLine } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   useLotteryPacks,
-  usePackReception,
   usePackDetails,
   useInvalidateLottery,
   useLotteryDayBins,
@@ -17,18 +16,28 @@ import { validateManualEntryEnding } from '@/lib/services/lottery-closing-valida
 import { DepletedPacksSection } from '@/components/lottery/DepletedPacksSection';
 import { ReturnedPacksSection } from '@/components/lottery/ReturnedPacksSection';
 import { ActivatedPacksSection } from '@/components/lottery/ActivatedPacksSection';
-import { PackReceptionForm } from '@/components/lottery/PackReceptionForm';
 import { EnhancedPackActivationForm } from '@/components/lottery/EnhancedPackActivationForm';
 import { PackDetailsModal, type PackDetailsData } from '@/components/lottery/PackDetailsModal';
 import { MarkSoldOutDialog } from '@/components/lottery/MarkSoldOutDialog';
 import { ManualEntryIndicator } from '@/components/lottery/ManualEntryIndicator';
 import { ReturnPackDialog } from '@/components/lottery/ReturnPackDialog';
+import { DayCloseScannerBar } from '@/components/lottery/DayCloseScannerBar';
 import { PinVerificationDialog, type VerifiedUser } from '@/components/auth/PinVerificationDialog';
 import { useAuthGuard } from '@/hooks/useAuthGuard';
-import { receivePack, closeLotteryDay, type LotteryPackResponse } from '@/lib/api/lottery';
+import { useScannedBins, type ScannedBin, type ScanError } from '@/hooks/useScannedBins';
+import { useNotificationSound } from '@/hooks/use-notification-sound';
+import { closeLotteryDay, type LotteryPackResponse } from '@/lib/api/lottery';
 import { useToast } from '@/hooks/use-toast';
 import { Alert, AlertDescription } from '@/components/ui/alert';
-import { CheckCircle2 } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { CheckCircle2, AlertTriangle } from 'lucide-react';
 
 /**
  * Manual entry state interface
@@ -61,7 +70,7 @@ interface ManualEntryState {
  * - Ending = last closing of the day (grayed out, read-only by default)
  * - Click row to open pack details modal
  * - Collapsible depleted packs section
- * - Keep Receive Pack and Activate Pack buttons
+ * - Activate Pack button (Receive Pack moved to Inventory page)
  * - Manual Entry button: Opens auth modal, then enables inline ending serial inputs
  * - Close Day: When in manual entry mode, saves data from table inputs
  * - AC #8: All API calls use proper authentication (JWT tokens), RLS policies ensure store access only
@@ -88,7 +97,6 @@ export default function LotteryManagementPage() {
   const { executeWithAuth: executeWithShiftManagerAuth } = useAuthGuard('shift_manager');
 
   // Dialog state management
-  const [receptionDialogOpen, setReceptionDialogOpen] = useState(false);
   const [activationDialogOpen, setActivationDialogOpen] = useState(false);
   const [detailsDialogOpen, setDetailsDialogOpen] = useState(false);
   const [selectedPackId, setSelectedPackId] = useState<string | null>(null);
@@ -98,16 +106,16 @@ export default function LotteryManagementPage() {
   const [packIdToMarkSoldOut, setPackIdToMarkSoldOut] = useState<string | null>(null);
 
   /**
-   * Pack Reception PIN verification state
-   * SEC-010: AUTHZ - PIN verification only if session invalid
-   */
-  const [receptionPinDialogOpen, setReceptionPinDialogOpen] = useState(false);
-
-  /**
    * Pack Activation PIN verification state
    * SEC-010: AUTHZ - PIN verification only if session invalid
    */
   const [activationPinDialogOpen, setActivationPinDialogOpen] = useState(false);
+
+  /**
+   * Business Day Initialization PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   */
+  const [initializationPinDialogOpen, setInitializationPinDialogOpen] = useState(false);
 
   /**
    * Return Pack dialog state
@@ -145,6 +153,50 @@ export default function LotteryManagementPage() {
 
   // Submission state for manual entry close day
   const [isSubmittingManualClose, setIsSubmittingManualClose] = useState(false);
+
+  // ============================================================================
+  // Scanner Mode State (Phase 4)
+  // Story: Lottery Day Close Scanner Feature
+  // MCP: FE-001 STATE_MANAGEMENT - Secure state management for scanner mode
+  // ============================================================================
+
+  /**
+   * Scanner mode state
+   * When active, shows the DayCloseScannerBar and enables scan-to-bin functionality
+   */
+  const [isScannerModeActive, setIsScannerModeActive] = useState(false);
+
+  /**
+   * Scanner mode PIN verification state
+   * SEC-010: AUTHZ - PIN verification only if session invalid
+   */
+  const [scannerModePinDialogOpen, setScannerModePinDialogOpen] = useState(false);
+
+  /**
+   * Scanner mode cancel confirmation dialog state
+   * Phase 5.5: Prevent accidental data loss when canceling with existing scans
+   * MCP: FE-001 STATE_MANAGEMENT - Track confirmation dialog visibility
+   */
+  const [scannerCancelDialogOpen, setScannerCancelDialogOpen] = useState(false);
+
+  /**
+   * Duplicate scan replacement dialog state
+   * Phase 5.2: Handle duplicate scans with re-scan option
+   * MCP: FE-001 STATE_MANAGEMENT - Track pending replacement data
+   */
+  const [duplicateScanDialogOpen, setDuplicateScanDialogOpen] = useState(false);
+  const [pendingDuplicateScan, setPendingDuplicateScan] = useState<{
+    binId: string;
+    binNumber: number;
+    existingSerial: string;
+    newSerial: string;
+  } | null>(null);
+
+  /**
+   * Notification sound hook for scan feedback
+   * WCAG compliant - sounds supplement visual feedback, never replace it
+   */
+  const { playSuccess, playError, isMuted, toggleMute } = useNotificationSound();
 
   // Get first active store ID from user's accessible stores
   const storeId =
@@ -256,13 +308,293 @@ export default function LotteryManagementPage() {
   });
 
   // Mutations
-  const packReceptionMutation = usePackReception();
   const { invalidateAll } = useInvalidateLottery();
 
   // Check if there are received packs for the Activate Pack button state
   const hasReceivedPacks = useMemo(() => {
     return (packs?.length ?? 0) > 0;
   }, [packs]);
+
+  // ============================================================================
+  // Scanner Mode Hook & Handlers (Phase 4)
+  // Story: Lottery Day Close Scanner Feature
+  // ============================================================================
+
+  /**
+   * Scanned bins hook - manages scanner state, validation, and scrolling
+   * MCP: FE-001 STATE_MANAGEMENT - Centralized scanner state management
+   * MCP: SEC-014 INPUT_VALIDATION - Serial validation in addFromSerial
+   */
+  const {
+    scannedBins,
+    addFromSerial,
+    removeScannedBin,
+    clearScannedBins,
+    lastScannedBinId,
+    progress: scanProgress,
+    allBinsScanned,
+    replaceScannedBin,
+  } = useScannedBins({
+    bins: dayBinsData?.bins ?? [],
+    onScanSuccess: useCallback(
+      (scannedBin: ScannedBin) => {
+        playSuccess();
+        toast({
+          title: 'Bin Scanned',
+          description: `Bin ${scannedBin.bin_number} - ${scannedBin.game_name} (${scannedBin.closing_serial})`,
+          duration: 2000,
+        });
+      },
+      [playSuccess, toast]
+    ),
+    onScanError: useCallback(
+      (error: ScanError) => {
+        // Phase 5.2: Handle duplicate scans with option to replace
+        if (
+          error.type === 'DUPLICATE_SCAN' &&
+          error.existingSerial &&
+          error.newSerial &&
+          error.binNumber
+        ) {
+          // Find the bin_id from dayBinsData
+          const bin = dayBinsData?.bins.find((b) => b.bin_number === error.binNumber);
+          if (bin) {
+            // Store pending replacement data and show dialog
+            setPendingDuplicateScan({
+              binId: bin.bin_id,
+              binNumber: error.binNumber,
+              existingSerial: error.existingSerial,
+              newSerial: error.newSerial,
+            });
+            setDuplicateScanDialogOpen(true);
+            // Play error sound to alert user
+            playError();
+            return;
+          }
+        }
+
+        // Default error handling for other error types
+        playError();
+        toast({
+          title: 'Scan Error',
+          description: error.message,
+          variant: 'destructive',
+          duration: 3000,
+        });
+      },
+      [playError, toast, dayBinsData?.bins]
+    ),
+  });
+
+  /**
+   * Check if Close Day button should be enabled
+   * Requirements: open day exists and has active bins
+   * MCP: FE-001 STATE_MANAGEMENT - Derived state for UI logic
+   */
+  const canEnterScannerMode = useMemo(() => {
+    if (!dayBinsData?.bins) return false;
+    // Must have at least one active bin with a pack
+    return dayBinsData.bins.some((bin) => bin.pack !== null);
+  }, [dayBinsData?.bins]);
+
+  /**
+   * Handle Close Day button click
+   * SEC-010: AUTHZ - Check session first, only prompt PIN if needed
+   */
+  const handleCloseDayClick = useCallback(() => {
+    executeWithAuth(
+      () => {
+        // Session valid - enter scanner mode directly
+        setIsScannerModeActive(true);
+        toast({
+          title: 'Scanner Mode Activated',
+          description: 'Scan lottery tickets to record ending serial numbers.',
+        });
+      },
+      () => {
+        // Session invalid - show PIN dialog
+        setScannerModePinDialogOpen(true);
+      }
+    );
+  }, [executeWithAuth, toast]);
+
+  /**
+   * Handle Scanner Mode PIN verification success
+   * SEC-010: AUTHZ - PIN verification logs user in
+   */
+  const handleScannerModePinVerified = useCallback(
+    (_user: VerifiedUser) => {
+      setScannerModePinDialogOpen(false);
+      setIsScannerModeActive(true);
+      toast({
+        title: 'Scanner Mode Activated',
+        description: 'Scan lottery tickets to record ending serial numbers.',
+      });
+    },
+    [toast]
+  );
+
+  /**
+   * Handle barcode scan from DayCloseScannerBar
+   * SEC-014: INPUT_VALIDATION - Validation delegated to useScannedBins.addFromSerial
+   *
+   * @param serial - 24-digit barcode string
+   */
+  const handleScan = useCallback(
+    (serial: string) => {
+      // addFromSerial handles validation, bin lookup, and state update
+      // Returns false on error (hook's onScanError already called)
+      addFromSerial(serial);
+    },
+    [addFromSerial]
+  );
+
+  /**
+   * Handle scan error from ScannerInput (invalid format before parsing)
+   */
+  const handleScanError = useCallback(() => {
+    playError();
+    toast({
+      title: 'Invalid Barcode',
+      description: 'Scanned barcode is not a valid 24-digit lottery ticket.',
+      variant: 'destructive',
+      duration: 3000,
+    });
+  }, [playError, toast]);
+
+  /**
+   * Handle undo scan - remove a scanned bin
+   * Called when user clicks a scanned row in the table
+   */
+  const handleUndoScan = useCallback(
+    (binId: string) => {
+      removeScannedBin(binId);
+      toast({
+        title: 'Scan Undone',
+        description: 'Ending serial cleared. Scan the ticket again to re-enter.',
+        duration: 2000,
+      });
+    },
+    [removeScannedBin, toast]
+  );
+
+  /**
+   * Handle cancel scanner mode
+   * Phase 5.5: Shows confirmation dialog if scans exist to prevent data loss
+   * MCP: FE-001 STATE_MANAGEMENT - User confirmation before destructive action
+   */
+  const handleCancelScannerMode = useCallback(() => {
+    if (scannedBins.length > 0) {
+      // Show confirmation dialog to prevent accidental data loss
+      setScannerCancelDialogOpen(true);
+    } else {
+      // No scans to lose - exit directly
+      setIsScannerModeActive(false);
+      toast({
+        title: 'Scanner Mode Cancelled',
+        description: 'Scanner mode has been deactivated.',
+      });
+    }
+  }, [scannedBins.length, toast]);
+
+  /**
+   * Handle confirmed cancel - actually clears data and exits scanner mode
+   * Phase 5.5: Called after user confirms they want to discard scans
+   */
+  const handleConfirmCancelScannerMode = useCallback(() => {
+    setScannerCancelDialogOpen(false);
+    clearScannedBins();
+    setIsScannerModeActive(false);
+    toast({
+      title: 'Scanner Mode Cancelled',
+      description: `Discarded ${scannedBins.length} scanned bin${scannedBins.length === 1 ? '' : 's'}.`,
+    });
+  }, [clearScannedBins, scannedBins.length, toast]);
+
+  /**
+   * Handle duplicate scan replacement
+   * Phase 5.2: Replace existing scan with new serial
+   * MCP: SEC-014 INPUT_VALIDATION - Serial validated by replaceScannedBin
+   */
+  const handleReplaceDuplicateScan = useCallback(() => {
+    if (!pendingDuplicateScan) return;
+
+    const success = replaceScannedBin(pendingDuplicateScan.binId, pendingDuplicateScan.newSerial);
+
+    setDuplicateScanDialogOpen(false);
+
+    if (success) {
+      playSuccess();
+      toast({
+        title: 'Scan Replaced',
+        description: `Bin ${pendingDuplicateScan.binNumber} updated: ${pendingDuplicateScan.existingSerial} → ${pendingDuplicateScan.newSerial}`,
+        duration: 2000,
+      });
+    } else {
+      playError();
+      toast({
+        title: 'Replacement Failed',
+        description: 'Failed to replace the scan. Please try scanning again.',
+        variant: 'destructive',
+      });
+    }
+
+    setPendingDuplicateScan(null);
+  }, [pendingDuplicateScan, replaceScannedBin, playSuccess, playError, toast]);
+
+  /**
+   * Handle keeping the existing scan (cancel duplicate replacement)
+   * Phase 5.2: User chose to keep the existing serial
+   */
+  const handleKeepExistingScan = useCallback(() => {
+    setDuplicateScanDialogOpen(false);
+    setPendingDuplicateScan(null);
+    toast({
+      title: 'Existing Scan Kept',
+      description: 'The previous scan value was preserved.',
+      duration: 2000,
+    });
+  }, [toast]);
+
+  /**
+   * Handle complete scanner mode
+   * Maps scanned bins to manualEndingValues and enters manual entry mode for review/submit
+   *
+   * MCP: FE-001 STATE_MANAGEMENT - Transform scanned data to form state
+   * SEC-014: INPUT_VALIDATION - Scanned serials already validated by hook
+   */
+  const handleCompleteScannerMode = useCallback(() => {
+    if (!allBinsScanned) return;
+
+    // Transform scannedBins to manualEndingValues format
+    const endingValues: Record<string, string> = {};
+    for (const scanned of scannedBins) {
+      endingValues[scanned.bin_id] = scanned.closing_serial;
+    }
+
+    // Pre-populate the manual entry form with scanned values
+    setManualEndingValues(endingValues);
+
+    // Clear validation errors (scanned values are already validated)
+    setValidationErrors({});
+
+    // Exit scanner mode, keeping scanned data in table
+    setIsScannerModeActive(false);
+
+    // Enable manual entry mode so user can review and submit
+    // SEC-010: AUTHZ - Use authenticated user from context for audit trail
+    // SEC-017: AUDIT_TRAILS - Real user ID required for traceability
+    setManualEntryState({
+      isActive: true,
+      authorizedBy: user ? { userId: user.id, name: user.name } : null,
+      authorizedAt: new Date(),
+    });
+
+    toast({
+      title: 'Scanning Complete',
+      description: 'Review the ending serials and click "Save & Close Lottery" to submit.',
+    });
+  }, [allBinsScanned, scannedBins, user, toast]);
 
   // Handlers
   const handlePackDetailsClick = (packId: string) => {
@@ -389,15 +721,6 @@ export default function LotteryManagementPage() {
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
 
-  const _handlePackReception = async (data: Parameters<typeof receivePack>[0]) => {
-    await packReceptionMutation.mutateAsync(data);
-    invalidateAll(); // Invalidate all lottery data including day bins
-    setReceptionDialogOpen(false);
-    setSuccessMessage('Pack received successfully');
-    setTimeout(() => setSuccessMessage(null), 5000);
-    // Error handling is done in the form component
-  };
-
   /**
    * Handle successful pack activation
    * Called by EnhancedPackActivationForm onSuccess
@@ -407,34 +730,6 @@ export default function LotteryManagementPage() {
     setSuccessMessage('Pack activated successfully');
     setTimeout(() => setSuccessMessage(null), 5000);
   }, [invalidateAll]);
-
-  /**
-   * Handle Receive Pack button click
-   * FE-001: Check session first, only show PIN dialog if session invalid
-   */
-  const handleReceivePackClick = useCallback(() => {
-    executeWithAuth(
-      () => {
-        // Session valid - open reception dialog directly
-        setReceptionDialogOpen(true);
-      },
-      () => {
-        // Session invalid - show PIN dialog
-        setReceptionPinDialogOpen(true);
-      }
-    );
-  }, [executeWithAuth]);
-
-  /**
-   * Handle Pack Reception PIN verification success
-   * SEC-010: AUTHZ - PIN verification logs user in, backend tracks received_by from session
-   */
-  const handleReceptionPinVerified = useCallback((_user: VerifiedUser) => {
-    // User is now logged in (PIN dialog called auth:login)
-    // Backend will get received_by from the authenticated session
-    setReceptionPinDialogOpen(false);
-    setReceptionDialogOpen(true);
-  }, []);
 
   /**
    * Handle Activate Pack button click
@@ -747,8 +1042,7 @@ export default function LotteryManagementPage() {
       },
       () => {
         // Session invalid - show PIN dialog for initialization
-        // For now, use the reception PIN dialog pattern
-        setReceptionPinDialogOpen(true);
+        setInitializationPinDialogOpen(true);
       }
     );
   }, [executeWithAuth, initializeBusinessDayMutation, toast]);
@@ -967,10 +1261,10 @@ export default function LotteryManagementPage() {
 
         {/* PIN Verification Dialog for Initialization */}
         <PinVerificationDialog
-          open={receptionPinDialogOpen}
-          onClose={() => setReceptionPinDialogOpen(false)}
+          open={initializationPinDialogOpen}
+          onClose={() => setInitializationPinDialogOpen(false)}
           onVerified={(user) => {
-            setReceptionPinDialogOpen(false);
+            setInitializationPinDialogOpen(false);
             // After PIN verification, trigger initialization
             initializeBusinessDayMutation.mutate(undefined, {
               onSuccess: (response) => {
@@ -1005,14 +1299,15 @@ export default function LotteryManagementPage() {
 
   // Convert pack details to modal format
   // Note: Map from API response types to modal types
-  // LotteryPackDetailResponse uses opening_serial/closing_serial, depleted_at
-  // PackDetailsData uses serial_start/serial_end, depleted_at
+  // LotteryPackDetailResponse uses opening_serial for start, serial_end for pack range end
+  // PackDetailsData uses serial_start/serial_end for display
+  // NOTE: closing_serial is the CURRENT sales position, NOT the pack's last ticket
   const packDetailsForModal: PackDetailsData | null = packDetails
     ? ({
         pack_id: packDetails.pack_id,
         pack_number: packDetails.pack_number,
-        serial_start: packDetails.opening_serial || '',
-        serial_end: packDetails.closing_serial || '',
+        serial_start: packDetails.opening_serial || '000',
+        serial_end: packDetails.serial_end || '',
         status: packDetails.status,
         game: packDetails.game || {
           game_id: packDetails.game_id,
@@ -1052,16 +1347,26 @@ export default function LotteryManagementPage() {
 
         {/* Right side: Action buttons */}
         <div className="flex flex-wrap gap-2">
-          <Button
-            onClick={handleReceivePackClick}
-            data-testid="receive-pack-button"
-            disabled={manualEntryState.isActive}
-          >
-            <Plus className="mr-2 h-4 w-4" />
-            Receive Pack
-          </Button>
+          {/* Close Day Button - Opens scanner mode
+              Story: Lottery Day Close Scanner Feature - Phase 4
+              Disabled when: no active bins, manual entry active, or scanner mode already active
+              SEC-010: Hidden when backend says independent close not allowed (non-lottery POS)
+          */}
+          {dayBinsData?.can_close_independently &&
+            !isScannerModeActive &&
+            !manualEntryState.isActive && (
+              <Button
+                onClick={handleCloseDayClick}
+                variant="default"
+                data-testid="close-day-button"
+                disabled={!canEnterScannerMode}
+              >
+                <ScanLine className="mr-2 h-4 w-4" />
+                Close Day
+              </Button>
+            )}
 
-          {/* Manual Entry Button - Shows Cancel when active */}
+          {/* Manual Entry Button - Available for ALL POS types */}
           {manualEntryState.isActive ? (
             <Button
               onClick={handleCancelManualEntry}
@@ -1071,7 +1376,7 @@ export default function LotteryManagementPage() {
               <X className="mr-2 h-4 w-4" />
               Cancel Manual Entry
             </Button>
-          ) : (
+          ) : !isScannerModeActive ? (
             <Button
               onClick={handleManualEntryClick}
               variant="outline"
@@ -1081,7 +1386,7 @@ export default function LotteryManagementPage() {
               <PenLine className="mr-2 h-4 w-4" />
               Manual Entry
             </Button>
-          )}
+          ) : null}
 
           {/* Save & Close Lottery Button - Only shown in manual entry mode */}
           {manualEntryState.isActive && (
@@ -1100,17 +1405,38 @@ export default function LotteryManagementPage() {
             </Button>
           )}
 
-          <Button
-            onClick={handleActivatePackClick}
-            variant="outline"
-            data-testid="activate-pack-button"
-            disabled={!hasReceivedPacks || manualEntryState.isActive}
-          >
-            <Zap className="mr-2 h-4 w-4" />
-            Activate Pack
-          </Button>
+          {!isScannerModeActive && (
+            <Button
+              onClick={handleActivatePackClick}
+              variant="outline"
+              data-testid="activate-pack-button"
+              disabled={!hasReceivedPacks || manualEntryState.isActive}
+            >
+              <Zap className="mr-2 h-4 w-4" />
+              Activate Pack
+            </Button>
+          )}
         </div>
       </div>
+
+      {/* Scanner Mode Bar - Sticky at top when active
+          Story: Lottery Day Close Scanner Feature - Phase 4
+          Shows progress, scan input, and action buttons
+      */}
+      {isScannerModeActive && dayBinsData && (
+        <DayCloseScannerBar
+          bins={dayBinsData.bins}
+          scannedBins={scannedBins}
+          onScan={handleScan}
+          onScanError={handleScanError}
+          onCancel={handleCancelScannerMode}
+          onComplete={handleCompleteScannerMode}
+          isMuted={isMuted}
+          onToggleMute={toggleMute}
+          isComplete={allBinsScanned}
+          data-testid="day-close-scanner-bar"
+        />
+      )}
 
       {/* Manual Entry Mode Indicator */}
       {manualEntryState.isActive && (
@@ -1169,6 +1495,11 @@ export default function LotteryManagementPage() {
             onValidateEnding={handleValidateEnding}
             onMarkSoldOut={handleMarkSoldOutClick}
             onReturnPack={handleReturnPackClick}
+            // Scanner mode props (Phase 4)
+            scannedBins={scannedBins}
+            lastScannedBinId={lastScannedBinId}
+            onUndoScan={handleUndoScan}
+            scannerModeActive={isScannerModeActive}
           />
 
           {/* Returned Packs Section (Collapsible) - Enterprise Close-to-Close Model */}
@@ -1203,18 +1534,6 @@ export default function LotteryManagementPage() {
         </div>
       )}
 
-      {/* Pack Reception PIN Verification Dialog
-          MCP: SEC-010 AUTHZ - Verify user before allowing pack reception
-      */}
-      <PinVerificationDialog
-        open={receptionPinDialogOpen}
-        onClose={() => setReceptionPinDialogOpen(false)}
-        onVerified={handleReceptionPinVerified}
-        requiredRole="cashier"
-        title="Verify PIN for Pack Reception"
-        description="Enter your PIN to receive lottery packs into inventory."
-      />
-
       {/* Pack Activation PIN Verification Dialog
           MCP: SEC-010 AUTHZ - Verify user before allowing pack activation
           Enterprise: Backend gets activated_by from session, not frontend
@@ -1226,16 +1545,6 @@ export default function LotteryManagementPage() {
         requiredRole="cashier"
         title="Verify PIN for Pack Activation"
         description="Enter your PIN to activate lottery packs."
-      />
-
-      {/* Pack Reception Dialog */}
-      <PackReceptionForm
-        storeId={storeId}
-        open={receptionDialogOpen}
-        onOpenChange={setReceptionDialogOpen}
-        onSuccess={() => {
-          invalidateAll();
-        }}
       />
 
       {/* Pack Activation Dialog - Enhanced with search, bin selection, and auth flow */}
@@ -1268,6 +1577,104 @@ export default function LotteryManagementPage() {
         title="Verify PIN for Manual Entry"
         description="Enter your PIN to enable manual entry mode. This action will be recorded for audit purposes."
       />
+
+      {/* Scanner Mode PIN Verification Dialog
+          SEC-010: AUTHZ - PIN verification before enabling scanner mode
+          SEC-017: AUDIT_TRAILS - Records user who authorized day close
+          FE-001: SESSION_CACHING - Bypasses PIN if valid session exists
+          Story: Lottery Day Close Scanner Feature - Phase 4
+      */}
+      <PinVerificationDialog
+        open={scannerModePinDialogOpen}
+        onClose={() => setScannerModePinDialogOpen(false)}
+        onVerified={handleScannerModePinVerified}
+        requiredRole="cashier"
+        title="Verify PIN for Day Close"
+        description="Enter your PIN to enter scanner mode for closing the lottery day."
+      />
+
+      {/* Scanner Mode Cancel Confirmation Dialog
+          Phase 5.5: Prevent accidental data loss when canceling with existing scans
+          MCP: FE-001 STATE_MANAGEMENT - User confirmation before destructive action
+          Story: Lottery Day Close Scanner Feature - Phase 5
+      */}
+      <Dialog open={scannerCancelDialogOpen} onOpenChange={setScannerCancelDialogOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="scanner-cancel-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-yellow-600" />
+              Discard Scanned Data?
+            </DialogTitle>
+            <DialogDescription>
+              You have {scannedBins.length} scanned bin{scannedBins.length === 1 ? '' : 's'}.
+              Canceling will discard all scanned data and exit scanner mode. This action cannot be
+              undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setScannerCancelDialogOpen(false)}
+              data-testid="scanner-cancel-dialog-keep"
+            >
+              Keep Scanning
+            </Button>
+            <Button
+              variant="destructive"
+              onClick={handleConfirmCancelScannerMode}
+              data-testid="scanner-cancel-dialog-discard"
+            >
+              Discard & Exit
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Duplicate Scan Replacement Dialog
+          Phase 5.2: Allow user to replace existing scan or keep it
+          MCP: FE-001 STATE_MANAGEMENT - User choice for duplicate handling
+          Story: Lottery Day Close Scanner Feature - Phase 5
+      */}
+      <Dialog open={duplicateScanDialogOpen} onOpenChange={setDuplicateScanDialogOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="duplicate-scan-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <AlertCircle className="h-5 w-5 text-blue-600" />
+              Bin Already Scanned
+            </DialogTitle>
+            <DialogDescription>
+              {pendingDuplicateScan && (
+                <>
+                  Bin {pendingDuplicateScan.binNumber} was already scanned with ending serial{' '}
+                  <span className="font-mono font-semibold">
+                    {pendingDuplicateScan.existingSerial}
+                  </span>
+                  .
+                  <br />
+                  <br />
+                  Replace with new serial{' '}
+                  <span className="font-mono font-semibold">{pendingDuplicateScan.newSerial}</span>?
+                </>
+              )}
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={handleKeepExistingScan}
+              data-testid="duplicate-scan-dialog-keep"
+            >
+              Keep Existing ({pendingDuplicateScan?.existingSerial})
+            </Button>
+            <Button
+              onClick={handleReplaceDuplicateScan}
+              data-testid="duplicate-scan-dialog-replace"
+            >
+              Replace with {pendingDuplicateScan?.newSerial}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Mark Sold Out Dialog */}
       <MarkSoldOutDialog

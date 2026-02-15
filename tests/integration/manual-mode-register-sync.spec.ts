@@ -35,15 +35,24 @@ const SKIP_NATIVE_MODULE_TESTS =
   process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 
 // ============================================================================
-// Database Reference (shared between mock and test code)
+// Database Holder (vi.hoisted for cross-platform mock compatibility)
 // ============================================================================
 
-let db: Database.Database;
+// Use vi.hoisted() to ensure the database holder is available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { dbHolder } = vi.hoisted(() => ({
+  dbHolder: { instance: null as Database.Database | null },
+}));
 
 // Mock database service to use our test database
 vi.mock('../../src/main/services/database.service', () => ({
-  getDatabase: () => db,
-  isDatabaseInitialized: () => true,
+  getDatabase: vi.fn(() => {
+    if (!dbHolder.instance) {
+      throw new Error('Database not initialized - test setup issue');
+    }
+    return dbHolder.instance;
+  }),
+  isDatabaseInitialized: vi.fn(() => dbHolder.instance !== null),
 }));
 
 // Mock uuid for predictable IDs in tests
@@ -61,6 +70,12 @@ vi.mock('../../src/main/utils/logger', () => ({
     error: vi.fn(),
   })),
 }));
+
+// ============================================================================
+// Database Reference (after mocks)
+// ============================================================================
+
+let db: Database.Database;
 
 // ============================================================================
 // Imports (after mocks)
@@ -86,12 +101,14 @@ describeSuite('Manual Mode Register Sync (Integration)', () => {
       storeName: 'Manual Mode Integration Store',
     });
     db = ctx.db;
+    dbHolder.instance = db;
 
     terminalMappingsDAL = new POSTerminalMappingsDAL();
   });
 
   afterEach(() => {
     ctx?.cleanup();
+    dbHolder.instance = null;
     vi.clearAllMocks();
   });
 

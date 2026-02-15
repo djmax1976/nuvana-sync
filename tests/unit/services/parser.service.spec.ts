@@ -15,6 +15,52 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
+// ============================================================================
+// Hoisted Mock Functions - Required for cross-platform compatibility
+// These must be created via vi.hoisted() BEFORE vi.mock() calls
+// ============================================================================
+const {
+  mockIsFileProcessed,
+  mockRecordFile,
+  mockGetOrCreateForDate,
+  mockCreateWithDetails,
+  mockEnqueue,
+  mockShiftFuelCreateFromNAXML,
+  mockShiftDeptCreateFromNAXML,
+  mockShiftTaxCreateFromNAXML,
+  mockMeterReadingsCreateFromNAXML,
+  mockTankReadingsCreateFromNAXML,
+  mockParse,
+  mockFindShiftByDateAndRegister,
+  mockFindOpenShiftToClose,
+  mockFindByDate,
+  mockCloseShift,
+  mockShiftUpdate,
+  mockGetOrCreateForShift,
+  mockCloseShiftSummary,
+  mockPosFuelGradeMappingsGetOrCreate,
+} = vi.hoisted(() => ({
+  mockIsFileProcessed: vi.fn(),
+  mockRecordFile: vi.fn(),
+  mockGetOrCreateForDate: vi.fn(),
+  mockCreateWithDetails: vi.fn(),
+  mockEnqueue: vi.fn(),
+  mockShiftFuelCreateFromNAXML: vi.fn(),
+  mockShiftDeptCreateFromNAXML: vi.fn(),
+  mockShiftTaxCreateFromNAXML: vi.fn(),
+  mockMeterReadingsCreateFromNAXML: vi.fn(),
+  mockTankReadingsCreateFromNAXML: vi.fn(),
+  mockParse: vi.fn(),
+  mockFindShiftByDateAndRegister: vi.fn(),
+  mockFindOpenShiftToClose: vi.fn(),
+  mockFindByDate: vi.fn(),
+  mockCloseShift: vi.fn(),
+  mockShiftUpdate: vi.fn(),
+  mockGetOrCreateForShift: vi.fn(),
+  mockCloseShiftSummary: vi.fn(),
+  mockPosFuelGradeMappingsGetOrCreate: vi.fn(),
+}));
+
 // Mock electron BEFORE any imports that might trigger ipcMain.handle
 // This is critical because shifts.handlers.ts (imported by parser.service.ts)
 // calls registerHandler at module load time, which requires ipcMain
@@ -36,61 +82,35 @@ vi.mock('electron', () => ({
   },
 }));
 
-// Declare mock functions that will be assigned after imports
-let mockIsFileProcessed: ReturnType<typeof vi.fn>;
-let mockRecordFile: ReturnType<typeof vi.fn>;
-let mockGetOrCreateForDate: ReturnType<typeof vi.fn>;
-let mockCreateWithDetails: ReturnType<typeof vi.fn>;
-let mockEnqueue: ReturnType<typeof vi.fn>;
-let mockParse: ReturnType<typeof vi.fn>;
-// New schema DAL mocks
-let mockShiftFuelCreateFromNAXML: ReturnType<typeof vi.fn>;
-let mockShiftDeptCreateFromNAXML: ReturnType<typeof vi.fn>;
-let mockShiftTaxCreateFromNAXML: ReturnType<typeof vi.fn>;
-let mockMeterReadingsCreateFromNAXML: ReturnType<typeof vi.fn>;
-let mockTankReadingsCreateFromNAXML: ReturnType<typeof vi.fn>;
-
-// Mock all DALs before importing - use inline vi.fn() to avoid hoisting issues
+// Mock all DALs before importing - use hoisted mocks for cross-platform compatibility
 vi.mock('../../../src/main/dal', () => {
-  const isFileProcessed = vi.fn();
-  const recordFile = vi.fn();
-  const enqueue = vi.fn();
-  const getOrCreateForDate = vi.fn();
-  const createWithDetails = vi.fn();
-  // New schema DALs
-  const shiftFuelCreateFromNAXML = vi.fn();
-  const shiftDeptCreateFromNAXML = vi.fn();
-  const shiftTaxCreateFromNAXML = vi.fn();
-  const meterReadingsCreateFromNAXML = vi.fn();
-  const tankReadingsCreateFromNAXML = vi.fn();
-
   return {
     processedFilesDAL: {
-      isFileProcessed,
-      recordFile,
+      isFileProcessed: mockIsFileProcessed,
+      recordFile: mockRecordFile,
     },
     syncQueueDAL: {
-      enqueue,
+      enqueue: mockEnqueue,
       hasPendingSync: vi.fn(() => false),
     },
     shiftsDAL: {
-      getOrCreateForDate,
-      findShiftByDateAndRegister: vi.fn(() => ({ shift_id: 'existing-shift-123' })),
-      findOpenShiftToClose: vi.fn(() => ({ shift_id: 'existing-shift-123' })),
-      findByDate: vi.fn(() => [{ shift_id: 'existing-shift-123' }]),
+      getOrCreateForDate: mockGetOrCreateForDate,
+      findShiftByDateAndRegister: mockFindShiftByDateAndRegister,
+      findOpenShiftToClose: mockFindOpenShiftToClose,
+      findByDate: mockFindByDate,
       createClosedShift: vi.fn(() => ({ shift_id: 'closed-shift-123' })),
-      closeShift: vi.fn(),
-      update: vi.fn(),
+      closeShift: mockCloseShift,
+      update: mockShiftUpdate,
     },
     daySummariesDAL: {
       getOrCreateForDate: vi.fn(),
     },
     transactionsDAL: {
-      createWithDetails,
+      createWithDetails: mockCreateWithDetails,
     },
     // POS ID Mapping DALs
     posFuelGradeMappingsDAL: {
-      getOrCreate: vi.fn(() => ({ mapping_id: 'fuel-grade-mapping-id' })),
+      getOrCreate: mockPosFuelGradeMappingsGetOrCreate,
     },
     posDepartmentMappingsDAL: {
       getOrCreate: vi.fn(() => ({ mapping_id: 'dept-mapping-id' })),
@@ -126,26 +146,26 @@ vi.mock('../../../src/main/dal', () => {
     },
     // New Schema-Aligned DALs (shift summary hierarchy)
     shiftSummariesDAL: {
-      getOrCreateForShift: vi.fn(() => ({ shift_summary_id: 'shift-summary-123' })),
-      closeShiftSummary: vi.fn(),
+      getOrCreateForShift: mockGetOrCreateForShift,
+      closeShiftSummary: mockCloseShiftSummary,
     },
     shiftFuelSummariesDAL: {
-      createFromNAXML: shiftFuelCreateFromNAXML,
+      createFromNAXML: mockShiftFuelCreateFromNAXML,
     },
     shiftDepartmentSummariesDAL: {
-      createFromNAXML: shiftDeptCreateFromNAXML,
+      createFromNAXML: mockShiftDeptCreateFromNAXML,
     },
     shiftTenderSummariesDAL: {
       upsert: vi.fn(() => ({ id: 'shift-tender-summary-123' })),
     },
     shiftTaxSummariesDAL: {
-      createFromNAXML: shiftTaxCreateFromNAXML,
+      createFromNAXML: mockShiftTaxCreateFromNAXML,
     },
     meterReadingsDAL: {
-      createFromNAXML: meterReadingsCreateFromNAXML,
+      createFromNAXML: mockMeterReadingsCreateFromNAXML,
     },
     tankReadingsDAL: {
-      createFromNAXML: tankReadingsCreateFromNAXML,
+      createFromNAXML: mockTankReadingsCreateFromNAXML,
     },
   };
 });
@@ -181,12 +201,11 @@ vi.mock('../../../src/main/services/settings.service', () => ({
   },
 }));
 
-// Mock NAXML parser
+// Mock NAXML parser - use hoisted mockParse for cross-platform compatibility
 vi.mock('../../../src/shared/naxml/parser', () => {
-  const parse = vi.fn();
   return {
     createNAXMLParser: vi.fn(() => ({
-      parse,
+      parse: mockParse,
     })),
     // extractFuelDataFromMSM is used by parser.service.ts for MSM processing
     extractFuelDataFromMSM: vi.fn(() => ({
@@ -211,9 +230,7 @@ vi.mock('../../../src/main/dal/sync-queue.dal', () => ({
 // Import after mocks
 import * as fs from 'fs/promises';
 import { ParserService, createParserService } from '../../../src/main/services/parser.service';
-import * as dal from '../../../src/main/dal';
-import { createNAXMLParser } from '../../../src/shared/naxml/parser';
-// settingsService is mocked above - import not needed for tests
+// dal and createNAXMLParser are mocked - imports not needed for tests
 
 // ============================================================================
 // Test Fixtures
@@ -272,32 +289,27 @@ describe('ParserService', () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
-    // Get references to mocked functions from the imported modules
-    mockIsFileProcessed = vi.mocked(dal.processedFilesDAL.isFileProcessed);
-    mockRecordFile = vi.mocked(dal.processedFilesDAL.recordFile);
-    mockEnqueue = vi.mocked(dal.syncQueueDAL.enqueue);
-    mockGetOrCreateForDate = vi.mocked(dal.shiftsDAL.getOrCreateForDate);
-    mockCreateWithDetails = vi.mocked(dal.transactionsDAL.createWithDetails);
-    // New schema DAL mocks
-    mockShiftFuelCreateFromNAXML = vi.mocked(dal.shiftFuelSummariesDAL.createFromNAXML);
-    mockShiftDeptCreateFromNAXML = vi.mocked(dal.shiftDepartmentSummariesDAL.createFromNAXML);
-    mockShiftTaxCreateFromNAXML = vi.mocked(dal.shiftTaxSummariesDAL.createFromNAXML);
-    mockMeterReadingsCreateFromNAXML = vi.mocked(dal.meterReadingsDAL.createFromNAXML);
-    mockTankReadingsCreateFromNAXML = vi.mocked(dal.tankReadingsDAL.createFromNAXML);
-
-    // Get parser mock - createNAXMLParser takes options object, not store ID
-    const parserInstance = createNAXMLParser();
-    mockParse = vi.mocked(parserInstance.parse);
-
     // Create service
     service = new ParserService(TEST_STORE_ID);
 
-    // Default mock returns
+    // Default mock returns for hoisted mocks
     mockIsFileProcessed.mockReturnValue(false);
     mockRecordFile.mockReturnValue({ id: 'file-record-id' });
     mockGetOrCreateForDate.mockReturnValue({ shift_id: 'shift-123' });
     mockCreateWithDetails.mockReturnValue({ transaction_id: 'txn-123' });
     mockEnqueue.mockReturnValue({ id: 'queue-item-id' });
+
+    // Shift DAL defaults
+    mockFindShiftByDateAndRegister.mockReturnValue({ shift_id: 'existing-shift-123' });
+    mockFindOpenShiftToClose.mockReturnValue({ shift_id: 'existing-shift-123' });
+    mockFindByDate.mockReturnValue([{ shift_id: 'existing-shift-123' }]);
+
+    // Shift summary DAL defaults
+    mockGetOrCreateForShift.mockReturnValue({ shift_summary_id: 'shift-summary-123' });
+
+    // POS mapping DAL defaults
+    mockPosFuelGradeMappingsGetOrCreate.mockReturnValue({ mapping_id: 'fuel-grade-mapping-id' });
+
     // New schema DAL defaults
     mockShiftFuelCreateFromNAXML.mockReturnValue('shift-fuel-summary-123');
     mockShiftDeptCreateFromNAXML.mockReturnValue('shift-dept-summary-123');
@@ -540,10 +552,8 @@ describe('ParserService', () => {
       // Override mocks to return null (no existing shift)
       // This tests the path where FGM processes mappings without linking to a shift
       // Note: findShiftByDateAndRegister is called TWICE (with register, then without)
-      vi.mocked(dal.shiftsDAL.findShiftByDateAndRegister)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce(undefined);
-      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(undefined);
+      mockFindShiftByDateAndRegister.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
+      mockFindOpenShiftToClose.mockReturnValueOnce(undefined);
 
       const fgmShiftResult = {
         documentType: 'FuelGradeMovement',
@@ -582,7 +592,7 @@ describe('ParserService', () => {
       expect(result.success).toBe(true);
       expect(result.documentType).toBe('FuelGradeMovement');
       // FGM tried to find a shift to close
-      expect(vi.mocked(dal.shiftsDAL.findShiftByDateAndRegister)).toHaveBeenCalled();
+      expect(mockFindShiftByDateAndRegister).toHaveBeenCalled();
     });
   });
 
@@ -723,11 +733,8 @@ describe('ParserService', () => {
     it('PS-082: should handle DAL errors during storage', async () => {
       mockParse.mockReturnValue(SAMPLE_FGM_PARSE_RESULT);
       // FGM calls posFuelGradeMappingsDAL.getOrCreate for fuel grade mappings
-      // Save original implementation to restore after test
-      const originalImpl = vi
-        .mocked(dal.posFuelGradeMappingsDAL.getOrCreate)
-        .getMockImplementation();
-      vi.mocked(dal.posFuelGradeMappingsDAL.getOrCreate).mockImplementation(() => {
+      // Use mockImplementation to throw error - will be reset by next beforeEach
+      mockPosFuelGradeMappingsGetOrCreate.mockImplementation(() => {
         throw new Error('Database constraint violation');
       });
 
@@ -735,22 +742,6 @@ describe('ParserService', () => {
 
       expect(result.success).toBe(false);
       expect(result.error).toContain('Database constraint violation');
-
-      // Restore original mock implementation
-      vi.mocked(dal.posFuelGradeMappingsDAL.getOrCreate).mockImplementation(
-        originalImpl ||
-          (() => ({
-            id: 'fuel-grade-mapping-id',
-            store_id: 'test-store-123',
-            external_grade_id: '001',
-            internal_grade_name: 'REGULAR',
-            fuel_type: 'REGULAR' as const,
-            pos_system_type: 'gilbarco' as const,
-            active: 1,
-            created_at: '2025-01-15T00:00:00.000Z',
-            updated_at: '2025-01-15T00:00:00.000Z',
-          }))
-      );
     });
 
     it('PS-083: should handle stat errors', async () => {
@@ -1118,10 +1109,8 @@ describe('ParserService', () => {
       // Override mocks to return null (no existing shift)
       // This tests the shift close detection logic without database interaction
       // Note: findShiftByDateAndRegister is called TWICE (with register, then without)
-      vi.mocked(dal.shiftsDAL.findShiftByDateAndRegister)
-        .mockReturnValueOnce(undefined)
-        .mockReturnValueOnce(undefined);
-      vi.mocked(dal.shiftsDAL.findOpenShiftToClose).mockReturnValueOnce(undefined);
+      mockFindShiftByDateAndRegister.mockReturnValueOnce(undefined).mockReturnValueOnce(undefined);
+      mockFindOpenShiftToClose.mockReturnValueOnce(undefined);
 
       const fgmWithEndTime = {
         documentType: 'FuelGradeMovement',

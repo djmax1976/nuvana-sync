@@ -111,7 +111,7 @@ export default function ReportsPage() {
   }, []);
 
   return (
-    <div className="mx-auto max-w-[1000px]">
+    <div className="mx-auto max-w-[1600px]">
       {/* Page Header — exact match to mockup */}
       <div className="mb-8 flex items-center justify-between">
         <h1 className="text-2xl font-semibold text-foreground">Reports</h1>

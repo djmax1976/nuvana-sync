@@ -12,6 +12,7 @@
 
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import apiClient from './client';
+import { terminalsAPI } from './ipc-client';
 
 /**
  * Store status values
@@ -798,7 +799,19 @@ export function useUpdateTerminal() {
 
 /**
  * Hook to delete a terminal
+ *
+ * Performs a two-step deletion process:
+ * 1. Delete from cloud API (primary operation)
+ * 2. Deactivate in local SQLite database (synchronization)
+ *
+ * Local deactivation failure is logged but does not fail the mutation,
+ * ensuring the UI reflects cloud state even if local sync fails.
+ * The local database will be corrected on next API key resync.
+ *
  * @returns Mutation for deleting a terminal
+ *
+ * @security SEC-014: terminalId validated as UUID by IPC handler
+ * @security DB-006: Local deactivation scoped to configured store
  */
 export function useDeleteTerminal() {
   const queryClient = useQueryClient();
@@ -806,15 +819,45 @@ export function useDeleteTerminal() {
   return useMutation({
     mutationFn: ({ storeId, terminalId }: { storeId: string; terminalId: string }) =>
       deleteTerminal(storeId, terminalId),
-    onSuccess: (_, variables) => {
-      // Invalidate terminals query for the store
+    onSuccess: async (_, variables) => {
+      // Step 1: Deactivate in local database after successful cloud deletion
+      // This ensures the local pos_terminal_mappings table reflects cloud state
+      // without requiring a full API key resync.
+      try {
+        const localResult = await terminalsAPI.deactivate(variables.terminalId);
+        if (localResult.success) {
+          console.info(`[useDeleteTerminal] Local deactivation successful: ${localResult.message}`);
+        } else {
+          // Terminal not found locally - may have been deactivated already
+          console.warn(
+            `[useDeleteTerminal] Local terminal not found (may be expected): ${localResult.message}`
+          );
+        }
+      } catch (localError) {
+        // Log error but don't fail the mutation - cloud deletion succeeded
+        // Local database will be corrected on next API key resync
+        console.warn(
+          '[useDeleteTerminal] Local deactivation failed (cloud deletion succeeded):',
+          localError instanceof Error ? localError.message : String(localError)
+        );
+      }
+
+      // Step 2: Invalidate cloud terminal queries for the store
       queryClient.invalidateQueries({
         queryKey: [...storeKeys.details(), variables.storeId, 'terminals'],
         refetchType: 'all',
       });
-      // Also invalidate store details to refresh terminal count if needed
+
+      // Step 3: Invalidate store details to refresh terminal count
       queryClient.invalidateQueries({
         queryKey: storeKeys.detail(variables.storeId),
+        refetchType: 'all',
+      });
+
+      // Step 4: Invalidate local IPC terminal list query
+      // This ensures TerminalsPage (which uses 'terminals:list' IPC) refreshes
+      queryClient.invalidateQueries({
+        queryKey: ['terminals', 'list'],
         refetchType: 'all',
       });
     },

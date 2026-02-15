@@ -27,12 +27,10 @@ import { randomBytes } from 'crypto';
 // Mocks - Must be hoisted
 // ============================================================================
 
-// Mock electron (app and safeStorage)
-vi.mock('electron', () => ({
-  app: {
-    getVersion: vi.fn(() => '1.0.0'),
-  },
-  safeStorage: {
+// Create hoisted containers for mock storage and electron mocks
+const { mockElectronStore, mockSafeStorage } = vi.hoisted(() => ({
+  mockElectronStore: { store: new Map<string, unknown>() },
+  mockSafeStorage: {
     isEncryptionAvailable: vi.fn(() => true),
     encryptString: vi.fn((data: string) => Buffer.from(`encrypted:${data}`)),
     decryptString: vi.fn((buffer: Buffer) => {
@@ -45,25 +43,32 @@ vi.mock('electron', () => ({
   },
 }));
 
+// Mock electron (app and safeStorage)
+vi.mock('electron', () => ({
+  app: {
+    getVersion: vi.fn(() => '1.0.0'),
+  },
+  safeStorage: mockSafeStorage,
+}));
+
 // Mock electron-store with internal store
 vi.mock('electron-store', () => {
-  const internalStore = new Map<string, unknown>();
   class MockStore {
-    static __store = internalStore;
+    static __store = mockElectronStore.store;
     get(key: string): unknown {
-      return internalStore.get(key);
+      return mockElectronStore.store.get(key);
     }
     set(key: string, value: unknown): void {
-      internalStore.set(key, value);
+      mockElectronStore.store.set(key, value);
     }
     delete(key: string): void {
-      internalStore.delete(key);
+      mockElectronStore.store.delete(key);
     }
     has(key: string): boolean {
-      return internalStore.has(key);
+      return mockElectronStore.store.has(key);
     }
     clear(): void {
-      internalStore.clear();
+      mockElectronStore.store.clear();
     }
   }
   return { default: MockStore };
@@ -89,19 +94,9 @@ import {
   GRACE_PERIOD_DAYS,
   type LicenseApiResponse,
 } from '../../src/main/services/license.service';
-import Store from 'electron-store';
-
-// Access the mock's internal store via static property
-type MockStoreClass = typeof Store & { __store: Map<string, unknown> };
 
 describe('License Security Tests', () => {
   let service: LicenseService;
-  let safeStorageMock: {
-    isEncryptionAvailable: ReturnType<typeof vi.fn>;
-    encryptString: ReturnType<typeof vi.fn>;
-    decryptString: ReturnType<typeof vi.fn>;
-  };
-  let mockStoreData: Map<string, unknown>;
 
   const daysFromNow = (days: number): string => {
     const date = new Date();
@@ -114,22 +109,20 @@ describe('License Security Tests', () => {
     status: 'active',
   });
 
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.clearAllMocks();
 
-    // Get access to mock store data
-    mockStoreData = (Store as unknown as MockStoreClass).__store;
-    mockStoreData.clear();
+    // Clear mock store data using hoisted reference
+    mockElectronStore.store.clear();
 
-    const electron = await import('electron');
-    safeStorageMock = electron.safeStorage as unknown as typeof safeStorageMock;
-    safeStorageMock.isEncryptionAvailable.mockReturnValue(true);
+    // Reset safeStorage mock defaults
+    mockSafeStorage.isEncryptionAvailable.mockReturnValue(true);
 
     service = new LicenseService();
   });
 
   afterEach(() => {
-    mockStoreData.clear();
+    mockElectronStore.store.clear();
     vi.restoreAllMocks();
   });
 
@@ -143,14 +136,14 @@ describe('License Security Tests', () => {
       expect(service.isValid()).toBe(true);
 
       // Tamper with the integrity hash
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
         storedAt: string;
       };
 
       stored.integrityHash = randomBytes(32).toString('hex');
-      mockStoreData.set(LICENSE_STORE_KEY, stored);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, stored);
 
       // New instance should detect tampering
       const service2 = new LicenseService();
@@ -161,14 +154,14 @@ describe('License Security Tests', () => {
     it('should detect and reject tampered encrypted data', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };
 
       // Tamper with encrypted data
       stored.encryptedData = Buffer.from('tampered-data').toString('base64');
-      mockStoreData.set(LICENSE_STORE_KEY, stored);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, stored);
 
       const service2 = new LicenseService();
       expect(service2.isValid()).toBe(false);
@@ -177,14 +170,14 @@ describe('License Security Tests', () => {
     it('should detect hash length mismatch attacks', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };
 
       // Try short hash (potential timing attack setup)
       stored.integrityHash = 'short';
-      mockStoreData.set(LICENSE_STORE_KEY, stored);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, stored);
 
       const service2 = new LicenseService();
       expect(service2.isValid()).toBe(false);
@@ -193,14 +186,14 @@ describe('License Security Tests', () => {
     it('should detect null byte injection in hash', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };
 
       // Null byte injection attempt
       stored.integrityHash = stored.integrityHash.substring(0, 32) + '\x00' + 'a'.repeat(31);
-      mockStoreData.set(LICENSE_STORE_KEY, stored);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, stored);
 
       const service2 = new LicenseService();
       expect(service2.isValid()).toBe(false);
@@ -209,19 +202,19 @@ describe('License Security Tests', () => {
     it('should clear storage on integrity failure (prevent replay)', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };
 
       stored.integrityHash = 'invalid';
-      mockStoreData.set(LICENSE_STORE_KEY, stored);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, stored);
 
       // Load tampered data
       new LicenseService();
 
       // Storage should be cleared
-      expect(mockStoreData.has(LICENSE_STORE_KEY)).toBe(false);
+      expect(mockElectronStore.store.has(LICENSE_STORE_KEY)).toBe(false);
     });
   });
 
@@ -363,13 +356,13 @@ describe('License Security Tests', () => {
     it('should handle corrupted JSON in encrypted data', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
-      const _stored = mockStoreData.get(LICENSE_STORE_KEY) as {
+      const _stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as {
         encryptedData: string;
         integrityHash: string;
       };
 
       // Corrupt the encrypted data to produce invalid JSON when decrypted
-      safeStorageMock.decryptString.mockReturnValueOnce('not-valid-json{{{');
+      mockSafeStorage.decryptString.mockReturnValueOnce('not-valid-json{{{');
 
       const service2 = new LicenseService();
       expect(service2.isValid()).toBe(false);
@@ -384,7 +377,7 @@ describe('License Security Tests', () => {
         constructor: { prototype: { isAdmin: true } },
       };
 
-      mockStoreData.set(LICENSE_STORE_KEY, maliciousData);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, maliciousData);
 
       // Should not throw or be exploited
       expect(() => new LicenseService()).not.toThrow();
@@ -397,26 +390,26 @@ describe('License Security Tests', () => {
         storedAt: new Date().toISOString(),
       };
 
-      mockStoreData.set(LICENSE_STORE_KEY, hugeData);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, hugeData);
 
       // Should handle without crashing
       expect(() => new LicenseService()).not.toThrow();
     });
 
     it('should handle null/undefined stored values', () => {
-      mockStoreData.set(LICENSE_STORE_KEY, null);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, null);
 
       const service2 = new LicenseService();
       expect(service2.isValid()).toBe(false);
 
-      mockStoreData.set(LICENSE_STORE_KEY, undefined);
+      mockElectronStore.store.set(LICENSE_STORE_KEY, undefined);
 
       const service3 = new LicenseService();
       expect(service3.isValid()).toBe(false);
     });
 
     it('should handle stored data with missing required fields', () => {
-      mockStoreData.set(LICENSE_STORE_KEY, {
+      mockElectronStore.store.set(LICENSE_STORE_KEY, {
         // Missing encryptedData
         integrityHash: 'a'.repeat(64),
       });
@@ -569,7 +562,7 @@ describe('License Security Tests', () => {
 
   describe('Encryption Security', () => {
     it('should not store plaintext in production when encryption unavailable', () => {
-      safeStorageMock.isEncryptionAvailable.mockReturnValue(false);
+      mockSafeStorage.isEncryptionAvailable.mockReturnValue(false);
       const originalEnv = process.env.NODE_ENV;
       process.env.NODE_ENV = 'production';
 
@@ -577,7 +570,7 @@ describe('License Security Tests', () => {
       prodService.updateFromApiResponse(createValidResponse(90));
 
       // Check that data wasn't stored in plaintext
-      const stored = mockStoreData.get(LICENSE_STORE_KEY) as { encryptedData?: string };
+      const stored = mockElectronStore.store.get(LICENSE_STORE_KEY) as { encryptedData?: string };
 
       if (stored?.encryptedData) {
         // If something was stored, it should be encrypted
@@ -593,7 +586,7 @@ describe('License Security Tests', () => {
       service.updateFromApiResponse(createValidResponse(90));
 
       // Simulate decryption failure
-      safeStorageMock.decryptString.mockImplementationOnce(() => {
+      mockSafeStorage.decryptString.mockImplementationOnce(() => {
         throw new Error('Decryption failed');
       });
 
@@ -603,7 +596,7 @@ describe('License Security Tests', () => {
     });
 
     it('should handle encryption failures gracefully', () => {
-      safeStorageMock.encryptString.mockImplementationOnce(() => {
+      mockSafeStorage.encryptString.mockImplementationOnce(() => {
         throw new Error('Encryption failed');
       });
 

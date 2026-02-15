@@ -1017,20 +1017,33 @@ if (!gotTheLock) {
           log.info('Initial manager synced from config to database after bootstrap');
         }
 
-        // Backfill terminal mappings from existing shifts
+        // Backfill terminal mappings from existing shifts (ONE-TIME MIGRATION)
         // This handles the case where shifts were processed before pos_terminal_mappings
-        // table was created (migration v007)
+        // table was created (migration v007).
+        //
+        // CRON-001 Compliance: Idempotency check ensures this runs ONLY ONCE.
+        // After completion, user deletions of terminal mappings are preserved.
         try {
           const store = storesDAL.getConfiguredStore();
           if (store) {
-            const backfillResult = posTerminalMappingsDAL.backfillFromShifts(store.store_id);
-            if (backfillResult.created > 0) {
-              log.info('Terminal mappings backfilled from existing shifts', {
+            // CRON-001: Check if migration already completed before running
+            if (settingsService.isTerminalBackfillV007Completed()) {
+              log.debug('Terminal backfill v007 already completed, skipping', {
+                storeId: store.store_id,
+                completedAt: settingsService.getTerminalBackfillV007CompletedAt(),
+              });
+            } else {
+              // Run backfill only if not previously completed
+              const backfillResult = posTerminalMappingsDAL.backfillFromShifts(store.store_id);
+              log.info('Terminal mappings backfill v007 executed', {
                 storeId: store.store_id,
                 created: backfillResult.created,
                 existing: backfillResult.existing,
                 total: backfillResult.total,
               });
+
+              // CRON-001: Mark as completed with timestamp for audit trail
+              settingsService.markTerminalBackfillV007Completed();
             }
 
             // DEBUG: Check processed_files table

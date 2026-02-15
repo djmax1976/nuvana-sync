@@ -677,10 +677,54 @@ export class LotteryGamesDAL extends StoreBasedDAL<LotteryGame> {
 }
 
 // ============================================================================
-// Singleton Export
+// Lazy Singleton Export
 // ============================================================================
 
 /**
- * Singleton instance for lottery game operations
+ * Lazy singleton instance holder
+ * @internal
  */
-export const lotteryGamesDAL = new LotteryGamesDAL();
+let _lotteryGamesDALInstance: LotteryGamesDAL | null = null;
+
+/**
+ * Get or create the singleton instance
+ * Defers creation until first access to support test mocking
+ * @internal
+ */
+function getLotteryGamesDAL(): LotteryGamesDAL {
+  if (!_lotteryGamesDALInstance) {
+    _lotteryGamesDALInstance = new LotteryGamesDAL();
+  }
+  return _lotteryGamesDALInstance;
+}
+
+/**
+ * Reset the singleton instance (for testing only)
+ * @internal
+ */
+export function _resetLotteryGamesDAL(): void {
+  _lotteryGamesDALInstance = null;
+}
+
+/**
+ * Lazy singleton proxy for lottery game operations
+ *
+ * Uses Proxy pattern to defer instance creation until first property access.
+ * This ensures tests can set up database mocks before the DAL is instantiated.
+ */
+export const lotteryGamesDAL: LotteryGamesDAL = new Proxy({} as LotteryGamesDAL, {
+  get(_target, prop: string | symbol) {
+    const instance = getLotteryGamesDAL();
+    const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+    // Bind methods to the instance to preserve `this` context
+    if (typeof value === 'function') {
+      return value.bind(instance);
+    }
+    return value;
+  },
+  set(_target, prop: string | symbol, value: unknown) {
+    const instance = getLotteryGamesDAL();
+    (instance as unknown as Record<string | symbol, unknown>)[prop] = value;
+    return true;
+  },
+});

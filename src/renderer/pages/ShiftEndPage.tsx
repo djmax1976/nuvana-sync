@@ -20,12 +20,11 @@ import { Button } from '../components/ui/button';
 import { Badge as _Badge } from '../components/ui/badge';
 import { Clock, Loader2, AlertCircle, Check, ArrowLeft } from 'lucide-react';
 
-import { useClientAuth } from '../contexts/ClientAuthContext';
-import { useClientDashboard } from '../lib/api/client-dashboard';
 import { useLotteryDayBins } from '../hooks/useLottery';
-import { useShiftDetail } from '../lib/api/shifts';
-import { useStoreTerminals } from '../lib/api/stores';
-import { useCashiers } from '../lib/api/cashiers';
+import { useLocalStore } from '../hooks/useLocalStore';
+import { useLocalShiftDetail } from '../hooks/useLocalShifts';
+import { useLocalTerminals } from '../hooks/useLocalTerminals';
+import { useLocalCashiers } from '../hooks/useLocalCashiers';
 import { ShiftClosingForm } from '../components/shifts/ShiftClosingForm';
 import { ShiftInfoHeader } from '../components/shifts/ShiftInfoHeader';
 import {
@@ -99,39 +98,27 @@ export default function ShiftEndWizardPage() {
   // Check if we're in manual mode (passed from TerminalsPage)
   const isManualMode = (location.state as { isManualMode?: boolean } | null)?.isManualMode ?? false;
 
-  // ============ AUTH & DATA HOOKS ============
-  const { isLoading: authLoading } = useClientAuth();
-  const {
-    data: dashboardData,
-    isLoading: dashboardLoading,
-    isError: dashboardError,
-  } = useClientDashboard();
+  // ============ LOCAL IPC HOOKS ============
+  // Use local IPC hooks for offline-first operation (no cloud API calls)
+  const { data: storeData, isLoading: storeLoading, isError: storeError } = useLocalStore();
 
-  // Get store ID from user's accessible stores
-  const storeId =
-    dashboardData?.stores.find((s) => s.status === 'ACTIVE')?.store_id ||
-    dashboardData?.stores[0]?.store_id;
+  // Get store ID from local configuration
+  const storeId = storeData?.store_id;
 
   // Fetch shift details to check if already closed
-  const { data: shiftData, isLoading: shiftLoading } = useShiftDetail(shiftId);
+  const { data: shiftData, isLoading: shiftLoading } = useLocalShiftDetail(shiftId);
   const isShiftClosed = shiftData?.status === 'CLOSED';
 
   // Fetch terminals for the store to get terminal name
-  const { data: terminals = [], isLoading: isLoadingTerminals } = useStoreTerminals(storeId, {
-    enabled: !!storeId,
-  });
+  const { data: terminals = [], isLoading: isLoadingTerminals } = useLocalTerminals();
 
-  // Find terminal info by ID from shift data
+  // Find terminal info by ID from shift data (uses external_register_id)
   const terminal = shiftData
-    ? terminals.find((t) => t.pos_terminal_id === shiftData.pos_terminal_id)
+    ? terminals.find((t) => t.external_register_id === shiftData.external_register_id)
     : null;
 
   // Get cashiers to find cashier name (fallback if not in shiftData)
-  const { data: cashiers = [], isLoading: isLoadingCashiers } = useCashiers(
-    storeId || '',
-    { is_active: true },
-    { enabled: !!storeId }
-  );
+  const { data: cashiers = [], isLoading: isLoadingCashiers } = useLocalCashiers();
 
   // Find cashier info from shift - prefer shiftData.cashier_name, fallback to lookup
   const cashierName =
@@ -307,7 +294,7 @@ export default function ShiftEndWizardPage() {
   }, [isShiftClosed, navigate]);
 
   // ============ LOADING STATE ============
-  if (authLoading || dashboardLoading || shiftLoading || isLoadingTerminals || isLoadingCashiers) {
+  if (storeLoading || shiftLoading || isLoadingTerminals || isLoadingCashiers) {
     return (
       <div
         className="flex items-center justify-center min-h-[400px]"
@@ -322,14 +309,14 @@ export default function ShiftEndWizardPage() {
   }
 
   // ============ ERROR STATE ============
-  if (dashboardError) {
+  if (storeError) {
     return (
       <div className="container mx-auto p-6" data-testid="shift-end-wizard-error">
         <Card className="border-destructive">
           <CardContent className="pt-6">
             <div className="flex items-center gap-2 text-destructive">
               <AlertCircle className="h-5 w-5" />
-              <p>Failed to load dashboard data. Please try again.</p>
+              <p>Failed to load store data. Please try again.</p>
             </div>
           </CardContent>
         </Card>
@@ -353,15 +340,15 @@ export default function ShiftEndWizardPage() {
   }
 
   // Get store name and format date
-  const storeName = dashboardData?.stores.find((s) => s.store_id === storeId)?.name || 'Your Store';
+  const storeName = storeData?.name || 'Your Store';
   const businessDate = lotteryData?.business_date || dayBinsData?.business_day?.date;
   const formattedDate = formatBusinessDate(businessDate);
 
   // Terminal and shift display values
   const terminalName = terminal?.name || 'Terminal';
   const shiftNumber = shiftData?.shift_number ?? null;
-  const shiftStartTime = shiftData?.opened_at ?? new Date().toISOString();
-  const openingCash = shiftData?.opening_cash ?? 0;
+  const shiftStartTime = shiftData?.start_time ?? new Date().toISOString();
+  const openingCash = 0; // Local ShiftResponse doesn't include opening_cash
 
   // ============ RENDER ============
   return (

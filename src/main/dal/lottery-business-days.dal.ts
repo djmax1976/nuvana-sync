@@ -11,7 +11,7 @@
 
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
-import { lotteryPacksDAL, type LotteryPack } from './lottery-packs.dal';
+import { lotteryPacksDAL } from './lottery-packs.dal';
 import { lotteryGamesDAL } from './lottery-games.dal';
 import { syncQueueDAL } from './sync-queue.dal';
 
@@ -603,7 +603,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
           // Calculate serial_start and serial_end for API compliance
           const serialStart = '000';
           const serialEnd = String(ticketsPerPack - 1).padStart(3, '0');
-          const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
+          const _effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
 
           syncPackData.push({
             pack_id: closing.pack_id,
@@ -1058,7 +1058,11 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       businessDate: day.business_date,
     });
 
-    return this.findById(dayId)!;
+    const reopenedDay = this.findById(dayId);
+    if (!reopenedDay) {
+      throw new Error(`Failed to retrieve reopened business day: ${dayId}`);
+    }
+    return reopenedDay;
   }
 
   /**
@@ -1262,10 +1266,57 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
 }
 
 // ============================================================================
-// Singleton Export
+// Lazy Singleton Export
 // ============================================================================
 
 /**
- * Singleton instance for lottery business day operations
+ * Lazy singleton instance holder
+ * @internal
  */
-export const lotteryBusinessDaysDAL = new LotteryBusinessDaysDAL();
+let _lotteryBusinessDaysDALInstance: LotteryBusinessDaysDAL | null = null;
+
+/**
+ * Get or create the singleton instance
+ * Defers creation until first access to support test mocking
+ * @internal
+ */
+function getLotteryBusinessDaysDAL(): LotteryBusinessDaysDAL {
+  if (!_lotteryBusinessDaysDALInstance) {
+    _lotteryBusinessDaysDALInstance = new LotteryBusinessDaysDAL();
+  }
+  return _lotteryBusinessDaysDALInstance;
+}
+
+/**
+ * Reset the singleton instance (for testing only)
+ * @internal
+ */
+export function _resetLotteryBusinessDaysDAL(): void {
+  _lotteryBusinessDaysDALInstance = null;
+}
+
+/**
+ * Lazy singleton proxy for lottery business day operations
+ *
+ * Uses Proxy pattern to defer instance creation until first property access.
+ * This ensures tests can set up database mocks before the DAL is instantiated.
+ */
+export const lotteryBusinessDaysDAL: LotteryBusinessDaysDAL = new Proxy(
+  {} as LotteryBusinessDaysDAL,
+  {
+    get(_target, prop: string | symbol) {
+      const instance = getLotteryBusinessDaysDAL();
+      const value = (instance as unknown as Record<string | symbol, unknown>)[prop];
+      // Bind methods to the instance to preserve `this` context
+      if (typeof value === 'function') {
+        return value.bind(instance);
+      }
+      return value;
+    },
+    set(_target, prop: string | symbol, value: unknown) {
+      const instance = getLotteryBusinessDaysDAL();
+      (instance as unknown as Record<string | symbol, unknown>)[prop] = value;
+      return true;
+    },
+  }
+);
