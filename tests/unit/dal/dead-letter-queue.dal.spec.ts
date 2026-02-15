@@ -600,6 +600,7 @@ describe('SyncQueueDAL - Dead Letter Queue Operations', () => {
         PERMANENT_ERROR: 5,
         MAX_ATTEMPTS_EXCEEDED: 3,
         STRUCTURAL_FAILURE: 2,
+        CONFLICT_ERROR: 0, // Phase 4 D4.2: Added for 409 handling
         MANUAL: 0, // Not in results, should default to 0
       });
 
@@ -612,6 +613,7 @@ describe('SyncQueueDAL - Dead Letter Queue Operations', () => {
         PERMANENT: 6,
         STRUCTURAL: 2,
         UNKNOWN: 2,
+        CONFLICT: 0, // Phase 4 D4.2: Added for 409 handling
         TRANSIENT: 0, // Not in results, should default to 0
       });
     });
@@ -655,6 +657,7 @@ describe('SyncQueueDAL - Dead Letter Queue Operations', () => {
         PERMANENT_ERROR: 0,
         MAX_ATTEMPTS_EXCEEDED: 0,
         STRUCTURAL_FAILURE: 0,
+        CONFLICT_ERROR: 0, // Phase 4 D4.2: Added for 409 handling
         MANUAL: 0,
       });
       expect(stats.byEntityType).toEqual({});
@@ -662,6 +665,7 @@ describe('SyncQueueDAL - Dead Letter Queue Operations', () => {
         TRANSIENT: 0,
         PERMANENT: 0,
         STRUCTURAL: 0,
+        CONFLICT: 0, // Phase 4 D4.2: Added for 409 handling
         UNKNOWN: 0,
       });
     });
