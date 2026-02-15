@@ -17,7 +17,7 @@
  */
 
 import { createLogger } from '../utils/logger';
-import type { ErrorCategory } from '../dal/sync-queue.dal';
+import type { ErrorCategory, DeadLetterReason } from '../dal/sync-queue.dal';
 
 // ============================================================================
 // Types
@@ -73,8 +73,8 @@ export interface RetryDecision {
   reason: string;
   /** Whether to dead-letter instead */
   shouldDeadLetter: boolean;
-  /** Dead letter reason if applicable */
-  deadLetterReason?: 'MAX_ATTEMPTS_EXCEEDED' | 'PERMANENT_ERROR' | 'STRUCTURAL_FAILURE';
+  /** Dead letter reason if applicable (excludes MANUAL which is operator-initiated) */
+  deadLetterReason?: Exclude<DeadLetterReason, 'MANUAL'>;
 }
 
 /**
@@ -273,11 +273,7 @@ export class RetryStrategyService {
     // Check if we've exceeded max attempts
     if (syncAttempts >= effectiveMaxAttempts) {
       // D4.2: Return category-specific dead letter reasons
-      let deadLetterReason:
-        | 'MAX_ATTEMPTS_EXCEEDED'
-        | 'PERMANENT_ERROR'
-        | 'STRUCTURAL_FAILURE'
-        | 'CONFLICT_ERROR';
+      let deadLetterReason: Exclude<DeadLetterReason, 'MANUAL'>;
       switch (errorCategory) {
         case 'PERMANENT':
           deadLetterReason = 'PERMANENT_ERROR';

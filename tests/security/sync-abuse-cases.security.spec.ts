@@ -93,7 +93,7 @@ vi.mock('uuid', () => ({
 
 import { createServiceTestContext, type ServiceTestContext } from '../helpers/test-context';
 import { SyncQueueDAL, type CreateSyncQueueItemData } from '../../src/main/dal/sync-queue.dal';
-import { ErrorClassifierService } from '../../src/main/services/error-classifier.service';
+import { errorClassifierService } from '../../src/main/services/error-classifier.service';
 
 // ============================================================================
 // Test Suite
@@ -104,7 +104,7 @@ const describeSuite = SKIP_NATIVE_MODULE_TESTS ? describe.skip : describe;
 describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
   let ctx: ServiceTestContext;
   let syncQueueDAL: SyncQueueDAL;
-  let errorClassifier: ErrorClassifierService;
+  // Using the singleton errorClassifierService directly - no need for local variable
 
   beforeEach(async () => {
     uuidCounter = 0;
@@ -116,7 +116,6 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
     dbHolder.instance = ctx.db;
     syncQueueDAL = new SyncQueueDAL();
-    errorClassifier = new ErrorClassifierService();
   });
 
   afterEach(() => {
@@ -136,7 +135,6 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       operation: overrides.operation ?? 'CREATE',
       payload: overrides.payload ?? { test: true },
       priority: overrides.priority ?? 0,
-      max_attempts: overrides.max_attempts ?? 5,
       sync_direction: overrides.sync_direction ?? 'PUSH',
     });
   }
@@ -202,7 +200,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
         expect(item).toBeDefined();
 
         // Verify payload stored correctly
-        const retrieved = syncQueueDAL.getById(item.id);
+        const retrieved = syncQueueDAL.findById(item.id);
         const parsedPayload = JSON.parse(retrieved!.payload);
         expect(parsedPayload.malicious_field).toBe(payload);
         expect(parsedPayload.nested.attack).toBe(payload);
@@ -297,7 +295,11 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
       // Create and DLQ item for store A
       const item = createQueueItem();
-      syncQueueDAL.moveToDeadLetter(item.id, 'TEST_REASON');
+      syncQueueDAL.deadLetter({
+        id: item.id,
+        reason: 'MAX_ATTEMPTS_EXCEEDED',
+        errorCategory: 'TRANSIENT',
+      });
 
       // DLQ count for other store should be 0
       const dlqCountB = syncQueueDAL.getDeadLetterCount('other-store-uuid');
@@ -340,7 +342,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem({ payload: pollutionPayload });
 
       // Payload should be stored as-is (serialized)
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
       expect(retrieved).toBeDefined();
 
       // Parse should not pollute Object.prototype
@@ -362,7 +364,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem({ payload: nested });
       expect(item).toBeDefined();
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
       expect(retrieved).toBeDefined();
     });
 
@@ -392,7 +394,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem({ payload: nullBytePayload });
       expect(item).toBeDefined();
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
       const parsed = JSON.parse(retrieved!.payload);
 
       // Null bytes should be preserved (not truncated)
@@ -409,7 +411,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem({ payload: largePayload });
       expect(item).toBeDefined();
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
       expect(retrieved).toBeDefined();
 
       const parsed = JSON.parse(retrieved!.payload);
@@ -478,9 +480,10 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
   describe('API-003: Error Message Information Leakage', () => {
     it('should not expose internal paths in error classification', () => {
-      const internalError = new Error('Failed at /internal/path/to/service.ts:123:45');
+      const internalErrorMessage = 'Failed at /internal/path/to/service.ts:123:45';
 
-      const classified = errorClassifier.classify(internalError);
+      // classifyError takes (httpStatus, errorMessage, retryAfterHeader)
+      const classified = errorClassifierService.classifyError(500, internalErrorMessage);
 
       // Classification should work without exposing internals to client
       expect(classified.category).toBeDefined();
@@ -489,9 +492,9 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
     it('should not expose database schema in errors', () => {
       // Simulate a constraint error
-      const dbError = new Error('SQLITE_CONSTRAINT: UNIQUE constraint failed: sync_queue.id');
+      const dbErrorMessage = 'SQLITE_CONSTRAINT: UNIQUE constraint failed: sync_queue.id';
 
-      const classified = errorClassifier.classify(dbError);
+      const classified = errorClassifierService.classifyError(500, dbErrorMessage);
 
       // Should classify appropriately
       expect(classified.category).toBeDefined();
@@ -499,13 +502,9 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
     });
 
     it('should sanitize stack traces in classified errors', () => {
-      const errorWithStack = new Error('Test error');
-      errorWithStack.stack = `Error: Test error
-    at SyncQueueDAL.enqueue (/app/src/main/dal/sync-queue.dal.ts:123:45)
-    at processItem (/app/src/main/services/sync-engine.service.ts:456:12)
-    at /app/node_modules/internal/process.js:123:1`;
+      const errorMessage = 'Test error at SyncQueueDAL.enqueue';
 
-      const classified = errorClassifier.classify(errorWithStack);
+      const classified = errorClassifierService.classifyError(500, errorMessage);
 
       // Classification result should not include stack for client
       // The message property is for client-facing, category for routing
@@ -562,7 +561,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       ]);
 
       // All should return same item ID (deduplication)
-      const ids = new Set(results.map((r) => r.id));
+      const ids = new Set(results.map((r) => r.item.id));
       expect(ids.size).toBe(1);
     });
 
@@ -571,14 +570,16 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
       // Concurrent operations (simulated - SQLite will serialize)
       const ops = [
-        Promise.resolve(syncQueueDAL.markSynced(item.id, { http_status: 200 })),
-        Promise.resolve(syncQueueDAL.getById(item.id)),
+        Promise.resolve(
+          syncQueueDAL.markSynced(item.id, { api_endpoint: '/api/v1/test', http_status: 200 })
+        ),
+        Promise.resolve(syncQueueDAL.findById(item.id)),
       ];
 
       await Promise.all(ops);
 
       // Final state should be consistent
-      const final = syncQueueDAL.getById(item.id);
+      const final = syncQueueDAL.findById(item.id);
       expect(final?.synced).toBe(1);
     });
 
@@ -586,17 +587,25 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem();
 
       // First DLQ
-      syncQueueDAL.moveToDeadLetter(item.id, 'FIRST_REASON');
+      syncQueueDAL.deadLetter({
+        id: item.id,
+        reason: 'PERMANENT_ERROR',
+        errorCategory: 'PERMANENT',
+      });
 
-      // Second DLQ attempt
-      syncQueueDAL.moveToDeadLetter(item.id, 'SECOND_REASON');
+      // Second DLQ attempt (should be ignored since already dead lettered)
+      syncQueueDAL.deadLetter({
+        id: item.id,
+        reason: 'MAX_ATTEMPTS_EXCEEDED',
+        errorCategory: 'TRANSIENT',
+      });
 
       // Should only be DLQ'd once
       const dlqCount = syncQueueDAL.getDeadLetterCount(ctx.storeId);
       expect(dlqCount).toBe(1);
 
-      // Reason should be the last one applied
-      const retrieved = syncQueueDAL.getById(item.id);
+      // Reason should be the first one (second is ignored)
+      const retrieved = syncQueueDAL.findById(item.id);
       expect(retrieved?.dead_lettered).toBe(1);
     });
   });
@@ -691,7 +700,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       );
 
       // Same item (deduplication)
-      expect(item1.id).toBe(item2.id);
+      expect(item1.item.id).toBe(item2.item.id);
 
       // Only one item in queue
       const pending = syncQueueDAL.getPendingCount(ctx.storeId);
@@ -722,7 +731,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       // Query with this store should find the item
       const pending = syncQueueDAL.findPendingByIdempotencyKey(ctx.storeId, key);
       expect(pending).toBeDefined();
-      expect(pending?.id).toBe(item1.id);
+      expect(pending?.id).toBe(item1.item.id);
 
       // Query with other store should NOT find it
       const otherPending = syncQueueDAL.findPendingByIdempotencyKey('other-store', key);
@@ -733,9 +742,13 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const item = createQueueItem();
 
       // Valid reasons should work
-      syncQueueDAL.moveToDeadLetter(item.id, 'MAX_ATTEMPTS_EXCEEDED');
+      syncQueueDAL.deadLetter({
+        id: item.id,
+        reason: 'MAX_ATTEMPTS_EXCEEDED',
+        errorCategory: 'TRANSIENT',
+      });
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
       expect(retrieved?.dead_letter_reason).toBe('MAX_ATTEMPTS_EXCEEDED');
     });
   });
@@ -757,9 +770,8 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       ];
 
       for (const value of maliciousValues) {
-        const classified = errorClassifier.classify(new Error('Rate limited'), 429, {
-          'retry-after': value,
-        });
+        // classifyError takes (httpStatus, errorMessage, retryAfterHeader)
+        const classified = errorClassifierService.classifyError(429, 'Rate limited', value);
 
         // Should not crash, should provide safe default
         expect(classified.category).toBe('TRANSIENT');
@@ -787,7 +799,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
         },
       });
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
 
       // The payload is stored as-is (encrypted at rest is separate concern)
       // API layer should filter before sending to client
@@ -803,11 +815,12 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
       const largeResponse = '{"data": "' + 'x'.repeat(100000) + '"}';
 
       syncQueueDAL.markSynced(item.id, {
+        api_endpoint: '/api/v1/test',
         http_status: 200,
         response_body: largeResponse,
       });
 
-      const retrieved = syncQueueDAL.getById(item.id);
+      const retrieved = syncQueueDAL.findById(item.id);
 
       // Response should be stored (truncation happens at app level if needed)
       expect(retrieved?.response_body).toBeDefined();

@@ -174,7 +174,6 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       operation: overrides.operation ?? 'CREATE',
       payload: overrides.payload ?? { test: true },
       priority: overrides.priority ?? 0,
-      max_attempts: overrides.max_attempts ?? 5,
       sync_direction: overrides.sync_direction ?? 'PUSH',
     });
   }
@@ -199,6 +198,7 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
     errorCategory: 'TRANSIENT' | 'PERMANENT' | 'STRUCTURAL' | 'CONFLICT' = 'TRANSIENT'
   ): void {
     syncQueueDAL.incrementAttempts(itemId, `Test ${errorCategory} failure`, {
+      api_endpoint: '/api/v1/test',
       http_status: errorCategory === 'PERMANENT' ? 400 : 500,
       response_body: JSON.stringify({ error: 'Test failure', category: errorCategory }),
     });
@@ -276,7 +276,7 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       );
 
       // Should be the same item (deduplication)
-      expect(item1.id).toBe(item2.id);
+      expect(item1.item.id).toBe(item2.item.id);
     });
 
     it('should respect queue constraints on enqueue', () => {
@@ -523,11 +523,11 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       );
 
       // Should be same item
-      expect(item1.id).toBe(item2.id);
+      expect(item1.item.id).toBe(item2.item.id);
 
       // Only one item in queue
       const allItems = syncQueueDAL.getRetryableItems(ctx.storeId, 100);
-      const matching = allItems.filter((i) => i.id === item1.id);
+      const matching = allItems.filter((i) => i.id === item1.item.id);
       expect(matching.length).toBe(1);
     });
   });
@@ -582,7 +582,8 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
 
   describe('D-R9: Dead Letter Queue Regression', () => {
     it('should move items to DLQ after max attempts', () => {
-      const item = createQueueItem({ max_attempts: 2 });
+      // Note: max_attempts is determined internally by sync direction (PUSH=10, PULL=5)
+      const item = createQueueItem({});
 
       // Fail twice
       markFailed(item.id);
@@ -708,7 +709,8 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       }
 
       // Cleanup should work without error
-      const cleaned = syncQueueDAL.cleanupAllStalePullTracking();
+      // DB-006: Store-scoped cleanup
+      const cleaned = syncQueueDAL.cleanupAllStalePullTracking(ctx.storeId);
       expect(cleaned).toBeGreaterThanOrEqual(0);
     });
   });
@@ -750,7 +752,7 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       ]);
 
       // All should return same item ID
-      expect(results[0].id).toBe(results[1].id);
+      expect(results[0].item.id).toBe(results[1].item.id);
     });
   });
 
@@ -864,7 +866,7 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
 
       const stats = syncQueueDAL.getDetailedStats(ctx.storeId);
 
-      expect(stats.synced).toBeGreaterThanOrEqual(1);
+      expect(stats.syncedTotal).toBeGreaterThanOrEqual(1);
       expect(stats.failed).toBeGreaterThanOrEqual(1);
     });
 

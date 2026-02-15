@@ -145,7 +145,6 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
       operation: overrides.operation ?? 'CREATE',
       payload: overrides.payload ?? { test: true },
       priority: overrides.priority ?? 0,
-      max_attempts: overrides.max_attempts ?? 5,
       sync_direction: overrides.sync_direction ?? 'PUSH',
     });
   }
@@ -188,11 +187,11 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
 
     it('should transition to HALF_OPEN after reset timeout', async () => {
       // Use shorter timeout for test
-      const fastCircuit = new CircuitBreakerService({
+      const fastCircuit = new CircuitBreakerService('test-fast-circuit', {
         failureThreshold: 2,
         resetTimeoutMs: 100, // 100ms timeout
         failureWindowMs: 5000,
-        halfOpenSuccessThreshold: 1,
+        successThreshold: 1,
       });
 
       // Trip the circuit
@@ -214,11 +213,11 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
     });
 
     it('should close circuit after successful recovery', async () => {
-      const fastCircuit = new CircuitBreakerService({
+      const fastCircuit = new CircuitBreakerService('test-recovery-circuit', {
         failureThreshold: 2,
         resetTimeoutMs: 50,
         failureWindowMs: 5000,
-        halfOpenSuccessThreshold: 2,
+        successThreshold: 2,
       });
 
       // Trip the circuit
@@ -241,11 +240,11 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
     });
 
     it('should re-open circuit on failure during HALF_OPEN', async () => {
-      const fastCircuit = new CircuitBreakerService({
+      const fastCircuit = new CircuitBreakerService('test-reopen-circuit', {
         failureThreshold: 2,
         resetTimeoutMs: 50,
         failureWindowMs: 5000,
-        halfOpenSuccessThreshold: 2,
+        successThreshold: 2,
       });
 
       // Trip the circuit
@@ -547,8 +546,11 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
       const item3 = createQueueItem({ entity_id: 'recover-3' });
 
       // Partial success: item1 synced, item2 failed, item3 pending
-      syncQueueDAL.markSynced(item1.id, { http_status: 200 });
-      syncQueueDAL.incrementAttempts(item2.id, 'Simulated failure', { http_status: 500 });
+      syncQueueDAL.markSynced(item1.id, { api_endpoint: '/api/v1/test', http_status: 200 });
+      syncQueueDAL.incrementAttempts(item2.id, 'Simulated failure', {
+        api_endpoint: '/api/v1/test',
+        http_status: 500,
+      });
 
       // Verify states
       const synced = syncQueueDAL.findById(item1.id);
@@ -603,7 +605,10 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
       for (const category of categories) {
         for (let i = 0; i < 5; i++) {
           const item = createQueueItem({ entity_id: `dlq-${category}-${i}` });
-          syncQueueDAL.incrementAttempts(item.id, `${category} error`, { http_status: 500 });
+          syncQueueDAL.incrementAttempts(item.id, `${category} error`, {
+            api_endpoint: '/api/v1/test',
+            http_status: 500,
+          });
           syncQueueDAL.deadLetter({
             id: item.id,
             reason: reasonMap[category],
@@ -722,7 +727,10 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
       const outageItems: string[] = [];
       for (let i = 0; i < 10; i++) {
         const item = createQueueItem({ entity_id: `outage-${i}` });
-        syncQueueDAL.incrementAttempts(item.id, 'ECONNREFUSED', { http_status: 503 });
+        syncQueueDAL.incrementAttempts(item.id, 'ECONNREFUSED', {
+          api_endpoint: '/api/v1/test',
+          http_status: 503,
+        });
         outageItems.push(item.id);
       }
 
@@ -772,7 +780,10 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
         const item = createQueueItem({ entity_id: `problematic-${i}` });
         // Fail multiple times
         for (let j = 0; j < 4; j++) {
-          syncQueueDAL.incrementAttempts(item.id, 'Repeated failure', { http_status: 500 });
+          syncQueueDAL.incrementAttempts(item.id, 'Repeated failure', {
+            api_endpoint: '/api/v1/test',
+            http_status: 500,
+          });
         }
         problematicItems.push(item.id);
       }
@@ -797,10 +808,13 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
     it('should track accurate stats during failures', () => {
       // Create mix of states
       const synced = createQueueItem({ entity_id: 'stats-synced' });
-      syncQueueDAL.markSynced(synced.id, { http_status: 200 });
+      syncQueueDAL.markSynced(synced.id, { api_endpoint: '/api/v1/test', http_status: 200 });
 
       const failed = createQueueItem({ entity_id: 'stats-failed' });
-      syncQueueDAL.incrementAttempts(failed.id, 'Error', { http_status: 500 });
+      syncQueueDAL.incrementAttempts(failed.id, 'Error', {
+        api_endpoint: '/api/v1/test',
+        http_status: 500,
+      });
 
       const pending = createQueueItem({ entity_id: 'stats-pending' });
 
