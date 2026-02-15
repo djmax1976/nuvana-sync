@@ -35,7 +35,11 @@ import {
   bidirectionalSyncService,
   type BidirectionalSyncResult,
 } from './bidirectional-sync.service';
-import { syncSessionManager, type SyncSessionContext } from './sync-session-manager.service';
+import {
+  syncSessionManager,
+  type SyncSessionContext,
+  type ICloudApiSessionService,
+} from './sync-session-manager.service';
 import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.types';
 
 // ============================================================================
@@ -145,9 +149,11 @@ export interface HeartbeatResponse {
 }
 
 /**
- * Cloud API service interface (to be implemented in Phase 5B)
+ * Cloud API service interface
+ * Extends ICloudApiSessionService to include session management methods
+ * required by syncSessionManager (SYNC-5001 compliance)
  */
-interface ICloudApiService {
+interface ICloudApiService extends ICloudApiSessionService {
   healthCheck(): Promise<boolean>;
   heartbeat(): Promise<HeartbeatResponse>;
 }

@@ -620,6 +620,9 @@ describe('SyncEngineService', () => {
         pushPackActivate: vi.fn(),
         pushPackDeplete: vi.fn(),
         pushPackReturn: vi.fn(),
+        // ICloudApiSessionService methods (SYNC-5001)
+        startSyncSession: vi.fn(),
+        completeSyncSession: vi.fn(),
       };
 
       expect(() => service.setCloudApiService(mockCloudApi)).not.toThrow();

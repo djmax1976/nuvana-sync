@@ -1013,19 +1013,21 @@ describe('CloudApiService', () => {
       const mockPacks = [
         {
           pack_id: 'pack-1',
-          store_id: 'store-456',
-          game_id: 'game-789',
+          game_code: '0789',
           pack_number: '1111111',
+          serial_start: '000',
+          serial_end: '059',
           received_at: '2025-01-15T10:00:00Z',
-          received_by: 'user-001',
+          local_id: 'local-pack-1',
         },
         {
           pack_id: 'pack-2',
-          store_id: 'store-456',
-          game_id: 'game-789',
+          game_code: '0789',
           pack_number: '2222222',
+          serial_start: '000',
+          serial_end: '059',
           received_at: '2025-01-15T10:01:00Z',
-          received_by: 'user-001',
+          local_id: 'local-pack-2',
         },
       ];
 

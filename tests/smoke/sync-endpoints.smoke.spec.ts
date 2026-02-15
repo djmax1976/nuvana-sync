@@ -169,7 +169,7 @@ describeSuite('SYNC-5000 Smoke Tests', () => {
         payload: {},
       });
 
-      syncQueueDAL.markSynced(item.id, { http_status: 200 });
+      syncQueueDAL.markSynced(item.id, { api_endpoint: '/api/v1/test', http_status: 200 });
 
       const updated = syncQueueDAL.findById(item.id);
       expect(updated?.synced).toBe(1);
@@ -592,6 +592,7 @@ describeSuite('SYNC-5000 Smoke Tests', () => {
 
       // Mark synced
       syncQueueDAL.markSynced(item.id, {
+        api_endpoint: '/api/v1/test',
         http_status: 200,
         response_body: '{"success":true}',
       });
@@ -605,18 +606,18 @@ describeSuite('SYNC-5000 Smoke Tests', () => {
     it('SMOKE: should handle failure and DLQ lifecycle', () => {
       const syncQueueDAL = new SyncQueueDAL();
 
-      // Enqueue
+      // Enqueue (max_attempts is determined internally by sync direction)
       const item = syncQueueDAL.enqueue({
         store_id: ctx.storeId,
         entity_type: 'pack',
         entity_id: 'dlq-lifecycle',
         operation: 'CREATE',
         payload: {},
-        max_attempts: 1,
       });
 
       // Increment attempts to simulate failure
       syncQueueDAL.incrementAttempts(item.id, 'Test failure', {
+        api_endpoint: '/api/v1/test',
         http_status: 500,
         response_body: '{"error":"test"}',
       });

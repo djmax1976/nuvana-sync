@@ -757,10 +757,13 @@ describe('Pack Sync Security Tests', () => {
       });
 
       it('should reject REVOKED status in session', () => {
-        // Arrange
-        const revokedSession = {
+        // Arrange - use union type to allow meaningful comparison test
+        const revokedSession: {
+          sessionId: string;
+          revocationStatus: 'VALID' | 'REVOKED' | 'SUSPENDED';
+        } = {
           sessionId: 'session-123',
-          revocationStatus: 'REVOKED' as const,
+          revocationStatus: 'REVOKED',
         };
 
         // Act
@@ -772,10 +775,13 @@ describe('Pack Sync Security Tests', () => {
       });
 
       it('should reject SUSPENDED status for new sessions', () => {
-        // Arrange
-        const suspendedSession = {
+        // Arrange - use union type to allow meaningful comparison test
+        const suspendedSession: {
+          sessionId: string;
+          revocationStatus: 'VALID' | 'REVOKED' | 'SUSPENDED';
+        } = {
           sessionId: 'session-123',
-          revocationStatus: 'SUSPENDED' as const,
+          revocationStatus: 'SUSPENDED',
         };
 
         // Act - Only VALID sessions should be used
@@ -872,9 +878,10 @@ describe('Pack Sync Security Tests', () => {
 
       it('should validate storeId matches request context for tenant isolation', () => {
         // Arrange
-        const sessionStoreId = 'store-tenant-A';
-        const requestStoreId = 'store-tenant-A';
-        const attackerStoreId = 'store-tenant-B';
+        // Using string type annotation to allow meaningful comparison tests
+        const sessionStoreId: string = 'store-tenant-A';
+        const requestStoreId: string = 'store-tenant-A';
+        const attackerStoreId: string = 'store-tenant-B';
 
         // Act
         const isValidTenant = sessionStoreId === requestStoreId;
