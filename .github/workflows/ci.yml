@@ -259,6 +259,7 @@ jobs:
               fi
             }
           done
+        shell: bash
 
       - name: Build Electron app
         run: npm run build
