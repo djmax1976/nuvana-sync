@@ -25,6 +25,10 @@ import { lotteryBusinessDaysDAL } from '../dal/lottery-business-days.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { shiftsDAL } from '../dal/shifts.dal';
+import {
+  transactionalOutbox,
+  generateIdempotencyKey,
+} from '../services/transactional-outbox.service';
 import { parseBarcode, validateBarcode } from '../services/scanner.service';
 import { settingsService } from '../services/settings.service';
 import { createLogger } from '../utils/logger';
@@ -1155,28 +1159,42 @@ registerHandler(
         return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game not found');
       }
 
-      const pack = lotteryPacksDAL.receive({
-        store_id: storeId,
-        game_id,
-        pack_number: packNum,
-      });
-
-      // SYNC-001: Enqueue pack for cloud synchronization
+      // SYNC-5000 Phase 2: Atomic business-write + enqueue via transactional outbox
+      // MQ-001: Idempotency key prevents duplicate queue entries
+      // SEC-006: All queries use parameterized statements within transaction
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
-      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code, serial_start, serial_end required by cloud API spec
-      syncQueueDAL.enqueue({
-        store_id: storeId,
-        entity_type: 'pack',
-        entity_id: pack.pack_id,
-        operation: 'CREATE',
-        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack),
-      });
+      const {
+        result: pack,
+        syncItem,
+        deduplicated,
+      } = transactionalOutbox.withSyncEnqueue(
+        // Business operation
+        () =>
+          lotteryPacksDAL.receive({
+            store_id: storeId,
+            game_id,
+            pack_number: packNum,
+          }),
+        // Sync data builder - builds sync payload from business operation result
+        (receivedPack) => ({
+          store_id: storeId,
+          entity_type: 'pack',
+          entity_id: receivedPack.pack_id,
+          operation: 'CREATE' as const,
+          payload: buildPackSyncPayload(receivedPack, game.game_code, game.tickets_per_pack),
+          idempotency_key: generateIdempotencyKey({
+            entity_type: 'pack',
+            entity_id: receivedPack.pack_id,
+            operation: 'CREATE',
+          }),
+        })
+      );
 
       log.info('Pack received', {
         packId: pack.pack_id,
         packNumber: pack.pack_number,
-        syncQueued: true,
+        syncQueued: !!syncItem,
+        deduplicated,
       });
 
       return createSuccessResponse(pack);
@@ -1600,20 +1618,25 @@ registerHandler(
       // SYNC-001: Depleted pack sync queued BEFORE new pack sync
       // ========================================================================
 
-      // Track depleted pack info for response (nullable)
-      let depletedPackInfo: {
-        pack_id: string;
-        pack_number: string;
-        game_name: string | null;
-        depletion_reason: string;
+      // ========================================================================
+      // Pre-fetch collision data (read-only, outside transaction)
+      // ========================================================================
+      // Check for existing pack in bin BEFORE transaction to prepare depletion data
+      // DB-006: Pass store_id for tenant isolation
+
+      let existingPack: ReturnType<typeof lotteryPacksDAL.findActiveInBin> = undefined;
+      let existingPackGame: ReturnType<typeof lotteryGamesDAL.findByIdForStore> = undefined;
+      let depletionData: {
+        closingSerial: string;
+        ticketsSoldCount: number;
+        salesAmount: number;
       } | null = null;
 
       if (deplete_previous) {
-        // DB-006: Pass store_id for tenant isolation
-        const existingPack = lotteryPacksDAL.findActiveInBin(storeId, bin_id);
+        existingPack = lotteryPacksDAL.findActiveInBin(storeId, bin_id);
 
         if (existingPack) {
-          log.info('Bin collision detected - auto-depleting existing pack', {
+          log.info('Bin collision detected - will auto-deplete existing pack', {
             binId: bin_id,
             existingPackId: existingPack.pack_id,
             existingPackNumber: existingPack.pack_number,
@@ -1623,10 +1646,9 @@ registerHandler(
           });
 
           // DB-006: Get existing pack's game info for depletion calculations
-          const existingPackGame = lotteryGamesDAL.findByIdForStore(storeId, existingPack.game_id);
+          existingPackGame = lotteryGamesDAL.findByIdForStore(storeId, existingPack.game_id);
 
           if (!existingPackGame) {
-            // Critical error: game missing for existing pack - log and continue without collision handling
             log.error('Game not found for existing pack during collision detection', {
               existingPackId: existingPack.pack_id,
               existingGameId: existingPack.game_id,
@@ -1638,123 +1660,152 @@ registerHandler(
             );
           }
 
-          // ====================================================================
-          // Calculate Depletion Values (Pack Sold Out / Fully Depleted)
-          // ====================================================================
-          // When a pack is replaced, we assume it was fully sold (sold out).
-          // final_serial = opening_serial + tickets_per_pack - 1
-          // tickets_sold_count = tickets_per_pack
-          // sales_amount = tickets_per_pack * price
-          // ====================================================================
+          // Calculate depletion values (pack assumed fully sold when replaced)
           const existingOpeningSerial = existingPack.opening_serial || '000';
           const ticketsPerPack = existingPackGame.tickets_per_pack || 300;
           const gamePrice = existingPackGame.price || 0;
-
-          // Calculate final serial: opening + tickets_per_pack - 1 (zero-indexed)
           const openingSerialNum = parseInt(existingOpeningSerial, 10);
           const finalSerialNum = openingSerialNum + ticketsPerPack - 1;
-          const closingSerial = String(finalSerialNum).padStart(3, '0');
 
-          // Full pack sold
-          const ticketsSoldCount = ticketsPerPack;
-          const salesAmount = ticketsSoldCount * gamePrice;
-
-          // SEC-010: AUTHZ - depleted_by comes from session, not request
-          // AUDIT-001: Record who and when auto-depleted
-          const settledPack = lotteryPacksDAL.settle(existingPack.pack_id, {
-            store_id: storeId,
-            closing_serial: closingSerial,
-            tickets_sold_count: ticketsSoldCount,
-            sales_amount: salesAmount,
-            depleted_by: activated_by,
-            depleted_shift_id: shift_id,
-            depletion_reason: 'AUTO_REPLACED',
-          });
-
-          // Prepare depletedPack info for response (matches cloud API format)
-          depletedPackInfo = {
-            pack_id: settledPack.pack_id,
-            pack_number: settledPack.pack_number,
-            game_name: existingPackGame.name,
-            depletion_reason: 'AUTO_REPLACED',
+          depletionData = {
+            closingSerial: String(finalSerialNum).padStart(3, '0'),
+            ticketsSoldCount: ticketsPerPack,
+            salesAmount: ticketsPerPack * gamePrice,
           };
-
-          // SYNC-001: Enqueue depleted pack sync BEFORE new pack activation sync
-          // This ensures cloud receives depletion first for proper state management
-          // DB-006: TENANT_ISOLATION - store_id included in sync payload
-          // SEC-010: AUTHZ - depleted_by and shift context included for audit trail
-          syncQueueDAL.enqueue({
-            store_id: storeId,
-            entity_type: 'pack',
-            entity_id: settledPack.pack_id,
-            operation: 'UPDATE',
-            payload: buildPackSyncPayload(
-              settledPack,
-              existingPackGame.game_code,
-              existingPackGame.tickets_per_pack,
-              null,
-              {
-                depleted_shift_id: shift_id,
-                depleted_by: activated_by,
-                depletion_reason: 'AUTO_REPLACED',
-              }
-            ),
-          });
-
-          log.info('Pack auto-depleted due to bin collision', {
-            depletedPackId: settledPack.pack_id,
-            depletedPackNumber: settledPack.pack_number,
-            newPackId: pack_id,
-            binId: bin_id,
-            depletionReason: 'AUTO_REPLACED',
-            ticketsSoldCount,
-            salesAmount,
-            closingSerial,
-            depletedBy: activated_by,
-            shiftId: shift_id,
-            syncQueued: true,
-          });
         }
       }
 
-      // DB-006: Pass store_id for tenant isolation validation
-      // v029 API Alignment: Map bin_id to current_bin_id for DAL
-      log.debug('Calling DAL.activate', {
-        pack_id,
-        store_id: storeId,
-        current_bin_id: bin_id,
-        opening_serial,
-        activated_by,
-        activated_shift_id: shift_id,
-      });
-      const pack = lotteryPacksDAL.activate(pack_id, {
-        store_id: storeId,
-        current_bin_id: bin_id,
-        opening_serial,
-        activated_by,
-        activated_shift_id: shift_id,
-      });
-      log.debug('Pack activated successfully', { pack_id: pack.pack_id });
-
-      // SYNC-001: Enqueue pack activation for cloud synchronization
+      // ========================================================================
+      // SYNC-5000 Phase 2: Atomic business-write + enqueue via transactional outbox
+      // ========================================================================
+      // MQ-001: Idempotency keys prevent duplicate queue entries
+      // SEC-006: All queries use parameterized statements within transaction
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
-      // SEC-010: AUTHZ - activated_by and shift_id from session included for audit trail
-      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code, serial_start, serial_end required by cloud API spec
-      // v019: shift_id included in sync payload for cloud audit trail
-      syncQueueDAL.enqueue({
-        store_id: storeId,
-        entity_type: 'pack',
-        entity_id: pack.pack_id,
-        operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, activated_by, {
-          shift_id,
-        }),
-      });
+      // SYNC-001: Depleted pack sync queued BEFORE new pack activation sync
+      // ========================================================================
 
-      // Increment daily activation count
-      const today = getCurrentBusinessDate();
-      lotteryBusinessDaysDAL.incrementPacksActivated(storeId, today);
+      interface ActivationResult {
+        pack: ReturnType<typeof lotteryPacksDAL.activate>;
+        settledPack: ReturnType<typeof lotteryPacksDAL.settle> | null;
+      }
+
+      const { result, syncItems, deduplicatedCount } =
+        transactionalOutbox.withMultipleSyncEnqueue<ActivationResult>(
+          // Business operation: settle existing pack (if collision) + activate new pack
+          () => {
+            let settledPack: ReturnType<typeof lotteryPacksDAL.settle> | null = null;
+
+            // If bin collision, settle existing pack first (SYNC-001: deplete before activate)
+            if (existingPack && depletionData) {
+              settledPack = lotteryPacksDAL.settle(existingPack.pack_id, {
+                store_id: storeId,
+                closing_serial: depletionData.closingSerial,
+                tickets_sold_count: depletionData.ticketsSoldCount,
+                sales_amount: depletionData.salesAmount,
+                depleted_by: activated_by,
+                depleted_shift_id: shift_id,
+                depletion_reason: 'AUTO_REPLACED',
+              });
+            }
+
+            // Activate the new pack
+            const pack = lotteryPacksDAL.activate(pack_id, {
+              store_id: storeId,
+              current_bin_id: bin_id,
+              opening_serial,
+              activated_by,
+              activated_shift_id: shift_id,
+            });
+
+            // Increment daily activation count (inside transaction for atomicity)
+            const today = getCurrentBusinessDate();
+            lotteryBusinessDaysDAL.incrementPacksActivated(storeId, today);
+
+            return { pack, settledPack };
+          },
+          // Sync data builders - order matters: depleted pack first, then activated pack
+          [
+            // Builder 1: Depleted pack sync (if collision occurred)
+            (activationResult) => {
+              if (!activationResult.settledPack || !existingPackGame) {
+                return null; // No collision, no sync item
+              }
+
+              return {
+                store_id: storeId,
+                entity_type: 'pack',
+                entity_id: activationResult.settledPack.pack_id,
+                operation: 'UPDATE' as const,
+                payload: buildPackSyncPayload(
+                  activationResult.settledPack,
+                  existingPackGame.game_code,
+                  existingPackGame.tickets_per_pack,
+                  null,
+                  {
+                    depleted_shift_id: shift_id,
+                    depleted_by: activated_by,
+                    depletion_reason: 'AUTO_REPLACED',
+                  }
+                ),
+                idempotency_key: generateIdempotencyKey({
+                  entity_type: 'pack',
+                  entity_id: activationResult.settledPack.pack_id,
+                  operation: 'UPDATE',
+                  discriminator: 'deplete:AUTO_REPLACED',
+                }),
+              };
+            },
+            // Builder 2: Activated pack sync
+            (activationResult) => ({
+              store_id: storeId,
+              entity_type: 'pack',
+              entity_id: activationResult.pack.pack_id,
+              operation: 'UPDATE' as const,
+              payload: buildPackSyncPayload(
+                activationResult.pack,
+                game.game_code,
+                game.tickets_per_pack,
+                activated_by,
+                { shift_id }
+              ),
+              idempotency_key: generateIdempotencyKey({
+                entity_type: 'pack',
+                entity_id: activationResult.pack.pack_id,
+                operation: 'UPDATE',
+                discriminator: 'activate',
+              }),
+            }),
+          ]
+        );
+
+      const { pack, settledPack } = result;
+
+      // Track depleted pack info for response (nullable)
+      const depletedPackInfo =
+        settledPack && existingPackGame
+          ? {
+              pack_id: settledPack.pack_id,
+              pack_number: settledPack.pack_number,
+              game_name: existingPackGame.name,
+              depletion_reason: 'AUTO_REPLACED',
+            }
+          : null;
+
+      if (settledPack && depletionData) {
+        log.info('Pack auto-depleted due to bin collision', {
+          depletedPackId: settledPack.pack_id,
+          depletedPackNumber: settledPack.pack_number,
+          newPackId: pack_id,
+          binId: bin_id,
+          depletionReason: 'AUTO_REPLACED',
+          ticketsSoldCount: depletionData.ticketsSoldCount,
+          salesAmount: depletionData.salesAmount,
+          closingSerial: depletionData.closingSerial,
+          depletedBy: activated_by,
+          shiftId: shift_id,
+          syncQueued: true,
+        });
+      }
 
       log.info('Pack activated', {
         packId: pack.pack_id,
@@ -1765,7 +1816,8 @@ registerHandler(
         userRole,
         hadCollision: depletedPackInfo !== null,
         depletedPackId: depletedPackInfo?.pack_id || null,
-        syncQueued: true,
+        syncQueued: syncItems.filter(Boolean).length,
+        deduplicatedCount,
       });
 
       // Return response with optional depletedPack info (matches cloud API format)
@@ -1882,42 +1934,51 @@ registerHandler(
         );
       }
 
-      // DB-006: Pass store_id for tenant isolation validation
-      // v019: Pass shift tracking fields
-      // v029 API Alignment: Uses tickets_sold_count
-      const pack = lotteryPacksDAL.settle(pack_id, {
-        store_id: storeId,
-        closing_serial,
-        tickets_sold_count: ticketsSold,
-        sales_amount: salesAmount,
-        depleted_by,
-        depleted_shift_id,
-        depletion_reason: 'MANUAL_SOLD_OUT',
-      });
-
-      // Look up game to get game_code for sync payload
-      const game = lotteryGamesDAL.findById(pack.game_id);
+      // Look up game to get game_code for sync payload (read-only, outside transaction)
+      const game = lotteryGamesDAL.findById(packDetails.game_id);
       if (!game) {
-        throw new Error('Game not found for pack');
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Game not found for pack');
       }
 
-      // SYNC-001: Enqueue pack depletion for cloud synchronization
+      // SYNC-5000 Phase 2: Atomic business-write + enqueue via transactional outbox
+      // MQ-001: Idempotency key prevents duplicate queue entries
+      // SEC-006: All queries use parameterized statements within transaction
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
-      // SEC-010: AUTHZ - depleted_by and shift context included for audit trail
-      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code, serial_start, serial_end required by cloud API spec
-      // v019: shift context and depletion reason included in sync payload
-      syncQueueDAL.enqueue({
-        store_id: storeId,
-        entity_type: 'pack',
-        entity_id: pack.pack_id,
-        operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, null, {
-          depleted_shift_id,
-          depleted_by,
-          depletion_reason: 'MANUAL_SOLD_OUT',
-        }),
-      });
+      const {
+        result: pack,
+        syncItem,
+        deduplicated,
+      } = transactionalOutbox.withSyncEnqueue(
+        // Business operation: settle the pack
+        () =>
+          lotteryPacksDAL.settle(pack_id, {
+            store_id: storeId,
+            closing_serial,
+            tickets_sold_count: ticketsSold,
+            sales_amount: salesAmount,
+            depleted_by,
+            depleted_shift_id,
+            depletion_reason: 'MANUAL_SOLD_OUT',
+          }),
+        // Sync data builder - builds sync payload from business operation result
+        (settledPack) => ({
+          store_id: storeId,
+          entity_type: 'pack',
+          entity_id: settledPack.pack_id,
+          operation: 'UPDATE' as const,
+          payload: buildPackSyncPayload(settledPack, game.game_code, game.tickets_per_pack, null, {
+            depleted_shift_id,
+            depleted_by,
+            depletion_reason: 'MANUAL_SOLD_OUT',
+          }),
+          idempotency_key: generateIdempotencyKey({
+            entity_type: 'pack',
+            entity_id: settledPack.pack_id,
+            operation: 'UPDATE',
+            discriminator: 'deplete:MANUAL_SOLD_OUT',
+          }),
+        })
+      );
 
       log.info('Pack depleted', {
         packId: pack.pack_id,
@@ -1928,7 +1989,8 @@ registerHandler(
         depletedBy: depleted_by,
         shiftId: depleted_shift_id,
         depletionReason: 'MANUAL_SOLD_OUT',
-        syncQueued: true,
+        syncQueued: !!syncItem,
+        deduplicated,
       });
 
       return createSuccessResponse({
@@ -2002,46 +2064,59 @@ registerHandler(
         salesAmount = sales.salesAmount;
       }
 
-      // DB-006: Pass store_id for tenant isolation validation
-      // v019: Pass shift tracking fields
-      // v029 API Alignment: Uses tickets_sold_count
-      // SEC-014: return_reason validated by ReturnReasonSchema
-      const pack = lotteryPacksDAL.returnPack(pack_id, {
-        store_id: storeId,
-        closing_serial,
-        tickets_sold_count: ticketsSold,
-        sales_amount: salesAmount,
-        returned_by,
-        returned_shift_id,
-        return_reason,
-        return_notes,
-      });
-
-      // Look up game to get game_code for sync payload
-      const game = lotteryGamesDAL.findById(pack.game_id);
-      if (!game) {
-        throw new Error('Game not found for pack');
+      // Pre-fetch pack details to get game_id for sync payload (read-only, outside transaction)
+      const packDetails = lotteryPacksDAL.getPackWithDetails(pack_id);
+      if (!packDetails) {
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Pack not found');
       }
 
-      // SYNC-001: Enqueue pack return for cloud synchronization
+      // Look up game to get game_code for sync payload (read-only, outside transaction)
+      const game = lotteryGamesDAL.findById(packDetails.game_id);
+      if (!game) {
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Game not found for pack');
+      }
+
+      // SYNC-5000 Phase 2: Atomic business-write + enqueue via transactional outbox
+      // MQ-001: Idempotency key prevents duplicate queue entries
+      // SEC-006: All queries use parameterized statements within transaction
       // DB-006: TENANT_ISOLATION - store_id included in sync payload
-      // SEC-010: AUTHZ - returned_by and shift context included for audit trail
-      // API-008: OUTPUT_FILTERING - Uses buildPackSyncPayload to exclude internal fields
-      // API-001: game_code, serial_start, serial_end required by cloud API spec
-      // v019: shift context included in sync payload
-      // SEC-014: return_reason and return_notes included for cloud API
-      syncQueueDAL.enqueue({
-        store_id: storeId,
-        entity_type: 'pack',
-        entity_id: pack.pack_id,
-        operation: 'UPDATE',
-        payload: buildPackSyncPayload(pack, game.game_code, game.tickets_per_pack, null, {
-          returned_shift_id,
-          returned_by,
-          return_reason,
-          return_notes,
-        }),
-      });
+      const {
+        result: pack,
+        syncItem,
+        deduplicated,
+      } = transactionalOutbox.withSyncEnqueue(
+        // Business operation: return the pack
+        () =>
+          lotteryPacksDAL.returnPack(pack_id, {
+            store_id: storeId,
+            closing_serial,
+            tickets_sold_count: ticketsSold,
+            sales_amount: salesAmount,
+            returned_by,
+            returned_shift_id,
+            return_reason,
+            return_notes,
+          }),
+        // Sync data builder - builds sync payload from business operation result
+        (returnedPack) => ({
+          store_id: storeId,
+          entity_type: 'pack',
+          entity_id: returnedPack.pack_id,
+          operation: 'UPDATE' as const,
+          payload: buildPackSyncPayload(returnedPack, game.game_code, game.tickets_per_pack, null, {
+            returned_shift_id,
+            returned_by,
+            return_reason,
+            return_notes,
+          }),
+          idempotency_key: generateIdempotencyKey({
+            entity_type: 'pack',
+            entity_id: returnedPack.pack_id,
+            operation: 'UPDATE',
+            discriminator: `return:${return_reason}`,
+          }),
+        })
+      );
 
       log.info('Pack returned', {
         packId: pack.pack_id,
@@ -2050,7 +2125,8 @@ registerHandler(
         returnReason: return_reason,
         returnedBy: returned_by,
         shiftId: returned_shift_id,
-        syncQueued: true,
+        syncQueued: !!syncItem,
+        deduplicated,
       });
 
       return createSuccessResponse(pack);

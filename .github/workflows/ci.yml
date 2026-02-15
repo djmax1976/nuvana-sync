@@ -333,11 +333,84 @@ jobs:
           retention-days: 7
 
   # ============================================================================
+  # Stage 6: Regression & Smoke Tests (SYNC-5000 Release Gate)
+  # ============================================================================
+  regression-tests:
+    name: Regression & Smoke Tests
+    needs: integration-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
+
+      - name: Run smoke tests
+        run: npm run test:smoke
+        env:
+          FORCE_COLOR: 1
+          CI: true
+          SKIP_NATIVE_TESTS: true
+
+      - name: Run regression tests
+        run: npm run test:regression
+        env:
+          FORCE_COLOR: 1
+          CI: true
+          SKIP_NATIVE_TESTS: true
+
+      - name: Run security tests
+        run: npm run test:security
+        env:
+          FORCE_COLOR: 1
+          CI: true
+          SKIP_NATIVE_TESTS: true
+
+      - name: Upload regression test results
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-test-results
+          path: test-results/
+          retention-days: 7
+
+      - name: Verify no critical failures
+        run: |
+          echo "Verifying regression test results..."
+          # If any test failed, the previous steps would have failed
+          # This step confirms all release gates passed
+          echo "All regression and smoke tests passed - release gate cleared"
+        shell: bash
+
+  # ============================================================================
   # Final: Pipeline Status Check
   # ============================================================================
   pipeline-status:
     name: Pipeline Status
-    needs: [quality-gates, unit-tests, integration-tests, build, performance-tests]
+    needs:
+      [quality-gates, unit-tests, integration-tests, build, performance-tests, regression-tests]
     runs-on: ubuntu-latest
     if: always()
 
@@ -350,15 +423,18 @@ jobs:
           echo "  Integration Tests: ${{ needs.integration-tests.result }}"
           echo "  Build: ${{ needs.build.result }}"
           echo "  Performance Tests: ${{ needs.performance-tests.result }}"
+          echo "  Regression Tests: ${{ needs.regression-tests.result }}"
 
           if [ "${{ needs.quality-gates.result }}" != "success" ] || \
              [ "${{ needs.unit-tests.result }}" != "success" ] || \
              [ "${{ needs.integration-tests.result }}" != "success" ] || \
              [ "${{ needs.build.result }}" != "success" ] || \
-             [ "${{ needs.performance-tests.result }}" != "success" ]; then
+             [ "${{ needs.performance-tests.result }}" != "success" ] || \
+             [ "${{ needs.regression-tests.result }}" != "success" ]; then
             echo "::error::One or more pipeline stages failed"
             exit 1
           fi
 
           echo "All pipeline stages passed successfully!"
+          echo "SYNC-5000 Release Gate: PASSED"
         shell: bash

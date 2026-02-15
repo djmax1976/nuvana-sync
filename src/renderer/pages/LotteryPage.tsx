@@ -1366,30 +1366,33 @@ export default function LotteryManagementPage() {
               </Button>
             )}
 
-          {/* Manual Entry Button - Available for ALL POS types */}
-          {manualEntryState.isActive ? (
-            <Button
-              onClick={handleCancelManualEntry}
-              variant="destructive"
-              data-testid="cancel-manual-entry-button"
-            >
-              <X className="mr-2 h-4 w-4" />
-              Cancel Manual Entry
-            </Button>
-          ) : !isScannerModeActive ? (
-            <Button
-              onClick={handleManualEntryClick}
-              variant="outline"
-              data-testid="manual-entry-button"
-              disabled={!dayBinsData?.bins.some((bin) => bin.pack !== null)}
-            >
-              <PenLine className="mr-2 h-4 w-4" />
-              Manual Entry
-            </Button>
-          ) : null}
+          {/* Manual Entry Button - Only for LOTTERY POS type (SEC-010)
+              Non-lottery stores close lottery via Day Close Wizard */}
+          {dayBinsData?.can_close_independently &&
+            (manualEntryState.isActive ? (
+              <Button
+                onClick={handleCancelManualEntry}
+                variant="destructive"
+                data-testid="cancel-manual-entry-button"
+              >
+                <X className="mr-2 h-4 w-4" />
+                Cancel Manual Entry
+              </Button>
+            ) : !isScannerModeActive ? (
+              <Button
+                onClick={handleManualEntryClick}
+                variant="outline"
+                data-testid="manual-entry-button"
+                disabled={!dayBinsData?.bins.some((bin) => bin.pack !== null)}
+              >
+                <PenLine className="mr-2 h-4 w-4" />
+                Manual Entry
+              </Button>
+            ) : null)}
 
-          {/* Save & Close Lottery Button - Only shown in manual entry mode */}
-          {manualEntryState.isActive && (
+          {/* Save & Close Lottery Button - Only shown in manual entry mode (SEC-010)
+              Follows same visibility rules as Manual Entry button */}
+          {dayBinsData?.can_close_independently && manualEntryState.isActive && (
             <Button
               onClick={handleManualCloseDay}
               variant="default"

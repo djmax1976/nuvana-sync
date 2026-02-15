@@ -306,6 +306,7 @@ export async function initializeIPC(): Promise<void> {
   await import('./employees.handlers');
   await import('./terminals.handlers');
   await import('./day-close.handlers');
+  await import('./observability.handlers'); // Phase 6 (D6.4): Observability endpoints
 
   log.info('IPC handlers initialized', {
     totalHandlers: handlerRegistry.size,

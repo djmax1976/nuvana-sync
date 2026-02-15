@@ -39,4 +39,19 @@ export const MainEvents = {
    * without requiring an app restart.
    */
   SETUP_COMPLETED: 'setup:completed',
+  /**
+   * Emitted when a sync metric is collected.
+   * Phase 6 (D6.1): Structured metrics for observability.
+   */
+  SYNC_METRIC_EMITTED: 'sync:metric:emitted',
+  /**
+   * Emitted when a sync alert is triggered.
+   * Phase 6 (D6.2): Threshold-based alerting.
+   */
+  SYNC_ALERT_TRIGGERED: 'sync:alert:triggered',
+  /**
+   * Emitted when a sync alert is resolved.
+   * Phase 6 (D6.2): Alert lifecycle management.
+   */
+  SYNC_ALERT_RESOLVED: 'sync:alert:resolved',
 } as const;

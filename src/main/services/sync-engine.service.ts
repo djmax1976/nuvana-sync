@@ -35,6 +35,7 @@ import {
   bidirectionalSyncService,
   type BidirectionalSyncResult,
 } from './bidirectional-sync.service';
+import { syncSessionManager, type SyncSessionContext } from './sync-session-manager.service';
 import type { DepletionReason, ReturnReason } from '../../shared/types/lottery.types';
 
 // ============================================================================
@@ -261,6 +262,8 @@ export class SyncEngineService {
    */
   setCloudApiService(service: ICloudApiService): void {
     this.cloudApiService = service;
+    // Configure sync session manager with cloud API service for consolidated session management
+    syncSessionManager.setCloudApiService(service);
     log.info('Cloud API service configured');
   }
 
@@ -309,6 +312,14 @@ export class SyncEngineService {
       syncIntervalSec: this.syncIntervalMs / 1000,
       heartbeatIntervalSec: this.heartbeatIntervalMs / 1000,
       referenceDataSyncIntervalSec: this.referenceDataSyncIntervalMs / 1000,
+    });
+
+    // Fetch server config for batch limits (non-blocking)
+    // API-BP-005: Server-driven batch configuration
+    this.syncServerConfig().catch((err) => {
+      log.warn('Failed to fetch server sync config, using defaults', {
+        error: err instanceof Error ? err.message : 'Unknown',
+      });
     });
 
     // Clean up any stale running syncs from previous session
@@ -584,7 +595,32 @@ export class SyncEngineService {
     const syncLogId = syncLogDAL.startSync(store.store_id, 'PUSH');
 
     try {
-      const result = await this.processSyncQueue(store.store_id);
+      // SYNC-5000: Use consolidated session management for all PUSH operations
+      // This ensures ONE startSyncSession and ONE completeSyncSession per sync cycle
+      // SYNC-5001: Session resolved internally via resolveSession() in CloudApiService
+      const cycleResult = await syncSessionManager.runSyncCycle(
+        store.store_id,
+        async (sessionCtx: SyncSessionContext) => {
+          // Process sync queue - session resolved internally via centralized manager
+          const result = await this.processSyncQueue(store.store_id);
+
+          // Record stats for session completion
+          syncSessionManager.recordOperationStats('pushQueue', {
+            pushed: result.succeeded,
+            errors: result.failed,
+          });
+
+          // Store result for outer scope
+          (sessionCtx as SyncSessionContext & { _result?: SyncResult })._result = result;
+        }
+      );
+
+      // Extract result from session context
+      const result = (cycleResult as unknown as { _result?: SyncResult })._result || {
+        sent: 0,
+        succeeded: 0,
+        failed: 0,
+      };
 
       // Complete sync log
       syncLogDAL.completeSync(syncLogId, {
@@ -625,6 +661,7 @@ export class SyncEngineService {
         sent: result.sent,
         succeeded: result.succeeded,
         failed: result.failed,
+        sessionId: cycleResult.stats?.operationStats?.size || 0,
       });
 
       // Pull reference data from cloud (games, bins) at configured interval
@@ -1039,6 +1076,11 @@ export class SyncEngineService {
    * - Routes 'shift_closing' entity types to pushShiftClosing endpoint
    * - Falls back to generic pushBatch for other entity types
    *
+   * SYNC-5000: sessionId is passed from consolidated session management
+   * to eliminate per-batch session creation overhead
+   *
+   * SYNC-5001: Session resolved internally via CloudApiService.resolveSession()
+   *
    * @param entityType - Type of entity being synced
    * @param items - Items to sync
    * @returns Batch sync response
@@ -1165,76 +1207,79 @@ export class SyncEngineService {
    * - API-003: Returns per-item results for error handling
    * - SEC-017: Audit logging for all operations
    *
+   * SYNC-5001: Session resolved internally via CloudApiService.resolveSession()
+   * which queries the centralized SyncSessionManager
+   *
    * @param items - Pack sync queue items
    * @returns Batch response with per-item results
    */
   private async pushPackBatch(items: SyncQueueItem[]): Promise<BatchSyncResponse> {
     const results: BatchSyncResponse['results'] = [];
 
-    for (const item of items) {
-      // Track pack status for accurate endpoint reporting in catch block
-      let packStatus: string | undefined;
+    // ==========================================================================
+    // Phase 1: Pre-process and categorize items
+    // API-BP-005: BATCH operations - group CREATE operations for batch endpoint
+    // ==========================================================================
 
+    interface PreparedPackItem {
+      item: SyncQueueItem;
+      payload: {
+        pack_id: string;
+        store_id: string;
+        game_id: string;
+        game_code?: string;
+        pack_number: string;
+        status: string;
+        bin_id: string | null;
+        opening_serial: string | null;
+        closing_serial: string | null;
+        tickets_sold: number;
+        sales_amount: number;
+        received_at: string | null;
+        received_by: string | null;
+        activated_at: string | null;
+        activated_by: string | null;
+        depleted_at: string | null;
+        returned_at: string | null;
+        serial_start?: string | null;
+        serial_end?: string | null;
+        shift_id?: string | null;
+        depleted_shift_id?: string | null;
+        depleted_by?: string | null;
+        returned_shift_id?: string | null;
+        returned_by?: string | null;
+        depletion_reason?: DepletionReason | null;
+        return_reason?: ReturnReason | null;
+        return_notes?: string | null;
+        mark_sold_tickets?: number;
+        mark_sold_reason?: string;
+        mark_sold_approved_by?: string | null;
+      };
+      gameCode: string;
+    }
+
+    const createItems: PreparedPackItem[] = [];
+    const updateItems: PreparedPackItem[] = [];
+    const activateItems: PreparedPackItem[] = [];
+    const deleteItems: SyncQueueItem[] = [];
+    const pullTrackingItems: SyncQueueItem[] = [];
+
+    // Pre-process all items: parse payloads and look up game codes
+    for (const item of items) {
       try {
-        // Parse payload - check if this is actual pack data or a pull tracking marker
         const rawPayload = JSON.parse(item.payload);
 
-        // Skip PULL tracking items - these are markers for pull operations, not actual pack data
-        // They have format: { action: 'pull_activated_packs', timestamp: '...', lastPull: '...' }
+        // Skip PULL tracking items - markers for pull operations
         if (rawPayload.action && rawPayload.action.startsWith('pull_')) {
           log.debug('Skipping pull tracking item', {
             itemId: item.id,
             action: rawPayload.action,
           });
-          results.push({
-            id: item.id,
-            status: 'synced' as const, // Mark as synced to clear from queue
-          });
+          pullTrackingItems.push(item);
           continue;
         }
 
-        // Cast to expected pack payload structure
-        const payload = rawPayload as {
-          pack_id: string;
-          store_id: string;
-          game_id: string;
-          game_code?: string;
-          pack_number: string;
-          status: string;
-          bin_id: string | null;
-          opening_serial: string | null;
-          closing_serial: string | null;
-          tickets_sold: number;
-          sales_amount: number;
-          received_at: string | null;
-          received_by: string | null;
-          activated_at: string | null;
-          activated_by: string | null;
-          depleted_at: string | null;
-          returned_at: string | null;
-          // Serial range fields (required by activate API)
-          serial_start?: string | null;
-          serial_end?: string | null;
-          // Shift tracking fields (v019 schema)
-          shift_id?: string | null;
-          depleted_shift_id?: string | null;
-          depleted_by?: string | null;
-          returned_shift_id?: string | null;
-          returned_by?: string | null;
-          /** v019: SEC-014 validated at entry point */
-          depletion_reason?: DepletionReason | null;
-          // v019: Return context fields
-          /** SEC-014 validated at entry point */
-          return_reason?: ReturnReason | null;
-          return_notes?: string | null;
-          // Mark-sold at activation fields (only if pack was mark-sold at activation time)
-          mark_sold_tickets?: number;
-          mark_sold_reason?: string;
-          mark_sold_approved_by?: string | null;
-        };
-
-        // Track status for accurate endpoint reporting in catch block
-        packStatus = payload.status;
+        const payload = rawPayload as PreparedPackItem['payload'];
 
         // Look up game_code if not in payload (legacy queue items)
         let gameCode = payload.game_code;
@@ -1266,258 +1311,185 @@ export class SyncEngineService {
           continue;
         }
 
-        // Route based on operation and status
-        if (item.operation === 'CREATE') {
-          // New pack received - API: POST /api/v1/sync/lottery/packs/receive
-          // Note: After cloud_id consolidation, pack_id IS the cloud ID
-          try {
-            const response = await cloudApiService.pushPackReceive({
-              pack_id: payload.pack_id,
-              store_id: payload.store_id,
-              game_id: payload.game_id,
-              game_code: gameCode,
-              pack_number: payload.pack_number,
-              serial_start: payload.serial_start || '000',
-              serial_end: payload.serial_end || '299',
-              received_at: payload.received_at || new Date().toISOString(),
-              received_by: payload.received_by,
-            });
+        const prepared: PreparedPackItem = { item, payload, gameCode };
 
-            // Note: After cloud_id consolidation, pack_id IS the cloud ID
-            // No need to update a separate cloud_pack_id field
+        // Categorize by operation type
+        switch (item.operation) {
+          case 'CREATE':
+            createItems.push(prepared);
+            break;
+          case 'UPDATE':
+            updateItems.push(prepared);
+            break;
+          case 'ACTIVATE':
+            activateItems.push(prepared);
+            break;
+          case 'DELETE':
+            deleteItems.push(item);
+            break;
+          default:
+            log.warn('Unknown pack operation', { itemId: item.id, operation: item.operation });
             results.push({
-              id: item.id, // Use queue item ID, not entity_id (supports multiple items per entity)
-              cloudId: payload.pack_id, // pack_id IS the cloud ID
-              status: response.success ? 'synced' : 'failed',
+              id: item.id,
+              status: 'failed',
+              error: `Unknown operation: ${item.operation}`,
+            });
+        }
+      } catch (parseError) {
+        const errorMessage = parseError instanceof Error ? parseError.message : 'Parse error';
+        log.error('Failed to parse pack payload', { itemId: item.id, error: errorMessage });
+        results.push({
+          id: item.id,
+          status: 'failed',
+          error: `Payload parse error: ${errorMessage}`,
+        });
+      }
+    }
+
+    // Mark pull tracking items as synced
+    for (const item of pullTrackingItems) {
+      results.push({
+        id: item.id,
+        status: 'synced' as const,
+      });
+    }
+
+    // ==========================================================================
+    // Phase 2: BATCH CREATE operations via pushPackReceiveBatch
+    // API-BP-005: Enterprise batch processing (up to 1000 items per call)
+    // ==========================================================================
+
+    if (createItems.length > 0) {
+      log.info('Batching CREATE operations for pack receive', { count: createItems.length });
+
+      // Build batch payload for cloud API
+      const batchPayload = createItems.map((prepared) => ({
+        pack_id: prepared.payload.pack_id,
+        game_code: prepared.gameCode,
+        pack_number: prepared.payload.pack_number,
+        serial_start: prepared.payload.serial_start || '000',
+        serial_end: prepared.payload.serial_end || '299',
+        received_at: prepared.payload.received_at || new Date().toISOString(),
+        local_id: prepared.item.id, // Use queue item ID for result mapping
+      }));
+
+      try {
+        // Single HTTP call for all CREATE operations
+        // SYNC-5001: Session resolved internally via centralized manager
+        const batchResponse = await cloudApiService.pushPackReceiveBatch(batchPayload);
+
+        // Map batch results back to queue items
+        for (const prepared of createItems) {
+          const packResult = batchResponse.results.find(
+            (r) => r.pack_id === prepared.payload.pack_id || r.local_id === prepared.item.id
+          );
+
+          if (packResult) {
+            // Handle duplicate as success (pack already in cloud)
+            const isSuccess = packResult.status === 'synced' || packResult.status === 'duplicate';
+            results.push({
+              id: prepared.item.id,
+              cloudId: prepared.payload.pack_id,
+              status: isSuccess ? 'synced' : 'failed',
+              error: packResult.error,
               apiContext: {
-                api_endpoint: '/api/v1/sync/lottery/packs/receive',
-                http_status: response.success ? 200 : 500,
+                api_endpoint: '/api/v1/sync/lottery/packs/receive/batch',
+                http_status: isSuccess ? (packResult.status === 'duplicate' ? 409 : 200) : 500,
+                response_body: packResult.status === 'duplicate' ? 'DUPLICATE_PACK' : undefined,
               },
             });
-          } catch (receiveError) {
-            // Check if this is a duplicate pack error (HTTP 409)
-            // This means the pack is already in the cloud - treat as success
-            const errorMessage =
-              receiveError instanceof Error ? receiveError.message : String(receiveError);
-            if (errorMessage.includes('409') || errorMessage.includes('DUPLICATE_PACK')) {
-              log.info('Pack already exists in cloud, marking as synced', {
-                packId: payload.pack_id,
-                packNumber: payload.pack_number,
-              });
-
-              // Note: After cloud_id consolidation, pack_id IS the cloud ID
-              // No need to extract or store a separate cloud_pack_id
-              results.push({
-                id: item.id, // Use queue item ID, not entity_id
-                cloudId: payload.pack_id, // pack_id IS the cloud ID
-                status: 'synced',
-                apiContext: {
-                  api_endpoint: '/api/v1/sync/lottery/packs/receive',
-                  http_status: 409,
-                  response_body: 'DUPLICATE_PACK - Pack already exists in cloud',
-                },
-              });
-            } else {
-              throw receiveError; // Re-throw for non-duplicate errors
-            }
+          } else {
+            // Item not found in response - should not happen
+            log.error('Pack not found in batch response', {
+              packId: prepared.payload.pack_id,
+              queueItemId: prepared.item.id,
+            });
+            results.push({
+              id: prepared.item.id,
+              status: 'failed',
+              error: 'Pack not found in batch response',
+              apiContext: {
+                api_endpoint: '/api/v1/sync/lottery/packs/receive/batch',
+                http_status: 500,
+              },
+            });
           }
-        } else if (item.operation === 'UPDATE') {
-          // Route based on current status
-          let success = false;
+        }
 
-          // Note: After cloud_id consolidation, pack_id IS the cloud ID
-          // No need to look up a separate cloud_pack_id field
+        log.info('Batch CREATE completed', {
+          total: createItems.length,
+          synced: batchResponse.results.filter((r) => r.status === 'synced').length,
+          duplicates: batchResponse.results.filter((r) => r.status === 'duplicate').length,
+          failed: batchResponse.results.filter((r) => r.status === 'failed').length,
+        });
+      } catch (batchError) {
+        // Batch call failed entirely - mark all items as failed
+        const errorMessage = batchError instanceof Error ? batchError.message : 'Batch failed';
+        log.error('Batch CREATE failed', { count: createItems.length, error: errorMessage });
 
-          switch (payload.status) {
-            case 'ACTIVE':
-              // Pack was activated
-              // API spec REQUIRED: pack_id, bin_id, opening_serial, game_code, pack_number,
-              //                    serial_start, serial_end, activated_at, received_at
-              // API spec OPTIONAL (only if mark-sold at activation): mark_sold_tickets, mark_sold_reason, mark_sold_approved_by
-              if (
-                payload.bin_id &&
-                payload.opening_serial &&
-                payload.activated_at &&
-                payload.received_at &&
-                gameCode
-              ) {
-                // Get serial_start and serial_end from payload or calculate from game
-                const serialStart = payload.serial_start || '000';
-                let serialEnd = payload.serial_end;
+        let httpStatus: number | null;
+        let responseBody: string;
 
-                // If serial_end not in payload, look up game to calculate it
-                if (!serialEnd) {
-                  const game = lotteryGamesDAL.findById(payload.game_id);
-                  if (game?.tickets_per_pack) {
-                    // serial_end = tickets_per_pack - 1, padded to 3 digits
-                    serialEnd = String(game.tickets_per_pack - 1).padStart(3, '0');
-                  } else {
-                    // Default to 299 (300 tickets per pack)
-                    serialEnd = '299';
-                  }
-                }
+        if (CloudApiError.isCloudApiError(batchError)) {
+          httpStatus = batchError.httpStatus;
+          responseBody = batchError.getTruncatedResponseBody(2000);
+        } else {
+          httpStatus = this.extractHttpStatusFromError(errorMessage);
+          responseBody = errorMessage.substring(0, 500);
+        }
 
-                // Build activation payload - mark_sold fields only included if pack was mark-sold at activation
-                // Note: After cloud_id consolidation, pack_id IS the cloud ID
-                const activatePayload: Parameters<typeof cloudApiService.pushPackActivate>[0] = {
-                  pack_id: payload.pack_id, // pack_id IS the cloud ID
-                  store_id: payload.store_id,
-                  bin_id: payload.bin_id, // TODO: May also need cloud bin_id
-                  opening_serial: payload.opening_serial,
-                  game_code: gameCode,
-                  pack_number: payload.pack_number,
-                  serial_start: serialStart,
-                  serial_end: serialEnd,
-                  activated_at: payload.activated_at,
-                  received_at: payload.received_at,
-                  activated_by: payload.activated_by,
-                  // v019: Include shift context for cloud audit trail
-                  shift_id: payload.shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
-                };
-
-                // Only add mark_sold fields if pack was actually mark-sold at activation
-                if (payload.mark_sold_tickets && payload.mark_sold_tickets > 0) {
-                  activatePayload.mark_sold_tickets = payload.mark_sold_tickets;
-                  activatePayload.mark_sold_reason = payload.mark_sold_reason || 'Full pack sold';
-                  activatePayload.mark_sold_approved_by = payload.mark_sold_approved_by;
-                }
-
-                const activateResponse = await cloudApiService.pushPackActivate(activatePayload);
-                success = activateResponse.success;
-              } else {
-                log.warn('Pack activation missing required fields', {
-                  packId: payload.pack_id,
-                  hasBinId: Boolean(payload.bin_id),
-                  hasOpeningSerial: Boolean(payload.opening_serial),
-                  hasActivatedAt: Boolean(payload.activated_at),
-                  hasReceivedAt: Boolean(payload.received_at),
-                  hasGameCode: Boolean(gameCode),
-                });
-                success = false;
-              }
-              break;
-
-            case 'DEPLETED':
-              // Pack was depleted/sold out
-              // v019 Schema Alignment: Now includes shift context for audit trail
-              // Note: After cloud_id consolidation, pack_id IS the cloud ID
-              // SEC-014: depletion_reason validated at entry point by DepletionReasonSchema
-              // depletion_reason is REQUIRED by cloud API - fail sync if missing
-              if (payload.closing_serial && payload.depleted_at && payload.depletion_reason) {
-                const depleteResponse = await cloudApiService.pushPackDeplete({
-                  pack_id: payload.pack_id, // pack_id IS the cloud ID
-                  store_id: payload.store_id,
-                  closing_serial: payload.closing_serial,
-                  tickets_sold: payload.tickets_sold,
-                  sales_amount: payload.sales_amount,
-                  depleted_at: payload.depleted_at,
-                  // v019: Include depletion reason (SHIFT_CLOSE, AUTO_REPLACED, MANUAL_SOLD_OUT, POS_LAST_TICKET)
-                  // SEC-014: Type narrowed by guard above
-                  depletion_reason: payload.depletion_reason,
-                  // SEC-010: Include depleted_by for cloud audit trail (required by cloud API)
-                  depleted_by: payload.depleted_by,
-                  // v019: Include shift context for cloud audit trail
-                  shift_id: payload.depleted_shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
-                });
-                success = depleteResponse.success;
-              } else {
-                log.warn('Pack depletion missing required fields', {
-                  packId: payload.pack_id,
-                  hasClosingSerial: Boolean(payload.closing_serial),
-                  hasDepletedAt: Boolean(payload.depleted_at),
-                  hasDepletionReason: Boolean(payload.depletion_reason),
-                });
-                success = false;
-              }
-              break;
-
-            case 'RETURNED':
-              // Pack was returned
-              // v019 Schema Alignment: Now includes shift context for audit trail
-              // Note: After cloud_id consolidation, pack_id IS the cloud ID
-              // SEC-014: return_reason validated at entry point by ReturnReasonSchema
-              // return_reason is REQUIRED by cloud API - fail sync if missing
-              if (payload.returned_at && payload.return_reason) {
-                const returnResponse = await cloudApiService.pushPackReturn({
-                  pack_id: payload.pack_id, // pack_id IS the cloud ID
-                  store_id: payload.store_id,
-                  closing_serial: payload.closing_serial,
-                  tickets_sold: payload.tickets_sold,
-                  sales_amount: payload.sales_amount,
-                  returned_at: payload.returned_at,
-                  // v019: Include return reason (SUPPLIER_RECALL, DAMAGED, EXPIRED, INVENTORY_ADJUSTMENT, STORE_CLOSURE)
-                  // SEC-014: Type narrowed by guard above
-                  return_reason: payload.return_reason,
-                  // v019: Include optional return notes (max 500 chars)
-                  return_notes: payload.return_notes,
-                  // SEC-010: Include returned_by for cloud audit trail (required by cloud API)
-                  returned_by: payload.returned_by,
-                  // v019: Include shift context for cloud audit trail
-                  shift_id: payload.returned_shift_id,
-                  local_id: payload.pack_id, // Send local ID for reference (same as pack_id now)
-                });
-                success = returnResponse.success;
-              } else {
-                log.warn('Pack return missing required fields', {
-                  packId: payload.pack_id,
-                  hasReturnedAt: Boolean(payload.returned_at),
-                  hasReturnReason: Boolean(payload.return_reason),
-                });
-                success = false;
-              }
-              break;
-
-            default:
-              log.warn('Unknown pack status for UPDATE operation', {
-                packId: payload.pack_id,
-                status: payload.status,
-              });
-              success = false;
-          }
-
+        for (const prepared of createItems) {
           results.push({
-            id: item.id, // Use queue item ID, not entity_id
-            status: success ? 'synced' : 'failed',
-            error: success ? undefined : `Failed to sync pack with status: ${payload.status}`,
+            id: prepared.item.id,
+            status: 'failed',
+            error: errorMessage,
             apiContext: {
-              api_endpoint: this.getPackEndpoint(item.operation, payload.status),
-              http_status: success ? 200 : 500,
+              api_endpoint: '/api/v1/sync/lottery/packs/receive/batch',
+              http_status: httpStatus,
+              response_body: responseBody,
             },
           });
-        } else if (item.operation === 'ACTIVATE') {
-          // Direct activation - calls POST /api/v1/sync/lottery/packs/activate
-          // Per API spec, this endpoint handles create-and-activate in one call:
-          // 1. Pack doesn't exist: Create it and activate
-          // 2. Pack exists with RECEIVED status: Activate it
-          // 3. Pack already ACTIVE in same bin: Idempotent success
-          // Note: After cloud_id consolidation, pack_id IS the cloud ID
+        }
+      }
+    }
 
-          // Get serial_start and serial_end from payload or calculate from game
-          const serialStart = payload.serial_start || '000';
-          let serialEnd = payload.serial_end;
+    // ==========================================================================
+    // Phase 3: Process UPDATE operations individually (no batch endpoint)
+    // ==========================================================================
 
-          if (!serialEnd) {
-            const game = lotteryGamesDAL.findById(payload.game_id);
-            if (game?.tickets_per_pack) {
-              serialEnd = String(game.tickets_per_pack - 1).padStart(3, '0');
-            } else {
-              serialEnd = '299';
-            }
-          }
+    for (const prepared of updateItems) {
+      const { item, payload, gameCode } = prepared;
+      const packStatus: string | undefined = payload.status;
 
-          // Required: bin_id, opening_serial, gameCode, activated_at, received_at
-          if (
-            payload.bin_id &&
-            payload.opening_serial &&
-            gameCode &&
-            payload.activated_at &&
-            payload.received_at
-          ) {
-            try {
-              const activateResponse = await cloudApiService.pushPackActivate({
+      try {
+        // Route based on current status
+        let success = false;
+
+        switch (payload.status) {
+          case 'ACTIVE':
+            // Pack was activated
+            if (
+              payload.bin_id &&
+              payload.opening_serial &&
+              payload.activated_at &&
+              payload.received_at &&
+              gameCode
+            ) {
+              const serialStart = payload.serial_start || '000';
+              let serialEnd = payload.serial_end;
+
+              if (!serialEnd) {
+                const game = lotteryGamesDAL.findById(payload.game_id);
+                if (game?.tickets_per_pack) {
+                  serialEnd = String(game.tickets_per_pack - 1).padStart(3, '0');
+                } else {
+                  serialEnd = '299';
+                }
+              }
+
+              const activatePayload: Parameters<typeof cloudApiService.pushPackActivate>[0] = {
                 pack_id: payload.pack_id,
+                store_id: payload.store_id,
                 bin_id: payload.bin_id,
                 opening_serial: payload.opening_serial,
                 game_code: gameCode,
@@ -1529,92 +1501,110 @@ export class SyncEngineService {
                 activated_by: payload.activated_by,
                 shift_id: payload.shift_id,
                 local_id: payload.pack_id,
-              });
+              };
 
-              results.push({
-                id: item.id,
-                status: activateResponse.success ? 'synced' : 'failed',
-                error: activateResponse.success ? undefined : 'Activation failed',
-                apiContext: {
-                  api_endpoint: '/api/v1/sync/lottery/packs/activate',
-                  http_status: activateResponse.success ? 200 : 500,
-                },
-              });
-            } catch (activateError) {
-              const errorMsg =
-                activateError instanceof Error ? activateError.message : String(activateError);
-              log.error('Failed to activate pack', {
-                packId: payload.pack_id,
-                error: errorMsg,
-              });
-
-              // ERR-002: Extract full response body from CloudApiError
-              let httpStatus: number | null;
-              let responseBody: string;
-
-              if (CloudApiError.isCloudApiError(activateError)) {
-                httpStatus = activateError.httpStatus;
-                responseBody = activateError.getTruncatedResponseBody(2000);
-              } else {
-                httpStatus = this.extractHttpStatusFromError(errorMsg);
-                responseBody = errorMsg.substring(0, 500);
+              if (payload.mark_sold_tickets && payload.mark_sold_tickets > 0) {
+                activatePayload.mark_sold_tickets = payload.mark_sold_tickets;
+                activatePayload.mark_sold_reason = payload.mark_sold_reason || 'Full pack sold';
+                activatePayload.mark_sold_approved_by = payload.mark_sold_approved_by;
               }
 
-              results.push({
-                id: item.id,
-                status: 'failed',
-                error: errorMsg,
-                apiContext: {
-                  api_endpoint: '/api/v1/sync/lottery/packs/activate',
-                  http_status: httpStatus,
-                  response_body: responseBody,
-                },
+              // SYNC-5001: Session resolved internally via centralized manager
+              const activateResponse = await cloudApiService.pushPackActivate(activatePayload);
+              success = activateResponse.success;
+            } else {
+              log.warn('Pack activation missing required fields', {
+                packId: payload.pack_id,
+                hasBinId: Boolean(payload.bin_id),
+                hasOpeningSerial: Boolean(payload.opening_serial),
+                hasActivatedAt: Boolean(payload.activated_at),
+                hasReceivedAt: Boolean(payload.received_at),
+                hasGameCode: Boolean(gameCode),
               });
+              success = false;
             }
-          } else {
-            log.warn('Pack ACTIVATE missing required fields', {
+            break;
+
+          case 'DEPLETED':
+            if (payload.closing_serial && payload.depleted_at && payload.depletion_reason) {
+              // SYNC-5001: Session resolved internally via centralized manager
+              const depleteResponse = await cloudApiService.pushPackDeplete({
+                pack_id: payload.pack_id,
+                store_id: payload.store_id,
+                closing_serial: payload.closing_serial,
+                tickets_sold: payload.tickets_sold,
+                sales_amount: payload.sales_amount,
+                depleted_at: payload.depleted_at,
+                depletion_reason: payload.depletion_reason,
+                depleted_by: payload.depleted_by,
+                shift_id: payload.depleted_shift_id,
+                local_id: payload.pack_id,
+              });
+              success = depleteResponse.success;
+            } else {
+              log.warn('Pack depletion missing required fields', {
+                packId: payload.pack_id,
+                hasClosingSerial: Boolean(payload.closing_serial),
+                hasDepletedAt: Boolean(payload.depleted_at),
+                hasDepletionReason: Boolean(payload.depletion_reason),
+              });
+              success = false;
+            }
+            break;
+
+          case 'RETURNED':
+            if (payload.returned_at && payload.return_reason) {
+              // SYNC-5001: Session resolved internally via centralized manager
+              const returnResponse = await cloudApiService.pushPackReturn({
+                pack_id: payload.pack_id,
+                store_id: payload.store_id,
+                closing_serial: payload.closing_serial,
+                tickets_sold: payload.tickets_sold,
+                sales_amount: payload.sales_amount,
+                returned_at: payload.returned_at,
+                return_reason: payload.return_reason,
+                return_notes: payload.return_notes,
+                returned_by: payload.returned_by,
+                shift_id: payload.returned_shift_id,
+                local_id: payload.pack_id,
+              });
+              success = returnResponse.success;
+            } else {
+              log.warn('Pack return missing required fields', {
+                packId: payload.pack_id,
+                hasReturnedAt: Boolean(payload.returned_at),
+                hasReturnReason: Boolean(payload.return_reason),
+              });
+              success = false;
+            }
+            break;
+
+          default:
+            log.warn('Unknown pack status for UPDATE operation', {
               packId: payload.pack_id,
-              hasBinId: Boolean(payload.bin_id),
-              hasOpeningSerial: Boolean(payload.opening_serial),
-              hasGameCode: Boolean(gameCode),
-              hasActivatedAt: Boolean(payload.activated_at),
-              hasReceivedAt: Boolean(payload.received_at),
+              status: payload.status,
             });
-            results.push({
-              id: item.id,
-              status: 'failed',
-              error: 'Missing required fields for activation',
-              apiContext: {
-                api_endpoint: '/api/v1/sync/lottery/packs/activate',
-                http_status: 400,
-              },
-            });
-          }
-        } else if (item.operation === 'DELETE') {
-          // Pack deletion - not typically supported, log warning
-          log.warn('Pack DELETE operation not supported for cloud sync', {
-            packId: item.entity_id,
-          });
-          results.push({
-            id: item.id, // Use queue item ID, not entity_id
-            status: 'failed',
-            error: 'DELETE operation not supported for packs',
-            apiContext: {
-              api_endpoint: '/api/v1/sync/lottery/packs',
-              http_status: 501, // Not Implemented
-            },
-          });
+            success = false;
         }
+
+        results.push({
+          id: item.id,
+          status: success ? 'synced' : 'failed',
+          error: success ? undefined : `Failed to sync pack with status: ${payload.status}`,
+          apiContext: {
+            api_endpoint: this.getPackEndpoint(item.operation, payload.status),
+            http_status: success ? 200 : 500,
+          },
+        });
       } catch (error) {
         const errorMessage = error instanceof Error ? error.message : 'Unknown error';
-        log.error('Failed to sync pack item', {
+        log.error('Failed to sync pack UPDATE item', {
           itemId: item.id,
           entityId: item.entity_id,
-          operation: item.operation,
+          status: packStatus,
           error: errorMessage,
         });
 
-        // ERR-002: Extract full response body from CloudApiError for dead letter storage
         let httpStatus: number | null;
         let responseBody: string;
 
@@ -1626,19 +1616,139 @@ export class SyncEngineService {
           responseBody = errorMessage.substring(0, 500);
         }
 
-        // Use actual endpoint based on operation and status instead of generic fallback
-        const actualEndpoint = this.getPackEndpoint(item.operation, packStatus);
         results.push({
-          id: item.id, // Use queue item ID, not entity_id
+          id: item.id,
           status: 'failed',
           error: errorMessage,
           apiContext: {
-            api_endpoint: actualEndpoint,
+            api_endpoint: this.getPackEndpoint(item.operation, packStatus),
             http_status: httpStatus,
             response_body: responseBody,
           },
         });
       }
+    }
+
+    // ==========================================================================
+    // Phase 4: Process ACTIVATE operations individually (no batch endpoint)
+    // ==========================================================================
+
+    for (const prepared of activateItems) {
+      const { item, payload, gameCode } = prepared;
+
+      try {
+        const serialStart = payload.serial_start || '000';
+        let serialEnd = payload.serial_end;
+
+        if (!serialEnd) {
+          const game = lotteryGamesDAL.findById(payload.game_id);
+          if (game?.tickets_per_pack) {
+            serialEnd = String(game.tickets_per_pack - 1).padStart(3, '0');
+          } else {
+            serialEnd = '299';
+          }
+        }
+
+        if (
+          payload.bin_id &&
+          payload.opening_serial &&
+          gameCode &&
+          payload.activated_at &&
+          payload.received_at
+        ) {
+          // SYNC-5001: Session resolved internally via centralized manager
+          const activateResponse = await cloudApiService.pushPackActivate({
+            pack_id: payload.pack_id,
+            bin_id: payload.bin_id,
+            opening_serial: payload.opening_serial,
+            game_code: gameCode,
+            pack_number: payload.pack_number,
+            serial_start: serialStart,
+            serial_end: serialEnd,
+            activated_at: payload.activated_at,
+            received_at: payload.received_at,
+            activated_by: payload.activated_by,
+            shift_id: payload.shift_id,
+            local_id: payload.pack_id,
+          });
+
+          results.push({
+            id: item.id,
+            status: activateResponse.success ? 'synced' : 'failed',
+            error: activateResponse.success ? undefined : 'Activation failed',
+            apiContext: {
+              api_endpoint: '/api/v1/sync/lottery/packs/activate',
+              http_status: activateResponse.success ? 200 : 500,
+            },
+          });
+        } else {
+          log.warn('Pack ACTIVATE missing required fields', {
+            packId: payload.pack_id,
+            hasBinId: Boolean(payload.bin_id),
+            hasOpeningSerial: Boolean(payload.opening_serial),
+            hasGameCode: Boolean(gameCode),
+            hasActivatedAt: Boolean(payload.activated_at),
+            hasReceivedAt: Boolean(payload.received_at),
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Missing required fields for activation',
+            apiContext: {
+              api_endpoint: '/api/v1/sync/lottery/packs/activate',
+              http_status: 400,
+            },
+          });
+        }
+      } catch (activateError) {
+        const errorMsg =
+          activateError instanceof Error ? activateError.message : String(activateError);
+        log.error('Failed to activate pack', {
+          packId: payload.pack_id,
+          error: errorMsg,
+        });
+
+        let httpStatus: number | null;
+        let responseBody: string;
+
+        if (CloudApiError.isCloudApiError(activateError)) {
+          httpStatus = activateError.httpStatus;
+          responseBody = activateError.getTruncatedResponseBody(2000);
+        } else {
+          httpStatus = this.extractHttpStatusFromError(errorMsg);
+          responseBody = errorMsg.substring(0, 500);
+        }
+
+        results.push({
+          id: item.id,
+          status: 'failed',
+          error: errorMsg,
+          apiContext: {
+            api_endpoint: '/api/v1/sync/lottery/packs/activate',
+            http_status: httpStatus,
+            response_body: responseBody,
+          },
+        });
+      }
+    }
+
+    // ==========================================================================
+    // Phase 5: Handle DELETE operations (not supported)
+    // ==========================================================================
+
+    for (const item of deleteItems) {
+      log.warn('Pack DELETE operation not supported for cloud sync', {
+        packId: item.entity_id,
+      });
+      results.push({
+        id: item.id,
+        status: 'failed',
+        error: 'DELETE operation not supported for packs',
+        apiContext: {
+          api_endpoint: '/api/v1/sync/lottery/packs',
+          http_status: 501,
+        },
+      });
     }
 
     return {
@@ -2508,6 +2618,27 @@ export class SyncEngineService {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Sync batch configuration from server
+   *
+   * Fetches batch limits from GET /api/v1/sync/config and applies them.
+   * Called on sync engine start and can be retried if server is unreachable.
+   *
+   * API-BP-005: Server-driven batch limits (100-1000 items)
+   */
+  private async syncServerConfig(): Promise<void> {
+    const serverConfig = await cloudApiService.getSyncConfig();
+
+    log.info('Fetched server sync config', {
+      version: serverConfig.version,
+      maxBatchItems: serverConfig.limits.maxBatchItems,
+      maxPayloadBytes: serverConfig.limits.maxPayloadBytes,
+    });
+
+    // Config is cached in cloudApiService for 5 minutes
+    // Individual batch methods will use cloudApiService.getBatchLimitForOperation()
   }
 
   /**

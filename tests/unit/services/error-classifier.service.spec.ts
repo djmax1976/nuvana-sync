@@ -177,11 +177,34 @@ describe('Error Classifier Service', () => {
         expect(result.action).toBe('DEAD_LETTER');
       });
 
-      it('should classify 409 Conflict as PERMANENT', () => {
+      // Note: 409 is now classified as CONFLICT (D4.2), see Conflict tests below
+    });
+
+    // ========================================================================
+    // Conflict HTTP Status Codes (D4.2 - limited retries)
+    // ========================================================================
+
+    describe('Conflict HTTP Status Codes (D4.2)', () => {
+      it('should classify 409 Conflict as CONFLICT with limited retry', () => {
         const result = classifyError(409, 'Resource already exists');
 
-        expect(result.category).toBe('PERMANENT');
-        expect(result.action).toBe('DEAD_LETTER');
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+        expect(result.deadLetterReason).toBe('CONFLICT_ERROR');
+      });
+
+      it('should classify 409 with duplicate message as CONFLICT', () => {
+        const result = classifyError(409, 'Duplicate entry for key pack_id');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify 409 with concurrent update as CONFLICT', () => {
+        const result = classifyError(409, 'Concurrent update detected');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
       });
 
       it('should classify 410 Gone as PERMANENT', () => {
@@ -514,19 +537,7 @@ describe('Error Classifier Service', () => {
         expect(result.action).toBe('DEAD_LETTER');
       });
 
-      it('should classify "already exists" as PERMANENT', () => {
-        const result = classifyError(null, 'Resource already exists with this ID');
-
-        expect(result.category).toBe('PERMANENT');
-        expect(result.action).toBe('DEAD_LETTER');
-      });
-
-      it('should classify "duplicate" as PERMANENT', () => {
-        const result = classifyError(null, 'Duplicate entry for key pack_number');
-
-        expect(result.category).toBe('PERMANENT');
-        expect(result.action).toBe('DEAD_LETTER');
-      });
+      // Note: "already exists" and "duplicate" moved to Conflict Error Patterns (D4.2)
 
       it('should classify "unauthorized" (message) as PERMANENT', () => {
         const result = classifyError(null, 'Unauthorized: invalid API key');
@@ -575,6 +586,76 @@ describe('Error Classifier Service', () => {
 
         expect(result.category).toBe('PERMANENT');
         expect(result.action).toBe('DEAD_LETTER');
+      });
+    });
+
+    // ========================================================================
+    // Conflict Error Patterns (D4.2 - limited retries, may resolve)
+    // ========================================================================
+
+    describe('Conflict Error Patterns (D4.2)', () => {
+      it('should classify "already exists" as CONFLICT', () => {
+        const result = classifyError(null, 'Resource already exists with this ID');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+        expect(result.deadLetterReason).toBe('CONFLICT_ERROR');
+      });
+
+      it('should classify "duplicate" as CONFLICT', () => {
+        const result = classifyError(null, 'Duplicate entry for key pack_number');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "conflict" as CONFLICT', () => {
+        const result = classifyError(null, 'Conflict: resource has been modified');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "concurrent update" as CONFLICT', () => {
+        const result = classifyError(null, 'Concurrent update detected');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "version mismatch" as CONFLICT', () => {
+        const result = classifyError(null, 'Version mismatch: expected v2, got v1');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "optimistic lock" as CONFLICT', () => {
+        const result = classifyError(null, 'Optimistic lock failure');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "unique constraint" as CONFLICT', () => {
+        const result = classifyError(null, 'Unique constraint violation');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "duplicate key" as CONFLICT', () => {
+        const result = classifyError(null, 'Duplicate key error');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
+      });
+
+      it('should classify "record exists" as CONFLICT', () => {
+        const result = classifyError(null, 'Record exists with the same identifier');
+
+        expect(result.category).toBe('CONFLICT');
+        expect(result.action).toBe('RETRY');
       });
     });
 
@@ -696,6 +777,33 @@ describe('Error Classifier Service', () => {
 
         expect(result.shouldDeadLetter).toBe(true);
         expect(result.reason).toBe('PERMANENT_ERROR');
+      });
+    });
+
+    // ========================================================================
+    // CONFLICT errors - dead letter after max attempts (D4.2)
+    // ========================================================================
+
+    describe('CONFLICT errors (D4.2)', () => {
+      it('should NOT dead letter CONFLICT error before max attempts', () => {
+        const result = shouldDeadLetter(3, MAX_ATTEMPTS, 'CONFLICT');
+
+        expect(result.shouldDeadLetter).toBe(false);
+        expect(result.reason).toBeUndefined();
+      });
+
+      it('should dead letter CONFLICT error at max attempts', () => {
+        const result = shouldDeadLetter(5, MAX_ATTEMPTS, 'CONFLICT');
+
+        expect(result.shouldDeadLetter).toBe(true);
+        expect(result.reason).toBe('CONFLICT_ERROR');
+      });
+
+      it('should dead letter CONFLICT error after max attempts', () => {
+        const result = shouldDeadLetter(7, MAX_ATTEMPTS, 'CONFLICT');
+
+        expect(result.shouldDeadLetter).toBe(true);
+        expect(result.reason).toBe('CONFLICT_ERROR');
       });
     });
 
@@ -1282,13 +1390,15 @@ describe('Error Classifier Service', () => {
 
   describe('Compliance Verification', () => {
     describe('ERR-007: Error retry logic', () => {
-      it('should implement error categorization (TRANSIENT, PERMANENT, STRUCTURAL, UNKNOWN)', () => {
+      it('should implement error categorization (TRANSIENT, PERMANENT, STRUCTURAL, CONFLICT, UNKNOWN) - D4.2', () => {
         const transient = classifyError(503, 'Service unavailable');
         const permanent = classifyError(404, 'Not found');
         const structural = classifyError(null, 'missing required field');
+        const conflict = classifyError(409, 'Duplicate entry');
         const unknown = classifyError(null, 'something happened');
 
         expect(transient.category).toBe('TRANSIENT');
+        expect(conflict.category).toBe('CONFLICT');
         expect(permanent.category).toBe('PERMANENT');
         expect(structural.category).toBe('STRUCTURAL');
         expect(unknown.category).toBe('UNKNOWN');
@@ -1334,10 +1444,12 @@ describe('Error Classifier Service', () => {
       it('should return correct dead letter reasons', () => {
         const structural = shouldDeadLetter(0, 5, 'STRUCTURAL');
         const permanent = shouldDeadLetter(5, 5, 'PERMANENT');
+        const conflict = shouldDeadLetter(5, 5, 'CONFLICT');
         const maxAttempts = shouldDeadLetter(5, 5, 'UNKNOWN');
 
         expect(structural.reason).toBe('STRUCTURAL_FAILURE');
         expect(permanent.reason).toBe('PERMANENT_ERROR');
+        expect(conflict.reason).toBe('CONFLICT_ERROR');
         expect(maxAttempts.reason).toBe('MAX_ATTEMPTS_EXCEEDED');
       });
     });

@@ -80,6 +80,8 @@ function createMockSyncItem(overrides: Partial<SyncQueueItem> = {}): SyncQueueIt
     dead_lettered_at: null,
     error_category: null,
     retry_after: null,
+    // v049 idempotency key
+    idempotency_key: null,
     ...overrides,
   };
 }
