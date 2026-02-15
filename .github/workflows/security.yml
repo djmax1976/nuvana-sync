@@ -115,7 +115,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors (e.g., 502 Bad Gateway)
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: NPM Audit (High/Critical)
         run: |
@@ -216,7 +229,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors (e.g., 502 Bad Gateway)
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Install license-checker
         run: npm install -g license-checker
@@ -269,7 +295,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors (e.g., 502 Bad Gateway)
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Generate CycloneDX SBOM
         run: |

@@ -40,7 +40,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: TypeScript type checking (strict)
         run: npm run typecheck
@@ -105,7 +118,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Run unit tests with coverage
         run: npm run test:coverage
@@ -171,7 +197,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Run integration tests
         run: npm run test:integration
@@ -206,7 +245,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Build Electron app
         run: npm run build
@@ -251,7 +303,20 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: |
+          # Retry npm ci up to 3 times to handle transient network errors
+          for i in 1 2 3; do
+            echo "Attempt $i of 3..."
+            npm ci && break || {
+              if [ $i -lt 3 ]; then
+                echo "npm ci failed, retrying in 10 seconds..."
+                sleep 10
+              else
+                echo "npm ci failed after 3 attempts"
+                exit 1
+              fi
+            }
+          done
 
       - name: Run performance benchmarks
         run: npm run test:performance
