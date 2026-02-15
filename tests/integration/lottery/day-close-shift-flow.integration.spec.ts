@@ -83,13 +83,13 @@ vi.mock('electron', () => ({
 // ============================================================================
 
 vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: () => {
+  getDatabase: vi.fn(() => {
     if (!dbHolder.instance) {
       throw new Error('Database not initialized - test setup issue');
     }
     return dbHolder.instance;
-  },
-  isDatabaseInitialized: () => dbHolder.instance !== null,
+  }),
+  isDatabaseInitialized: vi.fn(() => dbHolder.instance !== null),
 }));
 
 // ============================================================================

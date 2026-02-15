@@ -30,13 +30,13 @@ const { dbHolder } = vi.hoisted(() => ({
 
 // Mock the database service to use our test database via the hoisted holder
 vi.mock('../../src/main/services/database.service', () => ({
-  getDatabase: () => {
+  getDatabase: vi.fn(() => {
     if (!dbHolder.instance) {
       throw new Error('Database not initialized - test setup issue');
     }
     return dbHolder.instance;
-  },
-  isDatabaseInitialized: () => dbHolder.instance !== null,
+  }),
+  isDatabaseInitialized: vi.fn(() => dbHolder.instance !== null),
 }));
 
 vi.mock('../../src/main/utils/logger', () => ({
