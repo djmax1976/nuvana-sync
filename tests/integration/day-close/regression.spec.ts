@@ -47,10 +47,14 @@ const SKIP_NATIVE_MODULE_TESTS =
   process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 
 // ============================================================================
-// Database Reference (shared between mock and test code)
+// Database Holder (vi.hoisted for cross-platform mock compatibility)
 // ============================================================================
 
-let db: Database.Database;
+// Use vi.hoisted() to ensure the database holder is available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { dbHolder } = vi.hoisted(() => ({
+  dbHolder: { instance: null as Database.Database | null },
+}));
 
 // ============================================================================
 // Sync Queue Tracking
@@ -78,8 +82,13 @@ vi.mock('electron', () => ({
 // ============================================================================
 
 vi.mock('../../../src/main/services/database.service', () => ({
-  getDatabase: () => db,
-  isDatabaseInitialized: () => true,
+  getDatabase: () => {
+    if (!dbHolder.instance) {
+      throw new Error('Database not initialized - test setup issue');
+    }
+    return dbHolder.instance;
+  },
+  isDatabaseInitialized: () => dbHolder.instance !== null,
 }));
 
 // ============================================================================
@@ -163,6 +172,12 @@ vi.mock('uuid', () => ({
 }));
 
 // ============================================================================
+// Database Reference (after mocks)
+// ============================================================================
+
+let db: Database.Database;
+
+// ============================================================================
 // Imports (after mocks)
 // ============================================================================
 
@@ -201,6 +216,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
       storeName: 'Day Close Regression Test Store',
     });
     db = ctx.db;
+    dbHolder.instance = db;
 
     // Clear any existing session
     setCurrentUser(null);
@@ -208,6 +224,7 @@ describeSuite('Day Close Regression Tests (Phase 6)', () => {
 
   afterEach(() => {
     ctx?.cleanup();
+    dbHolder.instance = null;
     vi.clearAllMocks();
     setCurrentUser(null);
     syncQueueHistory.length = 0;

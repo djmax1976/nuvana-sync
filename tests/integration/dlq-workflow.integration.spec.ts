@@ -22,12 +22,21 @@ import Database from 'better-sqlite3';
 // Test Database Setup
 // ============================================================================
 
-let db: Database.Database;
+// Use vi.hoisted() to ensure the database holder is available when vi.mock runs
+// This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux
+const { dbHolder } = vi.hoisted(() => ({
+  dbHolder: { instance: null as Database.Database | null },
+}));
 
-// Mock the database service to use our test database
+// Mock the database service to use our test database via the hoisted holder
 vi.mock('../../src/main/services/database.service', () => ({
-  getDatabase: () => db,
-  isDatabaseInitialized: () => true,
+  getDatabase: () => {
+    if (!dbHolder.instance) {
+      throw new Error('Database not initialized - test setup issue');
+    }
+    return dbHolder.instance;
+  },
+  isDatabaseInitialized: () => dbHolder.instance !== null,
 }));
 
 vi.mock('../../src/main/utils/logger', () => ({
@@ -42,6 +51,8 @@ vi.mock('../../src/main/utils/logger', () => ({
 vi.mock('uuid', () => ({
   v4: () => `workflow-uuid-${Date.now()}-${Math.random().toString(36).substring(7)}`,
 }));
+
+let db: Database.Database;
 
 import { SyncQueueDAL, type SyncQueueItem } from '../../src/main/dal/sync-queue.dal';
 import {
@@ -154,12 +165,16 @@ describe('DLQ Workflow Integration Tests', () => {
 
   beforeEach(() => {
     db = new Database(':memory:');
+    dbHolder.instance = db;
     db.exec(SCHEMA);
     dal = new SyncQueueDAL();
   });
 
   afterEach(() => {
-    db.close();
+    if (db) {
+      db.close();
+    }
+    dbHolder.instance = null;
   });
 
   // ==========================================================================
