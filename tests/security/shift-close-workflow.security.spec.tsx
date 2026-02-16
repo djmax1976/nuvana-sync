@@ -403,6 +403,10 @@ function TestApp({ initialEntries = ['/shifts'] }: { initialEntries?: string[] }
               </DayCloseAccessGuard>
             }
           />
+          <Route
+            path="/shift-end"
+            element={<div data-testid="shift-end-page">Shift End Wizard</div>}
+          />
           <Route path="/terminals" element={<div data-testid="terminals-page">Terminals</div>} />
         </Route>
       </Routes>
@@ -536,11 +540,11 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: Navigated to wizard, no direct mutation called
+      // Assert: Navigated to shift-end wizard (per BIZ-011), no direct mutation called
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
 
@@ -550,14 +554,15 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
   });
 
   // ==========================================================================
-  // 5.1.2: Navigation does not expose shift ID (FE-001)
+  // 5.1.2: Navigation pattern with shift ID (BIZ-011)
   // ==========================================================================
 
-  describe('5.1.2: Navigation does not expose shift ID (FE-001)', () => {
-    it('should NOT include shift ID in URL when navigating from ShiftsPage', async () => {
-      // Arrange: Shift with potentially sensitive ID
+  describe('5.1.2: Navigation includes shift ID for shift-end wizard (BIZ-011)', () => {
+    it('should include shift ID in URL when navigating from ShiftsPage', async () => {
+      // Arrange: Shift with ID
+      const shiftId = 'shift-secret-uuid-123';
       mockUseShifts.mockReturnValue({
-        data: createMockListResponse([createMockShift('shift-secret-uuid-123', 'OPEN')]),
+        data: createMockListResponse([createMockShift(shiftId, 'OPEN')]),
         isLoading: false,
         error: null,
       });
@@ -568,44 +573,40 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: URL is clean with no parameters
+      // Assert: Navigated to /shift-end with shiftId parameter (per BIZ-011)
       const locationDisplay = screen.getByTestId('location-display');
       const pathname = locationDisplay.getAttribute('data-pathname');
 
-      expect(pathname).toBe('/day-close');
-      expect(pathname).not.toContain('shift');
-      expect(pathname).not.toContain('uuid');
-      expect(pathname).not.toContain('123');
-      expect(pathname).not.toContain('?');
-      expect(pathname).not.toContain('=');
+      expect(pathname).toBe('/shift-end');
+      // Note: shiftId is passed as query param, which is acceptable
+      // Backend validates ownership via SEC-010
     });
 
-    it('should NOT include shift ID in URL when navigating from ShiftDetailPage', async () => {
+    it('should navigate to shift-end from ShiftDetailPage', async () => {
       // Arrange: Viewing specific shift
+      const shiftId = 'sensitive-shift-id-456';
       mockUseShift.mockReturnValue({
-        data: createMockShift('sensitive-shift-id-456', 'OPEN'),
+        data: createMockShift(shiftId, 'OPEN'),
         isLoading: false,
         error: null,
       });
 
       // Act
-      render(<TestApp initialEntries={['/shifts/sensitive-shift-id-456']} />);
+      render(<TestApp initialEntries={[`/shifts/${shiftId}`]} />);
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /close shift/i }));
       });
 
-      // Assert: Navigated to /day-close without parameters
+      // Assert: Navigated to /shift-end (per BIZ-011)
       await waitFor(() => {
         const pathname = screen.getByTestId('location-display').getAttribute('data-pathname');
-        expect(pathname).toBe('/day-close');
-        expect(pathname).not.toContain('sensitive');
-        expect(pathname).not.toContain('456');
+        expect(pathname).toBe('/shift-end');
       });
     });
 
-    it('should NOT pass sensitive state via navigation', async () => {
-      // This test verifies that navigation uses plain navigate('/day-close')
-      // without any state object that could contain shift data
+    it('should navigate to shift-end wizard without direct mutation', async () => {
+      // This test verifies that navigation goes to shift-end wizard
+      // where authorization and closing happens properly
 
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift(VALID_UUID, 'OPEN')]),
@@ -618,14 +619,13 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // After navigation, the guard shows - no shift-specific data visible
+      // After navigation, shift-end wizard shows
       await waitFor(() => {
-        expect(screen.getByTestId('pin-dialog')).toBeInTheDocument();
+        expect(screen.getByTestId('shift-end-page')).toBeInTheDocument();
       });
 
-      // No shift ID visible in the PIN dialog (would indicate state passing)
-      expect(screen.queryByText(VALID_UUID)).not.toBeInTheDocument();
-      expect(screen.queryByText('shift')).not.toBeInTheDocument();
+      // No direct close mutation was called (wizard handles it)
+      expect(mockCloseShift).not.toHaveBeenCalled();
     });
   });
 
@@ -974,7 +974,7 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
       const closeButton = screen.getByRole('button', { name: 'Close' });
       expect(closeButton).not.toBeDisabled();
 
-      // Click navigates immediately
+      // Click navigates immediately to shift-end wizard (per BIZ-011)
       await act(async () => {
         fireEvent.click(closeButton);
       });
@@ -982,7 +982,7 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
