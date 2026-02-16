@@ -139,9 +139,9 @@ function toServiceBarcode(shared: SharedParsedBarcode): ParsedBarcode {
  * @example
  * const parsed = parseBarcode('100112345670001234567890');
  * if (parsed) {
- *   console.log(parsed.game_code);    // '1001'
- *   console.log(parsed.pack_number);  // '1234567'
- *   console.log(parsed.serial_start); // '000'
+ *   parsed.game_code;    // '1001'
+ *   parsed.pack_number;  // '1234567'
+ *   parsed.serial_start; // '000'
  * }
  */
 export function parseBarcode(raw: string): ParsedBarcode | null {
