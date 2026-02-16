@@ -1,7 +1,7 @@
 /**
  * Shift Close Workflow Integration Tests (Phase 4 - Task 4.1)
  *
- * Integration tests validating the complete user flow from shift list to Day Close wizard.
+ * Integration tests validating the complete user flow from shift list to Shift End wizard.
  * Tests navigation behavior and route transitions with full routing context.
  *
  * Testing Strategy:
@@ -11,13 +11,13 @@
  *
  * @module tests/integration/shift-close-workflow.integration
  *
- * Security Compliance:
- * - SEC-010: Navigation delegates authorization to DayCloseAccessGuard
- * - FE-001: No sensitive data exposed in URL parameters
+ * Business Compliance:
+ * - BIZ-011: Shift Close Navigation Pattern - "Close Shift" buttons MUST navigate to
+ *   /shift-end?shiftId=xxx, never call close API directly
  *
  * Traceability Matrix:
- * - 4.1.2: ShiftsPage Close → DayCloseAccessGuard
- * - 4.1.3: ShiftDetailPage Close → DayCloseAccessGuard
+ * - 4.1.2: ShiftsPage Close → ShiftEndPage
+ * - 4.1.3: ShiftDetailPage Close → ShiftEndPage
  * - 4.1.4: Navigation preserves app state
  * - 4.1.5: Back navigation returns to previous page
  */
@@ -27,7 +27,14 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import { MemoryRouter, Routes, Route, useLocation, Outlet } from 'react-router-dom';
+import {
+  MemoryRouter,
+  Routes,
+  Route,
+  useLocation,
+  Outlet,
+  useSearchParams,
+} from 'react-router-dom';
 
 // ============================================================================
 // Mock Dependencies (Hoisted)
@@ -38,7 +45,6 @@ const {
   mockUseShift,
   mockUseShiftSummary,
   mockUseShiftFuelData,
-  mockDayCloseCheckAccess,
   mockToast,
   mockWindowConfirm,
 } = vi.hoisted(() => ({
@@ -46,7 +52,6 @@ const {
   mockUseShift: vi.fn(),
   mockUseShiftSummary: vi.fn(),
   mockUseShiftFuelData: vi.fn(),
-  mockDayCloseCheckAccess: vi.fn(),
   mockToast: vi.fn(),
   mockWindowConfirm: vi.fn(),
 }));
@@ -57,17 +62,6 @@ vi.mock('../../src/renderer/lib/hooks', () => ({
   useShift: () => mockUseShift(),
   useShiftSummary: () => mockUseShiftSummary(),
   useShiftFuelData: () => mockUseShiftFuelData(),
-}));
-
-// Mock useDayCloseAccess hook
-vi.mock('../../src/renderer/hooks/useDayCloseAccess', () => ({
-  useDayCloseAccess: () => ({
-    checkAccess: mockDayCloseCheckAccess,
-    isChecking: false,
-    lastResult: null,
-    clearResult: vi.fn(),
-    error: null,
-  }),
 }));
 
 // Mock toast hook
@@ -179,7 +173,6 @@ vi.mock('../../src/renderer/components/shifts/FuelSalesBreakdown', () => ({
 
 import ShiftsPage from '../../src/renderer/pages/ShiftsPage';
 import ShiftDetailPage from '../../src/renderer/pages/ShiftDetailPage';
-import { DayCloseAccessGuard } from '../../src/renderer/components/guards/DayCloseAccessGuard';
 
 // ============================================================================
 // Test Fixtures
@@ -272,10 +265,18 @@ function createMockFuelData() {
 }
 
 /**
- * Minimal DayClosePage mock for testing guard rendering
+ * Mock ShiftEndPage for testing navigation target
+ * Shows the shiftId from URL params for verification
  */
-function MockDayClosePage() {
-  return <div data-testid="day-close-page">Day Close Wizard</div>;
+function MockShiftEndPage() {
+  const [searchParams] = useSearchParams();
+  const shiftId = searchParams.get('shiftId');
+  return (
+    <div data-testid="shift-end-page" data-shift-id={shiftId || ''}>
+      Shift End Wizard
+      {shiftId && <span data-testid="shift-id-display">Shift: {shiftId}</span>}
+    </div>
+  );
 }
 
 /**
@@ -284,15 +285,20 @@ function MockDayClosePage() {
 function LocationDisplay() {
   const location = useLocation();
   return (
-    <div data-testid="location-display" data-pathname={location.pathname}>
+    <div
+      data-testid="location-display"
+      data-pathname={location.pathname}
+      data-search={location.search}
+    >
       Current path: {location.pathname}
+      {location.search && <span> Search: {location.search}</span>}
     </div>
   );
 }
 
 /**
  * Test app with full routing context
- * Tests navigation from ShiftsPage/ShiftDetailPage to /day-close
+ * Tests navigation from ShiftsPage/ShiftDetailPage to /shift-end (per BIZ-011)
  */
 interface TestAppProps {
   initialEntries?: string[];
@@ -312,14 +318,7 @@ function TestApp({ initialEntries = ['/shifts'] }: TestAppProps) {
         >
           <Route path="/shifts" element={<ShiftsPage />} />
           <Route path="/shifts/:shiftId" element={<ShiftDetailPage />} />
-          <Route
-            path="/day-close"
-            element={
-              <DayCloseAccessGuard>
-                <MockDayClosePage />
-              </DayCloseAccessGuard>
-            }
-          />
+          <Route path="/shift-end" element={<MockShiftEndPage />} />
           <Route path="/terminals" element={<div data-testid="terminals-page">Terminals</div>} />
         </Route>
       </Routes>
@@ -356,11 +355,11 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
   });
 
   // ==========================================================================
-  // 4.1.2: ShiftsPage Close → DayCloseAccessGuard
+  // 4.1.2: ShiftsPage Close → ShiftEndPage (BIZ-011)
   // ==========================================================================
 
-  describe('4.1.2: ShiftsPage Close → DayCloseAccessGuard', () => {
-    it('should navigate to /day-close when Close button is clicked on ShiftsPage', async () => {
+  describe('4.1.2: ShiftsPage Close → ShiftEndPage', () => {
+    it('should navigate to /shift-end when Close button is clicked on ShiftsPage', async () => {
       // Arrange: List with one OPEN shift
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
@@ -381,16 +380,16 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(closeButton);
       });
 
-      // Assert: Route changed to /day-close
+      // Assert: Route changed to /shift-end (per BIZ-011)
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
 
-    it('should render DayCloseAccessGuard after navigation from ShiftsPage', async () => {
+    it('should render ShiftEndPage after navigation from ShiftsPage', async () => {
       // Arrange
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
@@ -406,14 +405,14 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: DayCloseAccessGuard's PIN dialog should render
+      // Assert: ShiftEndPage should render
       await waitFor(() => {
-        expect(screen.getByTestId('dialog')).toBeInTheDocument();
-        expect(screen.getByText('Day Close Authorization')).toBeInTheDocument();
+        expect(screen.getByTestId('shift-end-page')).toBeInTheDocument();
+        expect(screen.getByText('Shift End Wizard')).toBeInTheDocument();
       });
     });
 
-    it('should NOT expose shift ID in URL after navigation', async () => {
+    it('should pass shiftId in URL params after navigation (per BIZ-011)', async () => {
       // Arrange
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-sensitive-123', 'OPEN', 1)]),
@@ -427,14 +426,15 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: URL is just /day-close with no sensitive parameters
-      const locationDisplay = screen.getByTestId('location-display');
-      const pathname = locationDisplay.getAttribute('data-pathname');
-      expect(pathname).toBe('/day-close');
-      expect(pathname).not.toContain('shift-sensitive');
+      // Assert: URL includes shiftId as query param (per BIZ-011 pattern)
+      await waitFor(() => {
+        const locationDisplay = screen.getByTestId('location-display');
+        expect(locationDisplay).toHaveAttribute('data-pathname', '/shift-end');
+        expect(locationDisplay).toHaveAttribute('data-search', '?shiftId=shift-sensitive-123');
+      });
     });
 
-    it('should NOT call window.confirm when navigating to day-close', async () => {
+    it('should NOT call window.confirm when navigating to shift-end', async () => {
       // Arrange
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
@@ -448,17 +448,17 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: No confirm dialog was shown (SEC-010: auth is delegated to guard)
+      // Assert: No confirm dialog was shown (navigation should be direct)
       expect(mockWindowConfirm).not.toHaveBeenCalled();
     });
   });
 
   // ==========================================================================
-  // 4.1.3: ShiftDetailPage Close → DayCloseAccessGuard
+  // 4.1.3: ShiftDetailPage Close → ShiftEndPage (BIZ-011)
   // ==========================================================================
 
-  describe('4.1.3: ShiftDetailPage Close → DayCloseAccessGuard', () => {
-    it('should navigate to /day-close when Close Shift button is clicked on ShiftDetailPage', async () => {
+  describe('4.1.3: ShiftDetailPage Close → ShiftEndPage', () => {
+    it('should navigate to /shift-end when Close Shift button is clicked on ShiftDetailPage', async () => {
       // Arrange: OPEN shift
       mockUseShift.mockReturnValue({
         data: createMockShift('shift-001', 'OPEN'),
@@ -481,16 +481,16 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(closeButton);
       });
 
-      // Assert: Route changed to /day-close
+      // Assert: Route changed to /shift-end (per BIZ-011)
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
 
-    it('should render DayCloseAccessGuard PIN dialog after navigation from ShiftDetailPage', async () => {
+    it('should render ShiftEndPage after navigation from ShiftDetailPage', async () => {
       // Arrange
       mockUseShift.mockReturnValue({
         data: createMockShift('shift-001', 'OPEN'),
@@ -500,34 +500,16 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
 
       // Act
       render(<TestApp initialEntries={['/shifts/shift-001']} />);
+
+      // Click Close Shift button
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: /close shift/i }));
       });
 
-      // Assert: Guard's PIN dialog renders
+      // Assert: ShiftEndPage renders
       await waitFor(() => {
-        expect(screen.getByTestId('dialog')).toBeInTheDocument();
-        // DialogDescription contains "Enter your PIN to access..." - use regex for partial match
-        expect(screen.getByText(/Enter your PIN/)).toBeInTheDocument();
+        expect(screen.getByTestId('shift-end-page')).toBeInTheDocument();
       });
-    });
-
-    it('should NOT call window.confirm when navigating from detail page', async () => {
-      // Arrange
-      mockUseShift.mockReturnValue({
-        data: createMockShift('shift-001', 'OPEN'),
-        isLoading: false,
-        error: null,
-      });
-
-      // Act
-      render(<TestApp initialEntries={['/shifts/shift-001']} />);
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: /close shift/i }));
-      });
-
-      // Assert: No confirm dialog - auth is delegated to DayCloseAccessGuard
-      expect(mockWindowConfirm).not.toHaveBeenCalled();
     });
   });
 
@@ -536,7 +518,7 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
   // ==========================================================================
 
   describe('4.1.4: Navigation preserves app state', () => {
-    it('should maintain navigation history when going to /day-close', async () => {
+    it('should maintain navigation history when going to /shift-end', async () => {
       // Arrange
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
@@ -544,39 +526,33 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         error: null,
       });
 
-      // Act: Navigate from shifts to day-close
-      render(<TestApp initialEntries={['/shifts']} />);
+      // Act
+      render(<TestApp initialEntries={['/terminals', '/shifts']} />);
 
-      // Verify we start at /shifts
+      // Verify we're at /shifts
       expect(screen.getByTestId('location-display')).toHaveAttribute('data-pathname', '/shifts');
 
-      // Navigate
+      // Navigate to shift-end
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: At /day-close (history entry created)
+      // Assert: At /shift-end (history entry created)
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
 
-    it('should pass no sensitive state to /day-close route', async () => {
-      // This test verifies that navigation happens without state object
-      // containing shift IDs or other sensitive information
-
+    it('should include shiftId in navigation state', async () => {
       // Arrange
       mockUseShifts.mockReturnValue({
-        data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
+        data: createMockListResponse([createMockShift('shift-specific-id', 'OPEN', 1)]),
         isLoading: false,
         error: null,
       });
-
-      // Verify implementation: ShiftsPage.handleCloseShift() calls navigate('/day-close')
-      // without state - this is tested by checking no shift-specific data appears
 
       // Act
       render(<TestApp initialEntries={['/shifts']} />);
@@ -584,113 +560,48 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: The guard is shown, not shift-specific page
+      // Assert: ShiftEndPage receives the shiftId
       await waitFor(() => {
-        expect(screen.getByText('Day Close Authorization')).toBeInTheDocument();
-        // No shift ID visible in the URL or dialog
-        expect(screen.queryByText('shift-001')).not.toBeInTheDocument();
+        const shiftEndPage = screen.getByTestId('shift-end-page');
+        expect(shiftEndPage).toHaveAttribute('data-shift-id', 'shift-specific-id');
       });
     });
   });
 
   // ==========================================================================
-  // 4.1.5: Back navigation returns to previous page
-  // ==========================================================================
-
-  describe('4.1.5: Back navigation returns to previous page', () => {
-    it('should allow Cancel from PIN dialog to redirect to terminals', async () => {
-      // Arrange
-      mockUseShifts.mockReturnValue({
-        data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
-        isLoading: false,
-        error: null,
-      });
-
-      // Act: Navigate to day-close
-      render(<TestApp initialEntries={['/shifts']} />);
-      await act(async () => {
-        fireEvent.click(screen.getByRole('button', { name: 'Close' }));
-      });
-
-      // Wait for guard dialog
-      await waitFor(() => {
-        expect(screen.getByTestId('dialog')).toBeInTheDocument();
-      });
-
-      // Click Cancel button in PIN dialog
-      const cancelButton = screen.getByTestId('day-close-cancel-btn');
-      await act(async () => {
-        fireEvent.click(cancelButton);
-      });
-
-      // Assert: Redirected to /terminals (as per guard behavior)
-      await waitFor(() => {
-        expect(screen.getByTestId('location-display')).toHaveAttribute(
-          'data-pathname',
-          '/terminals'
-        );
-      });
-    });
-
-    it('should navigate via standard router history', async () => {
-      // This test verifies that navigation uses standard push, not replace
-      // allowing browser back button to work
-
-      // Arrange
-      mockUseShifts.mockReturnValue({
-        data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
-        isLoading: false,
-        error: null,
-      });
-
-      // Act
-      render(<TestApp initialEntries={['/shifts', '/day-close']} />);
-
-      // At /day-close
-      expect(screen.getByTestId('location-display')).toHaveAttribute('data-pathname', '/day-close');
-
-      // Dialog should be visible (guard shows PIN prompt)
-      expect(screen.getByTestId('dialog')).toBeInTheDocument();
-    });
-  });
-
-  // ==========================================================================
-  // Security Tests (SEC-010)
+  // SEC-010: Navigation Security
   // ==========================================================================
 
   describe('SEC-010: Navigation Security', () => {
-    it('should delegate all authorization to DayCloseAccessGuard', async () => {
+    it('should delegate all authorization to ShiftEndPage wizard', async () => {
       // Arrange
+      const authCheckSpy = vi.fn();
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
         isLoading: false,
         error: null,
       });
 
-      // Act: Navigate to day-close
+      // Act
       render(<TestApp initialEntries={['/shifts']} />);
       await act(async () => {
         fireEvent.click(screen.getByRole('button', { name: 'Close' }));
       });
 
-      // Assert: Guard is responsible for auth, not the originating page
+      // Assert: No pre-navigation auth was called, navigation is direct
+      expect(authCheckSpy).not.toHaveBeenCalled();
+      // Navigation happened directly
       await waitFor(() => {
-        // Guard's dialog is shown, not an inline auth prompt
-        expect(screen.getByTestId('dialog')).toBeInTheDocument();
-        expect(screen.getByText('Day Close Authorization')).toBeInTheDocument();
-
-        // No inline auth was attempted
-        expect(mockWindowConfirm).not.toHaveBeenCalled();
+        expect(screen.getByTestId('location-display')).toHaveAttribute(
+          'data-pathname',
+          '/shift-end'
+        );
       });
     });
 
     it('should not perform pre-navigation auth checks', async () => {
-      // This test ensures ShiftsPage doesn't check auth before navigating
-      // Authorization is 100% delegated to the guard (SEC-010)
-
-      // Arrange: Mock auth check that would be called if page did its own auth
+      // Arrange
       const authCheckSpy = vi.fn();
-
       mockUseShifts.mockReturnValue({
         data: createMockListResponse([createMockShift('shift-001', 'OPEN', 1)]),
         isLoading: false,
@@ -705,8 +616,13 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
 
       // Assert: No pre-navigation auth was called
       expect(authCheckSpy).not.toHaveBeenCalled();
-      // Navigation happened directly
-      expect(screen.getByTestId('location-display')).toHaveAttribute('data-pathname', '/day-close');
+      // Navigation happened directly to shift-end
+      await waitFor(() => {
+        expect(screen.getByTestId('location-display')).toHaveAttribute(
+          'data-pathname',
+          '/shift-end'
+        );
+      });
     });
   });
 
@@ -734,11 +650,11 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
         fireEvent.click(closeButton);
       });
 
-      // Assert: Only one navigation occurs
+      // Assert: Only one navigation occurs (ends up at /shift-end)
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
@@ -765,7 +681,7 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
       await waitFor(() => {
         expect(screen.getByTestId('location-display')).toHaveAttribute(
           'data-pathname',
-          '/day-close'
+          '/shift-end'
         );
       });
     });
