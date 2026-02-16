@@ -1926,6 +1926,7 @@ export class SyncEngineService {
       role: string;
       name: string;
       pin_hash: string;
+      sha256_pin_fingerprint: string;
       active: boolean;
       itemId: string;
     }> = [];
@@ -1974,8 +1975,9 @@ export class SyncEngineService {
           continue;
         }
 
-        // Fetch pin_hash from database - cloud API requires it
-        // This is secure because pin_hash is already bcrypt hashed
+        // Fetch pin_hash and sha256_pin_fingerprint from database - cloud API requires both
+        // pin_hash: bcrypt hashed PIN for authentication
+        // sha256_pin_fingerprint: SHA-256 of plain PIN for cloud uniqueness validation
         const user = usersDAL.findById(payload.user_id);
         if (!user || !user.pin_hash) {
           log.warn('Employee not found or missing pin_hash', {
@@ -1992,11 +1994,26 @@ export class SyncEngineService {
           continue;
         }
 
+        // Cloud API requires sha256_pin_fingerprint for PIN uniqueness validation
+        if (!user.sha256_pin_fingerprint) {
+          log.warn('Employee missing sha256_pin_fingerprint - run migration v051', {
+            itemId: item.id,
+            userId: payload.user_id,
+          });
+          results.push({
+            id: item.id,
+            status: 'failed',
+            error: 'Employee missing PIN fingerprint - database migration required',
+          });
+          continue;
+        }
+
         employees.push({
           user_id: payload.user_id,
           role: payload.role,
           name: payload.name,
           pin_hash: user.pin_hash,
+          sha256_pin_fingerprint: user.sha256_pin_fingerprint,
           active: payload.active ?? true,
           itemId: item.id,
         });
@@ -2023,6 +2040,7 @@ export class SyncEngineService {
             role: emp.role,
             name: emp.name,
             pin_hash: emp.pin_hash,
+            sha256_pin_fingerprint: emp.sha256_pin_fingerprint,
             active: emp.active,
           }))
         );

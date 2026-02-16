@@ -513,6 +513,7 @@ describe('SettingsService', () => {
         role: 'store_manager',
         name: 'Test Manager',
         pin_hash: '$2b$12$existinghash',
+        sha256_pin_fingerprint: 'existing_fingerprint_abc123',
         active: 1,
         last_login_at: null,
         synced_at: new Date().toISOString(),

@@ -7857,6 +7857,7 @@ export class CloudApiService {
       role: string;
       name: string;
       pin_hash: string;
+      sha256_pin_fingerprint: string;
       active: boolean;
       employee_code?: string;
     }>
@@ -7883,6 +7884,7 @@ export class CloudApiService {
       // API spec: POST /api/v1/sync/employees
       // Cloud gets store_id from session, uses upsert pattern (no operation field)
       // pin_hash is the bcrypt-hashed PIN from desktop
+      // sha256_pin_fingerprint is SHA-256(plain_pin) for cloud PIN uniqueness validation
       const requestBody = {
         session_id: session.sessionId,
         employees: employees.map((emp) => ({
@@ -7890,6 +7892,7 @@ export class CloudApiService {
           name: emp.name,
           role: emp.role.toUpperCase(), // Cloud expects STORE_MANAGER, SHIFT_MANAGER, CASHIER
           pin_hash: emp.pin_hash,
+          sha256_pin_fingerprint: emp.sha256_pin_fingerprint,
           is_active: emp.active,
           ...(emp.employee_code && { employee_code: emp.employee_code }),
         })),

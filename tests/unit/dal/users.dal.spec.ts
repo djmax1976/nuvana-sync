@@ -50,6 +50,7 @@ describe('UsersDAL', () => {
     role: 'cashier' as UserRole,
     name: 'John Doe',
     pin_hash: '$2b$12$hashedpin123',
+    sha256_pin_fingerprint: 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
     active: 1,
     last_login_at: null,
     synced_at: null,
