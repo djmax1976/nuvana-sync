@@ -358,6 +358,64 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
   }
 
   /**
+   * Count all business days for a store (regardless of status)
+   *
+   * Use this when you need the exact count (e.g., for debugging, logging, analytics).
+   * For boolean existence checks, prefer `hasAnyDay()` or `isFirstEverDay()` for better performance.
+   *
+   * @security SEC-006: Parameterized query prevents SQL injection
+   * @security DB-006: Store-scoped query ensures tenant isolation
+   * @performance Uses COUNT with indexed store_id column
+   *
+   * @param storeId - Store identifier
+   * @returns Total count of lottery business days for this store (any status)
+   *
+   * @example
+   * const count = lotteryBusinessDaysDAL.countAllDays(storeId);
+   * log.info('Store history', { storeId, totalDays: count });
+   */
+  countAllDays(storeId: string): number {
+    const stmt = this.db.prepare(`
+      SELECT COUNT(*) as count FROM lottery_business_days
+      WHERE store_id = ?
+    `);
+    const result = stmt.get(storeId) as { count: number } | undefined;
+    return result?.count ?? 0;
+  }
+
+  /**
+   * Check if this would be the store's first-ever lottery business day
+   *
+   * This is the primary method for BIZ-010 (Lottery Onboarding) detection.
+   * Returns true ONLY if the store has ZERO lottery_business_days records ever.
+   *
+   * IMPORTANT: This check must be performed BEFORE creating a new day.
+   * Once a day is created, this will return false.
+   *
+   * @business BIZ-010: Lottery Onboarding
+   *   - is_first_ever = true: Store has never operated lottery (enables onboarding mode)
+   *   - is_first_ever = false: Store has at least one day (any status)
+   *
+   * @security SEC-006: Parameterized query via hasAnyDay()
+   * @security DB-006: Store-scoped query via hasAnyDay()
+   * @performance Uses efficient EXISTS pattern via hasAnyDay() - O(1) lookup
+   *
+   * @param storeId - Store identifier
+   * @returns true if this is the store's first-ever day, false otherwise
+   *
+   * @example
+   * // Check BEFORE creating day to detect onboarding scenario
+   * const isFirstEver = lotteryBusinessDaysDAL.isFirstEverDay(storeId);
+   * const newDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, date, userId);
+   * // Now respond with { is_first_ever: isFirstEver, is_new: true }
+   */
+  isFirstEverDay(storeId: string): boolean {
+    // Leverage existing hasAnyDay() for efficient EXISTS pattern
+    // Returns true if no days exist (first-ever), false otherwise
+    return !this.hasAnyDay(storeId);
+  }
+
+  /**
    * Find days within date range
    * DB-006: Store-scoped query
    *

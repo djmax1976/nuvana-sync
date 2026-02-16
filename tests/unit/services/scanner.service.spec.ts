@@ -233,28 +233,37 @@ describe('Scanner Service', () => {
           raw: '100112345670001234567890',
           game_code: '1001',
           pack_number: '1234567',
+          serial_start: '000',
           serial_number: '000',
+          identifier: '1234567890',
           check_digit: '1234567890',
           checksum_valid: true,
           full_serial: '10011234567',
+          is_valid: true,
         },
         {
           raw: '100112345670151234567890', // Same pack, different serial
           game_code: '1001',
           pack_number: '1234567',
+          serial_start: '015',
           serial_number: '015',
+          identifier: '1234567890',
           check_digit: '1234567890',
           checksum_valid: true,
           full_serial: '10011234567',
+          is_valid: true,
         },
         {
           raw: '200298765430001234567890', // Different pack
           game_code: '2002',
           pack_number: '9876543',
+          serial_start: '000',
           serial_number: '000',
+          identifier: '1234567890',
           check_digit: '1234567890',
           checksum_valid: true,
           full_serial: '20029876543',
+          is_valid: true,
         },
       ];
 
@@ -271,19 +280,25 @@ describe('Scanner Service', () => {
           raw: '100112345670001234567890',
           game_code: '1001',
           pack_number: '1234567',
+          serial_start: '000',
           serial_number: '000',
+          identifier: '1234567890',
           check_digit: '1234567890',
           checksum_valid: true,
           full_serial: '10011234567',
+          is_valid: true,
         },
         {
           raw: '100112345670151234567890',
           game_code: '1001',
           pack_number: '1234567',
+          serial_start: '015',
           serial_number: '015',
+          identifier: '1234567890',
           check_digit: '1234567890',
           checksum_valid: true,
           full_serial: '10011234567',
+          is_valid: true,
         },
       ];
 
@@ -291,6 +306,7 @@ describe('Scanner Service', () => {
 
       expect(result.length).toBe(1);
       expect(result[0].serial_number).toBe('000'); // First one kept
+      expect(result[0].serial_start).toBe('000'); // Canonical field
     });
 
     it('should handle empty array', () => {

@@ -20,6 +20,7 @@ import { EnhancedPackActivationForm } from '@/components/lottery/EnhancedPackAct
 import { PackDetailsModal, type PackDetailsData } from '@/components/lottery/PackDetailsModal';
 import { MarkSoldOutDialog } from '@/components/lottery/MarkSoldOutDialog';
 import { ManualEntryIndicator } from '@/components/lottery/ManualEntryIndicator';
+import { OnboardingModeIndicator } from '@/components/lottery/OnboardingModeIndicator';
 import { ReturnPackDialog } from '@/components/lottery/ReturnPackDialog';
 import { DayCloseScannerBar } from '@/components/lottery/DayCloseScannerBar';
 import { PinVerificationDialog, type VerifiedUser } from '@/components/auth/PinVerificationDialog';
@@ -153,6 +154,22 @@ export default function LotteryManagementPage() {
 
   // Submission state for manual entry close day
   const [isSubmittingManualClose, setIsSubmittingManualClose] = useState(false);
+
+  // ============================================================================
+  // Onboarding Mode State (BIZ-010)
+  // Story: Lottery Onboarding Feature
+  // MCP: FE-001 STATE_MANAGEMENT - Track first-ever day onboarding mode
+  // ============================================================================
+
+  /**
+   * Onboarding mode state
+   * When active (first-ever lottery day), scanned packs use serial_start from
+   * barcode instead of defaulting to '000'. This allows new stores to accurately
+   * track partially-sold packs during initial setup.
+   *
+   * BIZ-010: Auto-activates when is_first_ever === true after initialization
+   */
+  const [isOnboardingMode, setIsOnboardingMode] = useState(false);
 
   // ============================================================================
   // Scanner Mode State (Phase 4)
@@ -331,7 +348,7 @@ export default function LotteryManagementPage() {
     removeScannedBin,
     clearScannedBins,
     lastScannedBinId,
-    progress: scanProgress,
+    progress: _scanProgress,
     allBinsScanned,
     replaceScannedBin,
   } = useScannedBins({
@@ -852,7 +869,7 @@ export default function LotteryManagementPage() {
    * Handle input complete (3 digits entered)
    * Can be used for audio feedback or other UX enhancements
    */
-  const handleInputComplete = useCallback((binId: string) => {
+  const handleInputComplete = useCallback((_binId: string) => {
     // Optional: Add audio feedback or visual confirmation
     // The auto-advance is handled in DayBinsTable
   }, []);
@@ -1010,8 +1027,24 @@ export default function LotteryManagementPage() {
   }, [canCloseManualEntry, storeId, dayBinsData?.bins, manualEndingValues, invalidateAll, toast]);
 
   /**
+   * Handle Complete Onboarding button click
+   * Exits onboarding mode and switches to normal operations
+   *
+   * BIZ-010: After onboarding, all new pack activations default to serial '000'
+   */
+  const handleCompleteOnboarding = useCallback(() => {
+    setIsOnboardingMode(false);
+    toast({
+      title: 'Onboarding Complete',
+      description: 'Normal operations active. New packs will start at ticket #1 by default.',
+    });
+  }, [toast]);
+
+  /**
    * Handle Initialize Business Day button click
    * Requires authentication via PIN if not already logged in
+   *
+   * BIZ-010: Checks is_first_ever and activates onboarding mode if true
    */
   const handleInitializeBusinessDay = useCallback(() => {
     executeWithAuth(
@@ -1020,10 +1053,21 @@ export default function LotteryManagementPage() {
         initializeBusinessDayMutation.mutate(undefined, {
           onSuccess: (response) => {
             if (response.success && response.data) {
-              toast({
-                title: 'Business Day Started',
-                description: `Business day for ${response.data.day.business_date} has been initialized.`,
-              });
+              // BIZ-010: Check if this is the first-ever lottery day
+              if (response.data.is_first_ever) {
+                setIsOnboardingMode(true);
+                toast({
+                  title: 'Onboarding Mode Active',
+                  description:
+                    'Scan your existing packs. The current ticket position will be recorded.',
+                  duration: 6000,
+                });
+              } else {
+                toast({
+                  title: 'Business Day Started',
+                  description: `Business day for ${response.data.day.business_date} has been initialized.`,
+                });
+              }
               setSuccessMessage(
                 'Business day initialized successfully. You can now receive and activate lottery packs.'
               );
@@ -1263,16 +1307,27 @@ export default function LotteryManagementPage() {
         <PinVerificationDialog
           open={initializationPinDialogOpen}
           onClose={() => setInitializationPinDialogOpen(false)}
-          onVerified={(user) => {
+          onVerified={(_user) => {
             setInitializationPinDialogOpen(false);
             // After PIN verification, trigger initialization
             initializeBusinessDayMutation.mutate(undefined, {
               onSuccess: (response) => {
                 if (response.success && response.data) {
-                  toast({
-                    title: 'Business Day Started',
-                    description: `Business day for ${response.data.day.business_date} has been initialized.`,
-                  });
+                  // BIZ-010: Check if this is the first-ever lottery day
+                  if (response.data.is_first_ever) {
+                    setIsOnboardingMode(true);
+                    toast({
+                      title: 'Onboarding Mode Active',
+                      description:
+                        'Scan your existing packs. The current ticket position will be recorded.',
+                      duration: 6000,
+                    });
+                  } else {
+                    toast({
+                      title: 'Business Day Started',
+                      description: `Business day for ${response.data.day.business_date} has been initialized.`,
+                    });
+                  }
                   setSuccessMessage(
                     'Business day initialized successfully. You can now receive and activate lottery packs.'
                   );
@@ -1441,6 +1496,14 @@ export default function LotteryManagementPage() {
         />
       )}
 
+      {/* Onboarding Mode Indicator - BIZ-010 */}
+      {isOnboardingMode && (
+        <OnboardingModeIndicator
+          isActive={isOnboardingMode}
+          onComplete={handleCompleteOnboarding}
+        />
+      )}
+
       {/* Manual Entry Mode Indicator */}
       {manualEntryState.isActive && (
         <ManualEntryIndicator
@@ -1551,12 +1614,14 @@ export default function LotteryManagementPage() {
       />
 
       {/* Pack Activation Dialog - Enhanced with search, bin selection, and auth flow */}
+      {/* BIZ-010: Pass onboardingMode to use scanned serial_start instead of '000' */}
       <EnhancedPackActivationForm
         storeId={storeId}
         open={activationDialogOpen}
         onOpenChange={setActivationDialogOpen}
         onSuccess={handleActivationSuccess}
         dayBins={dayBinsData?.bins}
+        onboardingMode={isOnboardingMode}
       />
 
       {/* Pack Details Modal */}

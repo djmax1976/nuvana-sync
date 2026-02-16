@@ -47,6 +47,7 @@ import {
   AlertTriangle,
   Package,
   Pencil,
+  ScanBarcode,
 } from 'lucide-react';
 import { useToast } from '@/hooks/use-toast';
 import { useFullPackActivation, useLotteryDayBins } from '@/hooks/useLottery';
@@ -149,6 +150,15 @@ interface EnhancedPackActivationFormProps {
   onSuccess?: () => void;
   /** Day bins data for bin selection (optional, fetched if not provided) */
   dayBins?: DayBin[];
+  /**
+   * BIZ-010: Onboarding mode flag
+   * When true, scanned packs use serial_start from barcode instead of '000'.
+   * This allows new stores to accurately track partially-sold packs during
+   * initial setup (first-ever lottery day).
+   *
+   * @default false
+   */
+  onboardingMode?: boolean;
 }
 
 /**
@@ -168,6 +178,7 @@ export function EnhancedPackActivationForm({
   onOpenChange,
   onSuccess,
   dayBins,
+  onboardingMode = false,
 }: EnhancedPackActivationFormProps) {
   const { toast } = useToast();
   const fullActivationMutation = useFullPackActivation();
@@ -326,11 +337,27 @@ export function EnhancedPackActivationForm({
    * Adds pack to pending list with bin assignment
    *
    * MCP FE-001: STATE_MANAGEMENT - Prepend to list (newest first)
+   * BIZ-010: In onboarding mode, use scanned_serial from barcode as starting position
    */
   const handleBinConfirm = useCallback(
     (binId: string, bin: DayBin, depletesPrevious: boolean) => {
       if (!currentScannedPack) {
         return;
+      }
+
+      // ========================================================================
+      // BIZ-010: Determine custom_serial_start based on onboarding mode
+      // In onboarding mode, use the scanned_serial from barcode (positions 12-14)
+      // which represents the current ticket position for partially-sold packs.
+      // Fallback to '000' if scanned_serial is not available.
+      // SEC-014: scanned_serial is validated as 3 digits by parseSerializedNumber
+      // ========================================================================
+      let customSerialStart = '000'; // Default for normal mode
+      if (onboardingMode && currentScannedPack.scanned_serial) {
+        // Validate scanned_serial is exactly 3 digits (SEC-014)
+        if (/^\d{3}$/.test(currentScannedPack.scanned_serial)) {
+          customSerialStart = currentScannedPack.scanned_serial;
+        }
       }
 
       // Create pending activation entry
@@ -342,7 +369,7 @@ export function EnhancedPackActivationForm({
         game_price: currentScannedPack.game_price,
         serial_start: currentScannedPack.serial_start,
         serial_end: currentScannedPack.serial_end,
-        custom_serial_start: '000', // Default
+        custom_serial_start: customSerialStart,
         bin_id: binId,
         bin_number: bin.bin_number,
         bin_name: bin.name,
@@ -369,7 +396,7 @@ export function EnhancedPackActivationForm({
         description: `${currentScannedPack.game_name} #${currentScannedPack.pack_number} → Bin ${bin.bin_number}`,
       });
     },
-    [currentScannedPack, toast]
+    [currentScannedPack, toast, onboardingMode]
   );
 
   /**
@@ -617,6 +644,21 @@ export function EnhancedPackActivationForm({
           </DialogHeader>
 
           <div className="space-y-4">
+            {/* BIZ-010: Onboarding mode banner */}
+            {onboardingMode && (
+              <div
+                className="flex items-center gap-2 rounded-md border border-blue-200 bg-blue-50 px-3 py-2 text-sm text-blue-800 dark:border-blue-800 dark:bg-blue-950/50 dark:text-blue-200"
+                role="status"
+                aria-live="polite"
+                data-testid="onboarding-mode-banner"
+              >
+                <ScanBarcode className="h-4 w-4 shrink-0" />
+                <span>
+                  <strong>Onboarding Mode:</strong> Scanned packs will use the current ticket
+                  position from the barcode.
+                </span>
+              </div>
+            )}
             {/* Pack search input - user is already authenticated via PIN dialog */}
             {/* Enterprise Pattern: Fully controlled component - parent owns all state */}
             <PackSearchCombobox
@@ -684,7 +726,12 @@ export function EnhancedPackActivationForm({
                               <Input
                                 value={editingSerialValue}
                                 onChange={(e) => handleSerialInputChange(e.target.value)}
-                                placeholder="000"
+                                placeholder={onboardingMode ? 'Scanned' : '000'}
+                                title={
+                                  onboardingMode
+                                    ? 'Enter current ticket position (from barcode)'
+                                    : 'Enter starting serial (default: 000)'
+                                }
                                 maxLength={3}
                                 inputMode="numeric"
                                 className={`h-7 w-20 text-xs ${
@@ -718,6 +765,17 @@ export function EnhancedPackActivationForm({
                           ) : (
                             <div className="mt-1 flex items-center gap-1 text-xs text-muted-foreground">
                               <span>Serial: {pending.custom_serial_start}</span>
+                              {/* BIZ-010: Show badge when using scanned position in onboarding */}
+                              {onboardingMode && pending.custom_serial_start !== '000' && (
+                                <Badge
+                                  variant="secondary"
+                                  className="ml-1 h-4 px-1 text-[10px] bg-blue-100 text-blue-700 dark:bg-blue-900 dark:text-blue-200"
+                                  data-testid={`scanned-position-badge-${pending.pack_id}`}
+                                >
+                                  <ScanBarcode className="mr-0.5 h-2.5 w-2.5" />
+                                  Scanned
+                                </Badge>
+                              )}
                               {!pending.result && (
                                 <>
                                   <Button

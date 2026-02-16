@@ -89,12 +89,8 @@ vi.mock('uuid', () => ({
 import { createServiceTestContext, type ServiceTestContext } from '../helpers/test-context';
 import { SyncQueueDAL, type CreateSyncQueueItemData } from '../../src/main/dal/sync-queue.dal';
 import { CircuitBreakerService } from '../../src/main/services/circuit-breaker.service';
-import {
-  RetryStrategyService,
-  type RetryDecision,
-} from '../../src/main/services/retry-strategy.service';
+import { RetryStrategyService } from '../../src/main/services/retry-strategy.service';
 import { errorClassifierService } from '../../src/main/services/error-classifier.service';
-import type { ErrorClassificationResult as ClassifiedError } from '../../src/main/services/error-classifier.service';
 
 // ============================================================================
 // Test Suite
@@ -591,15 +587,15 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
     it('should track DLQ stats under load', () => {
       // Create items with different error categories
       const categories = ['TRANSIENT', 'PERMANENT', 'STRUCTURAL', 'CONFLICT'] as const;
-      // Note: CONFLICT errors use MAX_ATTEMPTS_EXCEEDED as reason since there's no CONFLICT_ERROR in the constraint
+      // v052 migration adds CONFLICT_ERROR to dead_letter_reason constraint
       const reasonMap: Record<
         string,
-        'MAX_ATTEMPTS_EXCEEDED' | 'PERMANENT_ERROR' | 'STRUCTURAL_FAILURE'
+        'MAX_ATTEMPTS_EXCEEDED' | 'PERMANENT_ERROR' | 'STRUCTURAL_FAILURE' | 'CONFLICT_ERROR'
       > = {
         TRANSIENT: 'MAX_ATTEMPTS_EXCEEDED',
         PERMANENT: 'PERMANENT_ERROR',
         STRUCTURAL: 'STRUCTURAL_FAILURE',
-        CONFLICT: 'MAX_ATTEMPTS_EXCEEDED', // No CONFLICT_ERROR in DB constraint
+        CONFLICT: 'CONFLICT_ERROR', // v052: CONFLICT_ERROR now in DB constraint
       };
 
       for (const category of categories) {
@@ -741,7 +737,7 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
       }
 
       // Simulate recovery - reset backoff
-      const resetCount = syncQueueDAL.resetStuckInBackoff(ctx.storeId);
+      syncQueueDAL.resetStuckInBackoff(ctx.storeId);
 
       // After reset, items should be retryable
       const retryable = syncQueueDAL.getRetryableItems(ctx.storeId, 100);
@@ -816,7 +812,7 @@ describeSuite('SYNC-5000 Chaos & Resilience Tests', () => {
         http_status: 500,
       });
 
-      const pending = createQueueItem({ entity_id: 'stats-pending' });
+      createQueueItem({ entity_id: 'stats-pending' });
 
       const dlq = createQueueItem({ entity_id: 'stats-dlq' });
       syncQueueDAL.deadLetter({
