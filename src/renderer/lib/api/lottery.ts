@@ -710,10 +710,19 @@ export interface DayStatusResponse {
 
 /**
  * Initialize business day response - returned by lottery:initializeBusinessDay
+ *
+ * @property is_new - True if this day was just created, false if already existed
+ * @property is_first_ever - BIZ-010: True if this is the store's first-ever lottery day
+ *   When is_first_ever is true, the frontend should enter "onboarding mode" which
+ *   allows scanning existing packs with their current ticket position instead of
+ *   defaulting to serial '000'.
  */
 export interface InitializeBusinessDayResponse {
   success: boolean;
+  /** True if this day was just created, false if already existed (idempotent) */
   is_new: boolean;
+  /** BIZ-010: True if this is the store's first-ever lottery day (enables onboarding mode) */
+  is_first_ever: boolean;
   day: {
     day_id: string;
     business_date: string;

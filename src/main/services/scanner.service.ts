@@ -1,21 +1,61 @@
 /**
  * Scanner Service
  *
- * Parses lottery barcode formats for pack reception and tracking.
- * Supports 24-digit serialized barcode format standard.
+ * Backend wrapper around the centralized barcode parser for lottery pack scanning.
+ * Provides service-level logging and batch processing capabilities.
  *
  * @module main/services/scanner
  * @security SEC-014: Input validation for barcode formats
+ *
+ * @deprecated Direct parsing functions are deprecated. Use the centralized
+ * parser from '@shared/lottery/barcode-parser' instead. This module now
+ * re-exports the shared parser with service-layer enhancements (logging).
  */
 
 import { createLogger } from '../utils/logger';
 
+// Import from centralized parser
+import {
+  tryParseBarcode as sharedTryParseBarcode,
+  isValidBarcode as sharedIsValidBarcode,
+  validateBarcode as sharedValidateBarcode,
+  extractGameCode as sharedExtractGameCode,
+  extractPackNumber as sharedExtractPackNumber,
+  extractSerialStart,
+  parseBarcodes as sharedParseBarcodes,
+  deduplicateBarcodes as sharedDeduplicateBarcodes,
+  BARCODE_LENGTH,
+  type ParsedBarcode as SharedParsedBarcode,
+  type BatchParseResult,
+  type ParseBarcodeOptions,
+} from '@shared/lottery/barcode-parser';
+
+// Re-export from shared for consumers who import from this module
+export { BARCODE_LENGTH, extractSerialStart, type ParseBarcodeOptions, type BatchParseResult };
+
 // ============================================================================
-// Types
+// Logger
+// ============================================================================
+
+const log = createLogger('scanner-service');
+
+// ============================================================================
+// Types (Backward Compatible)
 // ============================================================================
 
 /**
  * Parsed barcode data from a lottery ticket/pack
+ *
+ * @property raw - Original raw barcode string
+ * @property game_code - 4-digit game code
+ * @property pack_number - 7-digit pack number
+ * @property serial_start - 3-digit serial start (current ticket position)
+ * @property serial_number - @deprecated Use serial_start instead
+ * @property check_digit - @deprecated Use identifier instead
+ * @property identifier - 10-digit check/validation data
+ * @property checksum_valid - Whether the checksum validation passed (always true for valid format)
+ * @property full_serial - Full serial for pack reception (game_code + pack_number)
+ * @property is_valid - Whether the barcode passed validation
  */
 export interface ParsedBarcode {
   /** Original raw barcode string */
@@ -24,14 +64,32 @@ export interface ParsedBarcode {
   game_code: string;
   /** 7-digit pack number */
   pack_number: string;
-  /** 3-digit serial number within pack */
+  /**
+   * 3-digit serial start (current ticket position)
+   * This is the canonical field name - use this in new code
+   */
+  serial_start: string;
+  /**
+   * @deprecated Use serial_start instead.
+   * This field is kept for backward compatibility.
+   */
   serial_number: string;
-  /** Check digit from barcode */
+  /**
+   * 10-digit identifier / check data
+   * This is the canonical field name - use this in new code
+   */
+  identifier: string;
+  /**
+   * @deprecated Use identifier instead.
+   * This field is kept for backward compatibility.
+   */
   check_digit: string;
-  /** Whether the checksum validation passed */
+  /** Whether the checksum validation passed (always true for valid format) */
   checksum_valid: boolean;
   /** Full serial for pack reception (game_code + pack_number) */
   full_serial: string;
+  /** Whether the barcode passed validation */
+  is_valid: boolean;
 }
 
 /**
@@ -44,39 +102,31 @@ export interface BarcodeValidationResult {
 }
 
 // ============================================================================
-// Constants
+// Conversion Helpers
 // ============================================================================
 
 /**
- * Standard lottery barcode length
- * Format: GGGG-PPPPPPP-SSS-CCCCCCCCCC
- * - GGGG: 4-digit game code
- * - PPPPPPP: 7-digit pack number
- * - SSS: 3-digit serial number
- * - CCCCCCCCCC: 10-digit check/validation data
+ * Convert shared ParsedBarcode to service ParsedBarcode (with legacy fields)
  */
-const BARCODE_LENGTH = 24;
-
-/**
- * Barcode segment positions
- */
-const GAME_CODE_START = 0;
-const GAME_CODE_LENGTH = 4;
-const PACK_NUMBER_START = 4;
-const PACK_NUMBER_LENGTH = 7;
-const SERIAL_NUMBER_START = 11;
-const SERIAL_NUMBER_LENGTH = 3;
-const CHECK_DIGIT_START = 14;
-const CHECK_DIGIT_LENGTH = 10;
-
-// ============================================================================
-// Logger
-// ============================================================================
-
-const log = createLogger('scanner-service');
+function toServiceBarcode(shared: SharedParsedBarcode): ParsedBarcode {
+  return {
+    raw: shared.raw,
+    game_code: shared.game_code,
+    pack_number: shared.pack_number,
+    serial_start: shared.serial_start,
+    // Legacy field aliases for backward compatibility
+    serial_number: shared.serial_start,
+    identifier: shared.identifier,
+    check_digit: shared.identifier,
+    // Format validation implies checksum is valid
+    checksum_valid: shared.is_valid,
+    full_serial: shared.full_serial,
+    is_valid: shared.is_valid,
+  };
+}
 
 // ============================================================================
-// Scanner Service
+// Scanner Service Functions
 // ============================================================================
 
 /**
@@ -85,6 +135,14 @@ const log = createLogger('scanner-service');
  *
  * @param raw - Raw barcode string from scanner
  * @returns Parsed barcode data or null if invalid
+ *
+ * @example
+ * const parsed = parseBarcode('100112345670001234567890');
+ * if (parsed) {
+ *   parsed.game_code;    // '1001'
+ *   parsed.pack_number;  // '1234567'
+ *   parsed.serial_start; // '000'
+ * }
  */
 export function parseBarcode(raw: string): ParsedBarcode | null {
   if (!raw || typeof raw !== 'string') {
@@ -92,51 +150,21 @@ export function parseBarcode(raw: string): ParsedBarcode | null {
     return null;
   }
 
-  // Remove any whitespace or hyphens
-  const cleaned = raw.replace(/[\s-]/g, '');
+  // Use lenient mode to allow whitespace/hyphens (backward compatible behavior)
+  const shared = sharedTryParseBarcode(raw, { allowCleaning: true });
 
-  // Validate length
-  if (cleaned.length !== BARCODE_LENGTH) {
-    log.debug('Invalid barcode length', {
-      expected: BARCODE_LENGTH,
-      actual: cleaned.length,
-    });
+  if (!shared) {
+    log.debug('Invalid barcode format', { raw: raw.substring(0, 30) });
     return null;
   }
 
-  // Validate all digits
-  if (!/^\d+$/.test(cleaned)) {
-    log.debug('Invalid barcode: contains non-digit characters');
-    return null;
-  }
-
-  // Extract segments
-  const game_code = cleaned.substring(GAME_CODE_START, GAME_CODE_START + GAME_CODE_LENGTH);
-  const pack_number = cleaned.substring(PACK_NUMBER_START, PACK_NUMBER_START + PACK_NUMBER_LENGTH);
-  const serial_number = cleaned.substring(
-    SERIAL_NUMBER_START,
-    SERIAL_NUMBER_START + SERIAL_NUMBER_LENGTH
-  );
-  const check_digit = cleaned.substring(CHECK_DIGIT_START, CHECK_DIGIT_START + CHECK_DIGIT_LENGTH);
-
-  // Validate checksum (simple modulo 97 check)
-  const checksum_valid = validateChecksum(cleaned);
-
-  const parsed: ParsedBarcode = {
-    raw: cleaned,
-    game_code,
-    pack_number,
-    serial_number,
-    check_digit,
-    checksum_valid,
-    full_serial: `${game_code}${pack_number}`,
-  };
+  const parsed = toServiceBarcode(shared);
 
   log.debug('Barcode parsed', {
-    gameCode: game_code,
-    packNumber: pack_number,
-    serialNumber: serial_number,
-    checksumValid: checksum_valid,
+    gameCode: parsed.game_code,
+    packNumber: parsed.pack_number,
+    serialStart: parsed.serial_start,
+    checksumValid: parsed.checksum_valid,
   });
 
   return parsed;
@@ -154,33 +182,16 @@ export function validateBarcode(raw: string): BarcodeValidationResult {
     return { valid: false, error: 'Barcode is required' };
   }
 
-  const cleaned = raw.replace(/[\s-]/g, '');
+  const result = sharedValidateBarcode(raw, { allowCleaning: true });
 
-  if (cleaned.length !== BARCODE_LENGTH) {
-    return {
-      valid: false,
-      error: `Barcode must be ${BARCODE_LENGTH} digits (got ${cleaned.length})`,
-    };
+  if (!result.valid) {
+    return { valid: false, error: result.error };
   }
 
-  if (!/^\d+$/.test(cleaned)) {
-    return { valid: false, error: 'Barcode must contain only digits' };
-  }
-
-  const parsed = parseBarcode(raw);
-  if (!parsed) {
-    return { valid: false, error: 'Failed to parse barcode' };
-  }
-
-  if (!parsed.checksum_valid) {
-    return {
-      valid: false,
-      error: 'Barcode checksum validation failed',
-      parsed,
-    };
-  }
-
-  return { valid: true, parsed };
+  return {
+    valid: true,
+    parsed: result.parsed ? toServiceBarcode(result.parsed) : undefined,
+  };
 }
 
 /**
@@ -194,9 +205,8 @@ export function isValidBarcode(raw: string): boolean {
   if (!raw || typeof raw !== 'string') {
     return false;
   }
-
-  const cleaned = raw.replace(/[\s-]/g, '');
-  return cleaned.length === BARCODE_LENGTH && /^\d+$/.test(cleaned);
+  // Use lenient mode for backward compatibility
+  return sharedIsValidBarcode(raw, { allowCleaning: true });
 }
 
 /**
@@ -246,8 +256,7 @@ export function formatSerialNumber(serial: number): string {
  * @returns 4-digit game code or null
  */
 export function extractGameCode(raw: string): string | null {
-  const parsed = parseBarcode(raw);
-  return parsed?.game_code || null;
+  return sharedExtractGameCode(raw, { allowCleaning: true });
 }
 
 /**
@@ -258,47 +267,7 @@ export function extractGameCode(raw: string): string | null {
  * @returns 7-digit pack number or null
  */
 export function extractPackNumber(raw: string): string | null {
-  const parsed = parseBarcode(raw);
-  return parsed?.pack_number || null;
-}
-
-// ============================================================================
-// Internal Helpers
-// ============================================================================
-
-/**
- * Validate barcode checksum using modulo 97
- * This is a simplified validation; actual lottery barcodes
- * may use different algorithms
- *
- * @param barcode - Full barcode string
- * @returns true if checksum is valid
- */
-function validateChecksum(barcode: string): boolean {
-  try {
-    // Simple modulo 97 check on the numeric value
-    // In production, this would match the actual lottery system's algorithm
-    const numericPart = barcode.substring(0, SERIAL_NUMBER_START + SERIAL_NUMBER_LENGTH);
-    const checkPart = barcode.substring(CHECK_DIGIT_START);
-
-    // For now, we'll accept all barcodes that pass format validation
-    // A real implementation would verify against the lottery system's algorithm
-    return true;
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Calculate checksum for barcode generation
- * Would be used if generating barcodes locally
- *
- * @param partial - Barcode without check digits
- * @returns 10-digit check string
- */
-export function calculateChecksum(partial: string): string {
-  // Placeholder - real implementation would match lottery system
-  return '0000000000';
+  return sharedExtractPackNumber(raw, { allowCleaning: true });
 }
 
 // ============================================================================
@@ -316,25 +285,12 @@ export function parseBarcodes(barcodes: string[]): {
   parsed: ParsedBarcode[];
   errors: Array<{ index: number; raw: string; error: string }>;
 } {
-  const parsed: ParsedBarcode[] = [];
-  const errors: Array<{ index: number; raw: string; error: string }> = [];
+  const result = sharedParseBarcodes(barcodes, { allowCleaning: true });
 
-  for (let i = 0; i < barcodes.length; i++) {
-    const raw = barcodes[i];
-    const result = validateBarcode(raw);
-
-    if (result.valid && result.parsed) {
-      parsed.push(result.parsed);
-    } else {
-      errors.push({
-        index: i,
-        raw: raw || '',
-        error: result.error || 'Unknown error',
-      });
-    }
-  }
-
-  return { parsed, errors };
+  return {
+    parsed: result.parsed.map(toServiceBarcode),
+    errors: result.errors,
+  };
 }
 
 /**
@@ -345,16 +301,18 @@ export function parseBarcodes(barcodes: string[]): {
  * @returns Deduplicated array
  */
 export function deduplicateBarcodes(barcodes: ParsedBarcode[]): ParsedBarcode[] {
-  const seen = new Set<string>();
-  const unique: ParsedBarcode[] = [];
+  // Convert to shared format, deduplicate, convert back
+  const sharedBarcodes: SharedParsedBarcode[] = barcodes.map((b) => ({
+    raw: b.raw,
+    game_code: b.game_code,
+    pack_number: b.pack_number,
+    serial_start: b.serial_start,
+    identifier: b.identifier,
+    is_valid: b.is_valid,
+    full_serial: b.full_serial,
+  }));
 
-  for (const barcode of barcodes) {
-    const key = `${barcode.game_code}-${barcode.pack_number}`;
-    if (!seen.has(key)) {
-      seen.add(key);
-      unique.push(barcode);
-    }
-  }
+  const deduplicated = sharedDeduplicateBarcodes(sharedBarcodes);
 
-  return unique;
+  return deduplicated.map(toServiceBarcode);
 }

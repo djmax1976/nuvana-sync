@@ -9,17 +9,32 @@ export default defineConfig({
   test: {
     globals: true,
     environment: 'node',
-    include: ['tests/integration/**/*.spec.ts', 'tests/integration/**/*.test.ts'],
+    include: [
+      'tests/integration/**/*.spec.ts',
+      'tests/integration/**/*.spec.tsx',
+      'tests/integration/**/*.test.ts',
+      'tests/integration/**/*.test.tsx',
+    ],
     exclude: ['**/node_modules/**', '**/dist/**'],
+    // Setup file for React Testing Library
+    setupFiles: ['./tests/setup-renderer.ts'],
     passWithNoTests: false,
-    pool: 'vmForks',
+    // Use threads pool for ESM/CJS module compatibility (required for React Router)
+    // Note: vmForks has issues with ESM modules in react-router
+    pool: 'threads',
     isolate: true,
     // Longer timeout for integration tests
     testTimeout: 30000,
     // Required for native modules like better-sqlite3-multiple-ciphers
+    // Also inline react-router for ESM/CJS compatibility in tests
     server: {
       deps: {
-        inline: [/^(?!.*vitest).*$/, 'better-sqlite3-multiple-ciphers'],
+        inline: [
+          /^(?!.*vitest).*$/,
+          'better-sqlite3-multiple-ciphers',
+          'react-router',
+          'react-router-dom',
+        ],
       },
     },
     deps: {
@@ -28,7 +43,10 @@ export default defineConfig({
   },
   resolve: {
     alias: {
-      '@': path.resolve(__dirname, './src'),
+      '@': path.resolve(__dirname, './src/renderer'),
+      '@shared': path.resolve(__dirname, './src/shared'),
+      '@main': path.resolve(__dirname, './src/main'),
+      '@renderer': path.resolve(__dirname, './src/renderer'),
     },
   },
   // Don't bundle native modules

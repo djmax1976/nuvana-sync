@@ -75,6 +75,15 @@ export interface PackSearchOption {
    * Mirrors backend validation in lottery:activatePack handler
    */
   game_status: LotteryGameStatus | null;
+  /**
+   * BIZ-010: Serial position from scanned barcode
+   * When a pack is selected via barcode scan, this contains the serial_start
+   * extracted from positions 12-14 of the 24-digit barcode.
+   * Used in onboarding mode to set the correct starting ticket position.
+   *
+   * @example "025" means 25 tickets already sold, start at ticket #25
+   */
+  scanned_serial?: string;
 }
 
 /**
@@ -544,8 +553,25 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
           return;
         }
 
+        // ========================================================================
+        // BIZ-010: Extract scanned_serial from barcode for onboarding mode
+        // When pack is selected via 24-digit barcode scan, extract the serial_start
+        // from positions 12-14 and include it in the pack option.
+        // SEC-014: Validated by isValidSerialNumber (strict 24-digit regex)
+        // ========================================================================
+        let packWithScannedSerial = pack;
+        const trimmedQuery = searchQuery.trim();
+        if (isValidSerialNumber(trimmedQuery)) {
+          const parsed = parseSerializedNumber(trimmedQuery);
+          // SEC-014: serial_start is validated as exactly 3 digits by parseSerializedNumber
+          packWithScannedSerial = {
+            ...pack,
+            scanned_serial: parsed.serial_start,
+          };
+        }
+
         // Notify parent of selection (only for ACTIVE games)
-        onPackSelect(pack);
+        onPackSelect(packWithScannedSerial);
         // Clear search query
         onSearchQueryChange('');
         // Clear any pending validation timer
@@ -556,7 +582,7 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
         // Close dropdown
         setIsOpen(false);
       },
-      [onPackSelect, onSearchQueryChange, toast, clearAndRefocus]
+      [onPackSelect, onSearchQueryChange, toast, clearAndRefocus, searchQuery]
     );
 
     const handleKeyDown = useCallback(

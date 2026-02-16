@@ -1,97 +1,118 @@
 /**
  * Lottery Serial Number Parser Utility (Frontend)
- * Parses 24-digit serialized lottery pack numbers into components
  *
- * Story 6.12: Serialized Pack Reception with Batch Processing
+ * @deprecated This module is deprecated. Import from '@shared/lottery/barcode-parser' instead.
  *
- * Serial Format:
- * - Total: 24 digits
- * - Positions 1-4: Game code (4 digits)
- * - Positions 5-11: Pack number (7 digits)
- * - Positions 12-14: Starting ticket number (3 digits)
- * - Positions 15-24: Identifier (10 digits, not used for reception)
+ * This file now re-exports from the centralized barcode parser for backward compatibility.
+ * The shared module provides a single source of truth for barcode parsing across frontend
+ * and backend.
  *
- * Example: "000112345670123456789012"
- * - game_code: "0001"
- * - pack_number: "1234567"
- * - serial_start: "012"
+ * @module renderer/lib/utils/lottery-serial-parser
+ * @see {@link @shared/lottery/barcode-parser} for the centralized implementation
+ *
+ * ## Migration Guide
+ *
+ * Old imports:
+ * ```typescript
+ * import { parseSerializedNumber, isValidSerialNumber } from '@/lib/utils/lottery-serial-parser';
+ * ```
+ *
+ * New imports:
+ * ```typescript
+ * import { parseBarcode, isValidBarcode } from '@shared/lottery/barcode-parser';
+ * ```
+ *
+ * ## Key Changes
+ *
+ * | Old (this module)         | New (shared module)        |
+ * |---------------------------|----------------------------|
+ * | parseSerializedNumber()   | parseBarcode()             |
+ * | isValidSerialNumber()     | isValidBarcode()           |
+ * | extractGameCode()         | extractGameCode()          |
+ * | ParsedSerialNumber        | ParsedBarcode              |
+ * | InvalidSerialNumberError  | InvalidBarcodeError        |
+ *
+ * ## New Fields Available
+ *
+ * The shared ParsedBarcode type includes additional fields:
+ * - `identifier`: The 10-digit check data (positions 15-24)
+ * - `raw`: The cleaned barcode string
+ * - `is_valid`: Boolean indicating validation status
+ * - `full_serial`: Combined game_code + pack_number for lookups
  */
 
+// Import parseBarcode directly for use in legacy function
+import { parseBarcode as _parseBarcode } from '@shared/lottery/barcode-parser';
+
+// Re-export everything from the shared module for backward compatibility
+export {
+  // Core parsing functions
+  parseBarcode,
+  tryParseBarcode,
+  isValidBarcode,
+  validateBarcode,
+
+  // Extraction convenience functions
+  extractGameCode,
+  extractPackNumber,
+  extractSerialStart,
+  extractIdentifier,
+
+  // Batch processing
+  parseBarcodes,
+  deduplicateBarcodes,
+
+  // Serial utilities
+  isValidSerialStart,
+  parseSerialStart,
+  formatSerialStart,
+
+  // Error class
+  InvalidBarcodeError,
+
+  // Types
+  type ParsedBarcode,
+  type ParseBarcodeOptions,
+  type BarcodeValidationResult,
+  type BatchParseResult,
+
+  // Constants
+  BARCODE_LENGTH,
+  BARCODE_REGEX,
+  BARCODE_SEGMENTS,
+
+  // Legacy compatibility aliases (re-exported from shared)
+  parseSerializedNumber,
+  isValidSerialNumber,
+  InvalidSerialNumberError,
+  type ParsedSerialNumber,
+} from '@shared/lottery/barcode-parser';
+
 /**
- * Parsed serial number components
+ * @deprecated Use `parseBarcode` from '@shared/lottery/barcode-parser' instead.
+ *
+ * This is a compatibility wrapper that provides the old interface.
+ * The new parseBarcode function returns additional fields (identifier, raw, is_valid, full_serial).
+ *
+ * @example
+ * // Old usage (deprecated):
+ * import { parseSerializedNumberLegacy } from '@/lib/utils/lottery-serial-parser';
+ * const result = parseSerializedNumberLegacy('000112345670253456789012');
+ *
+ * // New usage:
+ * import { parseBarcode } from '@shared/lottery/barcode-parser';
+ * const result = parseBarcode('000112345670253456789012');
  */
-export interface ParsedSerialNumber {
+export function parseSerializedNumberLegacy(serial: string): {
   game_code: string;
   pack_number: string;
   serial_start: string;
-}
-
-/**
- * Error thrown when serial number format is invalid
- */
-export class InvalidSerialNumberError extends Error {
-  constructor(message: string) {
-    super(message);
-    this.name = 'InvalidSerialNumberError';
-  }
-}
-
-/**
- * Parse a 24-digit serialized number into components
- *
- * @param serial - The 24-digit serialized number (string)
- * @returns Parsed components: { game_code, pack_number, serial_start }
- * @throws {InvalidSerialNumberError} If serial format is invalid
- *
- * @example
- * const parsed = parseSerializedNumber("000112345670123456789012");
- * // Returns: { game_code: "0001", pack_number: "1234567", serial_start: "012" }
- */
-export function parseSerializedNumber(serial: string): ParsedSerialNumber {
-  // Validate: exactly 24 digits, numeric only
-  if (!/^\d{24}$/.test(serial)) {
-    throw new InvalidSerialNumberError('Invalid serial number format. Must be 24 digits.');
-  }
-
-  // Extract components based on positions
-  const game_code = serial.substring(0, 4); // Positions 1-4
-  const pack_number = serial.substring(4, 11); // Positions 5-11
-  const serial_start = serial.substring(11, 14); // Positions 12-14
-
+} {
+  // Use the imported shared parseBarcode function
+  const result = _parseBarcode(serial);
   return {
-    game_code,
-    pack_number,
-    serial_start,
+    game_code: result.game_code,
+    pack_number: result.pack_number,
+    serial_start: result.serial_start,
   };
-}
-
-/**
- * Validate serial number format without parsing
- *
- * @param serial - The serial number to validate
- * @returns True if valid format, false otherwise
- *
- * @example
- * isValidSerialNumber("000112345670123456789012"); // true
- * isValidSerialNumber("123"); // false (too short)
- * isValidSerialNumber("abc123"); // false (non-numeric)
- */
-export function isValidSerialNumber(serial: string): boolean {
-  return /^\d{24}$/.test(serial);
-}
-
-/**
- * Extract game code from serial number without full parsing
- *
- * @param serial - The 24-digit serialized number
- * @returns Game code (4 digits) or null if invalid format
- *
- * @example
- * extractGameCode("000112345670123456789012"); // "0001"
- */
-export function extractGameCode(serial: string): string | null {
-  if (!isValidSerialNumber(serial)) {
-    return null;
-  }
-  return serial.substring(0, 4);
 }

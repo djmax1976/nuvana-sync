@@ -20,6 +20,7 @@
 
 import { useState, useCallback, useMemo, useRef, useEffect } from 'react';
 import type { DayBin } from '@/lib/api/lottery';
+import { tryParseBarcode } from '@shared/lottery/barcode-parser';
 
 /**
  * Scanned bin state - tracks which bins have been scanned and their ending serials
@@ -174,23 +175,29 @@ export interface UseScannedBinsReturn {
 /**
  * Parse a 24-digit serial number into components
  *
+ * Uses the centralized barcode parser from @shared/lottery/barcode-parser
+ * for consistent parsing across frontend and backend.
+ *
  * Format: GGGGPPPPPPPSSSIIIIIIIIII
  * - GGGG: Game code (4 digits, positions 0-3)
  * - PPPPPPP: Pack number (7 digits, positions 4-10)
  * - SSS: Serial number (3 digits, positions 11-13)
  * - IIIIIIIIII: Identifier (10 digits, positions 14-23)
  *
- * SEC-014: INPUT_VALIDATION - Strict regex validation
+ * SEC-014: INPUT_VALIDATION - Delegated to centralized parser
+ * @see {@link @shared/lottery/barcode-parser} for implementation
  */
 function parseSerial(serial: string): ParsedSerial | null {
-  // SEC-014: Validate format - exactly 24 digits
-  if (!/^\d{24}$/.test(serial)) {
+  // Delegate to centralized parser (SEC-014 compliant)
+  const parsed = tryParseBarcode(serial);
+  if (!parsed) {
     return null;
   }
 
+  // Map to local interface (pack_number → packNumber, serial_start → closingSerial)
   return {
-    packNumber: serial.substring(4, 11), // 7 digits
-    closingSerial: serial.substring(11, 14), // 3 digits
+    packNumber: parsed.pack_number,
+    closingSerial: parsed.serial_start,
   };
 }
 

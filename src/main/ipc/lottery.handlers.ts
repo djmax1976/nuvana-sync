@@ -1339,10 +1339,17 @@ registerHandler(
       // Process each barcode
       for (const serial of serialized_numbers) {
         try {
-          // Parse barcode to extract game_code and pack_number
-          // Format: positions 1-4 = game_code, 5-11 = pack_number
-          const game_code = serial.substring(0, 4);
-          const pack_number = serial.substring(4, 11);
+          // Parse barcode using centralized parser (SEC-014 compliant)
+          // Returns: game_code (4 digits), pack_number (7 digits), serial_start (3 digits)
+          const parsed = parseBarcode(serial);
+          if (!parsed) {
+            errors.push({
+              serial,
+              error: 'Invalid barcode format',
+            });
+            continue;
+          }
+          const { game_code, pack_number } = parsed;
 
           // Look up game by code
           const game = lotteryGamesDAL.findByGameCode(storeId, game_code);
@@ -3799,6 +3806,13 @@ registerHandler(
       }
       const userId = currentUser.user_id;
 
+      // ========================================================================
+      // BIZ-010: First-Ever Day Detection (for Lottery Onboarding)
+      // ========================================================================
+      // CRITICAL: Check BEFORE creating the new day to correctly detect first-ever state
+      // After creation, isFirstEverDay would return false even for the actual first day
+      const isFirstEver = lotteryBusinessDaysDAL.isFirstEverDay(storeId);
+
       // Check if already initialized (idempotent)
       const existingOpenDay = lotteryBusinessDaysDAL.findOpenDay(storeId);
       if (existingOpenDay) {
@@ -3810,6 +3824,7 @@ registerHandler(
         return createSuccessResponse({
           success: true,
           is_new: false,
+          is_first_ever: false, // Existing day means not first-ever
           day: {
             day_id: existingOpenDay.day_id,
             business_date: existingOpenDay.business_date,
@@ -3859,11 +3874,13 @@ registerHandler(
         initializedBy: userId,
         binsAvailable: bins.length,
         gamesAvailable: games.length,
+        isFirstEver, // BIZ-010: Log for debugging onboarding scenarios
       });
 
       return createSuccessResponse({
         success: true,
         is_new: true,
+        is_first_ever: isFirstEver, // BIZ-010: Enables onboarding mode when true
         day: {
           day_id: newDay.day_id,
           business_date: newDay.business_date,
