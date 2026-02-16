@@ -680,6 +680,7 @@ describe('CloudApiService', () => {
         },
       };
 
+      // SYNC-5000: pullBins now completes session after success, so mock 3 calls
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -688,6 +689,10 @@ describe('CloudApiService', () => {
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve(mockBinsResponse),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
         });
 
       const result = await service.pullBins();
@@ -704,6 +709,12 @@ describe('CloudApiService', () => {
       expect(mockFetch).toHaveBeenNthCalledWith(
         2,
         expect.stringContaining('/api/v1/sync/lottery/bins?session_id=test-session-123'),
+        expect.any(Object)
+      );
+      // Third call is to complete session
+      expect(mockFetch).toHaveBeenNthCalledWith(
+        3,
+        'https://api.nuvanaapp.com/api/v1/sync/complete',
         expect.any(Object)
       );
     });
@@ -726,6 +737,7 @@ describe('CloudApiService', () => {
         },
       };
 
+      // SYNC-5000: pullBins now completes session after success, so mock 3 calls
       mockFetch
         .mockResolvedValueOnce({
           ok: true,
@@ -734,6 +746,10 @@ describe('CloudApiService', () => {
         .mockResolvedValueOnce({
           ok: true,
           json: () => Promise.resolve(mockBinsResponse),
+        })
+        .mockResolvedValueOnce({
+          ok: true,
+          json: () => Promise.resolve({ success: true }),
         });
 
       await service.pullBins('2024-01-01T00:00:00Z');

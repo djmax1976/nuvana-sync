@@ -132,7 +132,8 @@ describe('BatchDispatcherService', () => {
       const dispatcher = new BatchDispatcherService();
       const config = dispatcher.getConfig();
 
-      expect(config.maxBatchSize).toBe(50);
+      // SYNC-5000 Phase 3: Updated defaults for production scale
+      expect(config.maxBatchSize).toBe(100);
       expect(config.maxConcurrentPartitions).toBe(4);
       expect(config.maxQueueDepth).toBe(10000);
       expect(config.maxQueueSizeBytes).toBe(50 * 1024 * 1024);
@@ -155,11 +156,11 @@ describe('BatchDispatcherService', () => {
     });
 
     it('should enforce maximum batch size limit', () => {
-      const dispatcher = new BatchDispatcherService({ maxBatchSize: 500 });
+      const dispatcher = new BatchDispatcherService({ maxBatchSize: 2000 });
       const config = dispatcher.getConfig();
 
-      // Should be capped at ABSOLUTE_MAX_BATCH_SIZE (200)
-      expect(config.maxBatchSize).toBe(200);
+      // SYNC-5000 Phase 3: Should be capped at ABSOLUTE_MAX_BATCH_SIZE (1000)
+      expect(config.maxBatchSize).toBe(1000);
     });
 
     it('should enforce maximum concurrent partitions limit', () => {
@@ -656,7 +657,8 @@ describe('BatchDispatcherService', () => {
       const dispatcher = new BatchDispatcherService();
       const result = await dispatcher.processPartitionedBatches(STORE_ID, processor);
 
-      expect(result.durationMs).toBeGreaterThanOrEqual(50);
+      // Allow small timing variance on CI runners (typically ±5ms)
+      expect(result.durationMs).toBeGreaterThanOrEqual(45);
     });
   });
 

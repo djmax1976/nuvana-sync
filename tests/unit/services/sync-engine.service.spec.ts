@@ -579,13 +579,14 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(1);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(mockItems);
-      // Mock usersDAL.findById to return employee with pin_hash (required for push)
+      // Mock usersDAL.findById to return employee with pin_hash and sha256_pin_fingerprint (required for push)
       mockUserFindById.mockReturnValue({
         user_id: 'entity-1',
         store_id: 'store-123',
         role: 'cashier',
         name: 'Test Employee',
         pin_hash: '$2b$12$hashedPinValue',
+        sha256_pin_fingerprint: 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
         active: 1,
       });
       // Mock pushEmployees to return success with the item marked as synced
@@ -735,13 +736,14 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(3);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(mockItems);
-      // Mock usersDAL.findById to return employees with pin_hash (required for push)
+      // Mock usersDAL.findById to return employees with pin_hash and sha256_pin_fingerprint (required for push)
       mockUserFindById.mockImplementation((userId: string) => ({
         user_id: userId,
         store_id: 'store-123',
         role: 'cashier',
         name: `Employee ${userId}`,
         pin_hash: '$2b$12$hashedPinValue',
+        sha256_pin_fingerprint: 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
         active: 1,
       }));
       // Mock pushEmployees to return success for all items
@@ -1182,13 +1184,14 @@ describe('SyncEngineService', () => {
       mockGetPendingCount.mockReturnValue(2);
       mockStartSync.mockReturnValue('log-1');
       mockGetRetryableItems.mockReturnValue(items);
-      // Mock usersDAL.findById to return employees with pin_hash (required for push)
+      // Mock usersDAL.findById to return employees with pin_hash and sha256_pin_fingerprint (required for push)
       mockUserFindById.mockImplementation((userId: string) => ({
         user_id: userId,
         store_id: 'store-123',
         role: 'cashier',
         name: `Employee ${userId}`,
         pin_hash: '$2b$12$hashedPinValue',
+        sha256_pin_fingerprint: 'a1b2c3d4e5f6789012345678901234567890123456789012345678901234abcd',
         active: 1,
       }));
       // Mock pushEmployees to return success for all items

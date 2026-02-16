@@ -13,6 +13,7 @@
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
 import bcrypt from 'bcrypt';
+import { createHash } from 'crypto';
 
 // ============================================================================
 // Constants
@@ -24,6 +25,17 @@ import bcrypt from 'bcrypt';
  * Tuned for ~250ms hash time on production hardware
  */
 const BCRYPT_ROUNDS = 12;
+
+/**
+ * Compute SHA-256 fingerprint of plain PIN for cloud uniqueness validation
+ * This is computed BEFORE bcrypt hashing and sent to cloud for duplicate detection
+ *
+ * @param pin - Plain text PIN
+ * @returns SHA-256 hex digest (64 characters)
+ */
+function computePinFingerprint(pin: string): string {
+  return createHash('sha256').update(pin).digest('hex');
+}
 
 // ============================================================================
 // Types
@@ -44,6 +56,7 @@ export interface User extends StoreEntity {
   role: UserRole;
   name: string;
   pin_hash: string;
+  sha256_pin_fingerprint: string | null; // SHA-256 of plain PIN for cloud uniqueness validation
   active: number; // SQLite boolean (0 or 1)
   last_login_at: string | null;
   synced_at: string | null;
@@ -139,15 +152,19 @@ export class UsersDAL extends StoreBasedDAL<User> {
     // SEC-001: Hash PIN with bcrypt
     const pinHash = await bcrypt.hash(data.pin, BCRYPT_ROUNDS);
 
+    // Compute SHA-256 fingerprint for cloud PIN uniqueness validation
+    // This must be computed BEFORE bcrypt hashing while we have the plain PIN
+    const pinFingerprint = computePinFingerprint(data.pin);
+
     // SEC-006: Parameterized query
     const stmt = this.db.prepare(`
       INSERT INTO users (
-        user_id, store_id, role, name, pin_hash, active,
+        user_id, store_id, role, name, pin_hash, sha256_pin_fingerprint, active,
         created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, 1, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
     `);
 
-    stmt.run(userId, data.store_id, data.role, data.name, pinHash, now, now);
+    stmt.run(userId, data.store_id, data.role, data.name, pinHash, pinFingerprint, now, now);
 
     log.info('User created', {
       userId,
@@ -190,6 +207,11 @@ export class UsersDAL extends StoreBasedDAL<User> {
       const pinHash = await bcrypt.hash(data.pin, BCRYPT_ROUNDS);
       updates.push('pin_hash = ?');
       params.push(pinHash);
+
+      // Compute SHA-256 fingerprint for cloud PIN uniqueness validation
+      const pinFingerprint = computePinFingerprint(data.pin);
+      updates.push('sha256_pin_fingerprint = ?');
+      params.push(pinFingerprint);
     }
     if (data.active !== undefined) {
       updates.push('active = ?');
