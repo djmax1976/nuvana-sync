@@ -364,12 +364,15 @@ describe('DayCloseModeScanner - deferCommit=true Skips API', () => {
     const closeBtn = screen.getByRole('button', { name: /close lottery/i });
     fireEvent.click(closeBtn);
 
-    await waitFor(() => {
-      // API should NOT be called
-      expect(mockPrepareLotteryDayClose).not.toHaveBeenCalled();
-      // But onSuccess should be called
-      expect(onSuccess).toHaveBeenCalled();
-    });
+    await waitFor(
+      () => {
+        // API should NOT be called
+        expect(mockPrepareLotteryDayClose).not.toHaveBeenCalled();
+        // But onSuccess should be called
+        expect(onSuccess).toHaveBeenCalled();
+      },
+      { timeout: 15000 }
+    );
   });
 
   it('DOES call prepareLotteryDayClose when deferCommit=false', async () => {

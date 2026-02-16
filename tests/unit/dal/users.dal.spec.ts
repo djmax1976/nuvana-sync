@@ -101,9 +101,10 @@ describe('UsersDAL', () => {
 
       // SEC-006: Verify parameterized query
       // Note: After cloud_id consolidation, no separate cloud_user_id column
+      // Note: sha256_pin_fingerprint added for cloud PIN uniqueness validation
       expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('INSERT INTO users'));
       expect(mockPrepare).toHaveBeenCalledWith(
-        expect.stringContaining('VALUES (?, ?, ?, ?, ?, 1, ?, ?)')
+        expect.stringContaining('VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)')
       );
     });
 
@@ -123,14 +124,16 @@ describe('UsersDAL', () => {
       });
 
       // Note: After cloud_id consolidation, no separate cloud_user_id column
+      // Note: sha256_pin_fingerprint added for cloud PIN uniqueness validation
       expect(mockRun).toHaveBeenCalledWith(
         'custom-user-id',
         'store-456',
         'cashier',
         'John Doe',
         '$2b$12$hashedpin123',
-        expect.any(String),
-        expect.any(String)
+        expect.any(String), // sha256_pin_fingerprint
+        expect.any(String), // created_at
+        expect.any(String) // updated_at
       );
     });
 

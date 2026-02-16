@@ -881,12 +881,13 @@ describe('SyncQueueDAL', () => {
 
     it('getRetryableItems should cap backoff at 60 seconds', () => {
       // Item with 10 attempts would have 1024s backoff without cap
-      // With cap, should be 60 seconds
+      // With cap, should be 60 seconds (base) with ±30% jitter = max 78 seconds
+      // Using 100s to account for worst-case jitter (60 * 1.3 = 78s)
       const mockItems: SyncQueueItem[] = [
         createMockQueueItem({
           id: 'capped-item',
           sync_attempts: 10,
-          last_attempt_at: new Date(Date.now() - 61000).toISOString(), // 61 seconds ago
+          last_attempt_at: new Date(Date.now() - 100000).toISOString(), // 100 seconds ago (> 78s max jitter)
         }),
       ];
 
@@ -896,7 +897,7 @@ describe('SyncQueueDAL', () => {
 
       const result = dal.getRetryableItems('store-123', 100);
 
-      // Item should be retryable (61s > 60s capped backoff)
+      // Item should be retryable (100s > 78s max jittered backoff)
       expect(result).toHaveLength(1);
     });
 
