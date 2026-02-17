@@ -98,21 +98,30 @@ function validateSerialInRange(
  * Represents a pack waiting to be activated
  *
  * MCP SEC-014: INPUT_VALIDATION - All IDs are UUIDs validated upstream
+ * BIZ-012-FIX: Supports onboarding mode where pack_id may not exist yet
  */
 export interface PendingActivation {
   /** Unique ID for React list key */
   id: string;
-  /** Pack UUID */
-  pack_id: string;
-  /** Pack number for display */
+  /**
+   * Pack UUID - optional in onboarding mode where pack doesn't exist in inventory yet
+   * BIZ-012-FIX: When undefined, backend creates pack during activation
+   */
+  pack_id?: string;
+  /** 7-digit pack number for display and backend pack creation */
   pack_number: string;
+  /**
+   * Game UUID for activation
+   * BIZ-012-FIX: Required for onboarding mode pack creation
+   */
+  game_id: string;
   /** Game name for display */
   game_name: string;
   /** Game price for display */
   game_price: number | null;
-  /** Pack serial range start */
+  /** Pack serial range start (empty for onboarding packs) */
   serial_start: string;
-  /** Pack serial range end */
+  /** Pack serial range end (empty for onboarding packs) */
   serial_end: string;
   /** Custom starting serial (user-specified, default "000") */
   custom_serial_start: string;
@@ -134,6 +143,11 @@ export interface PendingActivation {
   error?: string;
   /** Whether this pack is marked as pre-sold */
   mark_sold?: boolean;
+  /**
+   * BIZ-012-FIX: Indicates this pack was scanned during onboarding
+   * When true, pack_id is undefined and backend will create pack during activation
+   */
+  is_onboarding_pack?: boolean;
 }
 
 /**
@@ -166,6 +180,25 @@ interface EnhancedPackActivationFormProps {
  */
 function generateId(): string {
   return `pending-${Date.now()}-${Math.random().toString(36).substring(2, 9)}`;
+}
+
+/**
+ * Generate unique identity for duplicate detection
+ * - Inventory packs: Use pack_id (globally unique UUID)
+ * - Onboarding packs: Use game_id:pack_number (composite key)
+ *
+ * SEC-014: No user input in identity - only validated system values
+ * BIZ-012-UX-FIX: Handles onboarding packs with undefined pack_id
+ *
+ * @param pack - Pack object with optional pack_id and required game_id/pack_number
+ * @returns Unique string identifier for duplicate detection
+ */
+export function getPackIdentity(pack: {
+  pack_id?: string;
+  game_id: string;
+  pack_number: string;
+}): string {
+  return pack.pack_id ?? `${pack.game_id}:${pack.pack_number}`;
 }
 
 /**
@@ -230,9 +263,10 @@ export function EnhancedPackActivationForm({
     [pendingActivations]
   );
 
-  // Get pack IDs already in pending list (for duplicate check)
-  const pendingPackIds = useMemo(
-    () => new Set(pendingActivations.map((p) => p.pack_id)),
+  // Get pack identities already in pending list (for duplicate check)
+  // BIZ-012-UX-FIX: Use composite identity for onboarding packs with undefined pack_id
+  const pendingPackIdentities = useMemo(
+    () => new Set(pendingActivations.map((p) => getPackIdentity(p))),
     [pendingActivations]
   );
 
@@ -296,7 +330,9 @@ export function EnhancedPackActivationForm({
   const handlePackSelect = useCallback(
     (pack: PackSearchOption) => {
       // Check if pack is already in pending list
-      if (pendingPackIds.has(pack.pack_id)) {
+      // BIZ-012-UX-FIX: Use composite identity for onboarding packs with undefined pack_id
+      const packIdentity = getPackIdentity(pack);
+      if (pendingPackIdentities.has(packIdentity)) {
         toast({
           title: 'Pack Already Added',
           description: `Pack #${pack.pack_number} is already in the pending list.`,
@@ -321,7 +357,7 @@ export function EnhancedPackActivationForm({
       setCurrentScannedPack(pack);
       setShowBinModal(true);
     },
-    [pendingPackIds, toast]
+    [pendingPackIdentities, toast]
   );
 
   /**
@@ -361,10 +397,12 @@ export function EnhancedPackActivationForm({
       }
 
       // Create pending activation entry
+      // BIZ-012-FIX: Include game_id and is_onboarding_pack for onboarding mode
       const pendingItem: PendingActivation = {
         id: generateId(),
-        pack_id: currentScannedPack.pack_id,
+        pack_id: currentScannedPack.pack_id, // undefined for onboarding packs
         pack_number: currentScannedPack.pack_number,
+        game_id: currentScannedPack.game_id,
         game_name: currentScannedPack.game_name,
         game_price: currentScannedPack.game_price,
         serial_start: currentScannedPack.serial_start,
@@ -376,6 +414,7 @@ export function EnhancedPackActivationForm({
         deplete_previous: depletesPrevious,
         previous_pack_number: bin.pack?.pack_number,
         previous_game_name: bin.pack?.game_name,
+        is_onboarding_pack: currentScannedPack.is_onboarding_pack,
       };
 
       // Prepend to list (newest first)
@@ -534,14 +573,25 @@ export function EnhancedPackActivationForm({
       }
 
       // SEC-010: Backend gets activated_by from session
-      // Frontend sends pack_id, bin_id, opening_serial, and deplete_previous
       // BIN-001: deplete_previous enables auto-depletion of existing pack in bin
+      // BIZ-012-FIX: Include onboarding fields when pack_id is undefined
       const activationData: FullActivatePackInput = {
-        pack_id: pending.pack_id,
         bin_id: pending.bin_id,
         opening_serial: pending.custom_serial_start,
         deplete_previous: pending.deplete_previous,
       };
+
+      // BIZ-012-FIX: For onboarding packs, include onboarding_mode, game_id, pack_number
+      // For normal packs, include pack_id
+      if (pending.is_onboarding_pack || pending.pack_id === undefined) {
+        // Onboarding mode: backend will create pack during activation
+        activationData.onboarding_mode = true;
+        activationData.game_id = pending.game_id;
+        activationData.pack_number = pending.pack_number;
+      } else {
+        // Normal mode: pack already exists in inventory
+        activationData.pack_id = pending.pack_id;
+      }
 
       try {
         // Capture response to check for auto-depleted pack (BIN-001)
@@ -661,6 +711,7 @@ export function EnhancedPackActivationForm({
             )}
             {/* Pack search input - user is already authenticated via PIN dialog */}
             {/* Enterprise Pattern: Fully controlled component - parent owns all state */}
+            {/* BIZ-012-FIX: onboardingMode enables scanning packs not in inventory */}
             <PackSearchCombobox
               ref={packSearchRef}
               storeId={storeId}
@@ -672,6 +723,7 @@ export function EnhancedPackActivationForm({
               statusFilter="RECEIVED"
               disabled={isSubmitting}
               testId="batch-pack-search"
+              onboardingMode={onboardingMode}
             />
 
             {/* Pending activations list */}

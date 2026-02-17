@@ -16,6 +16,20 @@ import { lotteryGamesDAL } from './lottery-games.dal';
 import { syncQueueDAL } from './sync-queue.dal';
 
 // ============================================================================
+// Sync Priority Constants
+// ============================================================================
+
+/**
+ * Day Open Sync Priority
+ *
+ * SYNC-001: day_open MUST sync before shifts (priority 10) to prevent race conditions.
+ * Dependency chain: day_open → shift_opening → pack operations
+ *
+ * Without the day existing in cloud, shift sync will fail with foreign key errors.
+ */
+export const DAY_OPEN_SYNC_PRIORITY = 20;
+
+// ============================================================================
 // Types
 // ============================================================================
 
@@ -35,6 +49,13 @@ export interface LotteryBusinessDay extends StoreEntity {
   store_id: string;
   business_date: string;
   status: LotteryDayStatus;
+  /**
+   * BIZ-012-FIX: Onboarding mode flag
+   * - true (1): Store is in onboarding mode (first-ever day, can activate packs without inventory)
+   * - false (0): Normal operation (requires pack in inventory before activation)
+   * Persisted in database, survives navigation. Ends only via explicit user action.
+   */
+  is_onboarding: boolean;
   opened_at: string | null;
   closed_at: string | null;
   opened_by: string | null;
@@ -257,7 +278,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         entity_id: created.day_id,
         operation: 'CREATE',
         payload: dayOpenPayload,
-        priority: 2, // Higher priority - day_open must sync before day_close
+        priority: DAY_OPEN_SYNC_PRIORITY, // SYNC-001: Must sync before shifts (10) to prevent FK errors
         sync_direction: 'PUSH',
       });
 
@@ -413,6 +434,101 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
     // Leverage existing hasAnyDay() for efficient EXISTS pattern
     // Returns true if no days exist (first-ever), false otherwise
     return !this.hasAnyDay(storeId);
+  }
+
+  // ==========================================================================
+  // Onboarding State Management (BIZ-012-FIX)
+  // ==========================================================================
+
+  /**
+   * Set the onboarding flag for a lottery business day
+   *
+   * Updates the is_onboarding column for the specified day.
+   * Used to:
+   * - Enable onboarding mode when initializing first-ever day (is_onboarding = true)
+   * - Disable onboarding mode when user explicitly completes onboarding (is_onboarding = false)
+   *
+   * @security SEC-006: Parameterized UPDATE prevents SQL injection
+   * @security DB-006: WHERE clause includes store_id for tenant isolation
+   *
+   * @param storeId - Store identifier (for tenant isolation validation)
+   * @param dayId - Day identifier to update
+   * @param isOnboarding - Whether to enable (true) or disable (false) onboarding mode
+   * @returns true if the update affected a row, false if day not found or wrong store
+   *
+   * @example
+   * // Enable onboarding on first-ever day creation
+   * lotteryBusinessDaysDAL.setOnboardingFlag(storeId, dayId, true);
+   *
+   * // Disable onboarding when user clicks "Complete Onboarding"
+   * lotteryBusinessDaysDAL.setOnboardingFlag(storeId, dayId, false);
+   */
+  setOnboardingFlag(storeId: string, dayId: string, isOnboarding: boolean): boolean {
+    const now = this.now();
+    // SEC-006: Parameterized UPDATE with ? placeholders
+    // DB-006: WHERE includes store_id to prevent cross-tenant modifications
+    // SQLite uses INTEGER for boolean: 1 = true, 0 = false
+    const stmt = this.db.prepare(`
+      UPDATE lottery_business_days
+      SET is_onboarding = ?, updated_at = ?
+      WHERE day_id = ? AND store_id = ?
+    `);
+
+    const result = stmt.run(isOnboarding ? 1 : 0, now, dayId, storeId);
+    const updated = result.changes > 0;
+
+    log.info('Onboarding flag updated', {
+      dayId,
+      storeId,
+      isOnboarding,
+      updated,
+    });
+
+    return updated;
+  }
+
+  /**
+   * Find the active onboarding day for a store
+   *
+   * Returns the business day that has is_onboarding = 1 (true).
+   * There should be at most one such day per store at any time.
+   *
+   * @security SEC-006: Parameterized SELECT prevents SQL injection
+   * @security DB-006: WHERE clause scoped by store_id for tenant isolation
+   * @performance Uses composite index idx_lottery_days_onboarding(store_id, is_onboarding)
+   *
+   * @param storeId - Store identifier
+   * @returns The onboarding day if one exists, null otherwise
+   *
+   * @example
+   * const onboardingDay = lotteryBusinessDaysDAL.findOnboardingDay(storeId);
+   * if (onboardingDay) {
+   *   // Store is in onboarding mode
+   *   // Use onboardingDay.day_id for the active onboarding session
+   * } else {
+   *   // Normal operation mode
+   * }
+   */
+  findOnboardingDay(storeId: string): LotteryBusinessDay | null {
+    // SEC-006: Parameterized query with ? placeholders
+    // DB-006: WHERE includes store_id for tenant isolation
+    // LIMIT 1: There should only be one, but this ensures efficiency
+    // Uses index: idx_lottery_days_onboarding(store_id, is_onboarding)
+    const stmt = this.db.prepare(`
+      SELECT * FROM lottery_business_days
+      WHERE store_id = ? AND is_onboarding = 1
+      LIMIT 1
+    `);
+
+    const result = stmt.get(storeId) as LotteryBusinessDay | undefined;
+
+    log.debug('findOnboardingDay executed', {
+      storeId,
+      found: result !== undefined,
+      dayId: result?.day_id,
+    });
+
+    return result ?? null;
   }
 
   /**
@@ -1021,7 +1137,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         entity_id: dayId,
         operation: 'CREATE',
         payload: dayOpenPayload,
-        priority: 2, // Higher priority - day_open must sync before day_close
+        priority: DAY_OPEN_SYNC_PRIORITY, // SYNC-001: Must sync before shifts (10) to prevent FK errors
         sync_direction: 'PUSH',
       });
 

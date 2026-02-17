@@ -47,6 +47,7 @@ function createDefaultProps(
     isActive: true,
     onComplete: vi.fn(),
     isCompleting: false,
+    activatedPacksCount: undefined,
     ...overrides,
   };
 }
@@ -241,6 +242,44 @@ describe('OnboardingModeIndicator', () => {
 
       // Should have dark mode classes
       expect(indicator.className).toContain('dark:bg-blue');
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // Pack Count Display (BIZ-012-FIX)
+  // --------------------------------------------------------------------------
+  describe('Pack Count Display (BIZ-012-FIX)', () => {
+    it('should display activated pack count when activatedPacksCount > 0', () => {
+      render(<OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: 5 })} />);
+      expect(screen.getByTestId('onboarding-pack-count')).toBeInTheDocument();
+      expect(screen.getByText(/5 packs activated/i)).toBeInTheDocument();
+    });
+
+    it('should display singular form for 1 pack', () => {
+      render(<OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: 1 })} />);
+      expect(screen.getByText(/1 pack activated/i)).toBeInTheDocument();
+    });
+
+    it('should display plural form for multiple packs', () => {
+      render(<OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: 3 })} />);
+      expect(screen.getByText(/3 packs activated/i)).toBeInTheDocument();
+    });
+
+    it('should NOT display pack count when activatedPacksCount is 0', () => {
+      render(<OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: 0 })} />);
+      expect(screen.queryByTestId('onboarding-pack-count')).not.toBeInTheDocument();
+    });
+
+    it('should NOT display pack count when activatedPacksCount is undefined', () => {
+      render(
+        <OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: undefined })} />
+      );
+      expect(screen.queryByTestId('onboarding-pack-count')).not.toBeInTheDocument();
+    });
+
+    it('should handle large pack counts correctly', () => {
+      render(<OnboardingModeIndicator {...createDefaultProps({ activatedPacksCount: 100 })} />);
+      expect(screen.getByText(/100 packs activated/i)).toBeInTheDocument();
     });
   });
 

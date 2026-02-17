@@ -4883,7 +4883,7 @@ describe('Lottery IPC Handlers', () => {
             entity_id: NEW_DAY_ID,
             operation: 'CREATE',
             store_id: STORE_ID,
-            priority: 2, // day_open has high priority
+            priority: 20, // SYNC-001: day_open must sync before shifts (10)
             payload: { day_id: NEW_DAY_ID, business_date: BUSINESS_DATE_TODAY },
           });
           return mockNewDay;
@@ -4903,7 +4903,7 @@ describe('Lottery IPC Handlers', () => {
         );
       });
 
-      it('should queue day_open with correct priority (high priority)', () => {
+      it('should queue day_open with priority 20 (higher than shifts at 10)', () => {
         lotteryBusinessDaysDAL.commitClose.mockReturnValue(mockCommitCloseResult);
         lotteryBusinessDaysDAL.getOrCreateForDate.mockImplementation(() => {
           syncQueueDAL.enqueue({
@@ -4911,7 +4911,7 @@ describe('Lottery IPC Handlers', () => {
             entity_id: NEW_DAY_ID,
             operation: 'CREATE',
             store_id: STORE_ID,
-            priority: 2, // Priority 2 is high (lower number = higher priority)
+            priority: 20, // SYNC-001: higher number = higher priority
             payload: {},
           });
           return mockNewDay;
@@ -4920,10 +4920,10 @@ describe('Lottery IPC Handlers', () => {
         // Act
         lotteryBusinessDaysDAL.getOrCreateForDate(STORE_ID, BUSINESS_DATE_TODAY, USER_ID);
 
-        // Assert: High priority
+        // Assert: Priority 20 ensures day syncs before shifts (10)
         expect(syncQueueDAL.enqueue).toHaveBeenCalledWith(
           expect.objectContaining({
-            priority: 2,
+            priority: 20,
           })
         );
       });

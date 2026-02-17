@@ -71,6 +71,12 @@ export interface LotteryPack extends StoreEntity {
   depletion_reason: string | null;
   return_reason: string | null;
   return_notes: string | null;
+  /**
+   * v020: Original starting serial number of pack (from lottery commission barcode)
+   * BIZ-013: Cloud-synced packs may have opening_serial=null but serial_start set
+   * Used as fallback for effective starting serial calculation
+   */
+  serial_start: string | null;
 }
 
 /**
@@ -943,10 +949,18 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
-    const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial;
-    if (!effectiveStartingSerial) {
-      throw new Error(`Pack has no opening serial: ${packId}`);
-    }
+    // Fallback priority: prev_ending_serial → opening_serial → serial_start → '000'
+    // BIZ-013: Cloud-synced packs may have opening_serial=null but serial_start set
+    const effectiveStartingSerial =
+      pack.prev_ending_serial || pack.opening_serial || pack.serial_start || '000';
+
+    log.debug('calculateSales effectiveStartingSerial', {
+      packId,
+      prev_ending_serial: pack.prev_ending_serial,
+      opening_serial: pack.opening_serial,
+      serial_start: pack.serial_start,
+      effectiveStartingSerial,
+    });
 
     if (!pack.game_price) {
       throw new Error(`Game has no price: ${pack.game_id}`);

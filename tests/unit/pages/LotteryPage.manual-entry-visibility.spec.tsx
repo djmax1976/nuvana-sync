@@ -54,6 +54,10 @@ const mockUseLotteryDayBins = vi.fn();
 const mockUseDayStatus = vi.fn();
 const mockUseInitializeBusinessDay = vi.fn();
 
+// BIZ-012-FIX: Mock onboarding hooks
+const mockUseOnboardingStatus = vi.fn();
+const mockUseCompleteOnboarding = vi.fn();
+
 vi.mock('../../../src/renderer/hooks/useLottery', () => ({
   useLotteryPacks: () => mockUseLotteryPacks(),
   usePackDetails: () => mockUsePackDetails(),
@@ -61,6 +65,9 @@ vi.mock('../../../src/renderer/hooks/useLottery', () => ({
   useLotteryDayBins: () => mockUseLotteryDayBins(),
   useDayStatus: () => mockUseDayStatus(),
   useInitializeBusinessDay: () => mockUseInitializeBusinessDay(),
+  // BIZ-012-FIX: Add onboarding hooks
+  useOnboardingStatus: () => mockUseOnboardingStatus(),
+  useCompleteOnboarding: () => mockUseCompleteOnboarding(),
 }));
 
 // Mock useAuthGuard - returns an object with executeWithAuth that calls the callback immediately
@@ -417,6 +424,18 @@ function setupDefaultMocks() {
   });
 
   mockUseInitializeBusinessDay.mockReturnValue({
+    mutate: vi.fn(),
+    isPending: false,
+  });
+
+  // BIZ-012-FIX: Mock onboarding status (default: not in onboarding)
+  mockUseOnboardingStatus.mockReturnValue({
+    data: { isOnboarding: false, dayId: null, businessDate: null, openedAt: null },
+    isLoading: false,
+  });
+
+  // BIZ-012-FIX: Mock complete onboarding mutation
+  mockUseCompleteOnboarding.mockReturnValue({
     mutate: vi.fn(),
     isPending: false,
   });

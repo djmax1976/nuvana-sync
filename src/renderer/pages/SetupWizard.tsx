@@ -541,8 +541,9 @@ function SetupWizard({ onComplete }: SetupWizardProps): React.ReactElement {
             <button
               onClick={handleComplete}
               className="w-full bg-indigo-600 text-white py-3 px-6 rounded-lg font-medium hover:bg-indigo-700 transition-colors"
+              data-testid="setup-start-onboarding-button"
             >
-              Go to Dashboard
+              Start Onboarding
             </button>
           </div>
         )}

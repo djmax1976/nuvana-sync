@@ -4581,7 +4581,7 @@ describe('SyncEngineService', () => {
         opened_at: overrides?.opened_at ?? '2026-02-01T08:00:00.000Z',
         ...(overrides?.notes && { notes: overrides.notes }),
       }),
-      priority: 2,
+      priority: 20, // SYNC-001: Must sync before shifts (10)
       synced: 0,
       sync_attempts: 0,
       max_attempts: 5,
