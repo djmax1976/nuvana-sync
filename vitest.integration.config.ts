@@ -19,9 +19,10 @@ export default defineConfig({
     // Setup file for React Testing Library
     setupFiles: ['./tests/setup-renderer.ts'],
     passWithNoTests: false,
-    // Use threads pool for ESM/CJS module compatibility (required for React Router)
-    // Note: vmForks has issues with ESM modules in react-router
-    pool: 'threads',
+    // Use forks pool for native module compatibility (better-sqlite3)
+    // Threads pool causes segfaults (exit code 139) when workers terminate with open DB connections
+    // Note: vmForks has issues with ESM modules in react-router, but regular forks is fine
+    pool: 'forks',
     isolate: true,
     // Longer timeout for integration tests
     testTimeout: 30000,
