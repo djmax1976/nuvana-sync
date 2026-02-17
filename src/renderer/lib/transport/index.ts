@@ -430,6 +430,51 @@ export const ipc = {
       ipcClient.invoke<LotteryDayReportResponse>('reports:getLotteryDayReport', params),
   },
 
+  // Lottery
+  /**
+   * Lottery onboarding and management operations
+   *
+   * Manages lottery business day initialization and onboarding workflow.
+   * Onboarding mode allows stores to set up initial pack inventory.
+   *
+   * @security SEC-006: All queries use parameterized statements via DAL
+   * @security DB-006: All operations store-scoped for tenant isolation
+   */
+  lottery: {
+    /**
+     * Get current onboarding status for the store
+     *
+     * Returns whether the store is in onboarding mode and the associated day ID.
+     * Used to restore onboarding state after navigation or page reload.
+     *
+     * @returns OnboardingStatusResponse with is_onboarding flag and day info
+     *
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized query in backend DAL
+     */
+    getOnboardingStatus: () =>
+      ipcClient.invoke<OnboardingStatusResponse>('lottery:getOnboardingStatus'),
+
+    /**
+     * Complete onboarding mode for the store
+     *
+     * Explicitly ends onboarding mode by setting is_onboarding = 0 on the day.
+     * After completion, pack activation requires existing inventory.
+     *
+     * @param dayId - UUID of the lottery business day to complete onboarding
+     * @returns CompleteOnboardingResponse with success status
+     *
+     * @security SEC-010: Requires authenticated user
+     * @security DB-006: Validates day belongs to store before update
+     * @security SEC-014: dayId validated as UUID by Zod in backend
+     * @security API-001: Input validated via Zod schema in handler
+     */
+    completeOnboarding: (dayId: string) =>
+      ipcClient.invoke<CompleteOnboardingResponse>('lottery:completeOnboarding', {
+        day_id: dayId,
+      }),
+  },
+
   // Day Close Access
   /**
    * Day close access validation operations
@@ -1227,4 +1272,45 @@ export interface DayCloseAccessResult {
 export interface DayCloseAccessInput {
   /** PIN for authentication (4-6 digits) */
   pin: string;
+}
+
+// ============================================================================
+// Lottery Onboarding Types (BIZ-012-FIX)
+// ============================================================================
+
+/**
+ * Response from lottery:getOnboardingStatus IPC handler
+ *
+ * Returns the current onboarding state for the store.
+ * Used by frontend to restore onboarding mode on page load/navigation.
+ *
+ * @security DB-006: Response is store-scoped via backend query
+ */
+export interface OnboardingStatusResponse {
+  /** Whether the store is currently in onboarding mode */
+  is_onboarding: boolean;
+  /** Day ID of the onboarding day (null if not in onboarding) */
+  day_id: string | null;
+  /** Business date of the onboarding day (null if not in onboarding) */
+  business_date: string | null;
+  /** When the onboarding day was opened (null if not in onboarding) */
+  opened_at: string | null;
+}
+
+/**
+ * Response from lottery:completeOnboarding IPC handler
+ *
+ * Returned when onboarding mode is explicitly ended by user action.
+ * After this, normal inventory requirements apply for pack activation.
+ *
+ * @security SEC-010: Requires authenticated user (verified in backend)
+ * @security DB-006: Day ownership validated in backend
+ */
+export interface CompleteOnboardingResponse {
+  /** Whether the operation succeeded */
+  success: boolean;
+  /** The day ID that was updated */
+  day_id: string;
+  /** Human-readable result message */
+  message?: string;
 }

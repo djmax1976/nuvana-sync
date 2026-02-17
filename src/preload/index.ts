@@ -155,6 +155,9 @@ const ALLOWED_INVOKE_CHANNELS = [
   'lottery:listBusinessDays', // List all business days (debugging)
   'lottery:getDayStatus', // Get current day status without creating (initialization check)
   'lottery:initializeBusinessDay', // Explicitly initialize/start a business day
+  'lottery:getOnboardingStatus', // BIZ-012-FIX: Get current onboarding status
+  'lottery:completeOnboarding', // BIZ-012-FIX: Complete onboarding mode
+  'lottery:reQueueOnboardingPacks', // BIZ-012-SYNC-FIX: Re-queue onboarding packs with correct serial_start
   'lottery:deleteBusinessDay', // Delete business day (data cleanup)
   'lottery:reopenBusinessDay', // Reopen closed day (testing/recovery)
   'lottery:cleanupStaleDays', // Delete all stale days except most recent closed (data cleanup)

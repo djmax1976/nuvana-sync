@@ -99,7 +99,7 @@ function LotteryGuard({ children }: { children: React.ReactNode }) {
 const router = createHashRouter([
   {
     path: '/setup',
-    element: <SetupWizard onComplete={() => (window.location.href = '#/')} />,
+    element: <SetupWizard onComplete={() => (window.location.href = '#/lottery')} />,
   },
   {
     path: '/',

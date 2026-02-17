@@ -42,6 +42,11 @@ import {
   type ReturnPackInput,
   type ListGamesInput,
 } from '../lib/api/lottery';
+import {
+  ipc,
+  type OnboardingStatusResponse,
+  type CompleteOnboardingResponse,
+} from '../lib/transport';
 
 // ============ TanStack Query Keys ============
 
@@ -63,6 +68,8 @@ export const lotteryKeys = {
   dayBinsList: (storeId: string | undefined, date?: string) =>
     [...lotteryKeys.dayBins(), storeId, date] as const,
   dayStatus: () => [...lotteryKeys.all, 'dayStatus'] as const,
+  /** Query key for onboarding status (BIZ-012-FIX) */
+  onboardingStatus: () => [...lotteryKeys.all, 'onboardingStatus'] as const,
   games: () => [...lotteryKeys.all, 'games'] as const,
   gameList: () => [...lotteryKeys.games(), 'list'] as const,
   /** Query key for paginated games listing with filters */
@@ -156,6 +163,12 @@ export function useInvalidateLottery() {
     },
     invalidateVariances: () =>
       queryClient.invalidateQueries({ queryKey: lotteryKeys.variances(), refetchType: 'active' }),
+    /** BIZ-012-FIX: Invalidate onboarding status cache */
+    invalidateOnboardingStatus: () =>
+      queryClient.invalidateQueries({
+        queryKey: lotteryKeys.onboardingStatus(),
+        refetchType: 'active',
+      }),
     invalidateAll: () =>
       queryClient.invalidateQueries({ queryKey: lotteryKeys.all, refetchType: 'active' }),
   };
@@ -313,6 +326,13 @@ export function useDayStatus(options?: { enabled?: boolean }) {
  * Hook to initialize business day explicitly
  * Creates a new OPEN business day for the store.
  *
+ * BIZ-012-FIX: On success, invalidates onboarding status to ensure frontend
+ * reads the persisted is_onboarding flag from the newly created day.
+ *
+ * MCP Guidance Applied:
+ * - FE-001: STATE_MANAGEMENT - Proper cache invalidation after mutation
+ * - DB-006: TENANT_ISOLATION - Backend enforces store-level isolation
+ *
  * @returns Mutation hook for business day initialization
  */
 export function useInitializeBusinessDay() {
@@ -325,6 +345,8 @@ export function useInitializeBusinessDay() {
       queryClient.invalidateQueries({ queryKey: lotteryKeys.dayStatus() });
       // Also invalidate day bins (will now return data)
       queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
+      // BIZ-012-FIX: Invalidate onboarding status to read persisted flag
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.onboardingStatus() });
     },
   });
 }
@@ -685,6 +707,85 @@ export function useReturnPack() {
         queryKey: lotteryKeys.packDetail(packId),
       });
       // Invalidate day bins in case pack was active in a bin
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
+    },
+  });
+}
+
+// ============ Onboarding Hooks (BIZ-012-FIX) ============
+
+/**
+ * Response type for useOnboardingStatus hook
+ * Provides type-safe access to onboarding state
+ */
+export interface OnboardingStatusResult {
+  /** Whether the store is currently in onboarding mode */
+  isOnboarding: boolean;
+  /** Day ID of the onboarding day (null if not in onboarding) */
+  dayId: string | null;
+  /** Business date of the onboarding day (null if not in onboarding) */
+  businessDate: string | null;
+  /** When the onboarding day was opened (null if not in onboarding) */
+  openedAt: string | null;
+}
+
+/**
+ * Hook to fetch current onboarding status
+ * BIZ-012-FIX: Lottery Onboarding UX Improvement
+ *
+ * Returns whether the store is in onboarding mode and the associated day info.
+ * Used by LotteryPage to restore onboarding state after navigation/reload.
+ *
+ * MCP Guidance Applied:
+ * - FE-001: STATE_MANAGEMENT - Proper caching with query keys
+ * - FE-003: FE_SENSITIVE_DATA_EXPOSURE - No sensitive data in response
+ * - DB-006: TENANT_ISOLATION - Backend enforces store-level isolation
+ *
+ * @param options - Query options (enabled, etc.)
+ * @returns TanStack Query result with onboarding status
+ */
+export function useOnboardingStatus(options?: { enabled?: boolean }) {
+  return useQuery<OnboardingStatusResponse, Error, OnboardingStatusResult>({
+    queryKey: lotteryKeys.onboardingStatus(),
+    queryFn: () => ipc.lottery.getOnboardingStatus(),
+    enabled: options?.enabled !== false,
+    refetchOnMount: 'always',
+    refetchOnWindowFocus: true,
+    staleTime: 5000, // Check status frequently during onboarding
+    select: (response): OnboardingStatusResult => ({
+      isOnboarding: response.is_onboarding,
+      dayId: response.day_id,
+      businessDate: response.business_date,
+      openedAt: response.opened_at,
+    }),
+  });
+}
+
+/**
+ * Hook to complete onboarding mode
+ * BIZ-012-FIX: Lottery Onboarding UX Improvement
+ *
+ * Explicitly ends onboarding mode by setting is_onboarding = 0 on the day.
+ * After completion, pack activation requires existing inventory.
+ *
+ * MCP Guidance Applied:
+ * - FE-001: STATE_MANAGEMENT - Proper cache invalidation after mutation
+ * - API-001: VALIDATION - Backend validates day_id via Zod
+ * - DB-006: TENANT_ISOLATION - Backend validates day belongs to store
+ *
+ * @returns Mutation hook for completing onboarding
+ */
+export function useCompleteOnboarding() {
+  const queryClient = useQueryClient();
+
+  return useMutation<CompleteOnboardingResponse, Error, string>({
+    mutationFn: (dayId: string) => ipc.lottery.completeOnboarding(dayId),
+    onSuccess: () => {
+      // Invalidate onboarding status to reflect completion
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.onboardingStatus() });
+      // Invalidate day status as onboarding state is part of day info
+      queryClient.invalidateQueries({ queryKey: lotteryKeys.dayStatus() });
+      // Invalidate day bins to refresh UI state
       queryClient.invalidateQueries({ queryKey: lotteryKeys.dayBins() });
     },
   });

@@ -362,9 +362,9 @@ describe('Day Open Sync Integration (day_open_push - Phase 5)', () => {
   // ==========================================================================
   describe('T5.4.2: Day open then close flow', () => {
     it('should queue day_open before day_close based on priority', async () => {
-      // day_open has priority 2, day_close has priority 1
+      // SYNC-001: day_open has priority 20, shifts have priority 10, day_close has priority 1
       // Higher priority = processed first
-      // This ensures day exists on cloud before we try to close it
+      // This ensures day exists on cloud before shifts try to reference it
 
       const { LotteryBusinessDaysDAL } =
         await import('../../src/main/dal/lottery-business-days.dal');

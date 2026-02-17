@@ -599,7 +599,7 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
   // ==========================================================================
 
   describe('INT-FLOW-002: Sync queue ordering: day_open before shift', () => {
-    it('should queue day_open (priority 2) before day_close (priority 1)', async () => {
+    it('should queue day_open (priority 20) before shifts (priority 10) and day_close (priority 1)', async () => {
       // Arrange
       const user = createTestUser('shift_manager');
       setCurrentUser(user);
@@ -618,8 +618,8 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
       expect(dayOpenItems.length).toBeGreaterThanOrEqual(1);
       expect(dayCloseItems.length).toBeGreaterThanOrEqual(1);
 
-      // Priority ordering: higher number = processed first
-      // day_open: priority 2, day_close: priority 1
+      // SYNC-001: Priority ordering - higher number = processed first
+      // day_open: priority 20, shifts: priority 10, day_close: priority 1
       const dayOpenPriority = dayOpenItems[0].priority ?? 0;
       const dayClosePriority = dayCloseItems[0].priority ?? 0;
 

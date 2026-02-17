@@ -43,6 +43,11 @@ export interface OnboardingModeIndicatorProps {
    * Used during submission or other blocking operations
    */
   isCompleting?: boolean;
+  /**
+   * Optional: Count of packs activated during onboarding
+   * BIZ-012-FIX: Displays progress to user
+   */
+  activatedPacksCount?: number;
 }
 
 /**
@@ -64,6 +69,7 @@ export function OnboardingModeIndicator({
   isActive,
   onComplete,
   isCompleting = false,
+  activatedPacksCount,
 }: OnboardingModeIndicatorProps) {
   // Don't render if not active
   if (!isActive) {
@@ -86,6 +92,13 @@ export function OnboardingModeIndicator({
             positions. The system will use the scanned serial number as the starting position
             instead of defaulting to ticket #1.
           </p>
+          {/* BIZ-012-FIX: Display activated packs count for user progress feedback */}
+          {activatedPacksCount !== undefined && activatedPacksCount > 0 && (
+            <p className="text-sm font-medium" data-testid="onboarding-pack-count">
+              {activatedPacksCount} pack{activatedPacksCount === 1 ? '' : 's'} activated during
+              onboarding
+            </p>
+          )}
           <div className="flex items-center gap-2">
             <Button
               variant="outline"

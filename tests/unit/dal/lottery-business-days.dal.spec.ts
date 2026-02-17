@@ -1589,13 +1589,14 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
     // T5.3.7: Priority ordering
     // =======================================================================
     describe('T5.3.7: Priority ordering', () => {
-      it('should queue day_open with priority 2 (before day_close)', () => {
+      it('should queue day_open with priority 20 (before shifts at 10)', () => {
         const today = new Date().toISOString().split('T')[0];
         dal.getOrCreateForDate('store-1', today, 'user-opener-1');
 
         const dayOpenCall = getSyncCall('day_open');
 
-        expect(dayOpenCall[0].priority).toBe(2);
+        // SYNC-001: day_open must sync before shifts (10) to prevent FK errors
+        expect(dayOpenCall[0].priority).toBe(20);
       });
 
       it('should use PUSH sync_direction', () => {

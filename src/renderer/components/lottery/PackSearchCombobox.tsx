@@ -42,7 +42,7 @@ import { cn } from '@/lib/utils';
 import { Check, ChevronsUpDown, Loader2, Package } from 'lucide-react';
 import { useLotteryPacks, usePackSearch } from '@/hooks/useLottery';
 import type { LotteryPackResponse, LotteryPackStatus, LotteryGameStatus } from '@/lib/api/lottery';
-import { checkPackExists } from '@/lib/api/lottery';
+import { checkPackExists, lookupGameByCode } from '@/lib/api/lottery';
 import { isValidSerialNumber, parseSerializedNumber } from '@/lib/utils/lottery-serial-parser';
 
 /**
@@ -60,14 +60,25 @@ const SCAN_VALIDATION_TIMEOUT_MS = 400;
  * Pack option for selection
  * SEC-014: INPUT_VALIDATION - Includes game_status for client-side validation
  * FE-002: FORM_VALIDATION - Mirrors backend game status check
+ * BIZ-012-FIX: Supports onboarding mode where pack_id may not exist yet
  */
 export interface PackSearchOption {
-  pack_id: string;
+  /**
+   * Pack UUID - optional in onboarding mode where pack doesn't exist in inventory yet
+   * BIZ-012-FIX: When undefined, indicates pack needs to be created during activation
+   */
+  pack_id?: string;
+  /** 7-digit pack number from barcode */
   pack_number: string;
+  /** Game UUID for activation */
   game_id: string;
+  /** Game name for display */
   game_name: string;
+  /** Game price for display */
   game_price: number | null;
+  /** Pack serial range start (empty for onboarding) */
   serial_start: string;
+  /** Pack serial range end (empty for onboarding) */
   serial_end: string;
   /**
    * Game status for client-side validation
@@ -84,6 +95,11 @@ export interface PackSearchOption {
    * @example "025" means 25 tickets already sold, start at ticket #25
    */
   scanned_serial?: string;
+  /**
+   * BIZ-012-FIX: Indicates this pack was created from barcode scan during onboarding
+   * When true, pack_id is undefined and backend will create pack during activation
+   */
+  is_onboarding_pack?: boolean;
 }
 
 /**
@@ -94,6 +110,8 @@ export interface PackSearchOption {
  * - onSearchQueryChange: Called when user types (parent updates searchQuery)
  * - onPackSelect: Called when user selects a pack
  * - onClear: Called when selection should be cleared
+ *
+ * BIZ-012-FIX: Supports onboardingMode where packs can be scanned without inventory
  */
 export interface PackSearchComboboxProps {
   /** Store UUID for fetching packs */
@@ -118,6 +136,15 @@ export interface PackSearchComboboxProps {
   statusFilter?: 'RECEIVED' | 'ACTIVE' | 'DEPLETED' | 'RETURNED';
   /** Test ID for the input element */
   testId?: string;
+  /**
+   * BIZ-012-FIX: Onboarding mode flag
+   * When true, barcode scans lookup GAME instead of PACK in inventory.
+   * This allows new stores to scan packs that haven't been received yet.
+   * The pack will be created during activation by the backend.
+   *
+   * @default false
+   */
+  onboardingMode?: boolean;
 }
 
 /**
@@ -275,6 +302,7 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
       error,
       statusFilter = 'RECEIVED',
       testId,
+      onboardingMode = false,
     },
     ref
   ) {
@@ -470,6 +498,106 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
     );
 
     /**
+     * BIZ-012-FIX: Handle onboarding mode barcode scan
+     * Instead of searching inventory, lookup the game by code and create a synthetic pack option.
+     *
+     * Flow:
+     * 1. Parse barcode to extract game_code (4 digits), pack_number (7 digits), serial (3 digits)
+     * 2. Call lookupGameByCode to verify game exists and is ACTIVE
+     * 3. If valid, create PackSearchOption with is_onboarding_pack=true and call onPackSelect
+     * 4. If invalid, show appropriate error
+     *
+     * SEC-014: Barcode format validated by isValidSerialNumber (24 digits only)
+     * SEC-014: Game status validated - only ACTIVE games allowed
+     *
+     * @param barcode - Valid 24-digit barcode string
+     */
+    const handleOnboardingBarcodeScan = useCallback(
+      async (barcode: string) => {
+        // SEC-014: Parse and validate barcode
+        const parsed = parseSerializedNumber(barcode);
+        const { game_code, pack_number, serial_start } = parsed;
+
+        try {
+          // Lookup game by code - this validates game exists and gets game_id
+          const response = await lookupGameByCode(game_code);
+
+          if (!response.success) {
+            toast({
+              title: 'Game lookup failed',
+              description:
+                response.error || response.message || 'Unable to verify game. Please try again.',
+              variant: 'destructive',
+            });
+            clearAndRefocus();
+            return;
+          }
+
+          const { found, game } = response.data;
+
+          if (!found || !game) {
+            toast({
+              title: 'Unknown game code',
+              description: `Game code "${game_code}" not found. Please verify the barcode and try again.`,
+              variant: 'destructive',
+            });
+            clearAndRefocus();
+            return;
+          }
+
+          // SEC-014: Validate game status - only ACTIVE games allowed
+          if (!isGameActiveForActivation(game.status)) {
+            const errorMsg = getGameStatusErrorMessage(game.status, game.name, pack_number);
+            toast({
+              title: errorMsg.title,
+              description: errorMsg.description,
+              variant: 'destructive',
+            });
+            clearAndRefocus();
+            return;
+          }
+
+          // BIZ-012-FIX: Create synthetic pack option for onboarding
+          // pack_id is undefined - backend will create the pack during activation
+          const onboardingPack: PackSearchOption = {
+            pack_id: undefined, // Will be created by backend
+            pack_number: pack_number,
+            game_id: game.game_id,
+            game_name: game.name,
+            game_price: game.price,
+            serial_start: '', // Not yet in inventory
+            serial_end: '', // Not yet in inventory
+            game_status: game.status,
+            scanned_serial: serial_start,
+            is_onboarding_pack: true,
+          };
+
+          // Pass selection to parent
+          onPackSelect(onboardingPack);
+          onSearchQueryChange('');
+
+          // Clear any pending validation timer
+          if (scanValidationTimerRef.current) {
+            clearTimeout(scanValidationTimerRef.current);
+            scanValidationTimerRef.current = null;
+          }
+
+          setIsOpen(false);
+        } catch (error) {
+          // API-003: Log error, show generic message
+          console.error('Onboarding barcode scan failed:', error);
+          toast({
+            title: 'Scan failed',
+            description: 'Unable to process barcode. Please try again.',
+            variant: 'destructive',
+          });
+          clearAndRefocus();
+        }
+      },
+      [toast, clearAndRefocus, onPackSelect, onSearchQueryChange]
+    );
+
+    /**
      * Handle input change with simple 400ms validation
      *
      * Logic:
@@ -644,6 +772,8 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
     // 3. 500ms later → debouncedSearch updates → isSearchMode = true → API call starts
     // 4. API returns → isLoading = false → NOW we can safely select
     //
+    // BIZ-012-FIX: In onboarding mode, if no pack found, lookup game and create synthetic pack.
+    //
     // MCP FE-001: STATE_MANAGEMENT - Handle async state transitions correctly
     useEffect(() => {
       // Only auto-select when:
@@ -659,19 +789,25 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
           setPendingEnterSelect(false);
         });
       } else if (pendingEnterSelect && isSearchMode && !isLoading && packs.length === 0) {
-        // Search completed but no results - check if pack exists with different status
-        // This provides clear feedback for already-activated, depleted, or returned packs
+        // Search completed but no results
+        // BIZ-012-FIX: In onboarding mode, lookup game and create synthetic pack
+        // In normal mode, check if pack exists with different status
         queueMicrotask(() => {
           setPendingEnterSelect(false);
-          // Extract pack number from the search query (could be barcode or direct pack number)
           const trimmedQuery = searchQuery.trim();
-          let packNumber = trimmedQuery;
-          if (isValidSerialNumber(trimmedQuery)) {
-            const parsed = parseSerializedNumber(trimmedQuery);
-            packNumber = parsed.pack_number;
+
+          if (onboardingMode && isValidSerialNumber(trimmedQuery)) {
+            // Onboarding mode with valid barcode: lookup game and create pack
+            handleOnboardingBarcodeScan(trimmedQuery);
+          } else {
+            // Normal mode: show error about pack status
+            let packNumber = trimmedQuery;
+            if (isValidSerialNumber(trimmedQuery)) {
+              const parsed = parseSerializedNumber(trimmedQuery);
+              packNumber = parsed.pack_number;
+            }
+            checkPackStatusAndShowError(packNumber);
           }
-          // Check pack status and show appropriate error message
-          checkPackStatusAndShowError(packNumber);
         });
       }
       // Note: If pendingEnterSelect && !isSearchMode, we wait for debounce to complete
@@ -683,6 +819,8 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
       handleSelectPack,
       searchQuery,
       checkPackStatusAndShowError,
+      onboardingMode,
+      handleOnboardingBarcodeScan,
     ]);
 
     // ============================================================================
@@ -692,6 +830,9 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
     // 1. The debounced search matches the barcode (debounce completed)
     // 2. Search is not loading (API call completed)
     // 3. Exactly one pack matches OR the first pack's pack_number matches the barcode
+    //
+    // BIZ-012-FIX: In onboarding mode, if no pack found in inventory,
+    // lookup game by code and create synthetic pack for activation.
     //
     // This handles scanners that don't send Enter key after barcode.
     useEffect(() => {
@@ -731,10 +872,17 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
         }
         // If no exact match, leave dropdown open for manual selection
       } else {
-        // No results for valid barcode - check if pack exists with different status
-        // This provides clear feedback for already-activated, depleted, or returned packs
+        // No results for valid barcode
+        // BIZ-012-FIX: In onboarding mode, lookup game and create synthetic pack
+        // In normal mode, check if pack exists with different status
         queueMicrotask(() => {
-          checkPackStatusAndShowError(barcodePackNumber);
+          if (onboardingMode) {
+            // Onboarding mode: lookup game and create pack during activation
+            handleOnboardingBarcodeScan(trimmedQuery);
+          } else {
+            // Normal mode: show error about pack status
+            checkPackStatusAndShowError(barcodePackNumber);
+          }
         });
       }
     }, [
@@ -745,6 +893,8 @@ export const PackSearchCombobox = forwardRef<PackSearchComboboxHandle, PackSearc
       packs,
       handleSelectPack,
       checkPackStatusAndShowError,
+      onboardingMode,
+      handleOnboardingBarcodeScan,
     ]);
 
     return (

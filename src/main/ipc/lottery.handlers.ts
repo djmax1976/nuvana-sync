@@ -90,18 +90,41 @@ const ReceivePackSchema = z.object({
  * API-001: VALIDATION - Strict schema validation for pack activation
  * SEC-014: INPUT_VALIDATION - Boolean field with safe default
  *
- * @property pack_id - UUID of the pack to activate
+ * @property pack_id - UUID of the pack to activate (ignored in onboarding_mode)
  * @property bin_id - UUID of the target bin
  * @property opening_serial - 3-digit serial number of first ticket
  * @property deplete_previous - When true (default), auto-deplete existing pack in bin
  *                              with reason AUTO_REPLACED for cloud sync compatibility
+ * @property onboarding_mode - When true, creates pack in inventory AND activates it
+ *                             Used for first-time store setup with pre-sold packs
+ * @property game_id - Required when onboarding_mode is true (to create pack)
+ * @property pack_number - Required when onboarding_mode is true (7-digit pack number)
  */
 const ActivatePackSchema = z.object({
-  pack_id: UUIDSchema,
+  pack_id: UUIDSchema.optional(), // Optional in onboarding mode (will be generated)
   bin_id: UUIDSchema,
   opening_serial: SerialSchema,
   /** Default true ensures safety - always check for bin collisions unless explicitly disabled */
   deplete_previous: z.boolean().optional().default(true),
+  /**
+   * BIZ-012-FIX: Onboarding mode flag
+   * When true: Creates pack in inventory AND activates in single operation
+   * When false (default): Requires pack to already exist in inventory
+   */
+  onboarding_mode: z.boolean().optional().default(false),
+  /**
+   * Game ID - Required when onboarding_mode is true
+   * SEC-014: UUID validation prevents injection
+   */
+  game_id: UUIDSchema.optional(),
+  /**
+   * Pack number - Required when onboarding_mode is true
+   * 7-digit pack number extracted from 24-digit barcode
+   */
+  pack_number: z
+    .string()
+    .regex(/^\d{7}$/, 'Pack number must be 7 digits')
+    .optional(),
 });
 
 /**
@@ -285,11 +308,16 @@ interface PackSyncShiftContext {
  * - Depletion shift context (depleted_shift_id, depleted_by, depletion_reason)
  * - Return shift context (returned_shift_id, returned_by, return_reason, return_notes)
  *
+ * BIZ-012-SYNC-FIX: Onboarding mode serial_start handling
+ * - Normal operation: serial_start is always "000" (new packs start at first ticket)
+ * - Onboarding mode: serial_start uses pack.opening_serial (pre-sold packs have tickets already sold)
+ *
  * @param pack - Pack data from DAL
  * @param gameCode - Game code from lottery_games table (required by API)
  * @param ticketsPerPack - Number of tickets in pack (for calculating serial_end)
  * @param activatedBy - Optional activated_by user ID
  * @param shiftContext - Optional shift tracking context for audit trail
+ * @param onboardingMode - When true, use pack.opening_serial as serial_start (for pre-sold packs)
  * @returns Sync payload suitable for cloud sync
  */
 function buildPackSyncPayload(
@@ -315,12 +343,14 @@ function buildPackSyncPayload(
   gameCode: string,
   ticketsPerPack: number | null,
   activatedBy?: string | null,
-  shiftContext?: PackSyncShiftContext
+  shiftContext?: PackSyncShiftContext,
+  onboardingMode?: boolean
 ): PackSyncPayload {
   // Calculate serial_start and serial_end
-  // serial_start is always "000" (packs start at ticket 0)
-  // serial_end = tickets_per_pack - 1, padded to 3 digits (e.g., 300 tickets → "299")
-  const serialStart = '000';
+  // BIZ-012-SYNC-FIX: Onboarding packs use actual opening_serial (pre-sold position)
+  // Normal packs always start at "000" (first ticket)
+  // SEC-014: opening_serial is already validated by Zod schema (3-digit numeric string)
+  const serialStart = onboardingMode && pack.opening_serial ? pack.opening_serial : '000';
   const serialEnd = ticketsPerPack ? String(ticketsPerPack - 1).padStart(3, '0') : '299'; // Default to 299 (300 tickets)
 
   // v029 API Alignment: Map DAL field names to API field names
@@ -1500,9 +1530,17 @@ registerHandler(
     log.debug('Validation passed', { data: parseResult.data });
 
     try {
-      const { pack_id, bin_id, opening_serial, deplete_previous } = parseResult.data;
+      const {
+        pack_id: inputPackId,
+        bin_id,
+        opening_serial,
+        deplete_previous,
+        onboarding_mode,
+        game_id: inputGameId,
+        pack_number: inputPackNumber,
+      } = parseResult.data;
       const storeId = getStoreId();
-      log.debug('Got store ID', { storeId });
+      log.debug('Got store ID', { storeId, onboardingMode: onboarding_mode });
 
       // SEC-010: AUTHZ - Get user and role from authenticated session, not from frontend
       // This ensures we can't spoof who activated the packs
@@ -1530,7 +1568,7 @@ registerHandler(
         if (!openShift) {
           log.warn('Cashier attempted pack activation without active shift', {
             userId: activated_by,
-            packId: pack_id,
+            packId: inputPackId || 'onboarding', // May be undefined in onboarding mode
             storeId,
           });
           return createErrorResponse(
@@ -1549,6 +1587,132 @@ registerHandler(
         shiftId: shift_id,
         hasOpenShift: Boolean(openShift),
       });
+
+      // ========================================================================
+      // BIZ-012-FIX: Onboarding Mode Pack Creation
+      // ========================================================================
+      // When onboarding_mode is true:
+      // - Validate required fields (game_id, pack_number)
+      // - Create pack in inventory with RECEIVED status
+      // - Use the created pack_id for activation
+      // This allows first-time stores to set starting ticket positions for pre-sold packs
+      //
+      // SEC-006: All INSERTs use parameterized queries via DAL
+      // DB-006: All operations scoped to store_id
+      // ========================================================================
+      let pack_id = inputPackId;
+
+      if (onboarding_mode) {
+        log.info('Onboarding mode activation initiated', {
+          storeId,
+          binId: bin_id,
+          openingSerial: opening_serial,
+          gameId: inputGameId,
+          packNumber: inputPackNumber,
+          userId: activated_by,
+        });
+
+        // Validate required fields for onboarding mode
+        if (!inputGameId) {
+          log.warn('Onboarding mode: game_id is required', { storeId });
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            'Game ID is required for onboarding mode pack activation.'
+          );
+        }
+        if (!inputPackNumber) {
+          log.warn('Onboarding mode: pack_number is required', { storeId });
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            'Pack number is required for onboarding mode pack activation.'
+          );
+        }
+
+        // DB-006: Validate game exists AND belongs to this store (tenant isolation)
+        const onboardingGame = lotteryGamesDAL.findByIdForStore(storeId, inputGameId);
+        if (!onboardingGame) {
+          log.error('Onboarding mode: Game not found', {
+            gameId: inputGameId,
+            storeId,
+          });
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            'Game not found for this store.'
+          );
+        }
+
+        // SEC-014: Validate game status is in allowlist for activation
+        if (onboardingGame.status !== 'ACTIVE') {
+          log.warn('Onboarding mode: Game is not active', {
+            gameId: inputGameId,
+            gameName: onboardingGame.name,
+            gameStatus: onboardingGame.status,
+            storeId,
+          });
+          return createErrorResponse(
+            IPCErrorCodes.VALIDATION_ERROR,
+            `Cannot activate pack: Game "${onboardingGame.name}" is ${onboardingGame.status}. Only packs for ACTIVE games can be activated.`
+          );
+        }
+
+        // Check if pack with same pack_number + game_id already exists for this store
+        // SEC-006: Parameterized query via DAL
+        // DB-006: Store-scoped query
+        const existingPack = lotteryPacksDAL.findByPackNumber(
+          storeId,
+          inputGameId,
+          inputPackNumber
+        );
+        if (existingPack) {
+          log.warn('Onboarding mode: Pack already exists', {
+            packNumber: inputPackNumber,
+            existingPackId: existingPack.pack_id,
+            existingStatus: existingPack.status,
+            storeId,
+          });
+          // If pack exists and is RECEIVED, we can activate it
+          if (existingPack.status === 'RECEIVED') {
+            pack_id = existingPack.pack_id;
+            log.info('Onboarding mode: Using existing RECEIVED pack', {
+              packId: pack_id,
+              packNumber: inputPackNumber,
+            });
+          } else {
+            return createErrorResponse(
+              IPCErrorCodes.VALIDATION_ERROR,
+              `Pack ${inputPackNumber} already exists with status ${existingPack.status}.`
+            );
+          }
+        } else {
+          // Create the pack in inventory with RECEIVED status
+          // SEC-006: Parameterized INSERT via DAL
+          // DB-006: Pack associated with store_id
+          const newPack = lotteryPacksDAL.receive({
+            store_id: storeId,
+            game_id: inputGameId,
+            pack_number: inputPackNumber,
+            received_by: activated_by,
+          });
+          pack_id = newPack.pack_id;
+
+          log.info('Onboarding mode: Pack created in inventory', {
+            packId: pack_id,
+            packNumber: inputPackNumber,
+            gameId: inputGameId,
+            storeId,
+            receivedBy: activated_by,
+          });
+        }
+      }
+
+      // Ensure pack_id is set (either from input or onboarding)
+      if (!pack_id) {
+        log.warn('Pack ID is required', { onboardingMode: onboarding_mode });
+        return createErrorResponse(
+          IPCErrorCodes.VALIDATION_ERROR,
+          'Pack ID is required for activation.'
+        );
+      }
 
       // ========================================================================
       // Game Status Validation (SEC-014: INPUT_VALIDATION, DB-006: TENANT_ISOLATION)
@@ -1763,6 +1927,7 @@ registerHandler(
               };
             },
             // Builder 2: Activated pack sync
+            // BIZ-012-SYNC-FIX: Pass onboarding_mode to use correct serial_start
             (activationResult) => ({
               store_id: storeId,
               entity_type: 'pack',
@@ -1773,7 +1938,8 @@ registerHandler(
                 game.game_code,
                 game.tickets_per_pack,
                 activated_by,
-                { shift_id }
+                { shift_id },
+                onboarding_mode // BIZ-012-SYNC-FIX: Onboarding uses opening_serial, normal uses '000'
               ),
               idempotency_key: generateIdempotencyKey({
                 entity_type: 'pack',
@@ -1914,10 +2080,12 @@ registerHandler(
       // Example: 18-ticket pack (serials 000-017), closing_serial=017
       //          (17 + 1) - 0 = 18 tickets (correct)
       // This differs from day close where closing_serial is the NEXT position to sell
-      const effectiveStartingSerial = packDetails.prev_ending_serial || packDetails.opening_serial;
-      if (!effectiveStartingSerial) {
-        return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Pack has no opening serial');
-      }
+      // BIZ-013: Cloud-synced packs may have opening_serial=null but serial_start set
+      const effectiveStartingSerial =
+        packDetails.prev_ending_serial ||
+        packDetails.opening_serial ||
+        packDetails.serial_start ||
+        '000';
       if (!packDetails.game_price) {
         return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game has no price');
       }
@@ -3820,17 +3988,20 @@ registerHandler(
           dayId: existingOpenDay.day_id,
           businessDate: existingOpenDay.business_date,
           storeId,
+          isOnboarding: existingOpenDay.is_onboarding, // BIZ-012-FIX: Log onboarding state
         });
         return createSuccessResponse({
           success: true,
           is_new: false,
           is_first_ever: false, // Existing day means not first-ever
+          is_onboarding: existingOpenDay.is_onboarding, // BIZ-012-FIX: Persisted onboarding state
           day: {
             day_id: existingOpenDay.day_id,
             business_date: existingOpenDay.business_date,
             status: existingOpenDay.status,
             opened_at: existingOpenDay.opened_at,
             opened_by: existingOpenDay.opened_by,
+            is_onboarding: existingOpenDay.is_onboarding, // BIZ-012-FIX: Include in day object
           },
           message: 'Business day already open.',
         });
@@ -3866,6 +4037,34 @@ registerHandler(
       // This will also queue the day_open sync item
       const newDay = lotteryBusinessDaysDAL.getOrCreateForDate(storeId, today, userId);
 
+      // ========================================================================
+      // BIZ-012-FIX: Persist onboarding state in database
+      // ========================================================================
+      // When is_first_ever is true, set is_onboarding = 1 on the newly created day.
+      // This persists the onboarding state so it survives navigation/page reload.
+      // SEC-006: Uses parameterized UPDATE via DAL method
+      // DB-006: DAL method validates store_id ownership
+      // ========================================================================
+      if (isFirstEver) {
+        const onboardingSet = lotteryBusinessDaysDAL.setOnboardingFlag(
+          storeId,
+          newDay.day_id,
+          true
+        );
+        if (!onboardingSet) {
+          log.error('Failed to set onboarding flag on first-ever day', {
+            dayId: newDay.day_id,
+            storeId,
+          });
+          // Non-blocking: onboarding flag is a UX enhancement, not critical path
+        } else {
+          log.info('Onboarding mode activated for first-ever day', {
+            dayId: newDay.day_id,
+            storeId,
+          });
+        }
+      }
+
       // SEC-017: Audit logging
       log.info('Business day initialized', {
         dayId: newDay.day_id,
@@ -3875,18 +4074,21 @@ registerHandler(
         binsAvailable: bins.length,
         gamesAvailable: games.length,
         isFirstEver, // BIZ-010: Log for debugging onboarding scenarios
+        isOnboarding: isFirstEver, // BIZ-012-FIX: Log onboarding state
       });
 
       return createSuccessResponse({
         success: true,
         is_new: true,
         is_first_ever: isFirstEver, // BIZ-010: Enables onboarding mode when true
+        is_onboarding: isFirstEver, // BIZ-012-FIX: Persisted onboarding state
         day: {
           day_id: newDay.day_id,
           business_date: newDay.business_date,
           status: newDay.status,
           opened_at: newDay.opened_at,
           opened_by: newDay.opened_by,
+          is_onboarding: isFirstEver, // BIZ-012-FIX: Include in day object
         },
         message: 'Business day initialized successfully.',
       });
@@ -3905,6 +4107,373 @@ registerHandler(
     requiresAuth: true,
     requiredRole: 'cashier', // Any authenticated employee can initialize the day
     description: 'Initialize business day explicitly',
+  }
+);
+
+// ============================================================================
+// BIZ-012-FIX: Onboarding Status Handlers
+// ============================================================================
+
+/**
+ * Get onboarding status
+ * Channel: lottery:getOnboardingStatus
+ *
+ * Returns the current onboarding state for the store.
+ * Used by frontend to restore onboarding mode on page load.
+ *
+ * @security SEC-006: Store-scoped query via DAL
+ * @security DB-006: Tenant isolation via store_id
+ * @security API-003: Sanitized error responses
+ */
+registerHandler(
+  'lottery:getOnboardingStatus',
+  async () => {
+    try {
+      const storeId = getStoreId();
+
+      // DB-006: Store-scoped query via DAL
+      // SEC-006: Parameterized query in findOnboardingDay
+      const onboardingDay = lotteryBusinessDaysDAL.findOnboardingDay(storeId);
+
+      log.debug('Onboarding status queried', {
+        storeId,
+        isOnboarding: onboardingDay !== null,
+        dayId: onboardingDay?.day_id || null,
+      });
+
+      return createSuccessResponse({
+        is_onboarding: onboardingDay !== null,
+        day_id: onboardingDay?.day_id || null,
+        // Include additional context for frontend
+        business_date: onboardingDay?.business_date || null,
+        opened_at: onboardingDay?.opened_at || null,
+      });
+    } catch (error) {
+      log.error('Failed to get onboarding status', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to get onboarding status.'
+      );
+    }
+  },
+  {
+    requiresAuth: false, // Allow checking status without auth for page load
+    description: 'Get current onboarding status for the store',
+  }
+);
+
+/**
+ * Complete Onboarding Schema
+ * API-001: Input validation with Zod schema
+ * SEC-014: UUID format validation prevents injection
+ */
+const CompleteOnboardingSchema = z.object({
+  day_id: UUIDSchema,
+});
+
+/**
+ * Complete onboarding
+ * Channel: lottery:completeOnboarding
+ *
+ * Explicitly ends onboarding mode for the store.
+ * Sets is_onboarding = 0 on the specified day record.
+ *
+ * @security SEC-006: Parameterized UPDATE via DAL
+ * @security DB-006: Validates day belongs to store before update
+ * @security SEC-010: Requires authenticated user
+ * @security API-001: Zod validation rejects invalid day_id
+ */
+registerHandler(
+  'lottery:completeOnboarding',
+  async (_event, input: unknown) => {
+    // API-001: Validate input
+    const parseResult = CompleteOnboardingSchema.safeParse(input);
+    if (!parseResult.success) {
+      const errorMessage = parseResult.error.issues
+        .map((e: { message: string }) => e.message)
+        .join(', ');
+      log.warn('completeOnboarding validation failed', { errorMessage });
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, errorMessage);
+    }
+
+    const { day_id } = parseResult.data;
+
+    try {
+      const storeId = getStoreId();
+
+      // SEC-010: Get user from authenticated session for audit trail
+      const currentUser = getCurrentUser();
+      if (!currentUser?.user_id) {
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Authentication required to complete onboarding.'
+        );
+      }
+
+      // DB-006: Verify day belongs to this store before update
+      // SEC-006: Parameterized query in findById
+      const day = lotteryBusinessDaysDAL.findById(day_id);
+      if (!day) {
+        log.warn('completeOnboarding: Day not found', { dayId: day_id, storeId });
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Business day not found.');
+      }
+
+      // DB-006: Tenant isolation - verify store ownership
+      if (day.store_id !== storeId) {
+        log.warn('completeOnboarding: Cross-store access attempted', {
+          dayId: day_id,
+          dayStoreId: day.store_id,
+          requestStoreId: storeId,
+          userId: currentUser.user_id,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.FORBIDDEN,
+          'Access denied: Day does not belong to this store.'
+        );
+      }
+
+      // Validate day is currently in onboarding mode
+      if (!day.is_onboarding) {
+        log.info('completeOnboarding: Day is not in onboarding mode', {
+          dayId: day_id,
+          storeId,
+        });
+        return createSuccessResponse({
+          success: true,
+          day_id,
+          message: 'Onboarding already completed.',
+          was_already_complete: true,
+        });
+      }
+
+      // SEC-006: Parameterized UPDATE via DAL method
+      // DB-006: DAL validates store_id ownership
+      const updated = lotteryBusinessDaysDAL.setOnboardingFlag(storeId, day_id, false);
+
+      if (!updated) {
+        log.error('completeOnboarding: Failed to update onboarding flag', {
+          dayId: day_id,
+          storeId,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.INTERNAL_ERROR,
+          'Failed to complete onboarding. Please try again.'
+        );
+      }
+
+      // SEC-017: Audit logging
+      log.info('Onboarding completed', {
+        dayId: day_id,
+        storeId,
+        completedBy: currentUser.user_id,
+        businessDate: day.business_date,
+      });
+
+      return createSuccessResponse({
+        success: true,
+        day_id,
+        message: 'Onboarding completed successfully.',
+        was_already_complete: false,
+      });
+    } catch (error) {
+      log.error('Failed to complete onboarding', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+        dayId: day_id,
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to complete onboarding.'
+      );
+    }
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'cashier', // Any authenticated employee can complete onboarding
+    description: 'Complete onboarding mode for the store',
+  }
+);
+
+// ============================================================================
+// BIZ-012-SYNC-FIX: Re-queue Onboarding Packs with Correct Serial Start
+// ============================================================================
+// This handler re-queues all packs that were activated during onboarding
+// with the correct serial_start (their opening_serial instead of '000').
+// This is a one-time remediation for packs that were synced incorrectly.
+// ============================================================================
+
+/**
+ * Re-queue onboarding packs with correct serial_start
+ *
+ * @security SEC-010: Requires store_manager role (administrative operation)
+ * @security DB-006: Store-scoped via getConfiguredStore()
+ * @security SEC-006: Parameterized queries via DAL
+ */
+registerHandler(
+  'lottery:reQueueOnboardingPacks',
+  async () => {
+    log.info('Re-queueing onboarding packs with correct serial_start (BIZ-012-SYNC-FIX)');
+
+    try {
+      const storeId = getStoreId();
+      const currentUser = getCurrentUser();
+
+      // Find all packs with non-zero opening_serial (onboarding packs)
+      // SEC-006: Parameterized query via DAL getDatabase()
+      // DB-006: Store-scoped via WHERE store_id = ?
+      const db = lotteryPacksDAL['db']; // Access internal db for custom query
+      const query = `
+        SELECT
+          p.pack_id,
+          p.store_id,
+          p.game_id,
+          p.pack_number,
+          p.opening_serial,
+          p.closing_serial,
+          p.status,
+          p.current_bin_id,
+          p.tickets_sold_count,
+          p.sales_amount,
+          p.received_at,
+          p.received_by,
+          p.activated_at,
+          p.activated_by,
+          p.depleted_at,
+          p.returned_at,
+          g.game_code,
+          g.name as game_name,
+          g.tickets_per_pack
+        FROM lottery_packs p
+        JOIN lottery_games g ON p.game_id = g.game_id
+        WHERE p.store_id = ?
+          AND p.status IN ('ACTIVE', 'DEPLETED')
+          AND p.activated_at IS NOT NULL
+          AND p.opening_serial IS NOT NULL
+          AND p.opening_serial != '000'
+        ORDER BY p.activated_at DESC
+      `;
+
+      const packs = db.prepare(query).all(storeId) as Array<{
+        pack_id: string;
+        store_id: string;
+        game_id: string;
+        pack_number: string;
+        opening_serial: string;
+        closing_serial: string | null;
+        status: string;
+        current_bin_id: string | null;
+        tickets_sold_count: number;
+        sales_amount: number;
+        received_at: string | null;
+        received_by: string | null;
+        activated_at: string | null;
+        activated_by: string | null;
+        depleted_at: string | null;
+        returned_at: string | null;
+        game_code: string;
+        game_name: string;
+        tickets_per_pack: number | null;
+      }>;
+
+      log.info('Found onboarding packs to re-queue', { count: packs.length });
+
+      if (packs.length === 0) {
+        return createSuccessResponse({
+          success: true,
+          message: 'No onboarding packs found that need re-queuing.',
+          requeued: 0,
+        });
+      }
+
+      // Re-queue each pack with correct serial_start
+      let requeued = 0;
+      const errors: Array<{ pack_id: string; error: string }> = [];
+
+      for (const pack of packs) {
+        try {
+          // Build payload with onboardingMode=true to use opening_serial as serial_start
+          const payload = buildPackSyncPayload(
+            {
+              pack_id: pack.pack_id,
+              store_id: pack.store_id,
+              game_id: pack.game_id,
+              pack_number: pack.pack_number,
+              status: pack.status,
+              current_bin_id: pack.current_bin_id,
+              opening_serial: pack.opening_serial,
+              closing_serial: pack.closing_serial,
+              tickets_sold_count: pack.tickets_sold_count,
+              sales_amount: pack.sales_amount,
+              received_at: pack.received_at,
+              received_by: pack.received_by,
+              activated_at: pack.activated_at,
+              depleted_at: pack.depleted_at,
+              returned_at: pack.returned_at,
+            },
+            pack.game_code,
+            pack.tickets_per_pack,
+            pack.activated_by,
+            undefined, // No shift context needed for remediation
+            true // onboardingMode = true to use opening_serial as serial_start
+          );
+
+          // Enqueue for sync with correct serial_start
+          // Note: Using standard enqueue (no idempotency key) for one-time remediation
+          syncQueueDAL.enqueue({
+            store_id: storeId,
+            entity_type: 'pack',
+            entity_id: pack.pack_id,
+            operation: 'UPDATE',
+            payload,
+          });
+
+          requeued++;
+          log.info('Re-queued onboarding pack', {
+            packId: pack.pack_id,
+            gameCode: pack.game_code,
+            packNumber: pack.pack_number,
+            openingSerial: pack.opening_serial,
+            serialStart: payload.serial_start,
+          });
+        } catch (packError) {
+          const errorMsg = packError instanceof Error ? packError.message : 'Unknown error';
+          errors.push({ pack_id: pack.pack_id, error: errorMsg });
+          log.error('Failed to re-queue onboarding pack', {
+            packId: pack.pack_id,
+            error: errorMsg,
+          });
+        }
+      }
+
+      log.info('Onboarding pack remediation complete', {
+        total: packs.length,
+        requeued,
+        errors: errors.length,
+        triggeredBy: currentUser?.user_id,
+      });
+
+      return createSuccessResponse({
+        success: true,
+        message: `Re-queued ${requeued} onboarding packs with correct serial_start.`,
+        requeued,
+        total: packs.length,
+        errors: errors.length > 0 ? errors : undefined,
+      });
+    } catch (error) {
+      log.error('Failed to re-queue onboarding packs', {
+        error: error instanceof Error ? error.message : 'Unknown error',
+      });
+      return createErrorResponse(
+        IPCErrorCodes.INTERNAL_ERROR,
+        error instanceof Error ? error.message : 'Failed to re-queue onboarding packs.'
+      );
+    }
+  },
+  {
+    requiresAuth: true,
+    requiredRole: 'store_manager', // Administrative operation requires manager
+    description: 'Re-queue onboarding packs with correct serial_start (BIZ-012-SYNC-FIX)',
   }
 );
 

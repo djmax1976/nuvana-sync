@@ -3144,9 +3144,10 @@ export class SyncEngineService {
    * will not create duplicate days. The response includes an `is_idempotent` flag
    * indicating if the day already existed.
    *
-   * Priority:
-   * day_open items should be queued with priority 2 (same as day_close) to ensure
-   * they are processed before pack operations that might reference the day.
+   * Priority (SYNC-001):
+   * day_open items are queued with priority 20 (higher than shifts at 10) to ensure
+   * they sync BEFORE shift operations. Dependency chain: day_open → shift → packs.
+   * Without the day existing in cloud, shift sync will fail with FK constraint errors.
    *
    * @security SEC-006: No string concatenation with user input
    * @security DB-006: Tenant isolation via store_id in payload

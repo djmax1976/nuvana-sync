@@ -10,6 +10,8 @@ import {
   useLotteryDayBins,
   useDayStatus,
   useInitializeBusinessDay,
+  useOnboardingStatus,
+  useCompleteOnboarding,
 } from '@/hooks/useLottery';
 import { DayBinsTable, type BinValidationError } from '@/components/lottery/DayBinsTable';
 import { validateManualEntryEnding } from '@/lib/services/lottery-closing-validation';
@@ -21,6 +23,7 @@ import { PackDetailsModal, type PackDetailsData } from '@/components/lottery/Pac
 import { MarkSoldOutDialog } from '@/components/lottery/MarkSoldOutDialog';
 import { ManualEntryIndicator } from '@/components/lottery/ManualEntryIndicator';
 import { OnboardingModeIndicator } from '@/components/lottery/OnboardingModeIndicator';
+import { OnboardingLoadingModal } from '@/components/lottery/OnboardingLoadingModal';
 import { ReturnPackDialog } from '@/components/lottery/ReturnPackDialog';
 import { DayCloseScannerBar } from '@/components/lottery/DayCloseScannerBar';
 import { PinVerificationDialog, type VerifiedUser } from '@/components/auth/PinVerificationDialog';
@@ -155,21 +158,20 @@ export default function LotteryManagementPage() {
   // Submission state for manual entry close day
   const [isSubmittingManualClose, setIsSubmittingManualClose] = useState(false);
 
-  // ============================================================================
-  // Onboarding Mode State (BIZ-010)
-  // Story: Lottery Onboarding Feature
-  // MCP: FE-001 STATE_MANAGEMENT - Track first-ever day onboarding mode
-  // ============================================================================
+  /**
+   * Onboarding complete confirmation dialog state
+   * BIZ-012-FIX: Confirmation before ending onboarding mode
+   * MCP: FE-001 STATE_MANAGEMENT - User confirmation before state change
+   */
+  const [onboardingCompleteDialogOpen, setOnboardingCompleteDialogOpen] = useState(false);
 
   /**
-   * Onboarding mode state
-   * When active (first-ever lottery day), scanned packs use serial_start from
-   * barcode instead of defaulting to '000'. This allows new stores to accurately
-   * track partially-sold packs during initial setup.
-   *
-   * BIZ-010: Auto-activates when is_first_ever === true after initialization
+   * Complete Onboarding PIN verification state
+   * SEC-010: AUTHZ - PIN verification if session expired during onboarding
+   * SEC-012: SESSION_TIMEOUT - Re-authenticate after 15 min inactivity
+   * BIZ-012-SESSION-FIX: Handles session expiry during long onboarding sessions
    */
-  const [isOnboardingMode, setIsOnboardingMode] = useState(false);
+  const [completeOnboardingPinDialogOpen, setCompleteOnboardingPinDialogOpen] = useState(false);
 
   // ============================================================================
   // Scanner Mode State (Phase 4)
@@ -229,6 +231,35 @@ export default function LotteryManagementPage() {
 
   // Mutation for initializing business day
   const initializeBusinessDayMutation = useInitializeBusinessDay();
+
+  // ============================================================================
+  // Onboarding Mode State (BIZ-012-FIX)
+  // Story: Lottery Onboarding UX Improvement
+  // MCP: FE-001 STATE_MANAGEMENT - Persist onboarding state in database
+  // ============================================================================
+
+  /**
+   * Onboarding status hook - queries persisted state from database
+   * BIZ-012-FIX: State survives navigation/reload via is_onboarding column
+   *
+   * When active (first-ever lottery day with is_onboarding=1), scanned packs
+   * use serial_start from barcode instead of defaulting to '000'.
+   */
+  const { data: onboardingStatus, isLoading: onboardingStatusLoading } = useOnboardingStatus({
+    enabled: !!storeId && dayStatus?.has_open_day === true,
+  });
+
+  /**
+   * Complete onboarding mutation hook
+   * BIZ-012-FIX: Explicitly ends onboarding by setting is_onboarding=0
+   */
+  const completeOnboardingMutation = useCompleteOnboarding();
+
+  /**
+   * Derived onboarding mode state from persisted database state
+   * BIZ-012-FIX: No longer volatile - survives navigation
+   */
+  const isOnboardingMode = onboardingStatus?.isOnboarding ?? false;
 
   // Ref to prevent duplicate auto-initialization calls
   const autoInitTriggeredRef = useRef(false);
@@ -1028,23 +1059,110 @@ export default function LotteryManagementPage() {
 
   /**
    * Handle Complete Onboarding button click
-   * Exits onboarding mode and switches to normal operations
+   * Opens confirmation dialog before ending onboarding mode
    *
-   * BIZ-010: After onboarding, all new pack activations default to serial '000'
+   * BIZ-012-FIX: Uses confirmation dialog to prevent accidental completion
    */
-  const handleCompleteOnboarding = useCallback(() => {
-    setIsOnboardingMode(false);
-    toast({
-      title: 'Onboarding Complete',
-      description: 'Normal operations active. New packs will start at ticket #1 by default.',
-    });
-  }, [toast]);
+  const handleCompleteOnboardingClick = useCallback(() => {
+    setOnboardingCompleteDialogOpen(true);
+  }, []);
+
+  /**
+   * Handle confirmed onboarding completion
+   * Calls mutation to persist is_onboarding=0 in database
+   *
+   * BIZ-012-FIX: After onboarding, all new pack activations default to serial '000'
+   * BIZ-012-SESSION-FIX: Uses executeWithAuth for session validation before mutation
+   * SEC-010: AUTHZ - Session-first validation, fallback to PIN dialog if expired
+   * SEC-012: SESSION_TIMEOUT - Handles 15 min inactivity timeout during onboarding
+   * MCP: API-001 - Backend validates day_id via Zod
+   * MCP: DB-006 - Backend validates day belongs to store
+   */
+  const handleConfirmCompleteOnboarding = useCallback(() => {
+    // SEC-014: Validate dayId exists before proceeding
+    const dayId = onboardingStatus?.dayId;
+    if (!dayId) {
+      toast({
+        title: 'Error',
+        description: 'No onboarding day found.',
+        variant: 'destructive',
+      });
+      setOnboardingCompleteDialogOpen(false);
+      return;
+    }
+
+    executeWithAuth(
+      () => {
+        // Session valid - complete onboarding
+        // Note: dayId captured above for TypeScript type narrowing in closure
+        completeOnboardingMutation.mutate(dayId, {
+          onSuccess: () => {
+            setOnboardingCompleteDialogOpen(false);
+            toast({
+              title: 'Onboarding Complete',
+              description:
+                'Normal operations active. New packs will start at ticket #1 by default.',
+            });
+          },
+          onError: (error) => {
+            setOnboardingCompleteDialogOpen(false);
+            toast({
+              title: 'Failed to Complete Onboarding',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+              variant: 'destructive',
+            });
+          },
+        });
+      },
+      () => {
+        // Session invalid - close confirmation dialog, show PIN dialog
+        // SEC-012: Re-authenticate after session timeout
+        setOnboardingCompleteDialogOpen(false);
+        setCompleteOnboardingPinDialogOpen(true);
+      }
+    );
+  }, [onboardingStatus?.dayId, completeOnboardingMutation, toast, executeWithAuth]);
+
+  /**
+   * Handle Complete Onboarding PIN verification success
+   * Called after user re-authenticates via PIN dialog
+   *
+   * SEC-010: AUTHZ - PIN verification establishes session before mutation
+   * SEC-012: SESSION_TIMEOUT - Re-authentication after session expiry
+   * SEC-017: AUDIT_TRAILS - Backend records completed_by from authenticated session
+   * BIZ-012-SESSION-FIX: Completes onboarding after session re-establishment
+   */
+  const handleCompleteOnboardingPinVerified = useCallback(
+    (_user: VerifiedUser) => {
+      setCompleteOnboardingPinDialogOpen(false);
+      if (onboardingStatus?.dayId) {
+        completeOnboardingMutation.mutate(onboardingStatus.dayId, {
+          onSuccess: () => {
+            toast({
+              title: 'Onboarding Complete',
+              description:
+                'Normal operations active. New packs will start at ticket #1 by default.',
+            });
+          },
+          onError: (error) => {
+            toast({
+              title: 'Failed to Complete Onboarding',
+              description: error instanceof Error ? error.message : 'An error occurred.',
+              variant: 'destructive',
+            });
+          },
+        });
+      }
+    },
+    [onboardingStatus?.dayId, completeOnboardingMutation, toast]
+  );
 
   /**
    * Handle Initialize Business Day button click
    * Requires authentication via PIN if not already logged in
    *
-   * BIZ-010: Checks is_first_ever and activates onboarding mode if true
+   * BIZ-012-FIX: Backend persists is_onboarding flag; hook reads persisted state
+   * No longer sets local state - onboarding mode derived from useOnboardingStatus hook
    */
   const handleInitializeBusinessDay = useCallback(() => {
     executeWithAuth(
@@ -1053,9 +1171,9 @@ export default function LotteryManagementPage() {
         initializeBusinessDayMutation.mutate(undefined, {
           onSuccess: (response) => {
             if (response.success && response.data) {
-              // BIZ-010: Check if this is the first-ever lottery day
+              // BIZ-012-FIX: Onboarding mode is now persisted in backend
+              // The useOnboardingStatus hook will fetch the updated state
               if (response.data.is_first_ever) {
-                setIsOnboardingMode(true);
                 toast({
                   title: 'Onboarding Mode Active',
                   description:
@@ -1310,12 +1428,13 @@ export default function LotteryManagementPage() {
           onVerified={(_user) => {
             setInitializationPinDialogOpen(false);
             // After PIN verification, trigger initialization
+            // BIZ-012-FIX: Backend persists is_onboarding flag; hook reads persisted state
             initializeBusinessDayMutation.mutate(undefined, {
               onSuccess: (response) => {
                 if (response.success && response.data) {
-                  // BIZ-010: Check if this is the first-ever lottery day
+                  // BIZ-012-FIX: Onboarding mode is now persisted in backend
+                  // The useOnboardingStatus hook will fetch the updated state
                   if (response.data.is_first_ever) {
-                    setIsOnboardingMode(true);
                     toast({
                       title: 'Onboarding Mode Active',
                       description:
@@ -1386,8 +1505,27 @@ export default function LotteryManagementPage() {
       } as PackDetailsData)
     : null;
 
+  /**
+   * Show loading modal during first-ever day onboarding status fetch
+   * BIZ-012-UX-FIX: Prevents race condition where first scan fails because
+   * onboardingMode is still false while the query is loading.
+   *
+   * Conditions:
+   * - has_open_day: A business day exists
+   * - is_first_ever: This is the store's first lottery day (from dayStatus)
+   * - onboardingStatusLoading: The onboarding status query is in flight
+   */
+  const showOnboardingLoadingModal =
+    dayStatus?.has_open_day === true &&
+    dayStatus?.is_first_ever === true &&
+    onboardingStatusLoading === true;
+
   return (
     <div className="space-y-6" data-testid="lottery-management-page">
+      {/* Onboarding Loading Modal - BIZ-012-UX-FIX
+          Blocks all interaction until onboarding status is resolved */}
+      <OnboardingLoadingModal open={showOnboardingLoadingModal} />
+
       {/* Header - Day info on left, action buttons on right */}
       <div className="flex items-center justify-between">
         {/* Left side: Day started info */}
@@ -1468,7 +1606,12 @@ export default function LotteryManagementPage() {
               onClick={handleActivatePackClick}
               variant="outline"
               data-testid="activate-pack-button"
-              disabled={!hasReceivedPacks || manualEntryState.isActive}
+              disabled={
+                // BIZ-012-FIX: In onboarding mode, allow activation even without inventory
+                // Normal mode: requires received packs in inventory
+                // Onboarding mode: backend auto-creates packs during activation
+                (!hasReceivedPacks && !isOnboardingMode) || manualEntryState.isActive
+              }
             >
               <Zap className="mr-2 h-4 w-4" />
               Activate Pack
@@ -1496,11 +1639,13 @@ export default function LotteryManagementPage() {
         />
       )}
 
-      {/* Onboarding Mode Indicator - BIZ-010 */}
+      {/* Onboarding Mode Indicator - BIZ-012-FIX */}
       {isOnboardingMode && (
         <OnboardingModeIndicator
           isActive={isOnboardingMode}
-          onComplete={handleCompleteOnboarding}
+          onComplete={handleCompleteOnboardingClick}
+          isCompleting={completeOnboardingMutation.isPending}
+          activatedPacksCount={dayBinsData?.activated_packs?.length}
         />
       )}
 
@@ -1766,6 +1911,22 @@ export default function LotteryManagementPage() {
         description="Enter your PIN to return this pack. Shift Manager access required."
       />
 
+      {/* Complete Onboarding PIN Verification Dialog
+          SEC-010: AUTHZ - PIN verification before completing onboarding
+          SEC-012: SESSION_TIMEOUT - Re-authenticate after session expiry
+          SEC-017: AUDIT_TRAILS - Backend records completed_by from session
+          BIZ-012-SESSION-FIX: Handles session timeout during long onboarding sessions
+          FE-001: SESSION_CACHING - Bypasses PIN if valid session exists
+      */}
+      <PinVerificationDialog
+        open={completeOnboardingPinDialogOpen}
+        onClose={() => setCompleteOnboardingPinDialogOpen(false)}
+        onVerified={handleCompleteOnboardingPinVerified}
+        requiredRole="cashier"
+        title="Verify PIN to Complete Onboarding"
+        description="Your session expired. Please verify your PIN to complete onboarding."
+      />
+
       {/* Return Pack Dialog
           MCP Guidance Applied:
           - FE-001: STATE_MANAGEMENT - Controlled dialog with pack ID and data
@@ -1781,6 +1942,64 @@ export default function LotteryManagementPage() {
         packData={packDataToReturn}
         onSuccess={handleReturnPackSuccess}
       />
+
+      {/* Onboarding Complete Confirmation Dialog
+          BIZ-012-FIX: Confirmation before ending onboarding mode
+          MCP: FE-001 STATE_MANAGEMENT - User confirmation before state change
+          MCP: DB-006 TENANT_ISOLATION - Backend validates day belongs to store
+      */}
+      <Dialog open={onboardingCompleteDialogOpen} onOpenChange={setOnboardingCompleteDialogOpen}>
+        <DialogContent className="sm:max-w-md" data-testid="onboarding-complete-dialog">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <CheckCircle2 className="h-5 w-5 text-green-600" />
+              Complete Onboarding?
+            </DialogTitle>
+            <DialogDescription>
+              You are about to complete onboarding mode.
+              {dayBinsData?.activated_packs && dayBinsData.activated_packs.length > 0 && (
+                <>
+                  <br />
+                  <br />
+                  <span className="font-medium">
+                    {dayBinsData.activated_packs.length} pack
+                    {dayBinsData.activated_packs.length === 1 ? '' : 's'} activated
+                  </span>{' '}
+                  during onboarding.
+                </>
+              )}
+              <br />
+              <br />
+              After completion, new pack activations will default to ticket #1 (serial 000). This
+              action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter className="gap-2 sm:gap-0">
+            <Button
+              variant="outline"
+              onClick={() => setOnboardingCompleteDialogOpen(false)}
+              disabled={completeOnboardingMutation.isPending}
+              data-testid="onboarding-complete-dialog-cancel"
+            >
+              Continue Onboarding
+            </Button>
+            <Button
+              onClick={handleConfirmCompleteOnboarding}
+              disabled={completeOnboardingMutation.isPending}
+              data-testid="onboarding-complete-dialog-confirm"
+            >
+              {completeOnboardingMutation.isPending ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Completing...
+                </>
+              ) : (
+                'Complete Onboarding'
+              )}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
