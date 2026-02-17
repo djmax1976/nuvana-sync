@@ -300,7 +300,7 @@ describe('Day Open Sync Integration (day_open_push - Phase 5)', () => {
       db.close();
     });
 
-    it('should create sync item with correct priority (2)', async () => {
+    it('should create sync item with correct priority (20 per SYNC-001)', async () => {
       const { LotteryBusinessDaysDAL } =
         await import('../../src/main/dal/lottery-business-days.dal');
 
@@ -351,7 +351,8 @@ describe('Day Open Sync Integration (day_open_push - Phase 5)', () => {
       dal.getOrCreateForDate(TEST_STORE_ID, TEST_BUSINESS_DATE, TEST_USER_ID);
 
       const dayOpenItems = findSyncItemsByType('day_open');
-      expect(dayOpenItems[0].priority).toBe(2);
+      // SYNC-001: day_open priority = 20 (must sync before shifts at priority 10)
+      expect(dayOpenItems[0].priority).toBe(20);
 
       db.close();
     });
@@ -476,8 +477,9 @@ describe('Day Open Sync Integration (day_open_push - Phase 5)', () => {
       expect(dayOpenItems).toHaveLength(1);
       expect(dayCloseItems).toHaveLength(1);
 
-      // Verify priority ordering: day_open (2) > day_close (1)
-      expect(dayOpenItems[0].priority).toBe(2);
+      // SYNC-001: day_open (20) > shift (10) > day_close (1)
+      // Higher priority = processed first to prevent FK errors
+      expect(dayOpenItems[0].priority).toBe(20);
       expect(dayCloseItems[0].priority).toBe(1);
       expect(dayOpenItems[0].priority!).toBeGreaterThan(dayCloseItems[0].priority!);
 
