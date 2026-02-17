@@ -504,7 +504,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
    * const onboardingDay = lotteryBusinessDaysDAL.findOnboardingDay(storeId);
    * if (onboardingDay) {
    *   // Store is in onboarding mode
-   *   console.log('Onboarding day:', onboardingDay.day_id);
+   *   // Use onboardingDay.day_id for the active onboarding session
    * } else {
    *   // Normal operation mode
    * }
