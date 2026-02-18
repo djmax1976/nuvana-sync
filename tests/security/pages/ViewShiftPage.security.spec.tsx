@@ -258,7 +258,7 @@ describe('ViewShiftPage Security', () => {
       // Verify proper escaping (< becomes &lt;)
       expect(infoCard.innerHTML).toContain('&lt;script&gt;');
       // No unescaped script tags should exist
-      expect(infoCard.innerHTML).not.toMatch(/<script>/);
+      expect(infoCard.innerHTML).not.toMatch(/<script>/i);
       // Content is visible as text
       expect(infoCard.textContent).toContain('<script>');
     });
@@ -396,7 +396,7 @@ describe('ViewShiftPage Security', () => {
       expect(screen.getByTestId('view-shift-page-error')).toBeInTheDocument();
       // The error page should have escaped XSS content
       const errorPage = screen.getByTestId('view-shift-page-error');
-      expect(errorPage.innerHTML).not.toMatch(/<script>/);
+      expect(errorPage.innerHTML).not.toMatch(/<script>/i);
     });
 
     it('should handle empty shiftId by showing error state', () => {

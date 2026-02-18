@@ -236,8 +236,8 @@ describe('ViewDayPage Security', () => {
       const infoCard = screen.getByTestId('day-info-card');
       // Verify HTML-escaping (< becomes &lt;)
       expect(infoCard.innerHTML).toContain('&lt;script&gt;');
-      // No raw script tags
-      expect(infoCard.innerHTML).not.toMatch(/<script>/);
+      // No raw script tags (case-insensitive to catch <SCRIPT> too)
+      expect(infoCard.innerHTML).not.toMatch(/<script>/i);
       // Content is visible as text
       expect(infoCard.textContent).toContain('<script>');
     });
@@ -255,8 +255,8 @@ describe('ViewDayPage Security', () => {
 
       // Assert - LotterySection doesn't render malicious dayId as visible content
       const lotterySection = screen.getByTestId('lottery-section');
-      // No unescaped script or img tags in innerHTML
-      expect(lotterySection.innerHTML).not.toMatch(/<script>/);
+      // No unescaped script or img tags in innerHTML (case-insensitive)
+      expect(lotterySection.innerHTML).not.toMatch(/<script>/i);
       expect(lotterySection.innerHTML).not.toMatch(/<img\s+src=/);
       // The malicious lotteryDayId is passed as data-attribute, not visible content
       // Verify safe content is rendered (currency, headings)
