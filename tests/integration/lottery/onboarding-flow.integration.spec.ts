@@ -470,7 +470,7 @@ describeSuite('Lottery Onboarding Flow Integration (Phase 6)', () => {
       setCurrentUser(user);
 
       seedLotteryBin('Bin 1', 1);
-      void seedLotteryGame(); // Called for side effect
+      const gameId = seedLotteryGame();
       void seedLotteryBin('Bin 2', 2); // Called for side effect
 
       // Create day and set onboarding
