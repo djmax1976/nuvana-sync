@@ -220,7 +220,7 @@ vi.mock('../../src/renderer/components/shifts/FuelSalesBreakdown', () => ({
 // ============================================================================
 
 import ShiftsPage from '../../src/renderer/pages/ShiftsPage';
-import ShiftDetailPage from '../../src/renderer/pages/ShiftDetailPage';
+import ViewShiftPage from '../../src/renderer/pages/ViewShiftPage';
 import { DayCloseAccessGuard } from '../../src/renderer/components/guards/DayCloseAccessGuard';
 
 // ============================================================================
@@ -394,7 +394,7 @@ function TestApp({ initialEntries = ['/shifts'] }: { initialEntries?: string[] }
           }
         >
           <Route path="/shifts" element={<ShiftsPage />} />
-          <Route path="/shifts/:shiftId" element={<ShiftDetailPage />} />
+          <Route path="/shifts/:shiftId" element={<ViewShiftPage />} />
           <Route
             path="/day-close"
             element={
@@ -582,7 +582,7 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
       // Backend validates ownership via SEC-010
     });
 
-    it('should navigate to shift-end from ShiftDetailPage', async () => {
+    it('should navigate to shift-end from ViewShiftPage', async () => {
       // Arrange: Viewing specific shift
       const shiftId = 'sensitive-shift-id-456';
       mockUseShift.mockReturnValue({

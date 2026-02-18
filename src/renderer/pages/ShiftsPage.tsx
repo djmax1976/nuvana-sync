@@ -149,6 +149,7 @@ export default function ShiftsPage() {
                       <Link
                         to={`/shifts/${shift.shift_id}`}
                         className="text-primary hover:text-primary/80"
+                        data-testid={`view-shift-${shift.shift_id}`}
                       >
                         View
                       </Link>

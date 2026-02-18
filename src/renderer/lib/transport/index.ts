@@ -389,6 +389,22 @@ export const ipc = {
       ipcClient.invoke<{ success: boolean; message: string }>('shifts:resync', {
         shift_id: shiftId,
       }),
+    /**
+     * Get complete shift data for ViewShiftPage rendering
+     *
+     * Aggregates data from multiple tables into a single response optimized
+     * for frontend rendering. Includes shift info, summary cards, payment methods,
+     * and sales breakdown.
+     *
+     * @param shiftId - UUID of the shift to get view data for
+     * @returns ShiftViewDataResponse with all data needed for ViewShiftPage
+     *
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized queries in backend
+     * @security API-001: shiftId validated as UUID in handler
+     */
+    getViewData: (shiftId: string) =>
+      ipcClient.invoke<ShiftViewDataResponse>('shifts:getViewData', shiftId),
   },
 
   // Day Summaries
@@ -398,6 +414,33 @@ export const ipc = {
     getByDate: (date: string) =>
       ipcClient.invoke<DaySummaryWithShiftsResponse>('daySummaries:getByDate', date),
     close: (date: string) => ipcClient.invoke<DaySummaryResponse>('daySummaries:close', date),
+  },
+
+  // Days (View Data)
+  /**
+   * Day view operations for read-only viewing of closed days
+   * Used by ViewDayPage for comprehensive day data display
+   *
+   * @security DB-006: All operations store-scoped for tenant isolation
+   * @security SEC-006: All queries use parameterized statements via DAL
+   */
+  days: {
+    /**
+     * Get complete day data for ViewDayPage rendering
+     *
+     * Aggregates data from multiple tables (day_summaries, shifts, shift_summaries,
+     * lottery_business_days) into a single response optimized for frontend rendering.
+     * Includes day info, summary cards, payment methods, and sales breakdown.
+     *
+     * @param dayId - UUID of the day summary to get view data for
+     * @returns DayViewDataResponse with all data needed for ViewDayPage
+     *
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-006: Parameterized queries in backend
+     * @security API-001: dayId validated as UUID in handler
+     */
+    getViewData: (dayId: string) =>
+      ipcClient.invoke<DayViewDataResponse>('days:getViewData', dayId),
   },
 
   // Transactions
@@ -503,6 +546,90 @@ export const ipc = {
      */
     checkAccess: (input: { pin: string }) =>
       ipcClient.invoke<DayCloseAccessResult>('dayClose:checkAccess', input),
+  },
+
+  // Images (Task 3.4: Receipt image storage)
+  /**
+   * Receipt image operations for shift close
+   *
+   * Manages payout receipt images captured during shift close.
+   * Images are stored on filesystem with metadata in database.
+   *
+   * @security SEC-006: All queries use parameterized statements via DAL
+   * @security DB-006: All operations store-scoped for tenant isolation
+   * @security SEC-015: Path traversal prevention
+   */
+  images: {
+    /**
+     * Upload a receipt image for a shift
+     *
+     * Stores the image on filesystem and creates a database record.
+     * Uses SHA-256 hash for deduplication.
+     *
+     * @param data - Image upload data including Base64 image
+     * @returns UploadImageResponse with image metadata
+     *
+     * @security SEC-006: Parameterized queries in backend
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-014: Input validated via Zod schema
+     */
+    upload: (data: {
+      shift_id: string;
+      document_type: 'CASH_PAYOUT' | 'LOTTERY_REPORT' | 'GAMING_REPORT';
+      image_data: string;
+      file_name: string;
+      mime_type: 'image/jpeg' | 'image/png' | 'image/webp';
+      payout_index?: number;
+    }) => ipcClient.invoke<UploadImageResponse>('images:upload', data),
+
+    /**
+     * Retrieve an image by ID
+     *
+     * Returns the image data as Base64 encoded string.
+     *
+     * @param imageId - UUID of the image to retrieve
+     * @returns GetImageResponse with Base64 image data
+     *
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-015: Path validation
+     */
+    get: (imageId: string) =>
+      ipcClient.invoke<GetImageResponse>('images:get', { image_id: imageId }),
+
+    /**
+     * Get all images for a shift
+     *
+     * Returns metadata for all images associated with a shift.
+     *
+     * @param shiftId - UUID of the shift
+     * @param documentType - Optional filter by document type
+     * @returns ShiftImagesResponse with image list and counts
+     *
+     * @security DB-006: Store-scoped via backend handler
+     */
+    getByShift: (
+      shiftId: string,
+      documentType?: 'CASH_PAYOUT' | 'LOTTERY_REPORT' | 'GAMING_REPORT'
+    ) =>
+      ipcClient.invoke<ShiftImagesResponse>('images:getByShift', {
+        shift_id: shiftId,
+        document_type: documentType,
+      }),
+
+    /**
+     * Delete an image by ID
+     *
+     * Removes the image file and database record.
+     *
+     * @param imageId - UUID of the image to delete
+     * @returns Success status
+     *
+     * @security DB-006: Store-scoped via backend handler
+     */
+    delete: (imageId: string) =>
+      ipcClient.invoke<{ success: boolean; message: string }>('images:delete', {
+        image_id: imageId,
+      }),
   },
 };
 
@@ -686,6 +813,236 @@ export interface DailyFuelTotalsResponse {
   };
   byGrade: MSMFuelByGrade[];
   fuelSource: 'FGM' | 'MSM' | 'CALCULATED' | 'MANUAL';
+}
+
+// ============================================================================
+// View Page Data Types (Phase 3)
+// ============================================================================
+
+/**
+ * Shift info for ViewShiftPage display
+ * Pre-computed and formatted for direct frontend rendering
+ *
+ * @security API-008: OUTPUT_FILTERING - Only includes fields needed for display
+ */
+export interface ShiftViewInfo {
+  /** Resolved terminal name from pos_terminal_mappings */
+  terminalName: string;
+  /** Shift number for the day */
+  shiftNumber: number;
+  /** Resolved cashier name from users table */
+  cashierName: string;
+  /** Formatted start time for display */
+  startedAt: string;
+  /** Formatted end time for display, null if still open */
+  endedAt: string | null;
+  /** Opening cash amount */
+  openingCash: number;
+  /** Closing cash amount, null if still open */
+  closingCash: number | null;
+}
+
+/**
+ * Summary card data for ViewShiftPage
+ * Contains aggregated sales by category
+ */
+export interface ShiftViewSummary {
+  insideSales: {
+    total: number;
+    nonFood: number;
+    foodSales: number;
+  };
+  fuelSales: {
+    total: number;
+    gallonsSold: number;
+  };
+  lotterySales: {
+    total: number;
+    scratchOff: number;
+    online: number;
+  };
+  reserved: null;
+}
+
+/**
+ * Payment methods data for ViewShiftPage
+ * Contains receipts and payouts by type
+ */
+export interface ShiftViewPayments {
+  receipts: {
+    cash: { reports: number; pos: number };
+    creditCard: { reports: number; pos: number };
+    debitCard: { reports: number; pos: number };
+    ebt: { reports: number; pos: number };
+  };
+  payouts: {
+    cashPayouts: { reports: number; pos: number; hasImages: boolean; count: number };
+    lotteryPayouts: { reports: number; pos: number; hasImages: boolean };
+    gamingPayouts: { reports: number; pos: number; hasImages: boolean };
+  };
+  netCash: { reports: number; pos: number };
+}
+
+/**
+ * Sales breakdown data for ViewShiftPage
+ * Contains sales by department/category
+ */
+export interface ShiftViewSalesBreakdown {
+  gasSales: { reports: number; pos: number };
+  grocery: { reports: number; pos: number };
+  tobacco: { reports: number; pos: number };
+  beverages: { reports: number; pos: number };
+  snacks: { reports: number; pos: number };
+  other: { reports: number; pos: number };
+  lottery: {
+    instantSales: { reports: number; pos: number };
+    instantCashes: { reports: number; pos: number };
+    onlineSales: { reports: number; pos: number };
+    onlineCashes: { reports: number; pos: number };
+  };
+  salesTax: { reports: number; pos: number };
+  total: { reports: number; pos: number };
+}
+
+/**
+ * Complete response from shifts:getViewData
+ * All data needed to render ViewShiftPage
+ *
+ * @security DB-006: Store-scoped via backend handler
+ * @security SEC-006: Parameterized queries in backend
+ * @security API-008: Only whitelisted fields returned
+ */
+export interface ShiftViewDataResponse {
+  shiftId: string;
+  businessDate: string;
+  status: 'OPEN' | 'CLOSED';
+  shiftInfo: ShiftViewInfo;
+  summary: ShiftViewSummary;
+  payments: ShiftViewPayments;
+  salesBreakdown: ShiftViewSalesBreakdown;
+  /** Raw timestamps for footer calculations */
+  timestamps: {
+    createdAt: string;
+    closedAt: string | null;
+  };
+  /** Optional lottery day ID for LOTTERY mode display */
+  lotteryDayId: string | null;
+}
+
+// ============================================================================
+// Day View Page Data Types (Phase 3)
+// ============================================================================
+
+/**
+ * Day info for ViewDayPage display
+ * Pre-computed and formatted for direct frontend rendering
+ *
+ * @security API-008: OUTPUT_FILTERING - Only includes fields needed for display
+ */
+export interface DayViewInfo {
+  /** Business date formatted for display */
+  businessDate: string;
+  /** Total number of shifts for the day */
+  shiftCount: number;
+  /** First shift start time formatted for display */
+  firstShiftStarted: string | null;
+  /** Last shift end time formatted for display */
+  lastShiftEnded: string | null;
+  /** Total opening cash from first shift */
+  totalOpeningCash: number;
+  /** Total closing cash from last shift */
+  totalClosingCash: number;
+}
+
+/**
+ * Summary card data for ViewDayPage (aggregated from all shifts)
+ */
+export interface DayViewSummary {
+  insideSales: {
+    total: number;
+    nonFood: number;
+    foodSales: number;
+  };
+  fuelSales: {
+    total: number;
+    gallonsSold: number;
+  };
+  lotterySales: {
+    total: number;
+    scratchOff: number;
+    online: number;
+  };
+  reserved: null;
+}
+
+/**
+ * Payment methods data for ViewDayPage (aggregated from all shifts)
+ */
+export interface DayViewPayments {
+  receipts: {
+    cash: { reports: number; pos: number };
+    creditCard: { reports: number; pos: number };
+    debitCard: { reports: number; pos: number };
+    ebt: { reports: number; pos: number };
+  };
+  payouts: {
+    cashPayouts: { reports: number; pos: number; hasImages: boolean; count: number };
+    lotteryPayouts: { reports: number; pos: number; hasImages: boolean };
+    gamingPayouts: { reports: number; pos: number; hasImages: boolean };
+  };
+  netCash: { reports: number; pos: number };
+}
+
+/**
+ * Sales breakdown data for ViewDayPage (aggregated from all shifts)
+ */
+export interface DayViewSalesBreakdown {
+  gasSales: { reports: number; pos: number };
+  grocery: { reports: number; pos: number };
+  tobacco: { reports: number; pos: number };
+  beverages: { reports: number; pos: number };
+  snacks: { reports: number; pos: number };
+  other: { reports: number; pos: number };
+  lottery: {
+    instantSales: { reports: number; pos: number };
+    instantCashes: { reports: number; pos: number };
+    onlineSales: { reports: number; pos: number };
+    onlineCashes: { reports: number; pos: number };
+  };
+  salesTax: { reports: number; pos: number };
+  total: { reports: number; pos: number };
+}
+
+/**
+ * Complete response from days:getViewData
+ * All data needed to render ViewDayPage
+ *
+ * @security DB-006: Store-scoped via backend handler
+ * @security SEC-006: Parameterized queries in backend
+ * @security API-008: Only whitelisted fields returned
+ */
+export interface DayViewDataResponse {
+  /** Day summary ID */
+  daySummaryId: string;
+  /** Business date */
+  businessDate: string;
+  /** Day status */
+  status: 'OPEN' | 'CLOSED';
+  /** Day info for header/info card */
+  dayInfo: DayViewInfo;
+  /** Summary cards data */
+  summary: DayViewSummary;
+  /** Payment methods data */
+  payments: DayViewPayments;
+  /** Sales breakdown data */
+  salesBreakdown: DayViewSalesBreakdown;
+  /** Lottery business day ID for lottery components */
+  lotteryDayId: string | null;
+  /** Timestamps for footer */
+  timestamps: {
+    createdAt: string;
+    closedAt: string | null;
+  };
 }
 
 export interface ShiftSummaryResponse {
@@ -1313,4 +1670,101 @@ export interface CompleteOnboardingResponse {
   day_id: string;
   /** Human-readable result message */
   message?: string;
+}
+
+// ============================================================================
+// Image Storage Types (Task 3.4)
+// ============================================================================
+
+/**
+ * Document type for receipt images
+ */
+export type ReceiptDocumentType = 'CASH_PAYOUT' | 'LOTTERY_REPORT' | 'GAMING_REPORT';
+
+/**
+ * Allowed MIME types for images
+ */
+export type ImageMimeType = 'image/jpeg' | 'image/png' | 'image/webp';
+
+/**
+ * Response from images:upload IPC handler
+ *
+ * Returned when an image is successfully uploaded or already exists.
+ *
+ * @security DB-006: Response is store-scoped via backend handler
+ */
+export interface UploadImageResponse {
+  /** Whether the upload was successful */
+  success: boolean;
+  /** Image metadata */
+  image: {
+    /** Image record ID (UUID) */
+    id: string;
+    /** SHA-256 hash of image for deduplication */
+    image_hash: string;
+    /** Original filename */
+    file_name: string;
+    /** Document type (CASH_PAYOUT, LOTTERY_REPORT, GAMING_REPORT) */
+    document_type: ReceiptDocumentType;
+  };
+  /** Human-readable result message */
+  message: string;
+}
+
+/**
+ * Response from images:get IPC handler
+ *
+ * Returns Base64 encoded image data for display.
+ *
+ * @security DB-006: Response is store-scoped via backend handler
+ */
+export interface GetImageResponse {
+  /** Whether the retrieval was successful */
+  success: boolean;
+  /** Base64 encoded image data */
+  image_data: string;
+  /** MIME type of the image */
+  mime_type: ImageMimeType;
+  /** Original filename */
+  file_name: string;
+}
+
+/**
+ * Image metadata for list responses
+ */
+export interface ShiftImageInfo {
+  /** Image record ID (UUID) */
+  id: string;
+  /** Document type */
+  document_type: ReceiptDocumentType;
+  /** Original filename */
+  file_name: string;
+  /** File size in bytes */
+  file_size: number;
+  /** MIME type */
+  mime_type: ImageMimeType;
+  /** Optional payout index for CASH_PAYOUT */
+  payout_index: number | null;
+  /** When the image was uploaded (ISO timestamp) */
+  uploaded_at: string;
+  /** Whether the image file exists on disk */
+  has_image: boolean;
+}
+
+/**
+ * Response from images:getByShift IPC handler
+ *
+ * Returns all images associated with a shift.
+ *
+ * @security DB-006: Response is store-scoped via backend handler
+ */
+export interface ShiftImagesResponse {
+  /** Array of image metadata */
+  images: ShiftImageInfo[];
+  /** Count of images by document type */
+  counts: {
+    CASH_PAYOUT: number;
+    LOTTERY_REPORT: number;
+    GAMING_REPORT: number;
+  };
 }

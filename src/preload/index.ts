@@ -117,10 +117,12 @@ const ALLOWED_INVOKE_CHANNELS = [
   'shifts:getDailyFuelTotals',
   'shifts:manualStart', // Manual shift start for MANUAL mode stores
   'shifts:getOpenShifts', // Get open shifts with resolved names for DayClosePage
+  'shifts:getViewData', // Get complete shift data for ViewShiftPage rendering
   // Day Summaries
   'daySummaries:list',
   'daySummaries:getByDate',
   'daySummaries:close',
+  'days:getViewData', // Get complete day data for ViewDayPage rendering
   // Transactions
   'transactions:list',
   'transactions:getById',
@@ -130,6 +132,11 @@ const ALLOWED_INVOKE_CHANNELS = [
   'reports:dateRange',
   'reports:getShiftsByDays',
   'reports:getLotteryDayReport',
+  // Images (Task 3.4: Receipt image storage)
+  'images:upload', // Upload a receipt image for a shift
+  'images:get', // Retrieve an image by ID
+  'images:getByShift', // Get all images for a shift
+  'images:delete', // Delete an image by ID
   // Lottery
   'lottery:getGames',
   'lottery:listGames',

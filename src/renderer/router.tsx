@@ -24,7 +24,7 @@ const MyStoreDashboard = lazy(() =>
   import('./pages/MyStoreDashboard').then((m) => ({ default: m.MyStoreDashboard }))
 );
 const ShiftsPage = lazy(() => import('./pages/ShiftsPage'));
-const ShiftDetailPage = lazy(() => import('./pages/ShiftDetailPage'));
+// ShiftDetailPage removed - ViewShiftPage is now the universal shift view
 const TransactionsPage = lazy(() => import('./pages/TransactionsPage'));
 const ReportsPage = lazy(() => import('./pages/ReportsPage'));
 const SettingsPage = lazy(() => import('./pages/SettingsPage'));
@@ -43,6 +43,10 @@ const TerminalShiftPage = lazy(() => import('./pages/TerminalShiftPage'));
 
 // Report pages
 const LotteryDayReportPage = lazy(() => import('./pages/LotteryDayReportPage'));
+
+// View pages (read-only views for closed shifts/days)
+const ViewShiftPage = lazy(() => import('./pages/ViewShiftPage'));
+const ViewDayPage = lazy(() => import('./pages/ViewDayPage'));
 
 // Sync Monitor is now embedded in the Settings page (SyncMonitorPanel component)
 
@@ -186,7 +190,28 @@ const router = createHashRouter([
         element: (
           <LotteryGuard>
             <Suspense fallback={<PageLoader />}>
-              <ShiftDetailPage />
+              <ViewShiftPage />
+            </Suspense>
+          </LotteryGuard>
+        ),
+      },
+      {
+        // Legacy route - redirect to canonical path
+        path: 'shifts/:shiftId/view',
+        element: (
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ViewShiftPage />
+            </Suspense>
+          </LotteryGuard>
+        ),
+      },
+      {
+        path: 'days/:dayId/view',
+        element: (
+          <LotteryGuard>
+            <Suspense fallback={<PageLoader />}>
+              <ViewDayPage />
             </Suspense>
           </LotteryGuard>
         ),

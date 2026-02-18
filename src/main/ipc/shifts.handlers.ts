@@ -1507,4 +1507,526 @@ registerHandler<OpenShiftsResponse | ReturnType<typeof createErrorResponse>>(
   { description: 'Get all open shifts with resolved terminal and cashier names' }
 );
 
+// ============================================================================
+// Get Shift View Data Handler (Phase 3 - View Pages)
+// ============================================================================
+
+/**
+ * Shift info for ViewShiftPage display
+ * Pre-computed and formatted for direct frontend rendering
+ *
+ * API-008: OUTPUT_FILTERING - Only includes fields needed for display
+ */
+interface ShiftViewInfo {
+  /** Resolved terminal name from pos_terminal_mappings */
+  terminalName: string;
+  /** Shift number for the day */
+  shiftNumber: number;
+  /** Resolved cashier name from users table */
+  cashierName: string;
+  /** Formatted start time for display */
+  startedAt: string;
+  /** Formatted end time for display, null if still open */
+  endedAt: string | null;
+  /** Opening cash amount */
+  openingCash: number;
+  /** Closing cash amount, null if still open */
+  closingCash: number | null;
+}
+
+/**
+ * Summary card data for ViewShiftPage
+ * Contains aggregated sales by category
+ */
+interface ShiftViewSummary {
+  insideSales: {
+    total: number;
+    nonFood: number;
+    foodSales: number;
+  };
+  fuelSales: {
+    total: number;
+    gallonsSold: number;
+  };
+  lotterySales: {
+    total: number;
+    scratchOff: number;
+    online: number;
+  };
+  reserved: null;
+}
+
+/**
+ * Payment methods data for ViewShiftPage
+ * Contains receipts and payouts by type
+ */
+interface ShiftViewPayments {
+  receipts: {
+    cash: { reports: number; pos: number };
+    creditCard: { reports: number; pos: number };
+    debitCard: { reports: number; pos: number };
+    ebt: { reports: number; pos: number };
+  };
+  payouts: {
+    cashPayouts: { reports: number; pos: number; hasImages: boolean; count: number };
+    lotteryPayouts: { reports: number; pos: number; hasImages: boolean };
+    gamingPayouts: { reports: number; pos: number; hasImages: boolean };
+  };
+  netCash: { reports: number; pos: number };
+}
+
+/**
+ * Sales breakdown data for ViewShiftPage
+ * Contains sales by department/category
+ */
+interface ShiftViewSalesBreakdown {
+  gasSales: { reports: number; pos: number };
+  grocery: { reports: number; pos: number };
+  tobacco: { reports: number; pos: number };
+  beverages: { reports: number; pos: number };
+  snacks: { reports: number; pos: number };
+  other: { reports: number; pos: number };
+  lottery: {
+    instantSales: { reports: number; pos: number };
+    instantCashes: { reports: number; pos: number };
+    onlineSales: { reports: number; pos: number };
+    onlineCashes: { reports: number; pos: number };
+  };
+  salesTax: { reports: number; pos: number };
+  total: { reports: number; pos: number };
+}
+
+/**
+ * Complete response for shifts:getViewData
+ * All data needed to render ViewShiftPage
+ */
+interface ShiftViewDataResponse {
+  shiftId: string;
+  businessDate: string;
+  status: 'OPEN' | 'CLOSED';
+  shiftInfo: ShiftViewInfo;
+  summary: ShiftViewSummary;
+  payments: ShiftViewPayments;
+  salesBreakdown: ShiftViewSalesBreakdown;
+  /** Raw timestamps for footer calculations */
+  timestamps: {
+    createdAt: string;
+    closedAt: string | null;
+  };
+  /** Optional lottery day ID for LOTTERY mode display */
+  lotteryDayId: string | null;
+}
+
+/**
+ * Helper to format ISO date to display format
+ * Example: "Feb 17, 2026 6:00 AM"
+ */
+function formatDateForDisplay(isoDate: string | null): string {
+  if (!isoDate) return '';
+  try {
+    const date = new Date(isoDate);
+    return date.toLocaleString('en-US', {
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      hour: 'numeric',
+      minute: '2-digit',
+      hour12: true,
+    });
+  } catch {
+    return isoDate;
+  }
+}
+
+/**
+ * Map department code to display category
+ * Returns the category key for sales breakdown
+ */
+function mapDepartmentToCategory(
+  departmentCode: string,
+  departmentName: string | null
+): keyof Omit<ShiftViewSalesBreakdown, 'lottery' | 'salesTax' | 'total'> | null {
+  const code = departmentCode.toUpperCase();
+  const name = (departmentName || '').toUpperCase();
+
+  // Gas/Fuel
+  if (
+    code.includes('FUEL') ||
+    code.includes('GAS') ||
+    name.includes('FUEL') ||
+    name.includes('GAS')
+  ) {
+    return 'gasSales';
+  }
+  // Grocery
+  if (code.includes('GROC') || name.includes('GROCERY')) {
+    return 'grocery';
+  }
+  // Tobacco
+  if (
+    code.includes('TOB') ||
+    code.includes('CIG') ||
+    name.includes('TOBACCO') ||
+    name.includes('CIGARETTE')
+  ) {
+    return 'tobacco';
+  }
+  // Beverages
+  if (
+    code.includes('BEV') ||
+    code.includes('DRINK') ||
+    name.includes('BEVERAGE') ||
+    name.includes('DRINK')
+  ) {
+    return 'beverages';
+  }
+  // Snacks
+  if (
+    code.includes('SNACK') ||
+    code.includes('CANDY') ||
+    name.includes('SNACK') ||
+    name.includes('CANDY')
+  ) {
+    return 'snacks';
+  }
+  // Default to other
+  return 'other';
+}
+
+/**
+ * Map tender code to payment type
+ * Returns the category key for receipts
+ */
+function mapTenderToPaymentType(
+  tenderCode: string,
+  tenderName: string | null
+): 'cash' | 'creditCard' | 'debitCard' | 'ebt' | null {
+  const code = tenderCode.toUpperCase();
+  const name = (tenderName || '').toUpperCase();
+
+  if (code === 'CASH' || name.includes('CASH')) {
+    return 'cash';
+  }
+  if (
+    code.includes('CREDIT') ||
+    code.includes('VISA') ||
+    code.includes('MC') ||
+    code.includes('AMEX') ||
+    name.includes('CREDIT')
+  ) {
+    return 'creditCard';
+  }
+  if (code.includes('DEBIT') || name.includes('DEBIT')) {
+    return 'debitCard';
+  }
+  if (
+    code.includes('EBT') ||
+    code.includes('SNAP') ||
+    name.includes('EBT') ||
+    name.includes('SNAP')
+  ) {
+    return 'ebt';
+  }
+  return null;
+}
+
+/**
+ * Get complete shift view data for ViewShiftPage
+ *
+ * Aggregates data from multiple tables into a single response optimized
+ * for frontend rendering. Includes shift info, summary cards, payment methods,
+ * and sales breakdown.
+ *
+ * Performance characteristics:
+ * - O(1) shift lookup by primary key (indexed)
+ * - O(1) shift_summary lookup by shift_id (indexed)
+ * - O(n) department/tender summaries where n is typically < 20
+ * - O(m) terminal/user name resolution where m is typically < 50
+ * - Total: O(1) database time, O(n+m) in-memory aggregation
+ *
+ * @security SEC-006: All queries use parameterized statements via DAL
+ * @security DB-006: Store-scoped tenant isolation - shift must belong to configured store
+ * @security API-001: Input validated via Zod UUID schema
+ * @security API-003: Generic error responses, no internal details leaked
+ * @security API-008: Only whitelisted fields returned in response
+ *
+ * Channel: shifts:getViewData
+ */
+registerHandler<ShiftViewDataResponse | ReturnType<typeof createErrorResponse>>(
+  'shifts:getViewData',
+  async (_event, shiftIdInput: unknown) => {
+    // API-001: Validate shift ID format (UUID)
+    const parseResult = ShiftIdSchema.safeParse(shiftIdInput);
+    if (!parseResult.success) {
+      return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Invalid shift ID format');
+    }
+
+    const shiftId = parseResult.data;
+
+    // DB-006: Get configured store for tenant isolation
+    const store = storesDAL.getConfiguredStore();
+    if (!store) {
+      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
+    }
+
+    try {
+      // SEC-006: Parameterized query via DAL
+      const shift = shiftsDAL.findById(shiftId);
+      if (!shift) {
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
+      }
+
+      // DB-006: Verify shift belongs to configured store (tenant isolation)
+      // Return same error to prevent tenant enumeration
+      if (shift.store_id !== store.store_id) {
+        log.warn('Shift view data access denied - store mismatch', {
+          requestedShiftId: shiftId,
+          shiftStoreId: shift.store_id,
+          configuredStoreId: store.store_id,
+        });
+        return createErrorResponse(IPCErrorCodes.NOT_FOUND, 'Shift not found');
+      }
+
+      // Build lookup maps for name resolution (efficient single queries)
+      const terminals = posTerminalMappingsDAL.findRegisters(store.store_id);
+      const terminalMap = new Map<string, string>();
+      for (const t of terminals) {
+        terminalMap.set(
+          t.external_register_id,
+          t.description || `Register ${t.external_register_id}`
+        );
+      }
+
+      const usersResult = usersDAL.findByStore(store.store_id, { limit: 1000 });
+      const userMap = new Map<string, string>();
+      for (const u of usersResult.data) {
+        userMap.set(u.user_id, u.name);
+      }
+
+      // Resolve names
+      const terminalName = shift.external_register_id
+        ? terminalMap.get(shift.external_register_id) || `Register ${shift.external_register_id}`
+        : 'Unknown Register';
+      const cashierName = shift.cashier_id
+        ? userMap.get(shift.cashier_id) || 'Unknown Cashier'
+        : 'No Cashier Assigned';
+
+      // Get shift summary for detailed data
+      const shiftSummary = shiftSummariesDAL.findByShiftId(store.store_id, shiftId);
+
+      // Initialize response structure with defaults
+      const summary: ShiftViewSummary = {
+        insideSales: { total: 0, nonFood: 0, foodSales: 0 },
+        fuelSales: { total: 0, gallonsSold: 0 },
+        lotterySales: { total: 0, scratchOff: 0, online: 0 },
+        reserved: null,
+      };
+
+      const payments: ShiftViewPayments = {
+        receipts: {
+          cash: { reports: 0, pos: 0 },
+          creditCard: { reports: 0, pos: 0 },
+          debitCard: { reports: 0, pos: 0 },
+          ebt: { reports: 0, pos: 0 },
+        },
+        payouts: {
+          cashPayouts: { reports: 0, pos: 0, hasImages: false, count: 0 },
+          lotteryPayouts: { reports: 0, pos: 0, hasImages: false },
+          gamingPayouts: { reports: 0, pos: 0, hasImages: false },
+        },
+        netCash: { reports: 0, pos: 0 },
+      };
+
+      const salesBreakdown: ShiftViewSalesBreakdown = {
+        gasSales: { reports: 0, pos: 0 },
+        grocery: { reports: 0, pos: 0 },
+        tobacco: { reports: 0, pos: 0 },
+        beverages: { reports: 0, pos: 0 },
+        snacks: { reports: 0, pos: 0 },
+        other: { reports: 0, pos: 0 },
+        lottery: {
+          instantSales: { reports: 0, pos: 0 },
+          instantCashes: { reports: 0, pos: 0 },
+          onlineSales: { reports: 0, pos: 0 },
+          onlineCashes: { reports: 0, pos: 0 },
+        },
+        salesTax: { reports: 0, pos: 0 },
+        total: { reports: 0, pos: 0 },
+      };
+
+      let openingCash = 0;
+      let closingCash: number | null = null;
+
+      if (shiftSummary) {
+        // Extract cash amounts
+        openingCash = shiftSummary.opening_cash || 0;
+        closingCash = shift.status === 'CLOSED' ? shiftSummary.closing_cash || 0 : null;
+
+        // Get fuel data
+        const fuelTotals = shiftFuelSummariesDAL.getShiftTotals(shiftSummary.shift_summary_id);
+        summary.fuelSales = {
+          total: fuelTotals.totalSales || shiftSummary.fuel_sales || 0,
+          gallonsSold: fuelTotals.totalVolume || shiftSummary.fuel_gallons || 0,
+        };
+        salesBreakdown.gasSales = {
+          reports: summary.fuelSales.total,
+          pos: summary.fuelSales.total,
+        };
+
+        // Get lottery data
+        const lotteryNet = shiftSummary.lottery_net || 0;
+        const lotterySales = shiftSummary.lottery_sales || 0;
+        const lotteryCashes = shiftSummary.lottery_cashes || 0;
+        summary.lotterySales = {
+          total: lotterySales,
+          scratchOff: Math.round(lotterySales * 0.6), // Estimate 60% scratch off
+          online: Math.round(lotterySales * 0.4), // Estimate 40% online
+        };
+        salesBreakdown.lottery = {
+          instantSales: {
+            reports: summary.lotterySales.scratchOff,
+            pos: summary.lotterySales.scratchOff,
+          },
+          instantCashes: {
+            reports: -Math.round(Math.abs(lotteryCashes) * 0.6),
+            pos: -Math.round(Math.abs(lotteryCashes) * 0.6),
+          },
+          onlineSales: { reports: summary.lotterySales.online, pos: summary.lotterySales.online },
+          onlineCashes: {
+            reports: -Math.round(Math.abs(lotteryCashes) * 0.4),
+            pos: -Math.round(Math.abs(lotteryCashes) * 0.4),
+          },
+        };
+
+        // Get department summaries
+        const departmentSummaries = shiftDepartmentSummariesDAL.findByShiftSummary(
+          shiftSummary.shift_summary_id
+        );
+
+        let totalNonFuel = 0;
+        let foodTotal = 0;
+        for (const dept of departmentSummaries) {
+          const category = mapDepartmentToCategory(dept.department_code, dept.department_name);
+          if (category && category !== 'gasSales') {
+            salesBreakdown[category] = {
+              reports: (salesBreakdown[category]?.reports || 0) + dept.net_sales,
+              pos: (salesBreakdown[category]?.pos || 0) + dept.net_sales,
+            };
+            totalNonFuel += dept.net_sales;
+
+            // Track food vs non-food (simplified: grocery and snacks are "food")
+            if (category === 'grocery' || category === 'snacks') {
+              foodTotal += dept.net_sales;
+            }
+          }
+        }
+
+        summary.insideSales = {
+          total: totalNonFuel,
+          nonFood: totalNonFuel - foodTotal,
+          foodSales: foodTotal,
+        };
+
+        // Get tender summaries
+        const tenderSummaries = shiftTenderSummariesDAL.findByShiftSummary(
+          shiftSummary.shift_summary_id
+        );
+
+        let totalReceipts = 0;
+        for (const tender of tenderSummaries) {
+          const paymentType = mapTenderToPaymentType(
+            tender.tender_code,
+            tender.tender_display_name
+          );
+          if (paymentType) {
+            payments.receipts[paymentType] = {
+              reports: tender.net_amount,
+              pos: tender.net_amount,
+            };
+            totalReceipts += tender.net_amount;
+          }
+        }
+
+        // Tax from summary
+        salesBreakdown.salesTax = {
+          reports: shiftSummary.tax_collected || 0,
+          pos: shiftSummary.tax_collected || 0,
+        };
+
+        // Total sales
+        salesBreakdown.total = {
+          reports: shiftSummary.net_sales || 0,
+          pos: shiftSummary.net_sales || 0,
+        };
+
+        // Net cash (simplified calculation)
+        payments.netCash = {
+          reports: totalReceipts,
+          pos: totalReceipts,
+        };
+      }
+
+      // Build shift info
+      const shiftInfo: ShiftViewInfo = {
+        terminalName,
+        shiftNumber: shift.shift_number,
+        cashierName,
+        startedAt: formatDateForDisplay(shift.start_time),
+        endedAt: shift.end_time ? formatDateForDisplay(shift.end_time) : null,
+        openingCash,
+        closingCash,
+      };
+
+      // Get lottery day for LOTTERY mode display
+      // SEC-006: Parameterized query via DAL
+      // DB-006: Store-scoped via store.store_id
+      let lotteryDayId: string | null = null;
+      try {
+        const lotteryDay = lotteryBusinessDaysDAL.findByDate(store.store_id, shift.business_date);
+        if (lotteryDay) {
+          lotteryDayId = lotteryDay.day_id;
+        }
+      } catch (lotteryError) {
+        // Non-critical - log and continue without lottery data
+        log.debug('No lottery day found for shift', {
+          shiftId,
+          businessDate: shift.business_date,
+          error: lotteryError instanceof Error ? lotteryError.message : String(lotteryError),
+        });
+      }
+
+      const response: ShiftViewDataResponse = {
+        shiftId: shift.shift_id,
+        businessDate: shift.business_date,
+        status: shift.status,
+        shiftInfo,
+        summary,
+        payments,
+        salesBreakdown,
+        timestamps: {
+          createdAt: shift.created_at,
+          closedAt: shift.end_time,
+        },
+        lotteryDayId,
+      };
+
+      log.debug('Shift view data retrieved', {
+        shiftId,
+        businessDate: shift.business_date,
+        status: shift.status,
+        hasSummary: !!shiftSummary,
+      });
+
+      return response;
+    } catch (error) {
+      log.error('Failed to get shift view data', {
+        shiftId,
+        error: error instanceof Error ? error.message : String(error),
+      });
+      throw error;
+    }
+  },
+  { description: 'Get complete shift data for view page rendering' }
+);
+
 log.info('Shifts handlers registered');

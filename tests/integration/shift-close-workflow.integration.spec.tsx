@@ -17,7 +17,7 @@
  *
  * Traceability Matrix:
  * - 4.1.2: ShiftsPage Close → ShiftEndPage
- * - 4.1.3: ShiftDetailPage Close → ShiftEndPage
+ * - 4.1.3: ViewShiftPage Close → ShiftEndPage
  * - 4.1.4: Navigation preserves app state
  * - 4.1.5: Back navigation returns to previous page
  */
@@ -172,7 +172,7 @@ vi.mock('../../src/renderer/components/shifts/FuelSalesBreakdown', () => ({
 // ============================================================================
 
 import ShiftsPage from '../../src/renderer/pages/ShiftsPage';
-import ShiftDetailPage from '../../src/renderer/pages/ShiftDetailPage';
+import ViewShiftPage from '../../src/renderer/pages/ViewShiftPage';
 
 // ============================================================================
 // Test Fixtures
@@ -298,7 +298,7 @@ function LocationDisplay() {
 
 /**
  * Test app with full routing context
- * Tests navigation from ShiftsPage/ShiftDetailPage to /shift-end (per BIZ-011)
+ * Tests navigation from ShiftsPage/ViewShiftPage to /shift-end (per BIZ-011)
  */
 interface TestAppProps {
   initialEntries?: string[];
@@ -317,7 +317,7 @@ function TestApp({ initialEntries = ['/shifts'] }: TestAppProps) {
           }
         >
           <Route path="/shifts" element={<ShiftsPage />} />
-          <Route path="/shifts/:shiftId" element={<ShiftDetailPage />} />
+          <Route path="/shifts/:shiftId" element={<ViewShiftPage />} />
           <Route path="/shift-end" element={<MockShiftEndPage />} />
           <Route path="/terminals" element={<div data-testid="terminals-page">Terminals</div>} />
         </Route>
@@ -454,11 +454,11 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
   });
 
   // ==========================================================================
-  // 4.1.3: ShiftDetailPage Close → ShiftEndPage (BIZ-011)
+  // 4.1.3: ViewShiftPage Close → ShiftEndPage (BIZ-011)
   // ==========================================================================
 
-  describe('4.1.3: ShiftDetailPage Close → ShiftEndPage', () => {
-    it('should navigate to /shift-end when Close Shift button is clicked on ShiftDetailPage', async () => {
+  describe('4.1.3: ViewShiftPage Close → ShiftEndPage', () => {
+    it('should navigate to /shift-end when Close Shift button is clicked on ViewShiftPage', async () => {
       // Arrange: OPEN shift
       mockUseShift.mockReturnValue({
         data: createMockShift('shift-001', 'OPEN'),
@@ -490,7 +490,7 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
       });
     });
 
-    it('should render ShiftEndPage after navigation from ShiftDetailPage', async () => {
+    it('should render ShiftEndPage after navigation from ViewShiftPage', async () => {
       // Arrange
       mockUseShift.mockReturnValue({
         data: createMockShift('shift-001', 'OPEN'),
