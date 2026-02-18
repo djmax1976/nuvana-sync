@@ -146,11 +146,6 @@ const mockImageRecordStoreB = {
   store_id: STORE_B_ID,
 };
 
-// Base64 encoded 1x1 red JPEG pixel
-const VALID_BASE64_IMAGE =
-  '/9j/4AAQSkZJRgABAQEASABIAAD/2wBDAAgGBgcGBQgHBwcJCQgKDBQNDAsLDBkSEw8UHRof' +
-  'Hh0aHBwgJC4nICIsIxwcKDcpLDAxNDQ0Hyc5PTgyPC4zNDL/wAALCAABAAEBAREA/8QAFgAB';
-
 // ============================================================================
 // Test Setup
 // ============================================================================

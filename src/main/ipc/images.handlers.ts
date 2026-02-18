@@ -143,6 +143,26 @@ function getImagesBasePath(): string {
 }
 
 /**
+ * Sanitizes a path component to prevent traversal attacks
+ * SEC-015: Path traversal prevention
+ */
+function sanitizePathComponent(component: string, name: string): string {
+  // Block path separators
+  if (component.includes('/') || component.includes('\\')) {
+    throw new Error(`Invalid ${name}: contains path separator`);
+  }
+  // Block parent directory traversal
+  if (component.includes('..')) {
+    throw new Error(`Invalid ${name}: contains path traversal`);
+  }
+  // Block null bytes (poison null byte attack)
+  if (component.includes('\0')) {
+    throw new Error(`Invalid ${name}: contains null byte`);
+  }
+  return component;
+}
+
+/**
  * Get the file path for an image
  * SEC-015: Validates path components to prevent traversal
  */
@@ -152,19 +172,28 @@ function getImageFilePath(
   imageHash: string,
   mimeType: string
 ): string {
-  // SEC-015: Validate path components (no path separators allowed)
-  if (storeId.includes('/') || storeId.includes('\\')) {
-    throw new Error('Invalid store ID');
-  }
-  if (shiftId.includes('/') || shiftId.includes('\\')) {
-    throw new Error('Invalid shift ID');
-  }
-  if (imageHash.includes('/') || imageHash.includes('\\')) {
-    throw new Error('Invalid image hash');
-  }
+  // SEC-015: Sanitize all path components
+  const safeStoreId = sanitizePathComponent(storeId, 'store ID');
+  const safeShiftId = sanitizePathComponent(shiftId, 'shift ID');
+  const safeImageHash = sanitizePathComponent(imageHash, 'image hash');
 
   const extension = MIME_TO_EXTENSION[mimeType] || 'bin';
-  return path.join(getImagesBasePath(), storeId, shiftId, `${imageHash}.${extension}`);
+  const filePath = path.join(
+    getImagesBasePath(),
+    safeStoreId,
+    safeShiftId,
+    `${safeImageHash}.${extension}`
+  );
+
+  // SEC-015: Verify resolved path is within base directory (defense in depth)
+  const basePath = getImagesBasePath();
+  const resolvedPath = path.resolve(filePath);
+  const resolvedBase = path.resolve(basePath);
+  if (!resolvedPath.startsWith(resolvedBase + path.sep)) {
+    throw new Error('Path traversal detected');
+  }
+
+  return filePath;
 }
 
 /**

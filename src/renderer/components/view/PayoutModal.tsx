@@ -69,14 +69,15 @@ export interface PayoutModalProps {
    ============================================================================ */
 
 /**
- * Validates that an image URL is safe (no javascript: protocol)
+ * Validates that an image URL is safe (no dangerous protocols)
  * SEC-014: Input validation for image URLs
  */
 function isValidImageUrl(url: string | null | undefined): boolean {
   if (!url) return false;
   const trimmed = url.trim().toLowerCase();
-  // Block javascript: and data: protocols except data:image
+  // Block dangerous protocols: javascript:, vbscript:, data: (except data:image)
   if (trimmed.startsWith('javascript:')) return false;
+  if (trimmed.startsWith('vbscript:')) return false;
   if (trimmed.startsWith('data:') && !trimmed.startsWith('data:image/')) return false;
   return true;
 }

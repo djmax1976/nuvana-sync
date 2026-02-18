@@ -306,9 +306,14 @@ describe('PRV-S-002: XSS Prevention in return_notes', () => {
      * for logging/alerting purposes, even though we don't reject them
      */
 
-    const DANGEROUS_PATTERNS = [
-      /<script\b[^<]*(?:(?!<\/script[^>]*>)<[^<]*)*<\/script[^>]*>/gi,
+    // NOTE: These patterns are for LOGGING/DETECTION purposes only, not sanitization.
+    // Real XSS prevention uses React's built-in escaping, not regex filtering.
+    // Using functions that return new regex instances to avoid stateful lastIndex issues.
+    const createDangerousPatterns = () => [
+      // Case-insensitive script tag detection (gi flags)
+      /<script\b/gi,
       /javascript:/gi,
+      /vbscript:/gi,
       /on\w+\s*=/gi, // Event handlers like onclick=
       /<iframe/gi,
       /<object/gi,
@@ -317,20 +322,26 @@ describe('PRV-S-002: XSS Prevention in return_notes', () => {
 
     it('should be able to detect script tags for logging', () => {
       const input = '<script>alert("XSS")</script>';
-      const hasScriptTag = DANGEROUS_PATTERNS[0].test(input);
+      const hasScriptTag = createDangerousPatterns()[0].test(input);
       expect(hasScriptTag).toBe(true);
     });
 
     it('should be able to detect javascript: protocol for logging', () => {
       const input = 'javascript:alert("XSS")';
-      const hasJsProtocol = DANGEROUS_PATTERNS[1].test(input);
+      const hasJsProtocol = createDangerousPatterns()[1].test(input);
       expect(hasJsProtocol).toBe(true);
     });
 
     it('should be able to detect event handlers for logging', () => {
       const input = '<img src=x onerror=alert("XSS")>';
-      const hasEventHandler = DANGEROUS_PATTERNS[2].test(input);
+      const hasEventHandler = createDangerousPatterns()[3].test(input);
       expect(hasEventHandler).toBe(true);
+    });
+
+    it('should detect uppercase SCRIPT tags (case-insensitive)', () => {
+      const input = '<SCRIPT>alert("XSS")</SCRIPT>';
+      const hasScriptTag = createDangerousPatterns()[0].test(input);
+      expect(hasScriptTag).toBe(true);
     });
   });
 });
