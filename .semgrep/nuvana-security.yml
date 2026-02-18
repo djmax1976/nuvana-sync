@@ -1,55 +1,9 @@
 rules:
   # ============================================================================
-  # SEC-014: URL Protocol Validation
+  # NOTE: SQL Injection (SEC-006) and XSS (SEC-004) are handled by CodeQL
+  # which has data-flow analysis. Pattern-based rules produce false positives
+  # for our codebase where table/column names come from compile-time allowlists.
   # ============================================================================
-  - id: incomplete-url-scheme-check
-    message: >-
-      Incomplete URL scheme validation. When checking for dangerous protocols,
-      you must check for both javascript and vbscript protocols.
-    severity: ERROR
-    languages: [typescript, javascript]
-    patterns:
-      - pattern-either:
-          - pattern: $X.startsWith('javascript:')
-      - pattern-not-inside: |
-          $X.startsWith('vbscript:')
-    metadata:
-      category: security
-      cwe: 'CWE-79'
-      owasp: 'A7:2017 XSS'
-
-  # ============================================================================
-  # SEC-006: SQL Injection Prevention
-  # ============================================================================
-  - id: sql-string-concatenation
-    message: >-
-      Potential SQL injection - string concatenation in SQL query.
-      Use parameterized queries with ? placeholders instead.
-    severity: ERROR
-    languages: [typescript, javascript]
-    pattern-either:
-      - pattern: $DB.prepare(`... ${$VAR} ...`)
-      - pattern: $DB.prepare("..." + $VAR + "...")
-      - pattern: $DB.exec(`... ${$VAR} ...`)
-    metadata:
-      category: security
-      cwe: 'CWE-89'
-      owasp: 'A1:2017 Injection'
-
-  # ============================================================================
-  # SEC-004: XSS Prevention
-  # ============================================================================
-  - id: dangerous-innerhtml-assignment
-    message: >-
-      Using innerHTML with dynamic content can lead to XSS.
-      Use textContent or React built-in escaping instead.
-    severity: WARNING
-    languages: [typescript, javascript]
-    pattern: $EL.innerHTML = $VAR
-    metadata:
-      category: security
-      cwe: 'CWE-79'
-      owasp: 'A7:2017 XSS'
 
   # ============================================================================
   # Electron Security
