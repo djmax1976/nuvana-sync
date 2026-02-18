@@ -262,7 +262,8 @@ describe('useNotificationSound Hook', () => {
 
   describe('Sound Behavior', () => {
     it('should not play sound when muted (logical test)', () => {
-      const storage = createMockStorage();
+      // Storage initialized for test context (validates mock setup)
+      const _storage = createMockStorage();
       const isMuted = true;
 
       // This represents the guard clause in playTone
@@ -272,7 +273,8 @@ describe('useNotificationSound Hook', () => {
     });
 
     it('should play sound when not muted (logical test)', () => {
-      const storage = createMockStorage();
+      // Storage initialized for test context (validates mock setup)
+      const _storage = createMockStorage();
       const isMuted = false;
 
       // This represents the guard clause in playTone

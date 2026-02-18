@@ -6,7 +6,7 @@
  * @security DB-006: Verifies tenant isolation
  */
 
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // Use vi.hoisted() to ensure mock functions are available when vi.mock runs
 // This fixes cross-platform issues where vi.mock hoisting differs between Windows and Linux

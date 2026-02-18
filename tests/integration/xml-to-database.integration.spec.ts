@@ -129,7 +129,7 @@ let tempDir: string;
 // Mock the database service BEFORE importing DALs
 vi.mock('../../src/main/services/database.service', () => ({
   getDatabase: vi.fn(() => testDb),
-  isDatabaseInitialized: vi.fn(() => testDb !== null),
+  isDatabaseInitialized: vi.fn(() => testDb != null),
   withTransaction: vi.fn((fn: () => unknown) => {
     const transaction = testDb.transaction(fn);
     return transaction();

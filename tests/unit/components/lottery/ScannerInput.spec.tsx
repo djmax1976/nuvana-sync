@@ -46,7 +46,8 @@ const VALID_SERIAL = '000112345670123456789012'; // 24 digits
 const VALID_SERIAL_2 = '000298765430153456789012'; // Different pack
 const INVALID_SERIAL_SHORT = '00011234567012345678901'; // 23 digits
 const INVALID_SERIAL_LONG = '0001123456701234567890123'; // 25 digits
-const INVALID_SERIAL_ALPHA = '000112345670123456789abc'; // Contains letters
+// Reserved for future alpha character validation tests
+const _INVALID_SERIAL_ALPHA = '000112345670123456789abc'; // Contains letters
 
 // ============================================================================
 // Tests

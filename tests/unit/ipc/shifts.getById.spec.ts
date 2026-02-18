@@ -436,7 +436,7 @@ describe('shifts:getById Handler', () => {
 
     it('should return VALIDATION_ERROR for null input', async () => {
       // Act
-      const result = await handler({}, null);
+      await handler({}, null);
 
       // Assert
       expect(mockCreateErrorResponse).toHaveBeenCalledWith(
@@ -447,7 +447,7 @@ describe('shifts:getById Handler', () => {
 
     it('should return VALIDATION_ERROR for undefined input', async () => {
       // Act
-      const result = await handler({}, undefined);
+      await handler({}, undefined);
 
       // Assert
       expect(mockCreateErrorResponse).toHaveBeenCalledWith(
@@ -532,7 +532,7 @@ describe('shifts:getById Handler', () => {
       const maliciousInput = "'; DROP TABLE shifts; --";
 
       // Act
-      const result = await handler({}, maliciousInput);
+      await handler({}, maliciousInput);
 
       // Assert: input validation rejects before reaching DAL
       expect(mockCreateErrorResponse).toHaveBeenCalledWith(

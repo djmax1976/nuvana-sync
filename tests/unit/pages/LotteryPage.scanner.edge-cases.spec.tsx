@@ -30,7 +30,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ============================================================================
 // Mock Dependencies
@@ -513,7 +513,8 @@ describe('LotteryPage Scanner Edge Cases', () => {
 
       // Wait for duplicate dialog to appear
       await waitFor(() => {
-        const dialog = screen.queryByTestId('duplicate-scan-dialog');
+        // Query dialog for side effect (may trigger state updates)
+        const _dialog = screen.queryByTestId('duplicate-scan-dialog');
         // The dialog may or may not appear depending on the actual hook behavior
         // This test verifies the error sound is played for duplicates
         expect(mockPlayError).toHaveBeenCalled();

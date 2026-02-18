@@ -202,8 +202,9 @@ const PackNumberSchema = z.string().regex(/^\d{7}$/, 'Pack number must be 7 digi
 
 /**
  * SEC-014: Game code validation (4-digit)
+ * Reserved for future game code validation tests
  */
-const GameCodeSchema = z.string().regex(/^\d{4}$/, 'Game code must be 4 digits');
+const _GameCodeSchema = z.string().regex(/^\d{4}$/, 'Game code must be 4 digits');
 
 // ============================================================================
 // Test Payloads
@@ -256,9 +257,9 @@ const XSS_INJECTION_PAYLOADS = [
 ];
 
 /**
- * Malformed UUID payloads
+ * Malformed UUID payloads - reserved for UUID injection tests
  */
-const INVALID_UUID_PAYLOADS = [
+const _INVALID_UUID_PAYLOADS = [
   'not-a-uuid',
   '12345678',
   '',
@@ -292,7 +293,8 @@ const URL_MANIPULATION_PAYLOADS = [
 
 const STORE_A_ID = 'aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
 const STORE_B_ID = 'bbbbbbbb-bbbb-4bbb-bbbb-bbbbbbbbbbbb';
-const VALID_DAY_ID = '11111111-1111-4111-a111-111111111111';
+// Reserved for future day-related security tests
+const _VALID_DAY_ID = '11111111-1111-4111-a111-111111111111';
 const VALID_USER_ID = '22222222-2222-4222-a222-222222222222';
 const VALID_GAME_ID = '33333333-3333-4333-a333-333333333333';
 const VALID_PACK_ID = '55555555-5555-4555-a555-555555555555';

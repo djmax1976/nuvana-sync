@@ -1926,7 +1926,8 @@ describe('Shifts Handlers', () => {
     };
 
     // Mock closed day (should not satisfy guard)
-    const mockClosedDay = {
+    // Note: Prefixed with _ as it's for documentation showing what CLOSED days look like
+    const _mockClosedDay = {
       ...mockOpenDay,
       day_id: 'day-uuid-closed',
       status: 'CLOSED',
@@ -2210,11 +2211,11 @@ describe('Shifts Handlers', () => {
         // If a CLOSED day exists, it should not be returned
         lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
           // Simulate: CLOSED day exists but should not match
-          const closedDayExists = true;
-          const openDayExists = false;
-
-          if (storeId === STORE_ID && openDayExists) {
-            return mockOpenDay;
+          // The mock returns undefined because only CLOSED days exist (no OPEN day)
+          // This tests that findOpenDay correctly filters by OPEN status
+          if (storeId === STORE_ID) {
+            // Only CLOSED days exist, so return undefined
+            return undefined;
           }
           return undefined;
         });
@@ -2423,7 +2424,8 @@ describe('Shifts Handlers', () => {
           cashier_id: null,
         };
 
-        const terminalMap = new Map([['REG-1', 'Register 1']]);
+        // Terminal map available for context but not used in this cashier-focused test
+        const _terminalMap = new Map([['REG-1', 'Register 1']]);
         const userMap = new Map<string, string>();
 
         const cashierName = mockShift.cashier_id

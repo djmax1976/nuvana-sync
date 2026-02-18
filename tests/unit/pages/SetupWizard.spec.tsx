@@ -79,10 +79,11 @@ describe('SetupWizard', () => {
   /**
    * Renders SetupWizard and navigates to complete step by setting internal state
    * Uses a custom wrapper to access component internal state for testing
+   * Reserved for future tests that require navigating to complete step
    *
    * SEC-014: No user input involved, purely testing static button rendering
    */
-  function renderAtCompleteStep() {
+  function _renderAtCompleteStep() {
     // Render with a spy onComplete
     const { container, rerender } = render(<SetupWizard onComplete={mockOnComplete} />);
 

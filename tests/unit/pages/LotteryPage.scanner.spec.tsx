@@ -31,8 +31,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ============================================================================
 // Mock Dependencies
@@ -972,7 +971,8 @@ describe('SEC-010: Close Day Button Authorization', () => {
     it('SEC-017-AUDIT-001: should NOT use placeholder user IDs', () => {
       // This test validates the fix for BUG-002
       // The code should use user.id, not 'scanner-session'
-      const placeholderUserId = 'scanner-session';
+      // Note: This constant documents the anti-pattern we're testing against
+      const _placeholderUserId = 'scanner-session';
 
       render(<LotteryPage />);
 
