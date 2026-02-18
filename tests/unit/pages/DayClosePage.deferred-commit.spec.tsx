@@ -143,7 +143,7 @@ vi.mock('../../../src/renderer/components/day-close/ReportScanningStep', () => (
 }));
 
 // Mock ShiftClosingForm
-const __shiftClosingFormOpen = false;
+let _shiftClosingFormOpen = false;
 vi.mock('../../../src/renderer/components/shifts/ShiftClosingForm', () => ({
   ShiftClosingForm: ({
     open,
