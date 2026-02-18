@@ -26,7 +26,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import type {
   ScannedBin,
   PendingClosingsData,
@@ -153,15 +153,6 @@ vi.mock('../../../../src/renderer/components/ui/dropdown-menu', () => ({
   DropdownMenuItem: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
   DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
-
-// Mock lucide-react icons using importOriginal to include all icons
-vi.mock('lucide-react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('lucide-react')>();
-  return {
-    ...actual,
-    // Test-specific overrides if needed
-  };
-});
 
 // Mock sub-components
 vi.mock('../../../../src/renderer/components/lottery/ScannerInput', () => ({

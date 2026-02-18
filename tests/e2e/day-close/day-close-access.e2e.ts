@@ -167,10 +167,10 @@ function getCancelButton(window: Page): Locator {
  *
  * @returns Test user's PIN if successful, null if seeding fails
  */
-async function seedDayCloseTestData(window: Page): Promise<{ pin: string } | null> {
+async function _seedDayCloseTestData(window: Page): Promise<{ pin: string } | null> {
   try {
     const result = await window.evaluate(async () => {
-      const api = (
+      const _api = (
         window as unknown as {
           electronAPI: { invoke: (ch: string, params?: unknown) => Promise<unknown> };
         }
@@ -266,7 +266,7 @@ test.describe('Day Close Access Guard (5.T3)', () => {
       }
 
       // Capture URL before clicking
-      const urlBefore = new URL(window.url()).hash;
+      const _urlBefore = new URL(window.url()).hash;
 
       // Click Day Close button
       await getDayCloseButton(window).click();
@@ -316,7 +316,7 @@ test.describe('Day Close Access Guard (5.T3)', () => {
         const errorElement = window.locator(
           '[class*="error"], [class*="red"], [class*="destructive"]'
         );
-        const hasError = await errorElement
+        const _hasError = await errorElement
           .first()
           .isVisible()
           .catch(() => false);
@@ -479,7 +479,7 @@ test.describe('Day Close Access Guard (5.T3)', () => {
 
       // Tab should move to Cancel button
       await window.keyboard.press('Tab');
-      const cancelButton = getCancelButton(window);
+      const _cancelButton = getCancelButton(window);
 
       // Verify we can continue tabbing without errors
       await window.keyboard.press('Tab');

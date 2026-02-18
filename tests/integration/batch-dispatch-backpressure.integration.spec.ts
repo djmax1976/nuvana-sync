@@ -16,10 +16,10 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import Database from 'better-sqlite3';
 import * as path from 'path';
-import * as fs from 'fs';
+import * as _fs from 'fs';
 
 // Mock database service before importing DALs
-const testDbPath = path.join(__dirname, `test-batch-${Date.now()}.db`);
+const _testDbPath = path.join(__dirname, `test-batch-${Date.now()}.db`);
 let testDb: Database.Database;
 
 vi.mock('../../src/main/services/database.service', () => ({
@@ -28,7 +28,7 @@ vi.mock('../../src/main/services/database.service', () => ({
 }));
 
 // Import after mocks
-import { SyncQueueDAL, type CreateSyncQueueItemData } from '../../src/main/dal/sync-queue.dal';
+import { SyncQueueDAL } from '../../src/main/dal/sync-queue.dal';
 
 // ============================================================================
 // Test Setup
@@ -224,7 +224,7 @@ describe('Batch Dispatch and Backpressure Integration', () => {
 
     it('should exclude dead-lettered items from batches', () => {
       // Create items
-      const item1 = dal.enqueue({
+      const _item1 = dal.enqueue({
         store_id: STORE_ID,
         entity_type: 'pack',
         entity_id: 'active-item',
@@ -391,7 +391,7 @@ describe('Batch Dispatch and Backpressure Integration', () => {
 
     it('should count deferred items separately', () => {
       // Create normal and deferred items
-      const item1 = dal.enqueue({
+      const _item1 = dal.enqueue({
         store_id: STORE_ID,
         entity_type: 'pack',
         entity_id: 'normal-pack',

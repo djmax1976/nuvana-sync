@@ -44,7 +44,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
 
 // Alias for easier access in tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
+let _testDb: any = null;
 
 describe.skipIf(skipTests)('Lottery Bins DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -55,7 +55,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
     // Create in-memory database
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
-    testDb = db;
+    _testDb = db;
     testDbContainer.db = db;
 
     // Create required tables with cloud-aligned schema
@@ -124,7 +124,7 @@ describe.skipIf(skipTests)('Lottery Bins DAL', () => {
 
   afterEach(() => {
     db.close();
-    testDb = null;
+    _testDb = null;
     vi.clearAllMocks();
   });
 

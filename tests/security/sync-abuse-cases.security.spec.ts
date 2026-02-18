@@ -370,7 +370,7 @@ describeSuite('SYNC-5000 Security Abuse Case Tests', () => {
 
     it('should handle circular reference attempts', () => {
       // JSON.stringify will fail on circular refs, but we should handle gracefully
-      const circular: Record<string, unknown> = { name: 'circular' };
+      const _circular: Record<string, unknown> = { name: 'circular' };
       // Note: Can't actually pass circular to JSON.stringify, but this tests the concept
       // In real code, Zod validation would catch this before reaching DAL
 

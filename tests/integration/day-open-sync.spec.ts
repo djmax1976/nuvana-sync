@@ -179,7 +179,7 @@ function findSyncItemsByType(entityType: string): CreateSyncQueueItemData[] {
 /**
  * Find a specific sync item by entity type and entity ID
  */
-function findSyncItem(entityType: string, entityId: string): CreateSyncQueueItemData | undefined {
+function _findSyncItem(entityType: string, entityId: string): CreateSyncQueueItemData | undefined {
   return enqueueCallHistory.find(
     (item) => item.entity_type === entityType && item.entity_id === entityId
   );

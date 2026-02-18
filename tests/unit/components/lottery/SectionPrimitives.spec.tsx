@@ -23,14 +23,6 @@ import { describe, it, expect, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 
 // ============================================================================
-// Mock Dependencies
-// ============================================================================
-
-vi.mock('lucide-react', () => ({
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-}));
-
-// ============================================================================
 // Import Components Under Test
 // ============================================================================
 
@@ -212,15 +204,17 @@ describe('PackSectionHeader', () => {
   });
 
   it('should rotate chevron when open', () => {
-    render(<PackSectionHeader {...defaultProps} isOpen={true} />);
-    const chevron = screen.getByTestId('chevron-icon');
-    expect(chevron.className).toContain('rotate-90');
+    const { container } = render(<PackSectionHeader {...defaultProps} isOpen={true} />);
+    const chevron = container.querySelector('.lucide.lucide-chevron-right');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).toContain('rotate-90');
   });
 
   it('should not rotate chevron when closed', () => {
-    render(<PackSectionHeader {...defaultProps} isOpen={false} />);
-    const chevron = screen.getByTestId('chevron-icon');
-    expect(chevron.className).not.toContain('rotate-90');
+    const { container } = render(<PackSectionHeader {...defaultProps} isOpen={false} />);
+    const chevron = container.querySelector('.lucide.lucide-chevron-right');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).not.toContain('rotate-90');
   });
 
   it('should render rightBadge when provided', () => {

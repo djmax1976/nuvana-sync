@@ -60,8 +60,8 @@ import {
   type DayFuelSummary,
   type CreateDayFuelSummaryData,
   type MSMDayFuelInput,
-  type DayFuelTotals,
-  type DayFuelByGrade,
+  type DayFuelTotals as _DayFuelTotals,
+  type DayFuelByGrade as _DayFuelByGrade,
   type DayFuelSource,
 } from '../../../src/main/dal/day-fuel-summaries.dal';
 

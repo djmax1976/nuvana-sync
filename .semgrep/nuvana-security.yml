@@ -1,0 +1,40 @@
+rules:
+  # ============================================================================
+  # NOTE: SQL Injection (SEC-006) and XSS (SEC-004) are handled by CodeQL
+  # which has data-flow analysis. Pattern-based rules produce false positives
+  # for our codebase where table/column names come from compile-time allowlists.
+  # ============================================================================
+
+  # ============================================================================
+  # Electron Security
+  # ============================================================================
+  - id: electron-node-integration-enabled
+    message: >-
+      nodeIntegration should be false for security.
+      Use preload scripts with contextBridge instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'nodeIntegration: true'
+    metadata:
+      category: security
+      cwe: 'CWE-94'
+
+  - id: electron-context-isolation-disabled
+    message: >-
+      contextIsolation should be true for security.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'contextIsolation: false'
+    metadata:
+      category: security
+      cwe: 'CWE-94'
+
+  - id: electron-web-security-disabled
+    message: >-
+      webSecurity should not be disabled.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'webSecurity: false'
+    metadata:
+      category: security
+      cwe: 'CWE-94'

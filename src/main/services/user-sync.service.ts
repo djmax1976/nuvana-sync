@@ -17,8 +17,8 @@
  * @security SEC-017: Audit logging for user changes
  */
 
-import { cloudApiService, type CloudUser } from './cloud-api.service';
-import { usersDAL, type CloudUserData, type User } from '../dal/users.dal';
+import { cloudApiService } from './cloud-api.service';
+import { usersDAL, type CloudUserData } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL, type SyncApiContext, type ErrorCategory } from '../dal/sync-queue.dal';
 import { createLogger } from '../utils/logger';

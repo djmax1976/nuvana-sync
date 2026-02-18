@@ -31,8 +31,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ============================================================================
 // Mock Dependencies
@@ -242,22 +241,6 @@ vi.mock('../../../src/renderer/components/auth/PinVerificationDialog', () => ({
       </div>
     );
   }),
-}));
-
-// Mock lucide-react icons
-vi.mock('lucide-react', () => ({
-  Loader2: (props: Record<string, unknown>) => <div data-testid="loader-icon" {...props} />,
-  AlertCircle: (props: Record<string, unknown>) => <div data-testid="alert-icon" {...props} />,
-  Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  PenLine: (props: Record<string, unknown>) => <div data-testid="pen-icon" {...props} />,
-  X: (props: Record<string, unknown>) => <div data-testid="x-icon" {...props} />,
-  Save: (props: Record<string, unknown>) => <div data-testid="save-icon" {...props} />,
-  CalendarCheck: (props: Record<string, unknown>) => <div data-testid="calendar-icon" {...props} />,
-  ScanLine: (props: Record<string, unknown>) => <div data-testid="scan-line-icon" {...props} />,
-  CheckCircle2: (props: Record<string, unknown>) => <div data-testid="check-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => (
-    <div data-testid="alert-triangle-icon" {...props} />
-  ),
 }));
 
 // ============================================================================
@@ -988,7 +971,8 @@ describe('SEC-010: Close Day Button Authorization', () => {
     it('SEC-017-AUDIT-001: should NOT use placeholder user IDs', () => {
       // This test validates the fix for BUG-002
       // The code should use user.id, not 'scanner-session'
-      const placeholderUserId = 'scanner-session';
+      // Note: This constant documents the anti-pattern we're testing against
+      const _placeholderUserId = 'scanner-session';
 
       render(<LotteryPage />);
 

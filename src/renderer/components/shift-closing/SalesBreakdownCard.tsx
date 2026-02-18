@@ -17,7 +17,6 @@ import { Input } from '@/components/ui/input';
 import { TrendingUp } from 'lucide-react';
 
 import {
-  type SalesBreakdownState,
   type SalesBreakdownReportsState,
   type SalesBreakdownPOSState,
   type SalesBreakdownCardProps,

@@ -178,7 +178,7 @@ import {
   type LotteryBusinessDay,
   type LotteryDayPack,
 } from '../../../src/main/dal/lottery-business-days.dal';
-import { lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
+import { lotteryPacksDAL as _lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
 
 // ============================================================================
 // Test Suite

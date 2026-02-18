@@ -201,7 +201,7 @@ function createPackOperationResponse(overrides?: { success?: boolean; idempotent
 /**
  * Create mock response for session complete
  */
-function createCompleteSessionResponse() {
+function _createCompleteSessionResponse() {
   return {
     ok: true,
     json: () => Promise.resolve({ success: true }),

@@ -65,9 +65,9 @@ vi.mock('../../../src/main/dal/stores.dal', () => ({
 import {
   BatchDispatcherService,
   type BatchConfig,
-  type OverloadPolicy,
-  type PartitionBatch,
-  type QueueHealthStatus,
+  type OverloadPolicy as _OverloadPolicy,
+  type PartitionBatch as _PartitionBatch,
+  type QueueHealthStatus as _QueueHealthStatus,
 } from '../../../src/main/services/batch-dispatcher.service';
 import type { SyncQueueItem } from '../../../src/main/dal/sync-queue.dal';
 

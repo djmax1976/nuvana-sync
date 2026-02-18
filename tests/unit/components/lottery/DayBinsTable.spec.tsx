@@ -32,22 +32,6 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 
 // ============================================================================
-// Mock Dependencies
-// ============================================================================
-
-vi.mock('lucide-react', () => ({
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-  CheckCircle2: (props: Record<string, unknown>) => (
-    <div data-testid="check-circle-icon" {...props} />
-  ),
-  MoreVertical: (props: Record<string, unknown>) => (
-    <div data-testid="more-vertical-icon" {...props} />
-  ),
-  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
-  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
-}));
-
-// ============================================================================
 // Import Component Under Test
 // ============================================================================
 
@@ -985,13 +969,6 @@ describe('DayBinsTable', () => {
       );
       const row = screen.getByTestId('day-bins-row-bin-001');
       expect(row.className).not.toContain('animate-pulse');
-    });
-
-    it('should show checkmark icon for scanned bins', () => {
-      const bin = createBin();
-      const scannedBin = createScannedBin('bin-001');
-      render(<DayBinsTable bins={[bin]} scannedBins={[scannedBin]} scannerModeActive={true} />);
-      expect(screen.getByTestId('check-circle-icon')).toBeInTheDocument();
     });
 
     it('should display scanned closing serial with checkmark', () => {

@@ -30,7 +30,7 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, waitFor, within } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 // ============================================================================
 // Mock Dependencies
@@ -115,7 +115,7 @@ vi.mock('../../../src/renderer/lib/services/lottery-closing-validation', () => (
 }));
 
 // Track scanned bins for mock
-let mockScannedBins: Array<{ bin_id: string; closing_serial: string }> = [];
+let _mockScannedBins: Array<{ bin_id: string; closing_serial: string }> = [];
 
 // Mock components that are complex to test
 vi.mock('../../../src/renderer/components/lottery/DayBinsTable', () => ({
@@ -155,8 +155,8 @@ vi.mock('../../../src/renderer/components/lottery/DayBinsTable', () => ({
 }));
 
 // Store the onScan and onScanError callbacks for testing
-let capturedOnScan: ((serial: string) => void) | null = null;
-let capturedOnScanError: (() => void) | null = null;
+let _capturedOnScan: ((serial: string) => void) | null = null;
+let _capturedOnScanError: (() => void) | null = null;
 
 vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
   DayCloseScannerBar: vi.fn(
@@ -172,8 +172,8 @@ vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
       isComplete,
     }) => {
       // Capture callbacks for testing
-      capturedOnScan = onScan;
-      capturedOnScanError = onScanError;
+      _capturedOnScan = onScan;
+      _capturedOnScanError = onScanError;
 
       // Calculate empty bins count
       const emptyBinsCount =
@@ -262,22 +262,6 @@ vi.mock('../../../src/renderer/components/auth/PinVerificationDialog', () => ({
       </div>
     );
   }),
-}));
-
-// Mock lucide-react icons
-vi.mock('lucide-react', () => ({
-  Loader2: (props: Record<string, unknown>) => <div data-testid="loader-icon" {...props} />,
-  AlertCircle: (props: Record<string, unknown>) => <div data-testid="alert-icon" {...props} />,
-  Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  PenLine: (props: Record<string, unknown>) => <div data-testid="pen-icon" {...props} />,
-  X: (props: Record<string, unknown>) => <div data-testid="x-icon" {...props} />,
-  Save: (props: Record<string, unknown>) => <div data-testid="save-icon" {...props} />,
-  CalendarCheck: (props: Record<string, unknown>) => <div data-testid="calendar-icon" {...props} />,
-  ScanLine: (props: Record<string, unknown>) => <div data-testid="scan-line-icon" {...props} />,
-  CheckCircle2: (props: Record<string, unknown>) => <div data-testid="check-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => (
-    <div data-testid="alert-triangle-icon" {...props} />
-  ),
 }));
 
 // ============================================================================
@@ -450,9 +434,9 @@ function setupDefaultMocks() {
   });
 
   // Reset captured callbacks
-  capturedOnScan = null;
-  capturedOnScanError = null;
-  mockScannedBins = [];
+  _capturedOnScan = null;
+  _capturedOnScanError = null;
+  _mockScannedBins = [];
 }
 
 // ============================================================================
@@ -529,7 +513,8 @@ describe('LotteryPage Scanner Edge Cases', () => {
 
       // Wait for duplicate dialog to appear
       await waitFor(() => {
-        const dialog = screen.queryByTestId('duplicate-scan-dialog');
+        // Query dialog for side effect (may trigger state updates)
+        const _dialog = screen.queryByTestId('duplicate-scan-dialog');
         // The dialog may or may not appear depending on the actual hook behavior
         // This test verifies the error sound is played for duplicates
         expect(mockPlayError).toHaveBeenCalled();

@@ -79,7 +79,7 @@ interface DayCloseAccessResult {
   openShiftCount: number;
 }
 
-interface DayCloseAccessInput {
+interface _DayCloseAccessInput {
   pin: string;
 }
 

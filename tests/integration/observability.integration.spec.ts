@@ -61,7 +61,7 @@ vi.mock('../../src/main/utils/event-bus', () => ({
   },
 }));
 
-import { syncQueueDAL } from '../../src/main/dal/sync-queue.dal';
+import { syncQueueDAL as _syncQueueDAL } from '../../src/main/dal/sync-queue.dal';
 import { SyncMetricsService } from '../../src/main/services/sync-metrics.service';
 import { SyncAlertsService } from '../../src/main/services/sync-alerts.service';
 import { eventBus, MainEvents } from '../../src/main/utils/event-bus';
@@ -282,7 +282,7 @@ describe('Observability Integration Tests', () => {
 
       // Act
       const metrics = metricsService.collectMetrics(testStoreId);
-      const alerts = alertsService.evaluateMetrics(metrics);
+      const _alerts = alertsService.evaluateMetrics(metrics);
 
       // Assert - error rate = 10 / (90 + 10) = 10%
       expect(metrics.outcome.failed).toBeGreaterThan(0);

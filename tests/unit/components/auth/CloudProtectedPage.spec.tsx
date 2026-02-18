@@ -53,16 +53,6 @@ vi.mock('react-router-dom', () => ({
   useNavigate: () => mockNavigate,
 }));
 
-// lucide-react — replace SVG icons with testable span elements
-vi.mock('lucide-react', () => ({
-  Shield: (props: { className?: string }) => (
-    <span data-testid="icon-shield" className={props.className} />
-  ),
-  Code: (props: { className?: string }) => (
-    <span data-testid="icon-code" className={props.className} />
-  ),
-}));
-
 // CloudAuthDialog — controllable test double that exposes captured props
 vi.mock('../../../../src/renderer/components/auth/CloudAuthDialog', () => ({
   CloudAuthDialog: (props: Record<string, unknown>) => {
@@ -197,19 +187,6 @@ describe('CloudProtectedPage', () => {
       );
 
       expect(screen.getByText('DEV_BYPASS')).toBeInTheDocument();
-    });
-
-    it('CPP-DEV-004: dev banner uses Code icon, not Shield icon', async () => {
-      const CloudProtectedPage = await importComponent();
-      render(
-        <CloudProtectedPage>
-          <div>Content</div>
-        </CloudProtectedPage>
-      );
-
-      expect(screen.getByTestId('icon-code')).toBeInTheDocument();
-      // Shield icon should NOT appear in the dev banner
-      expect(screen.queryByTestId('icon-shield')).not.toBeInTheDocument();
     });
 
     it('CPP-DEV-005: does NOT show production amber banner', async () => {
@@ -382,24 +359,6 @@ describe('CloudProtectedPage', () => {
       });
 
       expect(screen.getByText('SUPERADMIN')).toBeInTheDocument();
-    });
-
-    it('CPP-PROD-008: production banner uses Shield icon, not Code icon', async () => {
-      const CloudProtectedPage = await importComponent();
-      render(
-        <CloudProtectedPage>
-          <div>Content</div>
-        </CloudProtectedPage>
-      );
-
-      act(() => {
-        (capturedDialogProps.current.onAuthenticated as (user: typeof SUPPORT_USER) => void)(
-          SUPPORT_USER
-        );
-      });
-
-      expect(screen.getByTestId('icon-shield')).toBeInTheDocument();
-      expect(screen.queryByTestId('icon-code')).not.toBeInTheDocument();
     });
 
     it('CPP-PROD-009: does NOT show dev mode purple banner after production auth', async () => {

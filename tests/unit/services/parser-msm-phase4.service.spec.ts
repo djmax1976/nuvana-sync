@@ -24,7 +24,7 @@
  * @security DB-006: Verifies tenant isolation
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 // ============================================================================
 // Mock Setup - Must be BEFORE imports
@@ -43,7 +43,7 @@ let mockDaySummaryGetOrCreate: ReturnType<typeof vi.fn>;
 let mockShiftSummaryGetOrCreate: ReturnType<typeof vi.fn>;
 let mockShiftsGetOrCreate: ReturnType<typeof vi.fn>;
 let mockShiftsFindOpen: ReturnType<typeof vi.fn>;
-let mockShiftsClose: ReturnType<typeof vi.fn>;
+let _mockShiftsClose: ReturnType<typeof vi.fn>;
 let mockProcessedFilesIsProcessed: ReturnType<typeof vi.fn>;
 let mockProcessedFilesRecord: ReturnType<typeof vi.fn>;
 let mockExtractFuelDataFromMSM: ReturnType<typeof vi.fn>;
@@ -183,7 +183,10 @@ vi.mock('../../../src/shared/naxml/parser', () => ({
 
 import { ParserService } from '../../../src/main/services/parser.service';
 import * as dal from '../../../src/main/dal';
-import { createNAXMLParser, extractFuelDataFromMSM } from '../../../src/shared/naxml/parser';
+import {
+  createNAXMLParser as _createNAXMLParser,
+  extractFuelDataFromMSM as _extractFuelDataFromMSM,
+} from '../../../src/shared/naxml/parser';
 import type { MSMExtractedFuelData } from '../../../src/shared/naxml/types';
 
 // ============================================================================
@@ -412,7 +415,7 @@ describe('ParserService - Phase 4 MSM Fuel Data Processing', () => {
     mockShiftSummaryGetOrCreate = vi.mocked(dal.shiftSummariesDAL.getOrCreateForShift);
     mockShiftsGetOrCreate = vi.mocked(dal.shiftsDAL.getOrCreateForDate);
     mockShiftsFindOpen = vi.mocked(dal.shiftsDAL.findOpenShiftToClose);
-    mockShiftsClose = vi.mocked(dal.shiftsDAL.closeShift);
+    _mockShiftsClose = vi.mocked(dal.shiftsDAL.closeShift);
     mockProcessedFilesIsProcessed = vi.mocked(dal.processedFilesDAL.isFileProcessed);
     mockProcessedFilesRecord = vi.mocked(dal.processedFilesDAL.recordFile);
 
@@ -990,7 +993,7 @@ describe('ParserService - Phase 4 MSM Fuel Data Processing', () => {
     });
 
     it('P4-SEC-005: should validate discount types via allowlist (SEC-014)', async () => {
-      const validDiscountTypes = [
+      const _validDiscountTypes = [
         'statistics',
         'amountFixed',
         'amountPercentage',

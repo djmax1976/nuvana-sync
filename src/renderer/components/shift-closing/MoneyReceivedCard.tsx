@@ -17,7 +17,6 @@ import { Input } from '@/components/ui/input';
 import { DollarSign } from 'lucide-react';
 
 import {
-  type MoneyReceivedState,
   type MoneyReceivedReportsState,
   type MoneyReceivedPOSState,
   type MoneyReceivedCardProps,

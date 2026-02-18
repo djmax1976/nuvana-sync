@@ -30,12 +30,7 @@ import {
   closeDatabase,
   getDbPath,
 } from './database.service';
-import {
-  runMigrations,
-  getCurrentSchemaVersion,
-  getAppliedMigrationDetails,
-  type MigrationSummary,
-} from './migration.service';
+import { runMigrations, getCurrentSchemaVersion, type MigrationSummary } from './migration.service';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================

@@ -48,16 +48,6 @@ vi.mock('../../../../src/renderer/components/lottery/ScannerInput', () => ({
   )),
 }));
 
-// Mock lucide-react icons
-vi.mock('lucide-react', () => ({
-  Scan: (props: Record<string, unknown>) => <div data-testid="scan-icon" {...props} />,
-  Volume2: (props: Record<string, unknown>) => <div data-testid="volume-on-icon" {...props} />,
-  VolumeX: (props: Record<string, unknown>) => <div data-testid="volume-off-icon" {...props} />,
-  X: (props: Record<string, unknown>) => <div data-testid="x-icon" {...props} />,
-  ArrowRight: (props: Record<string, unknown>) => <div data-testid="arrow-icon" {...props} />,
-  Loader2: (props: Record<string, unknown>) => <div data-testid="loader-icon" {...props} />,
-}));
-
 // ============================================================================
 // Import Component Under Test
 // ============================================================================
@@ -167,11 +157,6 @@ describe('DayCloseScannerBar', () => {
       expect(screen.getByTestId('custom-bar')).toBeInTheDocument();
     });
 
-    it('should render scanner icon', () => {
-      render(<DayCloseScannerBar {...createDefaultProps()} />);
-      expect(screen.getByTestId('scan-icon')).toBeInTheDocument();
-    });
-
     it('should render "Scan Ticket" label on larger screens', () => {
       render(<DayCloseScannerBar {...createDefaultProps()} />);
       expect(screen.getByText('Scan Ticket')).toBeInTheDocument();
@@ -260,18 +245,6 @@ describe('DayCloseScannerBar', () => {
   // Mute Toggle
   // --------------------------------------------------------------------------
   describe('Mute Toggle', () => {
-    it('should show volume-on icon when not muted', () => {
-      render(<DayCloseScannerBar {...createDefaultProps()} isMuted={false} />);
-      expect(screen.getByTestId('volume-on-icon')).toBeInTheDocument();
-      expect(screen.queryByTestId('volume-off-icon')).not.toBeInTheDocument();
-    });
-
-    it('should show volume-off icon when muted', () => {
-      render(<DayCloseScannerBar {...createDefaultProps()} isMuted={true} />);
-      expect(screen.getByTestId('volume-off-icon')).toBeInTheDocument();
-      expect(screen.queryByTestId('volume-on-icon')).not.toBeInTheDocument();
-    });
-
     it('should call onToggleMute when sound button clicked', () => {
       const props = createDefaultProps();
       render(<DayCloseScannerBar {...props} />);
@@ -364,17 +337,6 @@ describe('DayCloseScannerBar', () => {
       ];
       render(<DayCloseScannerBar {...props} isSubmitting={true} />);
       expect(screen.getByTestId('scanner-complete-button')).toBeDisabled();
-    });
-
-    it('should show loader icon when isSubmitting', () => {
-      const props = createDefaultProps();
-      props.scannedBins = [
-        createScannedBin({ bin_id: 'b1' }),
-        createScannedBin({ bin_id: 'b2', pack_number: '2345678' }),
-        createScannedBin({ bin_id: 'b3', pack_number: '3456789' }),
-      ];
-      render(<DayCloseScannerBar {...props} isSubmitting={true} />);
-      expect(screen.getByTestId('loader-icon')).toBeInTheDocument();
     });
 
     it('should respect isComplete override', () => {

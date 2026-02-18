@@ -26,7 +26,7 @@ import { extractFuelDataFromMSM } from '../../src/shared/naxml/parser';
 import type {
   NAXMLMiscellaneousSummaryMovementData,
   NAXMLMSMDetail,
-  MSMExtractedFuelData,
+  MSMExtractedFuelData as _MSMExtractedFuelData,
   MSMFuelSalesByGrade,
   MSMOutsideDispenserRecord,
   MSMDiscountTotals,

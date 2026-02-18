@@ -62,7 +62,7 @@ export interface UpdateActionResponse {
 /**
  * Schema for version strings - SEC-014: Input validation
  */
-const VersionSchema = z.string().regex(/^\d+\.\d+\.\d+/, 'Invalid version format');
+const _VersionSchema = z.string().regex(/^\d+\.\d+\.\d+/, 'Invalid version format');
 
 // ============================================================================
 // Logger

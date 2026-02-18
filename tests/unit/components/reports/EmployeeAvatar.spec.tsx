@@ -23,7 +23,7 @@ import {
   EmployeeAvatar,
   getInitials,
 } from '../../../../src/renderer/components/reports/EmployeeAvatar';
-import type { AvatarSize } from '../../../../src/renderer/components/reports/EmployeeAvatar';
+import type { AvatarSize as _AvatarSize } from '../../../../src/renderer/components/reports/EmployeeAvatar';
 
 // ============================================================================
 // getInitials Pure Function Tests

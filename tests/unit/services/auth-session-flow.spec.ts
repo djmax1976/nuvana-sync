@@ -124,7 +124,7 @@ describe('Auth Session Flow Integration', () => {
           { name: 'Activate Pack 2', delay: 3 * 60 * 1000 },
         ];
 
-        operations.forEach(({ name, delay }) => {
+        operations.forEach(({ name: _name, delay }) => {
           vi.advanceTimersByTime(delay);
           updateActivity(); // Hook updates activity on bypass
 

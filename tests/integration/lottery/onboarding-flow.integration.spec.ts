@@ -471,7 +471,7 @@ describeSuite('Lottery Onboarding Flow Integration (Phase 6)', () => {
 
       seedLotteryBin('Bin 1', 1);
       const gameId = seedLotteryGame();
-      const binId = seedLotteryBin('Bin 2', 2);
+      void seedLotteryBin('Bin 2', 2); // Called for side effect
 
       // Create day and set onboarding
       const day = lotteryBusinessDaysDAL.getOrCreateForDate(
@@ -577,7 +577,7 @@ describeSuite('Lottery Onboarding Flow Integration (Phase 6)', () => {
 
       seedLotteryBin('Bin 1', 1);
       const gameId = seedLotteryGame({ gameCode: '1234' });
-      const binId = seedLotteryBin('Activation Bin', 2);
+      void seedLotteryBin('Activation Bin', 2); // Called for side effect
 
       const day = lotteryBusinessDaysDAL.getOrCreateForDate(
         ctx.storeId,
@@ -934,8 +934,8 @@ describeSuite('Lottery Onboarding Flow Integration (Phase 6)', () => {
       setCurrentUser(user);
 
       seedLotteryBin('Bin 1', 1);
-      const gameId = seedLotteryGame();
-      const binId = seedLotteryBin('Activation Bin', 2);
+      void seedLotteryGame(); // Called for side effect
+      void seedLotteryBin('Activation Bin', 2); // Called for side effect
 
       // Create day, set onboarding, then complete
       const day = lotteryBusinessDaysDAL.getOrCreateForDate(
@@ -1002,7 +1002,7 @@ describeSuite('Lottery Onboarding Flow Integration (Phase 6)', () => {
 
       seedLotteryBin('Bin 1', 1);
       seedLotteryGame();
-      const binId = seedLotteryBin('Activation Bin', 2);
+      void seedLotteryBin('Activation Bin', 2); // Called for side effect
 
       // Complete onboarding
       const day = lotteryBusinessDaysDAL.getOrCreateForDate(

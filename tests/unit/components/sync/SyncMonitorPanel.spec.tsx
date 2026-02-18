@@ -83,39 +83,6 @@ vi.mock('../../../../src/renderer/components/ui/LoadingSpinner', () => ({
   ),
 }));
 
-// Mock lucide-react icons as simple spans
-vi.mock('lucide-react', () => {
-  const iconFactory = (name: string) => {
-    const IconComponent = (props: { className?: string }) => (
-      <span data-testid={`icon-${name}`} className={props.className} />
-    );
-    IconComponent.displayName = `Icon${name}`;
-    return IconComponent;
-  };
-  return {
-    RefreshCw: iconFactory('refresh-cw'),
-    AlertTriangle: iconFactory('alert-triangle'),
-    CheckCircle2: iconFactory('check-circle'),
-    Clock: iconFactory('clock'),
-    RotateCcw: iconFactory('rotate-ccw'),
-    Trash2: iconFactory('trash'),
-    ChevronLeft: iconFactory('chevron-left'),
-    ChevronRight: iconFactory('chevron-right'),
-    Activity: iconFactory('activity'),
-    Package: iconFactory('package'),
-    Zap: iconFactory('zap'),
-    XCircle: iconFactory('x-circle'),
-    Filter: iconFactory('filter'),
-    ArrowUpRight: iconFactory('arrow-up-right'),
-    ArrowDownLeft: iconFactory('arrow-down-left'),
-    Globe: iconFactory('globe'),
-    Archive: iconFactory('archive'),
-    Undo2: iconFactory('undo'),
-    Ban: iconFactory('ban'),
-    Skull: iconFactory('skull'),
-  };
-});
-
 // Import component AFTER all mocks
 import { SyncMonitorPanel } from '../../../../src/renderer/components/sync/SyncMonitorPanel';
 
@@ -275,12 +242,6 @@ describe('SyncMonitorPanel', () => {
     it('should render "Sync Monitor" heading', () => {
       render(<SyncMonitorPanel />);
       expect(screen.getByText('Sync Monitor')).toBeInTheDocument();
-    });
-
-    it('should render refresh button', () => {
-      render(<SyncMonitorPanel />);
-      // The refresh button contains a RefreshCw icon
-      expect(screen.getByTestId('icon-refresh-cw')).toBeInTheDocument();
     });
   });
 

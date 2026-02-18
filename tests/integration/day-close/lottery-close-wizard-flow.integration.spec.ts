@@ -873,7 +873,7 @@ describeSuite('Lottery Close via Day Close Wizard Integration (Phase 5 - Task 5.
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      const result = await simulateWizardClose({
+      const _result = await simulateWizardClose({
         closings: [{ pack_id: packId, closing_serial: '050' }],
         userId: closingUser.user_id,
       });

@@ -38,7 +38,6 @@ import { syncTimestampsDAL } from '../dal/sync-timestamps.dal';
 import { syncQueueDAL, type SyncApiContext, type ErrorCategory } from '../dal/sync-queue.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { usersDAL } from '../dal/users.dal';
-import { shiftsDAL } from '../dal/shifts.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================

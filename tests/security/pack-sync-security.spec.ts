@@ -427,7 +427,7 @@ describe('Pack Sync Security Tests', () => {
   describe('PS-S-005 & PS-S-006: Sync errors should NOT expose sensitive info', () => {
     it('PS-S-005: should NOT expose stack traces in error messages', () => {
       // Simulate error handling pattern
-      const internalError = new Error('Database connection failed at /internal/path/to/db.ts:123');
+      const _internalError = new Error('Database connection failed at /internal/path/to/db.ts:123');
 
       // Sanitized error for client
       const sanitizedError = 'Failed to sync pack. Please try again.';
@@ -439,7 +439,7 @@ describe('Pack Sync Security Tests', () => {
 
     it('PS-S-006: should NOT expose internal pack_id generation logic', () => {
       // UUID generation should be opaque to client
-      const generatedId = 'mock-uuid-1234';
+      const _generatedId = 'mock-uuid-1234';
 
       // Error message should not reveal ID generation method
       const errorMessage = 'Failed to create pack.';

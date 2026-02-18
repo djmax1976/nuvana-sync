@@ -14,7 +14,7 @@
  * @performance PERF-002: Validates efficient transformation
  */
 
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 
 // ============================================================================
 // Types (mirrored from transport and components)

@@ -409,7 +409,7 @@ describe('DT1.4: Regression Tests - Employee/Cashier Sync Compatibility', () => 
     });
 
     // Assert
-    const result = await manager.runSyncCycle(storeId, async () => {});
+    const _result = await manager.runSyncCycle(storeId, async () => {});
     // Stats from previous cycle should be cleared
     expect(manager.getCycleStats()).not.toBeNull();
   });

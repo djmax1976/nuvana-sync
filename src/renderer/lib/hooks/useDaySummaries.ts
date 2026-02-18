@@ -10,7 +10,6 @@
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import {
   ipc,
-  type DaySummaryResponse,
   type DaySummaryListParams,
   type DaySummaryListResponse,
   type DaySummaryWithShiftsResponse,

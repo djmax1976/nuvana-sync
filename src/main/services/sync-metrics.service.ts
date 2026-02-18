@@ -508,7 +508,7 @@ export class SyncMetricsService {
    */
   private collectThroughputMetrics(storeId: string): ThroughputMetrics {
     const stats = syncQueueDAL.getStats(storeId);
-    const detailedStats = syncQueueDAL.getDetailedStats(storeId);
+    const _detailedStats = syncQueueDAL.getDetailedStats(storeId);
 
     // Calculate items per minute
     const now = Date.now();

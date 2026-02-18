@@ -91,18 +91,6 @@ vi.mock('../../../src/renderer/hooks/useDateFormat', () => ({
   }),
 }));
 
-// Mock lucide-react icons to simple elements
-vi.mock('lucide-react', () => ({
-  Loader2: (props: Record<string, unknown>) => <div data-testid="loader-icon" {...props} />,
-  AlertCircle: (props: Record<string, unknown>) => <div data-testid="alert-icon" {...props} />,
-  ArrowLeft: (props: Record<string, unknown>) => <div data-testid="arrow-left-icon" {...props} />,
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
-  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
-  Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  Clock: (props: Record<string, unknown>) => <div data-testid="clock-icon" {...props} />,
-}));
-
 // ============================================================================
 // Import Component Under Test
 // ============================================================================

@@ -26,7 +26,6 @@ import {
   type SyncQueueItem,
   type CreateSyncQueueItemData,
 } from '../dal/sync-queue.dal';
-import { storesDAL } from '../dal/stores.dal';
 import { cloudApiService } from './cloud-api.service';
 
 // ============================================================================

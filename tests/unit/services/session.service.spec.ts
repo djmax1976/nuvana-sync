@@ -545,7 +545,7 @@ describe('Session Service', () => {
         // Simulate multiple lottery page operations
         const operations = ['Receive Pack', 'Activate Pack', 'Manual Entry'];
 
-        operations.forEach((op, index) => {
+        operations.forEach((_op, _index) => {
           // Advance 2 minutes between each operation
           vi.advanceTimersByTime(2 * 60 * 1000);
 

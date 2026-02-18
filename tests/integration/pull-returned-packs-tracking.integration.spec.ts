@@ -19,12 +19,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Use vi.hoisted() to ensure mock functions are available when vi.mock runs
-const { mockPrepare, mockTransaction, mockRun, mockGet, mockAll } = vi.hoisted(() => ({
+const { mockPrepare, mockTransaction, mockRun, mockGet, _mockAll } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockTransaction: vi.fn((fn: () => void) => () => fn()),
   mockRun: vi.fn(),
   mockGet: vi.fn(),
-  mockAll: vi.fn(),
+  _mockAll: vi.fn(),
 }));
 
 vi.mock('../../src/main/services/database.service', () => ({
@@ -41,11 +41,7 @@ vi.mock('uuid', () => ({
   v4: vi.fn(() => `pull-returned-uuid-${++uuidCounter}`),
 }));
 
-import {
-  SyncQueueDAL,
-  type SyncQueueItem,
-  type ErrorCategory,
-} from '../../src/main/dal/sync-queue.dal';
+import { SyncQueueDAL, type SyncQueueItem } from '../../src/main/dal/sync-queue.dal';
 
 describe('DT0.3: Pull Returned Packs Tracking Behavior', () => {
   let dal: SyncQueueDAL;

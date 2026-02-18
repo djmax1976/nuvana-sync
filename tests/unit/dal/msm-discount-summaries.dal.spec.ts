@@ -77,7 +77,7 @@ import {
 // ============================================================================
 
 const TEST_STORE_ID = 'store-msmd-001';
-const OTHER_STORE_ID = 'store-msmd-002';
+const _OTHER_STORE_ID = 'store-msmd-002';
 const TEST_BUSINESS_DATE = '2025-01-15';
 const TEST_SHIFT_ID = 'shift-msmd-001';
 const TEST_FILE_HASH = 'hash-msmd-abc123';

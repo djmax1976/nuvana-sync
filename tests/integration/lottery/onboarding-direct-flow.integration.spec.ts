@@ -309,8 +309,9 @@ describeSuite('Direct Onboarding Flow Integration (Phase 4 - BIZ-012-UX-FIX)', (
   /**
    * Get pack by ID from database
    * SEC-006: Parameterized query
+   * Reserved for future pack verification tests
    */
-  function getPackById(packId: string):
+  function _getPackById(packId: string):
     | {
         pack_id: string;
         status: string;

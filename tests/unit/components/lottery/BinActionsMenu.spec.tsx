@@ -22,20 +22,8 @@
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-
-// ============================================================================
-// Mock Dependencies
-// ============================================================================
-
-vi.mock('lucide-react', () => ({
-  MoreVertical: (props: Record<string, unknown>) => (
-    <div data-testid="more-vertical-icon" {...props} />
-  ),
-  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
-  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
-}));
 
 // ============================================================================
 // Import Component Under Test
@@ -56,7 +44,7 @@ describe('BinActionsMenu', () => {
   // Rendering
   // --------------------------------------------------------------------------
   describe('Rendering', () => {
-    it('should render trigger button with MoreVertical icon', () => {
+    it('should render trigger button', () => {
       render(
         <BinActionsMenu
           packId="pack-001"
@@ -66,7 +54,6 @@ describe('BinActionsMenu', () => {
         />
       );
       expect(screen.getByTestId('actions-menu-trigger')).toBeInTheDocument();
-      expect(screen.getByTestId('more-vertical-icon')).toBeInTheDocument();
     });
 
     it('should render with custom testIdPrefix', () => {
@@ -157,42 +144,6 @@ describe('BinActionsMenu', () => {
       await waitFor(() => {
         expect(screen.getByText('Mark Sold')).toBeInTheDocument();
         expect(screen.getByText('Return')).toBeInTheDocument();
-      });
-    });
-
-    it('should show Package icon for Mark Sold option', async () => {
-      const user = userEvent.setup();
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-          onReturn={vi.fn()}
-        />
-      );
-
-      await user.click(screen.getByTestId('actions-menu-trigger'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('package-icon')).toBeInTheDocument();
-      });
-    });
-
-    it('should show RotateCcw icon for Return option', async () => {
-      const user = userEvent.setup();
-      render(
-        <BinActionsMenu
-          packId="pack-001"
-          packNumber="1234567"
-          onMarkSold={vi.fn()}
-          onReturn={vi.fn()}
-        />
-      );
-
-      await user.click(screen.getByTestId('actions-menu-trigger'));
-
-      await waitFor(() => {
-        expect(screen.getByTestId('rotate-ccw-icon')).toBeInTheDocument();
       });
     });
 

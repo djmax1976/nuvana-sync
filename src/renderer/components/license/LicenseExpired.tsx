@@ -68,7 +68,7 @@ export function LicenseExpired({
       } else {
         setError('Subscription is still expired. Please renew to continue using Nuvana.');
       }
-    } catch (err) {
+    } catch {
       setError('Unable to check license status. Please check your internet connection.');
     } finally {
       setIsChecking(false);

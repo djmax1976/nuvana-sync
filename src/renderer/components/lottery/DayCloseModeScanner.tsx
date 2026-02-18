@@ -75,7 +75,6 @@ import {
   UnscannedBinWarningModal,
   type UnscannedBinInfo,
   type UnscannedBinModalResult,
-  type BinDecision,
 } from '@/components/lottery/UnscannedBinWarningModal';
 import { validateManualEntryEnding } from '@/lib/services/lottery-closing-validation';
 import { ReturnedPacksSection } from '@/components/lottery/ReturnedPacksSection';
@@ -366,8 +365,8 @@ export function DayCloseModeScanner({
   // Get bins with active packs (need scanning)
   const activeBins = useMemo(() => bins.filter((bin) => bin.is_active && bin.pack), [bins]);
 
-  // Get pending bins (not yet scanned)
-  const pendingBins = useMemo(
+  // Get pending bins (not yet scanned) - used for progress calculation
+  const _pendingBins = useMemo(
     () => activeBins.filter((bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id)),
     [activeBins, scannedBins]
   );

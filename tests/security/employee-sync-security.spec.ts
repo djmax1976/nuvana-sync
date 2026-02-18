@@ -34,7 +34,10 @@ vi.mock('uuid', () => ({
   v4: vi.fn().mockReturnValue('mock-uuid-1234'),
 }));
 
-import { SyncQueueDAL, type SyncQueueItem } from '../../src/main/dal/sync-queue.dal';
+import {
+  SyncQueueDAL,
+  type SyncQueueItem as _SyncQueueItem,
+} from '../../src/main/dal/sync-queue.dal';
 
 // ============================================================================
 // Test Interfaces - Employee Sync Payload Structure
@@ -123,11 +126,11 @@ const mockStoreManager: FullEmployeeRecord = {
 // ============================================================================
 
 describe('Employee Sync Security Tests', () => {
-  let dal: SyncQueueDAL;
+  let _dal: SyncQueueDAL;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    dal = new SyncQueueDAL();
+    _dal = new SyncQueueDAL();
   });
 
   // ==========================================================================

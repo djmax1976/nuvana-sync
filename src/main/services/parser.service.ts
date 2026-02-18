@@ -24,15 +24,12 @@ import type {
   NAXMLTankProductMovementData,
   NAXMLFGMDetail,
   NAXMLFPMDetail,
-  NAXMLMSMDetail,
   NAXMLTLMDetail,
-  NAXMLISMDetail,
   NAXMLTPMDetail,
   NAXMLMCMDetail,
   // POSJournal types
   NAXMLPOSJournalDocument,
   NAXMLSaleEvent,
-  NAXMLTransactionLine,
   NAXMLJournalTransactionTax,
 } from '../../shared/naxml/types';
 import { createLogger } from '../utils/logger';
@@ -47,7 +44,6 @@ import {
   posFuelPositionMappingsDAL,
   posTillMappingsDAL,
   posFuelGradeMappingsDAL,
-  posFuelProductMappingsDAL,
   posDepartmentMappingsDAL,
   posTaxLevelMappingsDAL,
   posTenderMappingsDAL,
@@ -72,7 +68,6 @@ import {
   type CreateTaxSummaryData,
 } from '../dal';
 import { withTransaction } from './database.service';
-import { settingsService } from './settings.service';
 import { eventBus, MainEvents } from '../utils/event-bus';
 import {
   determineShiftCloseType,
@@ -550,14 +545,14 @@ export class ParserService {
         }
 
         // Create tender mapping if present
-        let tenderType: FuelTenderType = 'ALL';
+        let _tenderType: FuelTenderType = 'ALL';
         if (detail.fgmTenderSummary?.tender) {
           const tender = detail.fgmTenderSummary.tender;
           posTenderMappingsDAL.getOrCreate(this.storeId, tender.tenderCode, {
             externalTenderSubcode: tender.tenderSubCode,
           });
           // Map tender code to FuelTenderType
-          tenderType = this.mapTenderCodeToFuelTenderType(tender.tenderCode);
+          _tenderType = this.mapTenderCodeToFuelTenderType(tender.tenderCode);
         }
 
         // Create price tier mapping if present
@@ -681,7 +676,7 @@ export class ParserService {
     let salesAmount = 0;
     let discountAmount = 0;
     let discountCount = 0;
-    let unitPrice: number | undefined;
+    let _unitPrice: number | undefined;
 
     // Try to get data from tender summary (more commonly used)
     if (detail.fgmTenderSummary?.fgmSellPriceSummary) {
@@ -694,7 +689,7 @@ export class ParserService {
         discountCount = salesTotals.discountCount || 0;
       }
       // Get unit price from sell price summary
-      unitPrice = detail.fgmTenderSummary.fgmSellPriceSummary.actualSalesPrice;
+      _unitPrice = detail.fgmTenderSummary.fgmSellPriceSummary.actualSalesPrice;
     }
 
     // Also try position summaries for pump-level breakdown (Period 98 files)
@@ -1363,7 +1358,7 @@ export class ParserService {
    */
   private processMerchandiseMovement(
     data: NAXMLMerchandiseCodeMovementData,
-    fileHash: string
+    _fileHash: string
   ): number {
     const { movementHeader, mcmDetails, salesMovementHeader } = data;
 
@@ -1574,7 +1569,7 @@ export class ParserService {
    * All TLM data is linked to shifts (not just Period 98) following
    * the AGKsoft pattern of Date+Shift linking.
    */
-  private processTaxLevelMovement(data: NAXMLTaxLevelMovementData, fileHash: string): number {
+  private processTaxLevelMovement(data: NAXMLTaxLevelMovementData, _fileHash: string): number {
     const { movementHeader, tlmDetails, salesMovementHeader } = data;
 
     // Get the ACTUAL business date (adjusted for overnight shifts)
@@ -1776,7 +1771,7 @@ export class ParserService {
    * All ISM data is linked to shifts (not just Period 98) following
    * the AGKsoft pattern of Date+Shift linking.
    */
-  private processItemSalesMovement(data: NAXMLItemSalesMovementData, fileHash: string): number {
+  private processItemSalesMovement(data: NAXMLItemSalesMovementData, _fileHash: string): number {
     const { movementHeader, ismDetails, salesMovementHeader } = data;
 
     // Get the ACTUAL business date (adjusted for overnight shifts)
@@ -1796,7 +1791,7 @@ export class ParserService {
     // Track external IDs from XML and their internal mappings
     let externalCashierId: string | undefined;
     let externalRegisterId: string | undefined;
-    let internalUserId: string | null = null;
+    let _internalUserId: string | null = null;
 
     if (salesMovementHeader) {
       externalCashierId = salesMovementHeader.cashierId;
@@ -1805,7 +1800,7 @@ export class ParserService {
       // Create/get cashier mapping - get internal_user_id if linked
       if (externalCashierId) {
         const cashierMapping = posCashierMappingsDAL.getOrCreate(this.storeId, externalCashierId);
-        internalUserId = cashierMapping.internal_user_id;
+        _internalUserId = cashierMapping.internal_user_id;
       }
 
       // Create/get terminal/register mapping (for reference tracking)
@@ -2015,13 +2010,13 @@ export class ParserService {
         daySummariesDAL.getOrCreateForDate(this.storeId, businessDate);
 
         // Create POS ID mappings for external IDs
-        let internalUserId: string | null = null;
+        let _internalUserId: string | null = null;
         if (saleEvent.cashierId) {
           const cashierMapping = posCashierMappingsDAL.getOrCreate(
             this.storeId,
             saleEvent.cashierId
           );
-          internalUserId = cashierMapping.internal_user_id;
+          _internalUserId = cashierMapping.internal_user_id;
         }
 
         if (saleEvent.registerId) {
@@ -2103,7 +2098,7 @@ export class ParserService {
             : undefined;
 
         // Create transaction with all details
-        const created = transactionsDAL.createWithDetails({
+        const _created = transactionsDAL.createWithDetails({
           store_id: this.storeId,
           shift_id: shift.shift_id,
           business_date: businessDate,

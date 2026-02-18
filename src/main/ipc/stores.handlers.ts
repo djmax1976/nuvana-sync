@@ -10,7 +10,7 @@
  */
 
 import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
-import { storesDAL, type Store } from '../dal/stores.dal';
+import { storesDAL } from '../dal/stores.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================

@@ -52,40 +52,6 @@ vi.mock('react-router-dom', () => ({
   ),
 }));
 
-// Mock lucide-react icons as simple spans
-vi.mock('lucide-react', () => ({
-  LayoutDashboard: (props: { className?: string }) => (
-    <span data-testid="icon-layout-dashboard" className={props.className} />
-  ),
-  Clock: (props: { className?: string }) => (
-    <span data-testid="icon-clock" className={props.className} />
-  ),
-  Ticket: (props: { className?: string }) => (
-    <span data-testid="icon-ticket" className={props.className} />
-  ),
-  Package: (props: { className?: string }) => (
-    <span data-testid="icon-package" className={props.className} />
-  ),
-  Monitor: (props: { className?: string }) => (
-    <span data-testid="icon-monitor" className={props.className} />
-  ),
-  Users: (props: { className?: string }) => (
-    <span data-testid="icon-users" className={props.className} />
-  ),
-  CalendarClock: (props: { className?: string }) => (
-    <span data-testid="icon-calendar-clock" className={props.className} />
-  ),
-  CalendarCheck: (props: { className?: string }) => (
-    <span data-testid="icon-calendar-check" className={props.className} />
-  ),
-  Receipt: (props: { className?: string }) => (
-    <span data-testid="icon-receipt" className={props.className} />
-  ),
-  BarChart3: (props: { className?: string }) => (
-    <span data-testid="icon-bar-chart" className={props.className} />
-  ),
-}));
-
 // Mock logo import
 vi.mock('../../../../src/renderer/assets/logo.png', () => ({
   default: 'mock-logo.png',

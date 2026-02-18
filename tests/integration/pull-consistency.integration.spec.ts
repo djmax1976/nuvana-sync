@@ -22,12 +22,12 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Use vi.hoisted() to ensure mock functions are available when vi.mock runs
-const { mockPrepare, mockTransaction, mockRun, mockGet, mockAll } = vi.hoisted(() => ({
+const { mockPrepare, mockTransaction, mockRun, _mockGet, _mockAll } = vi.hoisted(() => ({
   mockPrepare: vi.fn(),
   mockTransaction: vi.fn((fn: () => void) => () => fn()),
   mockRun: vi.fn(),
-  mockGet: vi.fn(),
-  mockAll: vi.fn(),
+  _mockGet: vi.fn(),
+  _mockAll: vi.fn(),
 }));
 
 vi.mock('../../src/main/services/database.service', () => ({
@@ -261,7 +261,7 @@ describe('DT5.2: Out-of-order pull convergence', () => {
       };
 
       // Mock: First call returns existing record, subsequent calls for the update
-      const callCount = 0;
+      const _callCount = 0;
       mockPrepare.mockImplementation(() => ({
         get: vi.fn().mockReturnValue(existingRecord),
         run: mockRun.mockReturnValue({ changes: 1 }),
@@ -869,8 +869,8 @@ describe('Pull Consistency Service integration', () => {
   describe('Filter for apply (idempotency)', () => {
     it('should filter out already-applied records', () => {
       // Arrange
-      const service = new PullConsistencyService();
-      const session = {
+      const _service = new PullConsistencyService();
+      const _session = {
         entityType: 'packs_received',
         storeId: 'store-123',
         cursorValue: null,
@@ -884,7 +884,7 @@ describe('Pull Consistency Service integration', () => {
         isResumed: false,
       };
 
-      const records = [
+      const _records = [
         { cloudRecordId: 'pack-1', payload: { status: 'ACTIVE' }, sequenceNumber: 1 },
         { cloudRecordId: 'pack-2', payload: { status: 'ACTIVE' }, sequenceNumber: 2 },
         { cloudRecordId: 'pack-3', payload: { status: 'ACTIVE' }, sequenceNumber: 3 },

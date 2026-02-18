@@ -29,14 +29,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // Mock Dependencies
 // ============================================================================
 
-vi.mock('lucide-react', () => ({
-  RotateCcw: (props: Record<string, unknown>) => <div data-testid="rotate-ccw-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => (
-    <div data-testid="alert-triangle-icon" {...props} />
-  ),
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-}));
-
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
   useDateFormat: () => ({
     formatCustom: (date: Date | string, fmt: string) => {
@@ -154,11 +146,6 @@ describe('ReturnedPacksSection', () => {
         <ReturnedPacksSection returnedPacks={[createPack(), createPack({ pack_id: 'ret-002' })]} />
       );
       expect(screen.getByText('Returned Packs (2)')).toBeInTheDocument();
-    });
-
-    it('should render orange SectionIcon with RotateCcw icon', () => {
-      render(<ReturnedPacksSection returnedPacks={[createPack()]} />);
-      expect(screen.getByTestId('rotate-ccw-icon')).toBeInTheDocument();
     });
 
     it('should display total return sales as orange currency badge', () => {

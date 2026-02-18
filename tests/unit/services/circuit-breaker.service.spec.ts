@@ -27,7 +27,7 @@ vi.mock('../../../src/main/utils/logger', () => ({
 import {
   CircuitBreakerService,
   CircuitOpenError,
-  type CircuitState,
+  type CircuitState as _CircuitState,
   type CircuitBreakerConfig,
 } from '../../../src/main/services/circuit-breaker.service';
 

@@ -383,8 +383,9 @@ describeSuite('Lottery Handlers Edge Case Tests (Phase 4)', () => {
 
   /**
    * Generate business date string (YYYY-MM-DD)
+   * Reserved for future date-specific edge case tests
    */
-  function createBusinessDate(options: { year?: number; month?: number; day?: number }): string {
+  function _createBusinessDate(options: { year?: number; month?: number; day?: number }): string {
     const now = new Date();
     const year = options.year ?? now.getFullYear();
     const month = String(options.month ?? now.getMonth() + 1).padStart(2, '0');

@@ -143,20 +143,22 @@ test.describe('Terminals Page', () => {
     test.skip(true, 'Terminal delete functionality not yet implemented in UI');
 
     test('T-E2E-001: should remove register from list after successful delete', async ({
-      window,
+      window: _window,
     }) => {
       // This test requires terminal delete UI which does not exist yet
       // The useDeleteTerminal hook is available but not exposed in any component
       test.skip();
     });
 
-    test('T-E2E-002: should not show deleted register on page refresh', async ({ window }) => {
+    test('T-E2E-002: should not show deleted register on page refresh', async ({
+      window: _window,
+    }) => {
       // This test requires terminal delete UI which does not exist yet
       test.skip();
     });
 
     test('T-E2E-003: should handle delete failure gracefully with user feedback', async ({
-      window,
+      window: _window,
     }) => {
       // This test requires terminal delete UI which does not exist yet
       test.skip();
@@ -249,12 +251,12 @@ test.describe('Terminals Page', () => {
     });
 
     // Delete button accessibility tests - SKIPPED (Feature Not Implemented)
-    test.skip('should have accessible delete button', async ({ window }) => {
+    test.skip('should have accessible delete button', async ({ window: _window }) => {
       // Test requires terminal delete UI which does not exist yet
       test.skip(true, 'Terminal delete functionality not yet implemented');
     });
 
-    test.skip('should trap focus in delete confirmation dialog', async ({ window }) => {
+    test.skip('should trap focus in delete confirmation dialog', async ({ window: _window }) => {
       // Test requires terminal delete UI which does not exist yet
       test.skip(true, 'Terminal delete functionality not yet implemented');
     });

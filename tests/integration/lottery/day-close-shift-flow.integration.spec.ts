@@ -182,12 +182,7 @@ let db: Database.Database;
 // ============================================================================
 
 import { createServiceTestContext, type ServiceTestContext } from '../../helpers/test-context';
-import {
-  setCurrentUser,
-  getCurrentUser,
-  type SessionUser,
-  type UserRole,
-} from '../../../src/main/ipc/index';
+import { setCurrentUser, type SessionUser, type UserRole } from '../../../src/main/ipc/index';
 import { lotteryBusinessDaysDAL } from '../../../src/main/dal/lottery-business-days.dal';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
 import { daySummariesDAL } from '../../../src/main/dal/day-summaries.dal';
@@ -379,7 +374,7 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
   /**
    * Find sync items by entity type and store
    */
-  function findSyncItemsByTypeAndStore(
+  function _findSyncItemsByTypeAndStore(
     entityType: string,
     storeId: string
   ): CreateSyncQueueItemData[] {

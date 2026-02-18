@@ -14,7 +14,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useQuery, useQueryClient, useMutation } from '@tanstack/react-query';
-import { Card, CardHeader, CardTitle, CardContent, CardDescription } from '../components/ui/card';
+import { Card, CardHeader, CardTitle, CardContent } from '../components/ui/card';
 import { Button } from '../components/ui/button';
 import { Badge } from '../components/ui/badge';
 import {
@@ -76,18 +76,13 @@ function RegisterCard({
   register,
   closedEvent,
   onNavigateToClose,
-  totalActiveShifts = 0,
+  totalActiveShifts: _totalActiveShifts = 0,
   isManualMode = false,
   onManualStartShift,
   onManualEndShift,
   isStartingShift = false,
 }: RegisterCardProps) {
   const navigate = useNavigate();
-
-  const handleViewShifts = () => {
-    // Navigate to shifts page with register filter
-    navigate('/shifts', { state: { registerId: register.external_register_id } });
-  };
 
   const handleViewActiveShift = () => {
     if (register.activeShift) {

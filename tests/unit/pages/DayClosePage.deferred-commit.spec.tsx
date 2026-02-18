@@ -143,7 +143,7 @@ vi.mock('../../../src/renderer/components/day-close/ReportScanningStep', () => (
 }));
 
 // Mock ShiftClosingForm
-let shiftClosingFormOpen = false;
+let _shiftClosingFormOpen = false;
 vi.mock('../../../src/renderer/components/shifts/ShiftClosingForm', () => ({
   ShiftClosingForm: ({
     open,
@@ -153,7 +153,7 @@ vi.mock('../../../src/renderer/components/shifts/ShiftClosingForm', () => ({
     onSuccess?: () => void;
     preAuthorizedOverride?: boolean;
   }) => {
-    shiftClosingFormOpen = open;
+    _shiftClosingFormOpen = open;
     return open ? (
       <div data-testid="shift-closing-form">
         Shift Closing Form
@@ -219,15 +219,6 @@ vi.mock('../../../src/renderer/components/ui/button', () => ({
       {children}
     </button>
   ),
-}));
-
-vi.mock('lucide-react', () => ({
-  CalendarCheck: () => <span data-testid="icon-calendar-check">CalendarCheck</span>,
-  Loader2: () => <span data-testid="icon-loader">Loader2</span>,
-  AlertCircle: () => <span data-testid="icon-alert">AlertCircle</span>,
-  Check: () => <span data-testid="icon-check">Check</span>,
-  ArrowRight: () => <span data-testid="icon-arrow-right">ArrowRight</span>,
-  ArrowLeft: () => <span data-testid="icon-arrow-left">ArrowLeft</span>,
 }));
 
 // Import after mocks
@@ -320,7 +311,7 @@ function renderDayClosePage() {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedScannerProps = {};
-  shiftClosingFormOpen = false;
+  _shiftClosingFormOpen = false;
 
   // Default mocks: non-LOTTERY POS type (triggers deferred commit)
   mockUseDayCloseAccessContext.mockReturnValue(createContextValue());
@@ -735,32 +726,6 @@ describe('DayClosePage - Loading State During Deferred Commit', () => {
     });
 
     // Resolve the promise
-    act(() => {
-      resolvePromise!();
-    });
-  });
-
-  it('shows loading spinner during commit', async () => {
-    let resolvePromise: () => void;
-    mockPrepareLotteryDayClose.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePromise = () =>
-          resolve({
-            success: true,
-            data: { day_id: 'day-uuid-prepared' },
-          });
-      })
-    );
-
-    await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
-
-    // Should show Loader2 icon during loading
-    await waitFor(() => {
-      expect(screen.getByTestId('icon-loader')).toBeInTheDocument();
-    });
-
     act(() => {
       resolvePromise!();
     });

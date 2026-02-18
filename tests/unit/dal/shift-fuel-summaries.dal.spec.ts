@@ -62,9 +62,9 @@ import {
   type FuelSource,
   type CreateShiftFuelSummaryData,
   type MSMShiftFuelInput,
-  type MSMFuelTotals,
-  type MSMFuelByGrade,
-  type FuelGradeAggregation,
+  type MSMFuelTotals as _MSMFuelTotals,
+  type MSMFuelByGrade as _MSMFuelByGrade,
+  type FuelGradeAggregation as _FuelGradeAggregation,
 } from '../../../src/main/dal/shift-fuel-summaries.dal';
 
 // ============================================================================
@@ -1383,7 +1383,7 @@ describe('ShiftFuelSummariesDAL', () => {
         }),
       });
 
-      const result = dal.create({
+      const _result = dal.create({
         shift_summary_id: 'ss-001',
         tender_type: 'ALL',
         sales_volume: 0,
