@@ -73,6 +73,27 @@ tmpclaude-*
 # Local development files
 myfiles/
 
+# Debug/diagnostic scripts (keep dev.js, sign.js, release.sh)
+scripts/check-*.js
+scripts/check-*.ts
+scripts/check-*.mjs
+scripts/debug-*.js
+scripts/debug-*.ts
+scripts/debug-*.cjs
+scripts/diagnose-*.js
+scripts/diagnose-*.ts
+scripts/diagnose-*.cjs
+scripts/query-*.js
+scripts/query-*.ts
+scripts/reset-*.js
+scripts/reset-*.ts
+scripts/fix-*.ts
+scripts/get-db-key*
+scripts/requeue-*.ts
+scripts/revert-*.ts
+scripts/verify-*.ts
+scripts/cleanup-*.ts
+
 # Package lock files (optional - uncomment if you prefer not to commit)
 # package-lock.json
 # yarn.lock

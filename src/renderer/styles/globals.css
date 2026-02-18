@@ -14,31 +14,31 @@
        ======================================================================== */
 
     /* Background Colors */
-    --background: 220 14% 96%;           /* #F1F5F9 - Main app background (light grey) */
-    --background-subtle: 210 20% 98%;    /* #F8FAFC - Subtle background variation */
+    --background: 220 14% 96%; /* #F1F5F9 - Main app background (light grey) */
+    --background-subtle: 210 20% 98%; /* #F8FAFC - Subtle background variation */
 
     /* Foreground/Text Colors */
-    --foreground: 222 47% 11%;           /* #1E293B - Primary text (slate-800) */
-    --foreground-muted: 215 16% 47%;     /* #64748B - Secondary text (slate-500) */
+    --foreground: 222 47% 11%; /* #1E293B - Primary text (slate-800) */
+    --foreground-muted: 215 16% 47%; /* #64748B - Secondary text (slate-500) */
 
     /* Card Colors - Clean white cards */
-    --card: 0 0% 100%;                   /* #FFFFFF - Card background */
-    --card-foreground: 222 47% 11%;      /* #1E293B - Card text */
-    --card-hover: 210 20% 98%;           /* #F8FAFC - Card hover state */
+    --card: 0 0% 100%; /* #FFFFFF - Card background */
+    --card-foreground: 222 47% 11%; /* #1E293B - Card text */
+    --card-hover: 210 20% 98%; /* #F8FAFC - Card hover state */
 
     /* Popover/Dropdown */
     --popover: 0 0% 100%;
     --popover-foreground: 222 47% 11%;
 
     /* Primary Brand Color - Blue */
-    --primary: 217 91% 60%;              /* #3B82F6 - Primary blue (blue-500) */
-    --primary-hover: 217 91% 55%;        /* Darker on hover */
-    --primary-foreground: 0 0% 100%;     /* White text on primary */
-    --primary-light: 214 95% 93%;        /* #DBEAFE - Light blue tint (blue-100) */
-    --primary-muted: 214 32% 91%;        /* Muted blue for subtle backgrounds */
+    --primary: 217 91% 60%; /* #3B82F6 - Primary blue (blue-500) */
+    --primary-hover: 217 91% 55%; /* Darker on hover */
+    --primary-foreground: 0 0% 100%; /* White text on primary */
+    --primary-light: 214 95% 93%; /* #DBEAFE - Light blue tint (blue-100) */
+    --primary-muted: 214 32% 91%; /* Muted blue for subtle backgrounds */
 
     /* Secondary Colors */
-    --secondary: 210 40% 96%;            /* #F1F5F9 - Secondary backgrounds */
+    --secondary: 210 40% 96%; /* #F1F5F9 - Secondary backgrounds */
     --secondary-foreground: 222 47% 11%;
 
     /* Muted/Subtle Elements */
@@ -46,35 +46,35 @@
     --muted-foreground: 215 16% 47%;
 
     /* Accent Color - For highlights */
-    --accent: 217 91% 60%;               /* Same as primary for consistency */
+    --accent: 217 91% 60%; /* Same as primary for consistency */
     --accent-foreground: 0 0% 100%;
     --accent-light: 214 95% 93%;
 
     /* Semantic Colors - Status */
-    --success: 142 71% 45%;              /* #22C55E - Green (green-500) */
+    --success: 142 71% 45%; /* #22C55E - Green (green-500) */
     --success-foreground: 0 0% 100%;
-    --success-light: 138 76% 94%;        /* #DCFCE7 - Light green (green-100) */
-    --success-muted: 142 76% 36%;        /* Darker green for text */
+    --success-light: 138 76% 94%; /* #DCFCE7 - Light green (green-100) */
+    --success-muted: 142 76% 36%; /* Darker green for text */
 
-    --warning: 38 92% 50%;               /* #F59E0B - Amber (amber-500) */
+    --warning: 38 92% 50%; /* #F59E0B - Amber (amber-500) */
     --warning-foreground: 0 0% 100%;
-    --warning-light: 48 96% 89%;         /* #FEF3C7 - Light amber (amber-100) */
-    --warning-muted: 38 92% 40%;         /* Darker amber for text */
+    --warning-light: 48 96% 89%; /* #FEF3C7 - Light amber (amber-100) */
+    --warning-muted: 38 92% 40%; /* Darker amber for text */
 
-    --destructive: 0 84% 60%;            /* #EF4444 - Red (red-500) */
+    --destructive: 0 84% 60%; /* #EF4444 - Red (red-500) */
     --destructive-foreground: 0 0% 100%;
-    --destructive-light: 0 86% 94%;      /* #FEE2E2 - Light red (red-100) */
-    --destructive-muted: 0 84% 40%;      /* Darker red for text */
+    --destructive-light: 0 86% 94%; /* #FEE2E2 - Light red (red-100) */
+    --destructive-muted: 0 84% 40%; /* Darker red for text */
 
-    --info: 199 89% 48%;                 /* #0EA5E9 - Sky (sky-500) */
+    --info: 199 89% 48%; /* #0EA5E9 - Sky (sky-500) */
     --info-foreground: 0 0% 100%;
-    --info-light: 201 94% 94%;           /* #E0F2FE - Light sky (sky-100) */
-    --info-muted: 199 89% 38%;           /* Darker sky for text */
+    --info-light: 201 94% 94%; /* #E0F2FE - Light sky (sky-100) */
+    --info-muted: 199 89% 38%; /* Darker sky for text */
 
     /* Border Colors */
-    --border: 214 32% 91%;               /* #E2E8F0 - Default border (slate-200) */
-    --border-subtle: 220 13% 91%;        /* Subtle border variation */
-    --border-focus: 217 91% 60%;         /* Blue border on focus */
+    --border: 214 32% 91%; /* #E2E8F0 - Default border (slate-200) */
+    --border-subtle: 220 13% 91%; /* Subtle border variation */
+    --border-focus: 217 91% 60%; /* Blue border on focus */
 
     /* Input Elements */
     --input: 214 32% 91%;
@@ -87,11 +87,11 @@
     /* ========================================================================
        LAYOUT TOKENS
        ======================================================================== */
-    --radius: 0.5rem;                    /* 8px - Default border radius */
-    --radius-sm: 0.375rem;               /* 6px - Small elements */
-    --radius-lg: 0.75rem;                /* 12px - Cards, modals */
-    --radius-xl: 1rem;                   /* 16px - Large cards */
-    --radius-full: 9999px;               /* Pill shapes */
+    --radius: 0.5rem; /* 8px - Default border radius */
+    --radius-sm: 0.375rem; /* 6px - Small elements */
+    --radius-lg: 0.75rem; /* 12px - Cards, modals */
+    --radius-xl: 1rem; /* 16px - Large cards */
+    --radius-full: 9999px; /* Pill shapes */
 
     /* ========================================================================
        SHADOW TOKENS
@@ -106,22 +106,22 @@
     /* ========================================================================
        SIDEBAR TOKENS
        ======================================================================== */
-    --sidebar-bg: 0 0% 100%;             /* White sidebar */
+    --sidebar-bg: 0 0% 100%; /* White sidebar */
     --sidebar-foreground: 222 47% 11%;
     --sidebar-border: 214 32% 91%;
     --sidebar-item-hover: 210 40% 96%;
-    --sidebar-item-active: 214 95% 93%;  /* Light blue for active item */
+    --sidebar-item-active: 214 95% 93%; /* Light blue for active item */
     --sidebar-item-active-text: 217 91% 50%; /* Blue text for active */
 
     /* ========================================================================
        CHART COLORS
        ======================================================================== */
-    --chart-1: 217 91% 60%;              /* Primary blue */
-    --chart-2: 142 71% 45%;              /* Green */
-    --chart-3: 38 92% 50%;               /* Amber */
-    --chart-4: 262 83% 58%;              /* Purple */
-    --chart-5: 199 89% 48%;              /* Sky */
-    --chart-6: 0 84% 60%;                /* Red */
+    --chart-1: 217 91% 60%; /* Primary blue */
+    --chart-2: 142 71% 45%; /* Green */
+    --chart-3: 38 92% 50%; /* Amber */
+    --chart-4: 262 83% 58%; /* Purple */
+    --chart-5: 199 89% 48%; /* Sky */
+    --chart-6: 0 84% 60%; /* Red */
   }
 
   /* ========================================================================
@@ -129,15 +129,15 @@
      ======================================================================== */
   .dark {
     /* Background Colors */
-    --background: 222 47% 11%;           /* #1E293B - Dark background */
-    --background-subtle: 217 33% 17%;    /* Subtle variation */
+    --background: 222 47% 11%; /* #1E293B - Dark background */
+    --background-subtle: 217 33% 17%; /* Subtle variation */
 
     /* Foreground/Text Colors */
-    --foreground: 210 40% 98%;           /* #F8FAFC - Light text */
-    --foreground-muted: 215 20% 65%;     /* Muted text */
+    --foreground: 210 40% 98%; /* #F8FAFC - Light text */
+    --foreground-muted: 215 20% 65%; /* Muted text */
 
     /* Card Colors */
-    --card: 217 33% 17%;                 /* #334155 - Card background */
+    --card: 217 33% 17%; /* #334155 - Card background */
     --card-foreground: 210 40% 98%;
     --card-hover: 217 33% 20%;
 
@@ -146,10 +146,10 @@
     --popover-foreground: 210 40% 98%;
 
     /* Primary Brand Color - Blue (slightly lighter for dark mode) */
-    --primary: 217 91% 65%;              /* Brighter blue */
+    --primary: 217 91% 65%; /* Brighter blue */
     --primary-hover: 217 91% 70%;
-    --primary-foreground: 222 47% 11%;   /* Dark text on primary */
-    --primary-light: 217 33% 25%;        /* Dark mode light blue */
+    --primary-foreground: 222 47% 11%; /* Dark text on primary */
+    --primary-light: 217 33% 25%; /* Dark mode light blue */
     --primary-muted: 217 33% 25%;
 
     /* Secondary Colors */
@@ -232,8 +232,18 @@
 }
 
 body {
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
-    Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+  font-family:
+    'Inter',
+    -apple-system,
+    BlinkMacSystemFont,
+    'Segoe UI',
+    Roboto,
+    Oxygen,
+    Ubuntu,
+    Cantarell,
+    'Open Sans',
+    'Helvetica Neue',
+    sans-serif;
   margin: 0;
   padding: 0;
 }
