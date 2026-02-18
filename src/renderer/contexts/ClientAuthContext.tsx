@@ -56,7 +56,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
         // Clear legacy key if present to prevent conflicts
         try {
           localStorage.removeItem('client_auth_session');
-        } catch (storageError) {
+        } catch {
           // Non-fatal: failed to clear legacy key
         }
 
@@ -103,7 +103,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
             try {
               localStorage.removeItem(STORAGE_KEY);
               localStorage.removeItem('client_auth_session');
-            } catch (storageError) {
+            } catch {
               // Non-fatal: failed to remove session
             }
             setIsLoading(false);
@@ -161,7 +161,7 @@ export function ClientAuthProvider({ children }: { children: ReactNode }) {
               try {
                 localStorage.removeItem(STORAGE_KEY);
                 localStorage.removeItem('client_auth_session');
-              } catch (storageError) {
+              } catch {
                 // Non-fatal: failed to clear session
               }
               setUser(null);

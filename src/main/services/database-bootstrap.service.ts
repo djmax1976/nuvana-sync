@@ -33,7 +33,6 @@ import {
 import {
   runMigrations,
   getCurrentSchemaVersion,
-  getAppliedMigrationDetails,
   type MigrationSummary,
 } from './migration.service';
 import { createLogger } from '../utils/logger';

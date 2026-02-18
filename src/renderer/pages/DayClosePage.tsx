@@ -18,7 +18,7 @@ import { Card, CardContent } from '../components/ui/card';
 import { formatDateTime } from '../utils/date-format.utils';
 import { useStoreTimezone } from '../contexts/StoreContext';
 import { Button } from '../components/ui/button';
-import { CalendarCheck, Loader2, AlertCircle, Check, ArrowRight, ArrowLeft } from 'lucide-react';
+import { CalendarCheck, Loader2, AlertCircle, Check, ArrowLeft } from 'lucide-react';
 
 // Day Close Access Context - provides validated shift/user from guard
 // SEC-010: Authorization already enforced by DayCloseAccessGuard before rendering
@@ -169,7 +169,7 @@ export default function DayCloseWizardPage() {
 
   // SEC-010: Get validated shift/user from context (set by DayCloseAccessGuard)
   // Guard has already verified: exactly one open shift exists, user is authorized
-  const { activeShift, user, accessType } = useDayCloseAccessContext();
+  const { activeShift, user: _user, accessType } = useDayCloseAccessContext();
   const shiftId = activeShift.shift_id;
 
   // Manual mode allows direct editing of POS totals (when automatic POS sync unavailable)
@@ -331,7 +331,7 @@ export default function DayCloseWizardPage() {
     scannedBins,
     reportScanningData,
     pendingLotteryDayId,
-    pendingLotteryCloseExpiresAt,
+    pendingLotteryCloseExpiresAt: _pendingLotteryCloseExpiresAt,
     pendingClosings,
   } = wizardState;
 

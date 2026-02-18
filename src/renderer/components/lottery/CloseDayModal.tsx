@@ -203,7 +203,7 @@ export function CloseDayModal({
         const parsed = parseSerializedNumber(serial);
 
         // Extract components
-        const gameCode = parsed.game_code;
+        const _gameCode = parsed.game_code; // Unused but kept for debugging
         const packNumber = parsed.pack_number;
         const closingSerial = parsed.serial_start; // Positions 12-14 contain the ending serial
 

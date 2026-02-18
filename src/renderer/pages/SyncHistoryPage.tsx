@@ -19,11 +19,9 @@ import {
   CheckCircle,
   XCircle,
   Clock,
-  AlertTriangle,
   ArrowUp,
   ArrowDown,
   RotateCcw,
-  Trash2,
 } from 'lucide-react';
 
 // ============================================================================
@@ -134,7 +132,7 @@ export default function SyncHistoryPage() {
       if (response.data) {
         setLogs(response.data.logs);
       }
-    } catch (err) {
+    } catch {
       setError('Failed to connect to sync service');
     } finally {
       setIsLoading(false);
@@ -161,7 +159,7 @@ export default function SyncHistoryPage() {
       if (response.data) {
         setPendingItems(response.data.items);
       }
-    } catch (err) {
+    } catch {
       setError('Failed to connect to sync service');
     } finally {
       setIsLoading(false);
@@ -188,7 +186,7 @@ export default function SyncHistoryPage() {
       if (response.data) {
         setFailedItems(response.data.items);
       }
-    } catch (err) {
+    } catch {
       setError('Failed to connect to sync service');
     } finally {
       setIsLoading(false);

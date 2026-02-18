@@ -196,7 +196,7 @@ class Logger {
     try {
       const stream = level === 'error' || level === 'warn' ? process.stderr : process.stdout;
       if (stream && !stream.destroyed) {
-        stream.write(output, (err) => {
+        stream.write(output, (_err) => {
           // Ignore write errors (EPIPE, etc.) - callback handles async errors
         });
       }

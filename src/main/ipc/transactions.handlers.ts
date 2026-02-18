@@ -23,7 +23,7 @@ import { createLogger } from '../utils/logger';
 // Types
 // ============================================================================
 
-interface TransactionListParams {
+interface _TransactionListParams {
   startDate?: string;
   endDate?: string;
   shiftId?: string;

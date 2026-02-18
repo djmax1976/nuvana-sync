@@ -13,7 +13,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { cn } from '../../lib/utils';
 import { Button } from '../ui/button';
 import { Badge } from '../ui/badge';
-import { RefreshCw, Cloud, CloudOff, AlertCircle, CheckCircle, Clock, Loader2 } from 'lucide-react';
+import { RefreshCw, Cloud, CloudOff, AlertCircle, CheckCircle, Loader2 } from 'lucide-react';
 
 // ============================================================================
 // Types
@@ -214,7 +214,7 @@ export function SyncStatus({
         setStatus(response.data);
         setError(null);
       }
-    } catch (err) {
+    } catch {
       setError('Failed to connect to sync service');
     } finally {
       setIsLoading(false);
@@ -239,7 +239,7 @@ export function SyncStatus({
 
       // Refetch status after triggering
       await fetchStatus();
-    } catch (err) {
+    } catch {
       setError('Failed to trigger sync');
     } finally {
       setIsSyncing(false);

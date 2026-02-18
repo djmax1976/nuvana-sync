@@ -24,7 +24,6 @@ import {
   shiftTenderSummariesDAL,
   dayFuelSummariesDAL,
   daySummariesDAL,
-  msmOutsideDispenserRecordsDAL,
   type MSMFuelTotals,
   type MSMFuelByGrade,
 } from '../dal';
@@ -38,7 +37,7 @@ import type { ShiftCloseType } from '../../shared/types/shift-events';
 // Types
 // ============================================================================
 
-interface ShiftListParams {
+interface _ShiftListParams {
   startDate?: string;
   endDate?: string;
   status?: 'OPEN' | 'CLOSED';
@@ -126,7 +125,7 @@ const CloseShiftInputSchema = z.object({
     }),
 });
 
-type CloseShiftInput = z.infer<typeof CloseShiftInputSchema>;
+type _CloseShiftInput = z.infer<typeof CloseShiftInputSchema>;
 
 // ============================================================================
 // Logger
@@ -1130,7 +1129,7 @@ const ManualStartShiftSchema = z.object({
   startTime: z.string().optional(),
 });
 
-type ManualStartShiftInput = z.infer<typeof ManualStartShiftSchema>;
+type _ManualStartShiftInput = z.infer<typeof ManualStartShiftSchema>;
 
 /**
  * Manually start a shift
@@ -1874,7 +1873,7 @@ registerHandler<ShiftViewDataResponse | ReturnType<typeof createErrorResponse>>(
         };
 
         // Get lottery data
-        const lotteryNet = shiftSummary.lottery_net || 0;
+        const _lotteryNet = shiftSummary.lottery_net || 0;
         const lotterySales = shiftSummary.lottery_sales || 0;
         const lotteryCashes = shiftSummary.lottery_cashes || 0;
         summary.lotterySales = {

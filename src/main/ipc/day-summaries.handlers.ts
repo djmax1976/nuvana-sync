@@ -25,7 +25,7 @@ import { createLogger } from '../utils/logger';
 // Types
 // ============================================================================
 
-interface DaySummaryListParams {
+interface _DaySummaryListParams {
   startDate?: string;
   endDate?: string;
   status?: 'OPEN' | 'CLOSED';
@@ -555,7 +555,7 @@ registerHandler<DayViewDataResponse | ReturnType<typeof createErrorResponse>>(
       const shiftSummaries = shiftSummariesDAL.findByDate(store.store_id, daySummary.business_date);
 
       // Aggregate totals from shift summaries
-      let totalOpeningCash = 0;
+      let _totalOpeningCash = 0; // Calculated but not yet used in response
       let totalClosingCash = 0;
       let totalFuelGallons = 0;
       let totalFuelSales = 0;
@@ -565,7 +565,7 @@ registerHandler<DayViewDataResponse | ReturnType<typeof createErrorResponse>>(
       let totalNetSales = 0;
 
       for (const ss of shiftSummaries) {
-        totalOpeningCash += ss.opening_cash || 0;
+        _totalOpeningCash += ss.opening_cash || 0;
         totalClosingCash += ss.closing_cash || 0;
         totalFuelGallons += ss.fuel_gallons || 0;
         totalFuelSales += ss.fuel_sales || 0;

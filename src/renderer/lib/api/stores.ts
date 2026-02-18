@@ -201,7 +201,7 @@ function validateTimezone(timezone: string): boolean {
 /**
  * Validate location JSON structure (address only, no GPS validation needed)
  */
-function validateLocationJson(location: LocationJson): void {
+function validateLocationJson(_location: LocationJson): void {
   // No validation needed for address-only location
   return;
 }
@@ -562,7 +562,7 @@ export function useDeleteStore() {
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ storeId, companyId }: { storeId: string; companyId: string }) =>
+    mutationFn: ({ storeId, companyId: _companyId }: { storeId: string; companyId: string }) =>
       deleteStore(storeId),
     onSuccess: () => {
       // Invalidate ALL store queries to ensure lists refresh

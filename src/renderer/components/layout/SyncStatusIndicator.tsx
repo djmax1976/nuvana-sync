@@ -544,7 +544,7 @@ export const SyncStatusIndicator = memo(function SyncStatusIndicator({
           setError(response.data.lastErrorMessage);
         }
       }
-    } catch (err) {
+    } catch (_err) {
       // API-003: Generic error message, no internal details
       setError('Unable to connect to sync service');
     } finally {
@@ -570,7 +570,7 @@ export const SyncStatusIndicator = memo(function SyncStatusIndicator({
 
       // Refetch status after triggering
       await fetchStatus();
-    } catch (err) {
+    } catch (_err) {
       setError('Failed to trigger sync');
     } finally {
       setIsRetrying(false);

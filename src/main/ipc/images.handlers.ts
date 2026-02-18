@@ -47,8 +47,8 @@ const log = createLogger('images-handlers');
 /** Maximum image size in bytes (10MB) */
 const MAX_IMAGE_SIZE = 10 * 1024 * 1024;
 
-/** Allowed MIME types */
-const ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
+/** Allowed MIME types (used for documentation/reference) */
+const _ALLOWED_MIME_TYPES = ['image/jpeg', 'image/png', 'image/webp'] as const;
 
 /** File extension mapping */
 const MIME_TO_EXTENSION: Record<string, string> = {

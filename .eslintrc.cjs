@@ -29,10 +29,10 @@ module.exports = {
     },
   },
   rules: {
-    // Relax rules for early-stage development
-    // These can be tightened as the project matures
+    // Unused variables should be errors to catch dead code early
+    // Use _ prefix to explicitly mark intentionally unused vars (e.g., _unused)
     '@typescript-eslint/no-unused-vars': [
-      'warn',
+      'error',
       { argsIgnorePattern: '^_', varsIgnorePattern: '^_' },
     ],
     '@typescript-eslint/no-explicit-any': 'warn',

@@ -14,7 +14,7 @@
  * Phase 5: Pull Consistency, Cursor Safety, and Idempotent Apply
  */
 
-import { syncCursorsDAL, type CursorState, type UpdateCursorData } from '../dal/sync-cursors.dal';
+import { syncCursorsDAL } from '../dal/sync-cursors.dal';
 import { syncAppliedRecordsDAL, type ApplyCheckResult } from '../dal/sync-applied-records.dal';
 import { syncTimestampsDAL } from '../dal/sync-timestamps.dal';
 import { createLogger } from '../utils/logger';

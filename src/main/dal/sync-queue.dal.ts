@@ -1000,7 +1000,7 @@ export class SyncQueueDAL extends StoreBasedDAL<SyncQueueItem> {
 
     if (existing) {
       // Update existing item's payload instead of creating duplicate
-      const now = this.now();
+      const _now = this.now(); // Unused but kept for potential logging
       const stmt = this.db.prepare(`
         UPDATE sync_queue SET
           payload = ?,

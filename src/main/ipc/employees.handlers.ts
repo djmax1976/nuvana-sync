@@ -19,7 +19,7 @@ import {
   createSuccessResponse,
   IPCErrorCodes,
 } from './index';
-import { usersDAL, UsersDAL, type UserRole, type SafeUser, type User } from '../dal/users.dal';
+import { usersDAL, UsersDAL, type UserRole, type SafeUser } from '../dal/users.dal';
 import { storesDAL } from '../dal/stores.dal';
 import { syncQueueDAL } from '../dal/sync-queue.dal';
 import { getCurrentAuthUser, hasMinimumRole } from '../services/auth.service';

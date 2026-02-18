@@ -18,11 +18,7 @@
 
 import { createLogger } from '../utils/logger';
 import { eventBus, MainEvents } from '../utils/event-bus';
-import {
-  syncMetricsService,
-  type SyncMetricsSnapshot,
-  type SLOMetrics,
-} from './sync-metrics.service';
+import { syncMetricsService, type SyncMetricsSnapshot } from './sync-metrics.service';
 
 // ============================================================================
 // Logger
@@ -808,7 +804,7 @@ export class SyncAlertsService {
    * Clear all active alerts
    */
   clearAllAlerts(): void {
-    for (const [type, alert] of this.activeAlerts) {
+    for (const [_type, alert] of this.activeAlerts) {
       alert.isActive = false;
       alert.resolvedAt = new Date().toISOString();
       alert.context = { ...alert.context, clearedManually: true };

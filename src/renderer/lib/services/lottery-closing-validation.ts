@@ -126,7 +126,7 @@ export async function validateManualEntryEnding(
     return {
       valid: true,
     };
-  } catch (error) {
+  } catch {
     // ERROR_HANDLING: Return generic error, don't leak implementation details
     return {
       valid: false,
@@ -239,7 +239,7 @@ export async function validateEndingSerial(
       valid: true,
       endingNumber: parsed.serial_start, // The 3-digit ticket number
     };
-  } catch (error) {
+  } catch {
     // ERROR_HANDLING: Return generic error, don't leak implementation details
     // parseSerializedNumber throws InvalidSerialNumberError, but we return generic message
     return {
