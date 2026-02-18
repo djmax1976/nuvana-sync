@@ -45,6 +45,7 @@ const {
   mockUseShift,
   mockUseShiftSummary,
   mockUseShiftFuelData,
+  mockUseShiftViewData,
   mockToast,
   mockWindowConfirm,
 } = vi.hoisted(() => ({
@@ -52,6 +53,7 @@ const {
   mockUseShift: vi.fn(),
   mockUseShiftSummary: vi.fn(),
   mockUseShiftFuelData: vi.fn(),
+  mockUseShiftViewData: vi.fn(),
   mockToast: vi.fn(),
   mockWindowConfirm: vi.fn(),
 }));
@@ -153,11 +155,33 @@ vi.mock('../../src/renderer/components/ui/input', () => {
 
 vi.mock('@/lib/utils', () => ({
   cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' '),
+  formatCurrency: (value: number) => `$${value.toFixed(2)}`,
 }));
 
 // Mock FuelSalesBreakdown
 vi.mock('../../src/renderer/components/shifts/FuelSalesBreakdown', () => ({
   FuelSalesBreakdown: () => <div data-testid="fuel-sales-breakdown" />,
+}));
+
+// Mock usePOSConnectionType hook (requires QueryClient in real usage)
+// Default to non-lottery mode for standard shift close workflow testing
+vi.mock('../../src/renderer/hooks/usePOSConnectionType', () => ({
+  useIsLotteryMode: () => false,
+  usePOSConnectionType: () => ({ data: { posType: 'STANDARD', connectionType: 'STANDARD' } }),
+  posConnectionTypeKeys: { all: ['settings', 'posConnectionType'] },
+}));
+
+// Mock useViewData hook (used by ViewShiftPage for fetching shift view data)
+vi.mock('../../src/renderer/hooks/useViewData', () => ({
+  useShiftViewData: () => mockUseShiftViewData(),
+  useDayViewData: () => ({ data: null, isLoading: false, error: null }),
+  viewDataKeys: {
+    all: ['view'] as const,
+    shifts: () => ['view', 'shifts'] as const,
+    shift: (id: string) => ['view', 'shifts', id] as const,
+    days: () => ['view', 'days'] as const,
+    day: (id: string) => ['view', 'days', id] as const,
+  },
 }));
 
 // ============================================================================
@@ -258,6 +282,68 @@ function createMockFuelData() {
 }
 
 /**
+ * Creates a mock shift view data response for ViewShiftPage
+ * @param shiftId - The shift ID to use
+ * @param status - OPEN or CLOSED
+ */
+function createMockShiftViewData(shiftId: string, status: 'OPEN' | 'CLOSED') {
+  return {
+    shiftId,
+    businessDate: '2026-02-15',
+    status,
+    shiftInfo: {
+      terminalName: 'Register 1',
+      shiftNumber: 1,
+      cashierName: 'Test Cashier',
+      startedAt: '2026-02-15T08:00:00.000Z',
+      endedAt: status === 'CLOSED' ? '2026-02-15T16:00:00.000Z' : null,
+      openingCash: 200.0,
+      closingCash: status === 'CLOSED' ? 1500.0 : null,
+    },
+    summary: {
+      insideSales: { total: 1500.0, nonFood: 800.0, foodSales: 700.0 },
+      fuelSales: { total: 5000.0, gallonsSold: 1500.0 },
+      lotterySales: { total: 500.0, scratchOff: 300.0, online: 200.0 },
+      reserved: null,
+    },
+    payments: {
+      receipts: {
+        cash: { reports: 1000.0, pos: 1000.0 },
+        creditCard: { reports: 2500.0, pos: 2500.0 },
+        debitCard: { reports: 1000.0, pos: 1000.0 },
+        ebt: { reports: 100.0, pos: 100.0 },
+      },
+      payouts: {
+        cashPayouts: { reports: -200.0, pos: -200.0, hasImages: false, count: 1 },
+        lotteryPayouts: { reports: -300.0, pos: -300.0, hasImages: false },
+        gamingPayouts: { reports: 0, pos: 0, hasImages: false },
+      },
+      netCash: { reports: 4100.0, pos: 4100.0 },
+    },
+    salesBreakdown: {
+      gasSales: { reports: 5000.0, pos: 5000.0 },
+      grocery: { reports: 500.0, pos: 500.0 },
+      tobacco: { reports: 200.0, pos: 200.0 },
+      beverages: { reports: 150.0, pos: 150.0 },
+      snacks: { reports: 100.0, pos: 100.0 },
+      other: { reports: 50.0, pos: 50.0 },
+      lottery: {
+        instantSales: { reports: 300.0, pos: 300.0 },
+        instantCashes: { reports: -150.0, pos: -150.0 },
+        onlineSales: { reports: 200.0, pos: 200.0 },
+        onlineCashes: { reports: -100.0, pos: -100.0 },
+      },
+      salesTax: { reports: 350.0, pos: 350.0 },
+      total: { reports: 6500.0, pos: 6500.0 },
+    },
+    timestamps: {
+      createdAt: '2026-02-15T08:00:00.000Z',
+      closedAt: status === 'CLOSED' ? '2026-02-15T16:00:00.000Z' : null,
+    },
+  };
+}
+
+/**
  * Mock ShiftEndPage for testing navigation target
  * Shows the shiftId from URL params for verification
  */
@@ -338,6 +424,14 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
 
     mockUseShiftFuelData.mockReturnValue({
       data: createMockFuelData(),
+      isLoading: false,
+      error: null,
+    });
+
+    // Default mock for ViewShiftPage's useShiftViewData hook
+    // Tests that render ViewShiftPage should override this with their specific data
+    mockUseShiftViewData.mockReturnValue({
+      data: createMockShiftViewData('default-shift-id', 'OPEN'),
       isLoading: false,
       error: null,
     });
@@ -452,9 +546,9 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
 
   describe('4.1.3: ViewShiftPage Close → ShiftEndPage', () => {
     it('should navigate to /shift-end when Close Shift button is clicked on ViewShiftPage', async () => {
-      // Arrange: OPEN shift
-      mockUseShift.mockReturnValue({
-        data: createMockShift('shift-001', 'OPEN'),
+      // Arrange: OPEN shift - ViewShiftPage uses useShiftViewData, not useShift
+      mockUseShiftViewData.mockReturnValue({
+        data: createMockShiftViewData('shift-001', 'OPEN'),
         isLoading: false,
         error: null,
       });
@@ -484,9 +578,9 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
     });
 
     it('should render ShiftEndPage after navigation from ViewShiftPage', async () => {
-      // Arrange
-      mockUseShift.mockReturnValue({
-        data: createMockShift('shift-001', 'OPEN'),
+      // Arrange: ViewShiftPage uses useShiftViewData, not useShift
+      mockUseShiftViewData.mockReturnValue({
+        data: createMockShiftViewData('shift-001', 'OPEN'),
         isLoading: false,
         error: null,
       });
@@ -653,9 +747,9 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
     });
 
     it('should work with OPEN shift on detail page', async () => {
-      // Arrange: OPEN shift
-      mockUseShift.mockReturnValue({
-        data: createMockShift('shift-detail-001', 'OPEN', 5),
+      // Arrange: OPEN shift - ViewShiftPage uses useShiftViewData, not useShift
+      mockUseShiftViewData.mockReturnValue({
+        data: createMockShiftViewData('shift-detail-001', 'OPEN'),
         isLoading: false,
         error: null,
       });
@@ -680,9 +774,9 @@ describe('Shift Close Workflow Integration (Phase 4.1)', () => {
     });
 
     it('should NOT show Close button for CLOSED shift on detail page', async () => {
-      // Arrange: CLOSED shift
-      mockUseShift.mockReturnValue({
-        data: createMockShift('shift-closed-001', 'CLOSED', 5),
+      // Arrange: CLOSED shift - ViewShiftPage uses useShiftViewData, not useShift
+      mockUseShiftViewData.mockReturnValue({
+        data: createMockShiftViewData('shift-closed-001', 'CLOSED'),
         isLoading: false,
         error: null,
       });
