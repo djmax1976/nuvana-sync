@@ -138,12 +138,6 @@ const mockStoreA = {
   external_id: 'ext-001',
 };
 
-const mockStoreB = {
-  store_id: STORE_B_ID,
-  name: 'Store B',
-  external_id: 'ext-002',
-};
-
 const mockShiftStoreA = {
   shift_id: SHIFT_ID,
   store_id: STORE_A_ID,

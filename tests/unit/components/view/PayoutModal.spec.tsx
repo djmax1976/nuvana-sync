@@ -82,20 +82,6 @@ const defaultCashProps: PayoutModalProps = {
   onClose: vi.fn(),
 };
 
-const defaultLotteryProps: PayoutModalProps = {
-  type: 'lottery',
-  data: mockLotteryData,
-  isOpen: true,
-  onClose: vi.fn(),
-};
-
-const defaultGamingProps: PayoutModalProps = {
-  type: 'gaming',
-  data: mockGamingData,
-  isOpen: true,
-  onClose: vi.fn(),
-};
-
 function renderModal(props: Partial<PayoutModalProps> = {}) {
   const mergedProps = { ...defaultCashProps, ...props };
   return render(<PayoutModal {...mergedProps} />);
