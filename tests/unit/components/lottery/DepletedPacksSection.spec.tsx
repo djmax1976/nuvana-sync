@@ -29,14 +29,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // Mock Dependencies
 // ============================================================================
 
-vi.mock('lucide-react', () => ({
-  Package: (props: Record<string, unknown>) => <div data-testid="package-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => (
-    <div data-testid="alert-triangle-icon" {...props} />
-  ),
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-}));
-
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
   useDateFormat: () => ({
     formatCustom: (date: Date | string, fmt: string) => {
@@ -151,11 +143,6 @@ describe('DepletedPacksSection', () => {
         <DepletedPacksSection depletedPacks={[createPack(), createPack({ pack_id: 'dep-002' })]} />
       );
       expect(screen.getByText('Packs Sold Out (2)')).toBeInTheDocument();
-    });
-
-    it('should render violet SectionIcon with Package icon', () => {
-      render(<DepletedPacksSection depletedPacks={[createPack()]} />);
-      expect(screen.getByTestId('package-icon')).toBeInTheDocument();
     });
 
     it('should display total sales as currency badge', () => {

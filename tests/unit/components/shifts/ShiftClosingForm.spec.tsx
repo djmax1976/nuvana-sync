@@ -170,8 +170,8 @@ vi.mock('../../../../src/renderer/components/ui/button', () => ({
 }));
 
 vi.mock('../../../../src/renderer/components/ui/form', () => ({
-  Form: ({ children, ...props }: { children: React.ReactNode }) => (
-    <form {...props}>{children}</form>
+  Form: ({ children }: { children: React.ReactNode }) => (
+    <form className="space-y-4">{children}</form>
   ),
   FormControl: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   FormDescription: ({ children }: { children: React.ReactNode }) => <span>{children}</span>,
@@ -197,10 +197,6 @@ vi.mock('../../../../src/renderer/components/ui/input', () => ({
 
 vi.mock('@hookform/resolvers/zod', () => ({
   zodResolver: vi.fn(() => vi.fn()),
-}));
-
-vi.mock('lucide-react', () => ({
-  Loader2: () => <span data-testid="loader" />,
 }));
 
 // ============================================================================
@@ -407,9 +403,10 @@ describe('ShiftClosingForm', () => {
         isChecking: true,
       });
 
-      render(<ShiftClosingForm {...props} />);
+      const { container } = render(<ShiftClosingForm {...props} />);
 
-      expect(screen.getByTestId('loader')).toBeInTheDocument();
+      // Real Loader2 icon renders with .lucide.lucide-loader-circle class
+      expect(container.querySelector('.lucide.lucide-loader-circle')).toBeInTheDocument();
 
       vi.mocked(useAuthGuard).mockReturnValue({
         executeWithAuth: mockExecuteWithAuth,

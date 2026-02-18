@@ -151,13 +151,6 @@ vi.mock('../../src/renderer/components/ui/input', () => {
   return { Input: MockInput };
 });
 
-vi.mock('lucide-react', () => ({
-  AlertCircle: () => <span data-testid="alert-circle-icon" />,
-  Lock: () => <span data-testid="lock-icon" />,
-  XCircle: () => <span data-testid="x-circle-icon" />,
-  Loader2: () => <span data-testid="loader-icon" />,
-}));
-
 vi.mock('@/lib/utils', () => ({
   cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' '),
 }));

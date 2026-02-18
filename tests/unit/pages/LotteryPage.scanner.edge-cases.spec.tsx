@@ -264,22 +264,6 @@ vi.mock('../../../src/renderer/components/auth/PinVerificationDialog', () => ({
   }),
 }));
 
-// Mock lucide-react icons
-vi.mock('lucide-react', () => ({
-  Loader2: (props: Record<string, unknown>) => <div data-testid="loader-icon" {...props} />,
-  AlertCircle: (props: Record<string, unknown>) => <div data-testid="alert-icon" {...props} />,
-  Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  PenLine: (props: Record<string, unknown>) => <div data-testid="pen-icon" {...props} />,
-  X: (props: Record<string, unknown>) => <div data-testid="x-icon" {...props} />,
-  Save: (props: Record<string, unknown>) => <div data-testid="save-icon" {...props} />,
-  CalendarCheck: (props: Record<string, unknown>) => <div data-testid="calendar-icon" {...props} />,
-  ScanLine: (props: Record<string, unknown>) => <div data-testid="scan-line-icon" {...props} />,
-  CheckCircle2: (props: Record<string, unknown>) => <div data-testid="check-icon" {...props} />,
-  AlertTriangle: (props: Record<string, unknown>) => (
-    <div data-testid="alert-triangle-icon" {...props} />
-  ),
-}));
-
 // ============================================================================
 // Import Component Under Test
 // ============================================================================

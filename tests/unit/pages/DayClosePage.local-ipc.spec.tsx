@@ -186,16 +186,6 @@ vi.mock('../../../src/renderer/components/ui/button', () => ({
   ),
 }));
 
-// Mock Lucide icons
-vi.mock('lucide-react', () => ({
-  CalendarCheck: () => <span data-testid="icon-calendar-check">CalendarCheck</span>,
-  Loader2: () => <span data-testid="icon-loader">Loader2</span>,
-  AlertCircle: () => <span data-testid="icon-alert">AlertCircle</span>,
-  Check: () => <span data-testid="icon-check">Check</span>,
-  ArrowRight: () => <span data-testid="icon-arrow-right">ArrowRight</span>,
-  ArrowLeft: () => <span data-testid="icon-arrow-left">ArrowLeft</span>,
-}));
-
 // Import the component after all mocks are set up
 import DayClosePage from '../../../src/renderer/pages/DayClosePage';
 

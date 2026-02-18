@@ -154,15 +154,6 @@ vi.mock('../../../../src/renderer/components/ui/dropdown-menu', () => ({
   DropdownMenuTrigger: ({ children }: React.PropsWithChildren) => <div>{children}</div>,
 }));
 
-// Mock lucide-react icons using importOriginal to include all icons
-vi.mock('lucide-react', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('lucide-react')>();
-  return {
-    ...actual,
-    // Test-specific overrides if needed
-  };
-});
-
 // Mock sub-components
 vi.mock('../../../../src/renderer/components/lottery/ScannerInput', () => ({
   ScannerInput: ({

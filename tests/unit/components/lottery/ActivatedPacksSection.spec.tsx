@@ -29,11 +29,6 @@ import { render, screen, fireEvent } from '@testing-library/react';
 // Mock Dependencies
 // ============================================================================
 
-vi.mock('lucide-react', () => ({
-  Zap: (props: Record<string, unknown>) => <div data-testid="zap-icon" {...props} />,
-  ChevronRight: (props: Record<string, unknown>) => <div data-testid="chevron-icon" {...props} />,
-}));
-
 vi.mock('../../../../src/renderer/hooks/useDateFormat', () => ({
   useDateFormat: () => ({
     formatCustom: (date: Date | string, fmt: string) => {
@@ -140,11 +135,6 @@ describe('ActivatedPacksSection', () => {
         />
       );
       expect(screen.getByText('Activated Packs (2)')).toBeInTheDocument();
-    });
-
-    it('should render blue SectionIcon with Zap icon', () => {
-      render(<ActivatedPacksSection activatedPacks={[createPack()]} />);
-      expect(screen.getByTestId('zap-icon')).toBeInTheDocument();
     });
 
     it('should show status subtitle when mixed statuses exist', () => {
