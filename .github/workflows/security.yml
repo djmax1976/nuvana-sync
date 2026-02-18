@@ -45,17 +45,47 @@ jobs:
           fetch-depth: 0
 
       - name: Run Semgrep SAST
+        id: semgrep
         run: |
           pip install semgrep
-          semgrep scan --config=auto --sarif --output=semgrep.sarif \
+
+          # Run Semgrep with custom rules + community rules
+          # Output both SARIF (for GitHub) and JSON (for blocking logic)
+          semgrep scan \
+            --config=.semgrep/ \
             --config=p/javascript \
             --config=p/typescript \
             --config=p/nodejs \
             --config=p/security-audit \
-            --config=p/secrets \
             --config=p/owasp-top-ten \
-            .
-        continue-on-error: true
+            --sarif --output=semgrep.sarif \
+            --json --output=semgrep.json \
+            --exclude='node_modules' \
+            --exclude='dist' \
+            --exclude='*.spec.ts' \
+            --exclude='*.spec.tsx' \
+            --exclude='tests/' \
+            . || true
+
+          # Check for ERROR severity findings (blocking)
+          ERROR_COUNT=$(cat semgrep.json | jq '[.results[] | select(.extra.severity == "ERROR")] | length')
+          echo "error_count=$ERROR_COUNT" >> $GITHUB_OUTPUT
+
+          # Check for WARNING severity findings (non-blocking but reported)
+          WARNING_COUNT=$(cat semgrep.json | jq '[.results[] | select(.extra.severity == "WARNING")] | length')
+          echo "warning_count=$WARNING_COUNT" >> $GITHUB_OUTPUT
+
+          echo "Semgrep found $ERROR_COUNT errors and $WARNING_COUNT warnings"
+
+          # Display findings for visibility
+          if [ "$ERROR_COUNT" -gt 0 ]; then
+            echo "::error::Semgrep found $ERROR_COUNT high-severity security issues"
+            cat semgrep.json | jq '.results[] | select(.extra.severity == "ERROR") | {rule: .check_id, file: .path, line: .start.line, message: .extra.message}'
+          fi
+
+          if [ "$WARNING_COUNT" -gt 0 ]; then
+            echo "::warning::Semgrep found $WARNING_COUNT medium-severity security issues"
+          fi
 
       - name: Upload Semgrep SARIF
         uses: github/codeql-action/upload-sarif@v3
@@ -63,6 +93,13 @@ jobs:
         with:
           sarif_file: semgrep.sarif
         continue-on-error: true
+
+      - name: Fail on high-severity findings
+        if: steps.semgrep.outputs.error_count != '0'
+        run: |
+          echo "::error::Blocking PR due to ${{ steps.semgrep.outputs.error_count }} high-severity Semgrep findings"
+          echo "Review the Semgrep results above and fix the security issues before merging."
+          exit 1
 
   # ============================================================================
   # CodeQL Analysis (GitHub's SAST)
@@ -419,9 +456,11 @@ jobs:
           echo "  Electron Security: ${{ needs.electron-security.result }}"
 
           # Fail if any critical security check failed
-          # Note: CodeQL is optional (may fail if code scanning not enabled in repo)
+          # Semgrep and Electron security are blocking
+          # CodeQL is optional (may fail if code scanning not enabled in repo)
           # Note: Secret scan uses .gitleaks.toml for false positive exclusions
-          if [ "${{ needs.dependency-audit.result }}" == "failure" ] || \
+          if [ "${{ needs.semgrep-sast.result }}" == "failure" ] || \
+             [ "${{ needs.dependency-audit.result }}" == "failure" ] || \
              [ "${{ needs.electron-security.result }}" == "failure" ]; then
             echo "::error::Critical security checks failed"
             exit 1

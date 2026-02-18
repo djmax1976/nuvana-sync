@@ -1,0 +1,86 @@
+rules:
+  # ============================================================================
+  # SEC-014: URL Protocol Validation
+  # ============================================================================
+  - id: incomplete-url-scheme-check
+    message: >-
+      Incomplete URL scheme validation. When checking for dangerous protocols,
+      you must check for both javascript and vbscript protocols.
+    severity: ERROR
+    languages: [typescript, javascript]
+    patterns:
+      - pattern-either:
+          - pattern: $X.startsWith('javascript:')
+      - pattern-not-inside: |
+          $X.startsWith('vbscript:')
+    metadata:
+      category: security
+      cwe: 'CWE-79'
+      owasp: 'A7:2017 XSS'
+
+  # ============================================================================
+  # SEC-006: SQL Injection Prevention
+  # ============================================================================
+  - id: sql-string-concatenation
+    message: >-
+      Potential SQL injection - string concatenation in SQL query.
+      Use parameterized queries with ? placeholders instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern-either:
+      - pattern: $DB.prepare(`... ${$VAR} ...`)
+      - pattern: $DB.prepare("..." + $VAR + "...")
+      - pattern: $DB.exec(`... ${$VAR} ...`)
+    metadata:
+      category: security
+      cwe: 'CWE-89'
+      owasp: 'A1:2017 Injection'
+
+  # ============================================================================
+  # SEC-004: XSS Prevention
+  # ============================================================================
+  - id: dangerous-innerhtml-assignment
+    message: >-
+      Using innerHTML with dynamic content can lead to XSS.
+      Use textContent or React built-in escaping instead.
+    severity: WARNING
+    languages: [typescript, javascript]
+    pattern: $EL.innerHTML = $VAR
+    metadata:
+      category: security
+      cwe: 'CWE-79'
+      owasp: 'A7:2017 XSS'
+
+  # ============================================================================
+  # Electron Security
+  # ============================================================================
+  - id: electron-node-integration-enabled
+    message: >-
+      nodeIntegration should be false for security.
+      Use preload scripts with contextBridge instead.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'nodeIntegration: true'
+    metadata:
+      category: security
+      cwe: 'CWE-94'
+
+  - id: electron-context-isolation-disabled
+    message: >-
+      contextIsolation should be true for security.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'contextIsolation: false'
+    metadata:
+      category: security
+      cwe: 'CWE-94'
+
+  - id: electron-web-security-disabled
+    message: >-
+      webSecurity should not be disabled.
+    severity: ERROR
+    languages: [typescript, javascript]
+    pattern: 'webSecurity: false'
+    metadata:
+      category: security
+      cwe: 'CWE-94'
