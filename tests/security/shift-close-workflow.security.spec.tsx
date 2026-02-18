@@ -42,6 +42,7 @@ import { z } from 'zod';
 const {
   mockUseShifts,
   mockUseShift,
+  mockUseShiftViewData,
   mockCheckAccess,
   mockToast,
   mockWindowConfirm,
@@ -49,6 +50,7 @@ const {
 } = vi.hoisted(() => ({
   mockUseShifts: vi.fn(),
   mockUseShift: vi.fn(),
+  mockUseShiftViewData: vi.fn(),
   mockCheckAccess: vi.fn(),
   mockToast: vi.fn(),
   mockWindowConfirm: vi.fn(),
@@ -87,6 +89,12 @@ vi.mock('../../src/renderer/lib/hooks', () => ({
   }),
 }));
 
+// Mock useViewData hook (used by ViewShiftPage)
+vi.mock('../../src/renderer/hooks/useViewData', () => ({
+  useShiftViewData: () => mockUseShiftViewData(),
+  viewDataKeys: { shift: (id: string) => ['viewData', 'shift', id] },
+}));
+
 // Mock useDayCloseAccess hook
 vi.mock('../../src/renderer/hooks/useDayCloseAccess', () => ({
   useDayCloseAccess: () => ({
@@ -96,6 +104,14 @@ vi.mock('../../src/renderer/hooks/useDayCloseAccess', () => ({
     clearResult: vi.fn(),
     error: null,
   }),
+}));
+
+// Mock usePOSConnectionType hook (requires QueryClient in real implementation)
+// Default to non-lottery mode for standard shift workflow testing
+vi.mock('../../src/renderer/hooks/usePOSConnectionType', () => ({
+  useIsLotteryMode: () => false,
+  usePOSConnectionType: () => ({ data: { connectionType: 'STANDARD', posType: 'STANDARD' } }),
+  posConnectionTypeKeys: { all: ['settings', 'posConnectionType'] },
 }));
 
 // Mock toast hook
@@ -202,6 +218,8 @@ vi.mock('../../src/renderer/components/ui/input', () => {
 
 vi.mock('@/lib/utils', () => ({
   cn: (...classes: (string | undefined | null | false)[]) => classes.filter(Boolean).join(' '),
+  formatCurrency: (value: number) => `$${value.toFixed(2)}`,
+  formatDate: (date: string | Date) => String(date),
 }));
 
 vi.mock('../../src/renderer/components/shifts/FuelSalesBreakdown', () => ({
@@ -576,10 +594,64 @@ describe('Shift Close Workflow Security Tests (Phase 5)', () => {
     });
 
     it('should navigate to shift-end from ViewShiftPage', async () => {
-      // Arrange: Viewing specific shift
+      // Arrange: Viewing specific shift with view data format
       const shiftId = 'sensitive-shift-id-456';
-      mockUseShift.mockReturnValue({
-        data: createMockShift(shiftId, 'OPEN'),
+      mockUseShiftViewData.mockReturnValue({
+        data: {
+          shiftId,
+          businessDate: '2026-02-15',
+          status: 'OPEN',
+          shiftInfo: {
+            terminalName: 'Register 1',
+            shiftNumber: 1,
+            cashierName: 'Test Cashier',
+            startedAt: '2026-02-15T08:00:00.000Z',
+            endedAt: null,
+            openingCash: 200.0,
+            closingCash: null,
+          },
+          summary: {
+            insideSales: { total: 0, nonFood: 0, foodSales: 0 },
+            fuelSales: { total: 0, gallonsSold: 0 },
+            lotterySales: { total: 0, scratchOff: 0, online: 0 },
+            reserved: null,
+          },
+          payments: {
+            receipts: {
+              cash: { reports: 0, pos: 0 },
+              creditCard: { reports: 0, pos: 0 },
+              debitCard: { reports: 0, pos: 0 },
+              ebt: { reports: 0, pos: 0 },
+            },
+            payouts: {
+              cashPayouts: { reports: 0, pos: 0, hasImages: false, count: 0 },
+              lotteryPayouts: { reports: 0, pos: 0, hasImages: false },
+              gamingPayouts: { reports: 0, pos: 0, hasImages: false },
+            },
+            netCash: { reports: 0, pos: 0 },
+          },
+          salesBreakdown: {
+            gasSales: { reports: 0, pos: 0 },
+            grocery: { reports: 0, pos: 0 },
+            tobacco: { reports: 0, pos: 0 },
+            beverages: { reports: 0, pos: 0 },
+            snacks: { reports: 0, pos: 0 },
+            other: { reports: 0, pos: 0 },
+            lottery: {
+              instantSales: { reports: 0, pos: 0 },
+              instantCashes: { reports: 0, pos: 0 },
+              onlineSales: { reports: 0, pos: 0 },
+              onlineCashes: { reports: 0, pos: 0 },
+            },
+            salesTax: { reports: 0, pos: 0 },
+            total: { reports: 0, pos: 0 },
+          },
+          timestamps: {
+            createdAt: '2026-02-15T08:00:00.000Z',
+            closedAt: null,
+          },
+          lotteryDayId: null,
+        },
         isLoading: false,
         error: null,
       });
