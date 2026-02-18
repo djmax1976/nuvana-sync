@@ -132,7 +132,7 @@ vi.mock('../../../../src/renderer/components/ui/dialog', () => ({
   Dialog: ({
     children,
     open,
-    onOpenChange,
+    onOpenChange: _onOpenChange,
   }: {
     children: React.ReactNode;
     open: boolean;

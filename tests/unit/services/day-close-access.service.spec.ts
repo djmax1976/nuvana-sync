@@ -66,7 +66,7 @@ import {
   validateShiftConditions,
   validateUserAccess,
   checkAccess,
-  type DayCloseAccessResult,
+  type DayCloseAccessResult as _DayCloseAccessResult,
 } from '../../../src/main/services/day-close-access.service';
 
 describe('Day Close Access Service', () => {

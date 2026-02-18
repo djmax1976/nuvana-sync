@@ -115,7 +115,7 @@ vi.mock('../../../src/renderer/lib/services/lottery-closing-validation', () => (
 }));
 
 // Track scanned bins for mock
-let mockScannedBins: Array<{ bin_id: string; closing_serial: string }> = [];
+let _mockScannedBins: Array<{ bin_id: string; closing_serial: string }> = [];
 
 // Mock components that are complex to test
 vi.mock('../../../src/renderer/components/lottery/DayBinsTable', () => ({
@@ -155,8 +155,8 @@ vi.mock('../../../src/renderer/components/lottery/DayBinsTable', () => ({
 }));
 
 // Store the onScan and onScanError callbacks for testing
-let capturedOnScan: ((serial: string) => void) | null = null;
-let capturedOnScanError: (() => void) | null = null;
+let _capturedOnScan: ((serial: string) => void) | null = null;
+let _capturedOnScanError: (() => void) | null = null;
 
 vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
   DayCloseScannerBar: vi.fn(
@@ -172,8 +172,8 @@ vi.mock('../../../src/renderer/components/lottery/DayCloseScannerBar', () => ({
       isComplete,
     }) => {
       // Capture callbacks for testing
-      capturedOnScan = onScan;
-      capturedOnScanError = onScanError;
+      _capturedOnScan = onScan;
+      _capturedOnScanError = onScanError;
 
       // Calculate empty bins count
       const emptyBinsCount =
@@ -434,9 +434,9 @@ function setupDefaultMocks() {
   });
 
   // Reset captured callbacks
-  capturedOnScan = null;
-  capturedOnScanError = null;
-  mockScannedBins = [];
+  _capturedOnScan = null;
+  _capturedOnScanError = null;
+  _mockScannedBins = [];
 }
 
 // ============================================================================

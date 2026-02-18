@@ -140,7 +140,7 @@ const createMockStoreData = () => ({
  * Creates mock user data for testing
  * DB-006: User is scoped to store via store_id
  */
-const createMockUserData = () => ({
+const _createMockUserData = () => ({
   user_id: TEST_USER_ID,
   cloud_user_id: 'cloud-user-123',
   store_id: TEST_STORE_ID,
@@ -156,7 +156,7 @@ const createMockUserData = () => ({
  * Creates mock sync queue item for testing
  * DB-006: Sync queue item is scoped to store via store_id
  */
-const createMockSyncQueueItem = () => ({
+const _createMockSyncQueueItem = () => ({
   id: TEST_SYNC_QUEUE_ID,
   store_id: TEST_STORE_ID,
   entity_type: 'pack',

@@ -104,7 +104,7 @@ const mockStoreA = {
   external_id: 'ext-001',
 };
 
-const mockStoreB = {
+const _mockStoreB = {
   store_id: STORE_B_ID,
   name: 'Store B',
   external_id: 'ext-002',

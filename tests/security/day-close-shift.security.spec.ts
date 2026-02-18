@@ -1017,7 +1017,7 @@ describeSuite('Day Close & Shift Guard Security Tests (Phase 4)', () => {
 
       // Even if frontend tried to claim different role,
       // backend uses getCurrentUser() which is authoritative
-      const day = seedLotteryDay({ status: 'OPEN' });
+      const _day = seedLotteryDay({ status: 'OPEN' });
 
       // Shift start requires shift_manager for some operations,
       // but basic shift start is allowed for cashiers with open day

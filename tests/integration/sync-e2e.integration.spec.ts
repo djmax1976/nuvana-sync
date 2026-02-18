@@ -294,7 +294,7 @@ vi.mock('../../src/main/services/auth.service', () => ({
 
 const E2E_STORE_ID = 'store-e2e-test';
 const E2E_USER_ID = 'user-e2e-001';
-const E2E_PACK_ID = 'pack-e2e-001';
+const _E2E_PACK_ID = 'pack-e2e-001';
 const E2E_GAME_ID = 'game-e2e-001';
 const E2E_BIN_ID = 'bin-e2e-001';
 

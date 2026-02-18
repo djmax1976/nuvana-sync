@@ -21,9 +21,8 @@
  * @security SYNC-001: Depletion sync queued before activation sync
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import type { CreateSyncQueueItemData } from '../../../src/main/dal/sync-queue.dal';
 
 // ==========================================================================
 // Schema Definitions (Matching lottery.handlers.ts)
@@ -179,7 +178,7 @@ describe('Bin Collision Integration Tests (Phase 4 - Task 4.2.1)', () => {
   // ==========================================================================
   describe('4.2.1.2: Empty Bin - No Collision', () => {
     it('should not trigger depletion when bin is empty', () => {
-      const mockFindActiveInBin = (storeId: string, binId: string) => null;
+      const mockFindActiveInBin = (_storeId: string, _binId: string) => null;
 
       const collision = mockFindActiveInBin('store-test-uuid', 'bin-1');
       expect(collision).toBeNull();

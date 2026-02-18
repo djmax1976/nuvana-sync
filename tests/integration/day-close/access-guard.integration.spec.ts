@@ -139,7 +139,6 @@ import {
   checkAccess,
   validateShiftConditions,
   validateUserAccess,
-  type DayCloseAccessResult,
 } from '../../../src/main/services/day-close-access.service';
 import { usersDAL, type User, type UserRole } from '../../../src/main/dal/users.dal';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
@@ -262,7 +261,7 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
    * Get shift by ID
    * SEC-006: Parameterized query
    */
-  function getShiftById(shiftId: string): { status: string; shift_id: string } | undefined {
+  function _getShiftById(shiftId: string): { status: string; shift_id: string } | undefined {
     const stmt = db.prepare(`SELECT * FROM shifts WHERE shift_id = ?`);
     return stmt.get(shiftId) as { status: string; shift_id: string } | undefined;
   }
@@ -366,7 +365,7 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
     it('should grant OVERRIDE access when store_manager authenticates', async () => {
       // Arrange
       const { user: cashier } = seedUserWithPin({ role: 'cashier', pin: '1111' });
-      const { user: storeManager, pin } = seedUserWithPin({
+      const { user: _storeManager, pin } = seedUserWithPin({
         role: 'store_manager',
         name: 'Store Owner',
         pin: '9999',
@@ -384,7 +383,7 @@ describeSuite('Day Close Access Guard Integration (4.T5)', () => {
 
     it('should grant OVERRIDE access even when shift has no cashier assigned', async () => {
       // Arrange: Shift with no cashier
-      const { user: manager, pin } = seedUserWithPin({ role: 'shift_manager', pin: '5555' });
+      const { user: _manager, pin } = seedUserWithPin({ role: 'shift_manager', pin: '5555' });
       seedOpenShift({ cashierId: null });
 
       // Act

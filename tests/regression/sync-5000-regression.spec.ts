@@ -859,7 +859,7 @@ describeSuite('SYNC-5000 Enterprise Regression Suite', () => {
       // Create mixed items
       const pack1 = createQueueItem({ entity_type: 'pack', operation: 'CREATE' });
       const pack2 = createQueueItem({ entity_type: 'pack', operation: 'UPDATE' });
-      const game = createQueueItem({ entity_type: 'game', operation: 'CREATE' });
+      const _game = createQueueItem({ entity_type: 'game', operation: 'CREATE' });
 
       markSynced(pack1.id);
       markFailed(pack2.id);

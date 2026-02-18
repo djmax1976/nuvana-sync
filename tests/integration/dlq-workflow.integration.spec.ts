@@ -472,7 +472,7 @@ describe('DLQ Workflow Integration Tests', () => {
 
   describe('Workflow: Error Pattern Priority Over HTTP Status', () => {
     it('should classify structural error even with 500 status', () => {
-      const item = createTestItem(dal);
+      const _item = createTestItem(dal);
 
       // 500 status but structural error message
       const classification = classifyError(500, 'missing required field: game_code');

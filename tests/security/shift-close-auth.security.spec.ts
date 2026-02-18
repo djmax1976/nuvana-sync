@@ -30,7 +30,7 @@
  * - T4.4.4: Session security - failed attempts logged
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach, beforeAll as _beforeAll } from 'vitest';
 import type Database from 'better-sqlite3-multiple-ciphers';
 import { z } from 'zod';
 
@@ -828,7 +828,7 @@ describeSuite('Shift Close Authentication Security Tests (Phase 4)', () => {
         ];
 
         for (const uuid of badFormatUUIDs) {
-          const result = ShiftIdSchema.safeParse(uuid);
+          const _result = ShiftIdSchema.safeParse(uuid);
           // UUID schema accepts uppercase in Zod, but we verify format is validated
           if (uuid.includes('-')) {
             // Has hyphens - format structure should be validated

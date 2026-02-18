@@ -676,7 +676,7 @@ describeSuite('LOTTERY POS Independent Close Integration (Phase 5 - Task 5.2)', 
       const user = createTestUser('cashier');
       setCurrentUser(user);
 
-      const day = seedLotteryDay({ status: 'OPEN' });
+      const _day = seedLotteryDay({ status: 'OPEN' });
       const gameId = seedLotteryGame({ price: 10.0 });
       const bin1 = seedLotteryBin('Bin 1', 1);
       const bin2 = seedLotteryBin('Bin 2', 2);
@@ -955,7 +955,7 @@ describeSuite('LOTTERY POS Independent Close Integration (Phase 5 - Task 5.2)', 
         setCurrentUser(user);
 
         // Create fresh day/bin/game/pack for each test
-        const day = seedLotteryDay({ status: 'OPEN', openedBy: user.user_id });
+        const _day = seedLotteryDay({ status: 'OPEN', openedBy: user.user_id });
         const binId = seedLotteryBin(`Bin ${role}`, 1);
         const gameId = seedLotteryGame();
         const packId = seedActivePack(gameId, binId);

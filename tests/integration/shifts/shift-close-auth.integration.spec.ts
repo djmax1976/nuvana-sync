@@ -26,7 +26,7 @@
  * - T3.3.1-4: Cross-Mode Verification
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach, beforeAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import type Database from 'better-sqlite3-multiple-ciphers';
 
 // ============================================================================

@@ -2259,7 +2259,7 @@ describe('Shifts Handlers', () => {
       it('should not return PENDING_CLOSE day from findOpenDay', () => {
         // Arrange: Verify DAL behavior - only OPEN status matches
         // PENDING_CLOSE is not OPEN, so shouldn't be returned
-        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((storeId: string) => {
+        lotteryBusinessDaysDAL.findOpenDay.mockImplementation((_storeId: string) => {
           // Simulate: Only PENDING_CLOSE day exists
           const existingDay = mockPendingCloseDay;
           // findOpenDay only returns OPEN days

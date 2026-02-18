@@ -172,7 +172,7 @@ vi.mock('../../src/main/services/cloud-api.service', () => ({
 
 const TEST_STORE_ID = 'store-550e8400-e29b-41d4-a716-446655440000';
 const TEST_USER_ID = 'user-550e8400-e29b-41d4-a716-446655440100';
-const TEST_MANAGER_ID = 'manager-550e8400-e29b-41d4-a716-446655440200';
+const _TEST_MANAGER_ID = 'manager-550e8400-e29b-41d4-a716-446655440200';
 
 // ==========================================================================
 // Test Suite

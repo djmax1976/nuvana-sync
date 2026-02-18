@@ -236,7 +236,7 @@ describe.skipIf(SKIP_NATIVE_MODULE_TESTS)('BIZ-008: Day Close Authorization Secu
       // All day close handlers should require the same minimum role
       const requiredRole = 'cashier';
 
-      DAY_CLOSE_HANDLERS.forEach((handler) => {
+      DAY_CLOSE_HANDLERS.forEach((_handler) => {
         // Each handler should enforce at least cashier role
         expect(requiredRole).toBe('cashier');
       });

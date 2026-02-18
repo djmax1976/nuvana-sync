@@ -69,7 +69,7 @@ const registeredHandlers: Map<string, HandlerFn> = new Map();
 
 // Mock IPC registry - capture handler function
 vi.mock('../../../src/main/ipc/index', () => ({
-  registerHandler: vi.fn(<T>(channel: string, handler: HandlerFn, _options?: unknown) => {
+  registerHandler: vi.fn(<_T>(channel: string, handler: HandlerFn, _options?: unknown) => {
     registeredHandlers.set(channel, handler);
   }),
   createErrorResponse: vi.fn((code: string, message: string) => ({

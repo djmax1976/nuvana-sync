@@ -87,7 +87,7 @@ vi.mock('../../src/main/dal/sync-queue.dal', () => ({
 }));
 
 // Import the mocked module after vi.mock() (Vitest hoists mocks)
-import { syncQueueDAL } from '../../src/main/dal/sync-queue.dal';
+import { syncQueueDAL as _syncQueueDAL } from '../../src/main/dal/sync-queue.dal';
 
 // Mock lotteryPacksDAL with tracking
 vi.mock('../../src/main/dal/lottery-packs.dal', () => ({
@@ -264,7 +264,7 @@ function findSyncItemsByType(entityType: string): CreateSyncQueueItemData[] {
 /**
  * Find a specific sync item by entity type and entity ID
  */
-function findSyncItem(entityType: string, entityId: string): CreateSyncQueueItemData | undefined {
+function _findSyncItem(entityType: string, entityId: string): CreateSyncQueueItemData | undefined {
   return enqueueCallHistory.find(
     (item) => item.entity_type === entityType && item.entity_id === entityId
   );

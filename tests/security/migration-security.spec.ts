@@ -284,7 +284,7 @@ describe.skipIf(skipTests)('Migration Security', () => {
     });
 
     it('should prevent cross-tenant user updates', () => {
-      const now = new Date().toISOString();
+      const _now = new Date().toISOString();
 
       // Attempt to update Store 1 user with Store 2 context
       const result = db

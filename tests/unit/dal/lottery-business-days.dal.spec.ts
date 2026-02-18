@@ -44,7 +44,7 @@ const { testDbContainer, mockSyncQueueEnqueue, mockLotteryGamesFindById } = vi.h
 
 // Alias for easier access in tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
+let _testDb: any = null;
 
 /**
  * Helper function to find a sync queue call by entity type and assert it exists.
@@ -100,7 +100,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
     // Create in-memory database
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
-    testDb = db;
+    _testDb = db;
     testDbContainer.db = db;
 
     // Create required tables
@@ -232,7 +232,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
 
   afterEach(() => {
     db.close();
-    testDb = null;
+    _testDb = null;
     vi.clearAllMocks();
   });
 
@@ -1675,7 +1675,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       });
 
       it('should safely handle store_id with special characters', () => {
-        const today = new Date().toISOString().split('T')[0];
+        const _today = new Date().toISOString().split('T')[0];
 
         // Find with store_id containing special SQL characters
         const specialStoreId = "store-1'; --";

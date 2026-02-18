@@ -11,7 +11,7 @@
  * @performance PERF-002: Verifies memoization through stable references
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect } from 'vitest';
 
 // ============================================================================
 // Types mirrored from transport layer

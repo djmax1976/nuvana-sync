@@ -150,7 +150,7 @@ describe('Employee IPC Handlers', () => {
     getStats: CallableMock;
     getBatch: CallableMock;
   };
-  let authService: {
+  let _authService: {
     getCurrentAuthUser: CallableMock;
     hasMinimumRole: CallableMock;
   };
@@ -165,7 +165,7 @@ describe('Employee IPC Handlers', () => {
     usersDAL = usersModule.usersDAL as unknown as typeof usersDAL;
     storesDAL = storesModule.storesDAL as unknown as typeof storesDAL;
     syncQueueDAL = syncModule.syncQueueDAL as unknown as typeof syncQueueDAL;
-    authService = authModule as unknown as typeof authService;
+    _authService = authModule as unknown as typeof _authService;
 
     // Default mock implementations
     storesDAL.getConfiguredStore.mockReturnValue(mockStore);

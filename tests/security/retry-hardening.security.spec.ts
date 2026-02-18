@@ -510,7 +510,7 @@ describe('Retry Hardening Security Tests (DT4.4)', () => {
       it('should handle operation that never resolves (timeout scenario)', async () => {
         vi.useRealTimers();
         // This simulates a hanging request - in real usage, the caller handles timeouts
-        const hangingPromise = breaker.execute(() => new Promise(() => {}));
+        const _hangingPromise = breaker.execute(() => new Promise(() => {}));
 
         // Just verify the circuit is ready to accept the request
         expect(breaker.getState()).toBe('CLOSED');

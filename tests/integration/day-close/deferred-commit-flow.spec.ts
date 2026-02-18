@@ -179,17 +179,12 @@ let db: Database.Database;
 // ============================================================================
 
 import { createServiceTestContext, type ServiceTestContext } from '../../helpers/test-context';
-import {
-  setCurrentUser,
-  getCurrentUser,
-  type SessionUser,
-  type UserRole,
-} from '../../../src/main/ipc/index';
+import { setCurrentUser, type SessionUser, type UserRole } from '../../../src/main/ipc/index';
 import {
   lotteryBusinessDaysDAL,
   type LotteryBusinessDay,
 } from '../../../src/main/dal/lottery-business-days.dal';
-import { lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
+import { lotteryPacksDAL as _lotteryPacksDAL } from '../../../src/main/dal/lottery-packs.dal';
 import { shiftsDAL } from '../../../src/main/dal/shifts.dal';
 import { daySummariesDAL } from '../../../src/main/dal/day-summaries.dal';
 
@@ -755,7 +750,7 @@ describeSuite('Deferred Commit Flow Integration (Phase 4.1)', () => {
       const packId = seedActivePack(gameId, binId);
 
       // Act
-      const result = await simulateDeferredCommitFlow({
+      const _result = await simulateDeferredCommitFlow({
         closings: [{ pack_id: packId, closing_serial: '050' }],
         userId: closingUser.user_id,
       });

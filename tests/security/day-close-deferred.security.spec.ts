@@ -195,8 +195,8 @@ import {
   IPCErrorCodes,
 } from '../../src/main/ipc/index';
 import { lotteryBusinessDaysDAL } from '../../src/main/dal/lottery-business-days.dal';
-import { lotteryPacksDAL } from '../../src/main/dal/lottery-packs.dal';
-import { lotteryGamesDAL } from '../../src/main/dal/lottery-games.dal';
+import { lotteryPacksDAL as _lotteryPacksDAL } from '../../src/main/dal/lottery-packs.dal';
+import { lotteryGamesDAL as _lotteryGamesDAL } from '../../src/main/dal/lottery-games.dal';
 
 // ============================================================================
 // Test Suite
@@ -304,7 +304,7 @@ describeSuite('Day Close Deferred Commit Authorization Security Tests', () => {
    * Seed a lottery game
    * SEC-006: Parameterized query
    */
-  function seedLotteryGame(
+  function _seedLotteryGame(
     storeId: string,
     options: { gameCode?: string; price?: number } = {}
   ): { game_id: string; game_code: string } {
@@ -327,7 +327,7 @@ describeSuite('Day Close Deferred Commit Authorization Security Tests', () => {
    * Seed a lottery pack
    * SEC-006: Parameterized query
    */
-  function seedLotteryPack(
+  function _seedLotteryPack(
     storeId: string,
     gameId: string,
     options: { status?: string; packNumber?: string; currentSerial?: string } = {}

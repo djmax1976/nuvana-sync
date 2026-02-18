@@ -157,7 +157,7 @@ function createCompleteSessionResponse() {
 /**
  * Create mock for pack activation response
  */
-function createPackActivateResponse(overrides?: { idempotent?: boolean }) {
+function _createPackActivateResponse(overrides?: { idempotent?: boolean }) {
   return {
     ok: true,
     json: () =>

@@ -11,7 +11,7 @@
  * @module tests/integration/transactional-outbox.integration.spec
  */
 
-import { describe, it, expect, beforeEach, afterEach, vi, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeEach, beforeAll, afterAll } from 'vitest';
 import Database from 'better-sqlite3';
 import path from 'path';
 import fs from 'fs';
@@ -354,7 +354,7 @@ describe('Transactional Outbox Integration Tests', () => {
 
     it('should rollback queue entry when second business write fails', () => {
       const packId1 = 'pack-partial-001';
-      const packId2 = 'pack-partial-002';
+      const _packId2 = 'pack-partial-002';
 
       expect(() => {
         withSyncEnqueue(

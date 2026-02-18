@@ -143,7 +143,7 @@ vi.mock('../../../src/renderer/components/day-close/ReportScanningStep', () => (
 }));
 
 // Mock ShiftClosingForm
-let shiftClosingFormOpen = false;
+const __shiftClosingFormOpen = false;
 vi.mock('../../../src/renderer/components/shifts/ShiftClosingForm', () => ({
   ShiftClosingForm: ({
     open,
@@ -153,7 +153,7 @@ vi.mock('../../../src/renderer/components/shifts/ShiftClosingForm', () => ({
     onSuccess?: () => void;
     preAuthorizedOverride?: boolean;
   }) => {
-    shiftClosingFormOpen = open;
+    _shiftClosingFormOpen = open;
     return open ? (
       <div data-testid="shift-closing-form">
         Shift Closing Form
@@ -311,7 +311,7 @@ function renderDayClosePage() {
 beforeEach(() => {
   vi.clearAllMocks();
   capturedScannerProps = {};
-  shiftClosingFormOpen = false;
+  _shiftClosingFormOpen = false;
 
   // Default mocks: non-LOTTERY POS type (triggers deferred commit)
   mockUseDayCloseAccessContext.mockReturnValue(createContextValue());

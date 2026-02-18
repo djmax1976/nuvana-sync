@@ -18,7 +18,7 @@
 
 import { createLogger } from '../utils/logger';
 import { eventBus, MainEvents } from '../utils/event-bus';
-import { syncMetricsService, type SyncMetricsSnapshot } from './sync-metrics.service';
+import { type SyncMetricsSnapshot } from './sync-metrics.service';
 
 // ============================================================================
 // Logger

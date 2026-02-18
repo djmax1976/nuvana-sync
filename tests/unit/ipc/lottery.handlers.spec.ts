@@ -3846,11 +3846,11 @@ describe('Lottery IPC Handlers', () => {
      */
 
     // Get reference to mocked DALs
-    let lotteryPacksDAL: {
+    let _lotteryPacksDAL: {
       returnPack: ReturnType<typeof vi.fn>;
       calculateSales: ReturnType<typeof vi.fn>;
     };
-    let syncQueueDAL: {
+    let _syncQueueDAL: {
       enqueue: ReturnType<typeof vi.fn>;
     };
 
@@ -3861,8 +3861,8 @@ describe('Lottery IPC Handlers', () => {
       const packsModule = await import('../../../src/main/dal/lottery-packs.dal');
       const syncModule = await import('../../../src/main/dal/sync-queue.dal');
 
-      lotteryPacksDAL = packsModule.lotteryPacksDAL as unknown as typeof lotteryPacksDAL;
-      syncQueueDAL = syncModule.syncQueueDAL as unknown as typeof syncQueueDAL;
+      _lotteryPacksDAL = packsModule.lotteryPacksDAL as unknown as typeof _lotteryPacksDAL;
+      _syncQueueDAL = syncModule.syncQueueDAL as unknown as typeof _syncQueueDAL;
     });
 
     // 8.10: Test should pass return_reason to DAL

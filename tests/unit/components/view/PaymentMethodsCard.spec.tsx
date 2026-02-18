@@ -23,7 +23,7 @@ import {
   PaymentMethodsCard,
   type PaymentMethodsCardProps,
   type PaymentMethodsData,
-  type PayoutType,
+  type PayoutType as _PayoutType,
 } from '../../../../src/renderer/components/view/PaymentMethodsCard';
 
 // ============================================================================

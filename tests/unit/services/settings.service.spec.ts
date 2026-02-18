@@ -1595,11 +1595,11 @@ describe('SettingsService', () => {
   // DB-006: Store-scoped operations via posTerminalMappingsDAL
   // ==========================================================================
   describe('syncRegistersFromCloud (MANUAL mode)', () => {
-    const getTestAbsolutePath = (name: string): string => {
+    const _getTestAbsolutePath = (_name: string): string => {
       if (process.platform === 'win32') {
-        return `C:\\NAXML\\${name}`;
+        return `C:\\NAXML\\${_name}`;
       }
-      return `/naxml/${name.toLowerCase()}`;
+      return `/naxml/${_name.toLowerCase()}`;
     };
 
     const mockManualValidationResponse = {

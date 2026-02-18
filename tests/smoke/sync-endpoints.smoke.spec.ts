@@ -504,12 +504,12 @@ describeSuite('SYNC-5000 Smoke Tests', () => {
   describe('Alerts Service', () => {
     let alertsService: SyncAlertsService;
     let metricsService: SyncMetricsService;
-    let syncQueueDAL: SyncQueueDAL;
+    let _syncQueueDAL: SyncQueueDAL;
 
     beforeEach(() => {
       alertsService = new SyncAlertsService();
       metricsService = new SyncMetricsService();
-      syncQueueDAL = new SyncQueueDAL();
+      _syncQueueDAL = new SyncQueueDAL();
     });
 
     afterEach(() => {

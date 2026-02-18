@@ -24,7 +24,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { renderHook, act, waitFor } from '@testing-library/react';
+import { renderHook, act } from '@testing-library/react';
 
 // ============================================================================
 // Mock Setup — Hoisted for handler capture
@@ -114,7 +114,7 @@ import type { DayBin, DayBinPack } from '../../../src/renderer/lib/api/lottery';
 // ============================================================================
 
 const TEST_STORE_ID = 'store-550e8400-e29b-41d4-a716-446655440000';
-const TEST_DATE = '2026-02-05';
+const _TEST_DATE = '2026-02-05';
 
 // ============================================================================
 // Test Data Factories

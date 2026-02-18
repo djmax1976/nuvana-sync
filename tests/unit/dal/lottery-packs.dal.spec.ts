@@ -45,7 +45,7 @@ vi.mock('../../../src/main/services/database.service', () => ({
 
 // Alias for easier access in tests
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-let testDb: any = null;
+let _testDb: any = null;
 
 describe.skipIf(skipTests)('Lottery Packs DAL', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,7 +56,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
     // Create in-memory database
     db = new Database(':memory:');
     // Set the shared test database so the mock returns it
-    testDb = db;
+    _testDb = db;
     testDbContainer.db = db;
 
     // Create required tables
@@ -206,7 +206,7 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
 
   afterEach(() => {
     db.close();
-    testDb = null;
+    _testDb = null;
     vi.clearAllMocks();
   });
 
@@ -1157,12 +1157,12 @@ describe.skipIf(skipTests)('Lottery Packs DAL', () => {
           game_id: 'game-1',
           pack_number: '0000001',
         });
-        const pack2 = dal.receive({
+        const _pack2 = dal.receive({
           store_id: 'store-1',
           game_id: 'game-1',
           pack_number: '0000002',
         });
-        const pack3 = dal.receive({
+        const _pack3 = dal.receive({
           store_id: 'store-1',
           game_id: 'game-1',
           pack_number: '0000003',

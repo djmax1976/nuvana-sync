@@ -25,8 +25,8 @@ vi.mock('../../../src/main/utils/logger', () => ({
 
 import {
   RetryStrategyService,
-  type RetryConfig,
-  type BatchSizeConfig,
+  type RetryConfig as _RetryConfig,
+  type BatchSizeConfig as _BatchSizeConfig,
 } from '../../../src/main/services/retry-strategy.service';
 
 // ============================================================================
