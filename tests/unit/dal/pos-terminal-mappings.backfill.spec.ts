@@ -83,6 +83,10 @@ const createMockMapping = (overrides: Partial<POSTerminalMapping> = {}): POSTerm
   active: 1,
   created_at: '2026-01-15T10:00:00.000Z',
   updated_at: '2026-01-15T10:00:00.000Z',
+  // POS-001: Required POS configuration fields
+  pos_type: null,
+  connection_type: null,
+  connection_config: null,
   ...overrides,
 });
 

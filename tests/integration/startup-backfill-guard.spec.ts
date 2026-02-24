@@ -23,7 +23,7 @@
  * | T-SBKG-005 | Integration            | Settings + DAL     | Integration|
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 
 // ==========================================================================
 // Mock Setup
@@ -106,9 +106,9 @@ const createStartupGuardLogic = (settingsService: {
 
 describe('Startup Backfill Guard Integration Tests', () => {
   let mockSettingsService: {
-    getPOSConnectionType: ReturnType<typeof vi.fn>;
-    isTerminalBackfillV007Completed: ReturnType<typeof vi.fn>;
-    markTerminalBackfillV007Completed: ReturnType<typeof vi.fn>;
+    getPOSConnectionType: Mock<() => string | null>;
+    isTerminalBackfillV007Completed: Mock<() => boolean>;
+    markTerminalBackfillV007Completed: Mock<() => void>;
   };
   let guardLogic: StartupGuardLogic;
 
@@ -117,9 +117,9 @@ describe('Startup Backfill Guard Integration Tests', () => {
     mockConfigStore.clear();
 
     mockSettingsService = {
-      getPOSConnectionType: vi.fn(),
-      isTerminalBackfillV007Completed: vi.fn(),
-      markTerminalBackfillV007Completed: vi.fn(),
+      getPOSConnectionType: vi.fn<() => string | null>(),
+      isTerminalBackfillV007Completed: vi.fn<() => boolean>(),
+      markTerminalBackfillV007Completed: vi.fn<() => void>(),
     };
 
     guardLogic = createStartupGuardLogic(mockSettingsService);

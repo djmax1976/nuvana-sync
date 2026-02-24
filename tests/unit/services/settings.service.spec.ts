@@ -1642,6 +1642,10 @@ describe('SettingsService', () => {
       active: 1,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
+      // POS-001: Required POS configuration fields
+      pos_type: null,
+      connection_type: null,
+      connection_config: null,
     };
 
     // 6.4.1 - Calls syncRegistersFromCloud when result contains registers
@@ -2561,9 +2565,10 @@ describe('SettingsService', () => {
 
       for (const call of calls) {
         const options = call[2];
-        expect(options.pos_type).toBe('GILBARCO_NAXML');
-        expect(options.connection_type).toBe('FILE');
-        expect(options.connection_config).toBe(
+        expect(options).toBeDefined();
+        expect(options?.pos_type).toBe('GILBARCO_NAXML');
+        expect(options?.connection_type).toBe('FILE');
+        expect(options?.connection_config).toBe(
           JSON.stringify(mockPOSConnectionConfig.pos_connection_config)
         );
       }

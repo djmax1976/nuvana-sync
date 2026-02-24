@@ -65,6 +65,10 @@ describe('POSTerminalMappingsDAL', () => {
     active: 1,
     created_at: '2026-01-15T10:00:00.000Z',
     updated_at: '2026-01-15T10:00:00.000Z',
+    // POS-001: Required POS configuration fields
+    pos_type: 'GILBARCO_NAXML',
+    connection_type: 'FILE',
+    connection_config: null,
   };
 
   beforeEach(() => {

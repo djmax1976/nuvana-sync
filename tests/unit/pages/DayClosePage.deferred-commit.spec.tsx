@@ -273,8 +273,18 @@ function createLotteryDayBins() {
 function createPendingClosingsData(): PendingClosingsData {
   return {
     closings: [
-      { pack_id: 'pack-uuid-001', closing_serial: '015', is_sold_out: false },
-      { pack_id: 'pack-uuid-002', closing_serial: '029', is_sold_out: true },
+      {
+        bin_id: 'bin-uuid-001',
+        pack_id: 'pack-uuid-001',
+        closing_serial: '015',
+        is_sold_out: false,
+      },
+      {
+        bin_id: 'bin-uuid-002',
+        pack_id: 'pack-uuid-002',
+        closing_serial: '029',
+        is_sold_out: true,
+      },
     ],
     entry_method: 'SCAN',
   };

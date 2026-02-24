@@ -25,6 +25,7 @@ import {
   type FinalizeResponse,
   type VersionConflictResponse,
   type DraftResponse,
+  type DraftErrorResponse,
 } from '../lib/transport';
 
 // ============================================================================
@@ -287,11 +288,11 @@ export function useCloseDraft(
       const createResponse = await ipc.drafts.create(shiftId, draftType);
 
       // Check for error in create response
-      if ('error' in createResponse) {
-        console.error('[useCloseDraft] create failed:', createResponse);
-        throw new Error(
-          `Failed to create draft: ${createResponse.message || createResponse.error}`
-        );
+      // Type guard: IPC error responses have { success: false, error: string, message: string }
+      if ('error' in createResponse && 'message' in createResponse) {
+        const errorResponse = createResponse as unknown as DraftErrorResponse;
+        console.error('[useCloseDraft] create failed:', errorResponse);
+        throw new Error(`Failed to create draft: ${errorResponse.message || errorResponse.error}`);
       }
 
       if (!createResponse.draft) {

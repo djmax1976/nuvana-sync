@@ -476,7 +476,7 @@ export interface ValidateApiKeyResponse {
    * @security SEC-014: Validated against POSConnectionConfigSchema
    * @security DB-006: Store-scoped POS connection configuration
    */
-  posConnectionConfig?: POSConnectionConfig;
+  posConnectionConfig?: POSConnectionConfig | null;
   /**
    * POS connection validation errors if config is invalid
    * Present when posConnectionConfig data exists but fails validation

@@ -2009,6 +2009,21 @@ export interface DraftResponse {
 }
 
 /**
+ * Error response from IPC handlers
+ * Returned when an operation fails (validation error, not found, etc.)
+ *
+ * @security API-003: Standardized error response format
+ */
+export interface DraftErrorResponse {
+  /** Always false for error responses */
+  success: false;
+  /** Error code (e.g., 'VALIDATION_ERROR', 'NOT_FOUND', 'CONFLICT') */
+  error: string;
+  /** Human-readable error message */
+  message: string;
+}
+
+/**
  * Response for get operations (may not exist)
  */
 export interface GetDraftResponse {
