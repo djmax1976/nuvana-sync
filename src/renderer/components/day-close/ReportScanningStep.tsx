@@ -98,6 +98,31 @@ interface ReportScanningStepProps {
   daySummaryId?: string;
   /** Optional lottery day context for traceability */
   lotteryDayId?: string;
+  /**
+   * DRAFT-001: Instant sales amount from draft payload (lottery.totals.sales_amount).
+   * When provided, the Instant Sales field becomes READ-ONLY as the value
+   * is calculated from Step 1 lottery scanning and stored in the draft.
+   * Only applicable when showInstantSales is true (default).
+   */
+  instantSalesFromDraft?: number;
+  /**
+   * Controls visibility of the Instant Sales input field.
+   *
+   * @default true
+   *
+   * Business Context:
+   * - Day Close Wizard: true (Instant Sales comes from lottery scanning in Step 1)
+   * - Shift Close Wizard: false (No lottery step, instant sales not applicable)
+   *
+   * When false:
+   * - Instant Sales input is hidden
+   * - Grid layout adjusts from 4 columns to 3 columns
+   * - instantSales value defaults to 0 in output state
+   * - Summary calculations exclude instant sales
+   *
+   * @security SEC-014: When hidden, instantSales is guaranteed to be 0 in output
+   */
+  showInstantSales?: boolean;
 }
 
 // ============ HELPER FUNCTIONS ============
@@ -229,20 +254,47 @@ export function ReportScanningStep({
   shiftId,
   daySummaryId,
   lotteryDayId,
+  instantSalesFromDraft,
+  showInstantSales = true,
 }: ReportScanningStepProps) {
   // ============ STATE ============
   /**
    * Lottery reports state with proper initialization
    * @security SEC-014: INPUT_VALIDATION - Default values are safe numbers
+   * @security SEC-014: When showInstantSales=false, instantSales is guaranteed to be 0
+   *
+   * NOTE: instantSales in local state is only used when user can edit the field.
+   * When instantSalesFromDraft is provided, that value takes precedence (see effectiveInstantSales).
    */
   const [lotteryReports, setLotteryReports] = useState<LotteryReportsData>(
     initialData?.lotteryReports ?? {
+      // SEC-014: When showInstantSales=false, always default to 0 (field is hidden)
       instantSales: 0,
       instantCashes: 0,
       onlineSales: 0,
       onlineCashes: 0,
     }
   );
+
+  /**
+   * DRAFT-001: Whether instant sales is read-only (comes from draft)
+   * Only applicable when showInstantSales=true
+   */
+  const isInstantSalesReadOnly = showInstantSales && instantSalesFromDraft !== undefined;
+
+  /**
+   * DRAFT-001: Effective instant sales value
+   * When draft value is provided and field is visible, use draft value (source of truth).
+   * Otherwise use local state value (editable by user).
+   * When field is hidden, always 0.
+   *
+   * @security SEC-014: Guaranteed to be 0 when showInstantSales=false
+   */
+  const effectiveInstantSales = useMemo(() => {
+    if (!showInstantSales) return 0;
+    if (instantSalesFromDraft !== undefined) return instantSalesFromDraft;
+    return lotteryReports.instantSales;
+  }, [showInstantSales, instantSalesFromDraft, lotteryReports.instantSales]);
 
   // State for scan modal
   const [scanModalOpen, setScanModalOpen] = useState(false);
@@ -269,8 +321,9 @@ export function ReportScanningStep({
 
   // Track which sections have been "scanned" (have data)
   // A section is considered "scanned" when any field has a non-zero value
+  // SEC-014: When showInstantSales=false, effectiveInstantSales is 0, so it won't affect this check
   const lotteryScanned =
-    lotteryReports.instantSales > 0 ||
+    effectiveInstantSales > 0 ||
     lotteryReports.instantCashes > 0 ||
     lotteryReports.onlineSales > 0 ||
     lotteryReports.onlineCashes > 0;
@@ -285,10 +338,11 @@ export function ReportScanningStep({
   /**
    * Total lottery sales (instant + online)
    * @security SEC-014: INPUT_VALIDATION - Values already sanitized on input
+   * @security SEC-014: When showInstantSales=false, effectiveInstantSales is 0
    */
   const totalLotterySales = useMemo(
-    () => lotteryReports.instantSales + lotteryReports.onlineSales,
-    [lotteryReports]
+    () => effectiveInstantSales + lotteryReports.onlineSales,
+    [effectiveInstantSales, lotteryReports.onlineSales]
   );
 
   /**
@@ -370,9 +424,22 @@ export function ReportScanningStep({
     setScanModalOpen(false);
   }, []);
 
+  /**
+   * Handle completion of report scanning step
+   * @security SEC-014: When showInstantSales=false, effectiveInstantSales is guaranteed to be 0
+   */
   const handleComplete = useCallback(() => {
+    // SEC-014: Use effectiveInstantSales which is guaranteed to be 0 when showInstantSales=false
+    // This prevents any stale/incorrect data from being passed to parent
+    const sanitizedLotteryReports: LotteryReportsData | null = lotteryScanned
+      ? {
+          ...lotteryReports,
+          instantSales: effectiveInstantSales,
+        }
+      : null;
+
     const data: ReportScanningState = {
-      lotteryReports: lotteryScanned ? lotteryReports : null,
+      lotteryReports: sanitizedLotteryReports,
       gamingReports: gamingScanned ? gamingReports : null,
       vendorInvoices,
       cashPayouts: cashPayoutsRecorded ? cashPayouts : null,
@@ -381,6 +448,7 @@ export function ReportScanningStep({
   }, [
     lotteryReports,
     lotteryScanned,
+    effectiveInstantSales,
     gamingReports,
     gamingScanned,
     vendorInvoices,
@@ -405,29 +473,56 @@ export function ReportScanningStep({
             onScanReport={() => setScanModalOpen(true)}
           >
             {/*
-              Layout: Single row with 4 columns for lottery fields
-              Instant Sales | Instant Cashes | Online Sales | Online Cashes
+              Layout: Dynamic grid based on showInstantSales prop
+              - 4 columns when showInstantSales=true: Instant Sales | Instant Cashes | Online Sales | Online Cashes
+              - 3 columns when showInstantSales=false: Instant Cashes | Online Sales | Online Cashes
 
               @security FE-002: FORM_VALIDATION - All inputs use sanitizeNumericInput
               @security SEC-014: INPUT_VALIDATION - Values validated on change
+              @security SEC-014: When showInstantSales=false, Instant Sales field is not rendered
             */}
-            <div className="bg-muted/50 rounded-lg p-3 grid grid-cols-4 gap-4 text-sm">
-              <div>
-                <label htmlFor="lottery-instant-sales" className="text-muted-foreground block mb-1">
-                  Instant Sales
-                </label>
-                <Input
-                  id="lottery-instant-sales"
-                  type="text"
-                  inputMode="decimal"
-                  value={lotteryReports.instantSales || ''}
-                  onChange={(e) => handleLotteryChange('instantSales', e.target.value)}
-                  placeholder="0.00"
-                  className="font-mono"
-                  data-testid="lottery-instant-sales-input"
-                  aria-label="Instant lottery sales amount"
-                />
-              </div>
+            <div
+              className={cn(
+                'bg-muted/50 rounded-lg p-3 gap-4 text-sm grid',
+                showInstantSales ? 'grid-cols-4' : 'grid-cols-3'
+              )}
+            >
+              {/* Instant Sales - conditionally rendered based on showInstantSales prop */}
+              {showInstantSales && (
+                <div>
+                  <label
+                    htmlFor="lottery-instant-sales"
+                    className="text-muted-foreground block mb-1"
+                  >
+                    Instant Sales
+                    {isInstantSalesReadOnly && (
+                      <span className="ml-1 text-xs text-green-600">(from lottery scan)</span>
+                    )}
+                  </label>
+                  <Input
+                    id="lottery-instant-sales"
+                    type="text"
+                    inputMode="decimal"
+                    value={
+                      isInstantSalesReadOnly
+                        ? `$${(effectiveInstantSales || 0).toFixed(2)}`
+                        : lotteryReports.instantSales || ''
+                    }
+                    onChange={(e) =>
+                      !isInstantSalesReadOnly && handleLotteryChange('instantSales', e.target.value)
+                    }
+                    placeholder="0.00"
+                    className={cn(
+                      'font-mono',
+                      isInstantSalesReadOnly && 'bg-muted cursor-not-allowed'
+                    )}
+                    data-testid="lottery-instant-sales-input"
+                    aria-label="Instant lottery sales amount"
+                    readOnly={isInstantSalesReadOnly}
+                    disabled={isInstantSalesReadOnly}
+                  />
+                </div>
+              )}
               <div>
                 <label
                   htmlFor="lottery-instant-cashes"

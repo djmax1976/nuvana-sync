@@ -1023,20 +1023,33 @@ if (!gotTheLock) {
         //
         // CRON-001 Compliance: Idempotency check ensures this runs ONLY ONCE.
         // After completion, user deletions of terminal mappings are preserved.
+        //
+        // NOTE: Only applies to FILE-based POS stores (Gilbarco, Verifone).
+        // MANUAL stores receive terminals from cloud sync, not file parsing.
         try {
           const store = storesDAL.getConfiguredStore();
           if (store) {
-            // CRON-001: Check if migration already completed before running
-            if (settingsService.isTerminalBackfillV007Completed()) {
+            // Check if this is a MANUAL store - skip backfill entirely
+            // MANUAL stores receive terminals from cloud sync, not from file parsing
+            const posConnectionType = settingsService.getPOSConnectionType();
+            if (posConnectionType === 'MANUAL') {
+              log.debug('Terminal backfill v007 skipped for MANUAL store', {
+                storeId: store.store_id,
+                posConnectionType,
+                reason: 'MANUAL stores receive terminals from cloud sync',
+              });
+            } else if (settingsService.isTerminalBackfillV007Completed()) {
+              // CRON-001: Check if migration already completed before running
               log.debug('Terminal backfill v007 already completed, skipping', {
                 storeId: store.store_id,
                 completedAt: settingsService.getTerminalBackfillV007CompletedAt(),
               });
             } else {
-              // Run backfill only if not previously completed
+              // Run backfill only if not previously completed (FILE-based stores only)
               const backfillResult = posTerminalMappingsDAL.backfillFromShifts(store.store_id);
               log.info('Terminal mappings backfill v007 executed', {
                 storeId: store.store_id,
+                posConnectionType,
                 created: backfillResult.created,
                 existing: backfillResult.existing,
                 total: backfillResult.total,
@@ -1053,21 +1066,6 @@ if (!gotTheLock) {
               storeId: store.store_id,
               stats: processedStats,
             });
-
-            // Close stale open shifts from previous days
-            // This fixes data where shifts weren't properly closed by Period 98 files
-            const { shiftsDAL } = await import('./dal/shifts.dal');
-            // Use local date, not UTC
-            const nowDate = new Date();
-            const today = `${nowDate.getFullYear()}-${String(nowDate.getMonth() + 1).padStart(2, '0')}-${String(nowDate.getDate()).padStart(2, '0')}`;
-            const closedStaleShifts = shiftsDAL.closeStaleOpenShifts(store.store_id, today);
-            if (closedStaleShifts > 0) {
-              log.info('Closed stale open shifts at startup', {
-                storeId: store.store_id,
-                closedCount: closedStaleShifts,
-                today,
-              });
-            }
           }
         } catch (error) {
           log.warn('Failed to backfill terminal mappings (non-fatal)', {

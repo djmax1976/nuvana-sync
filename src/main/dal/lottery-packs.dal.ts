@@ -1221,7 +1221,9 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
           -- FK columns: Use validated value directly (don't COALESCE to preserve invalid FKs)
           -- API-001: FKs validated before upsert, null means entity doesn't exist locally
           current_bin_id = ?,
-          opening_serial = COALESCE(?, opening_serial),
+          -- SERIAL-CARRYFORWARD-FIX: Keep local opening_serial if exists, only use cloud for new packs
+          -- Cloud sends original activation value, but local may have been updated via serial carryforward
+          opening_serial = COALESCE(opening_serial, ?),
           closing_serial = COALESCE(?, closing_serial),
           serial_start = COALESCE(?, serial_start),
           serial_end = COALESCE(?, serial_end),

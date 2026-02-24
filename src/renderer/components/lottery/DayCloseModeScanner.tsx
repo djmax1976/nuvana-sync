@@ -56,6 +56,7 @@ import {
   AlertCircle,
   AlertTriangle,
   PenLine,
+  PackageX,
 } from 'lucide-react';
 import {
   prepareLotteryDayClose,
@@ -166,6 +167,8 @@ interface BinValidationError {
  */
 export interface PendingClosingsData {
   closings: Array<{
+    /** Bin ID for direct reference (DRAFT-001: required for persistence) */
+    bin_id: string;
     pack_id: string;
     closing_serial: string;
     /** True if pack was marked sold out/depleted - affects ticket count formula */
@@ -173,6 +176,11 @@ export interface PendingClosingsData {
   }>;
   entry_method: 'SCAN' | 'MANUAL';
   authorized_by_user_id?: string;
+  /** Calculated totals for draft persistence */
+  totals?: {
+    tickets_sold: number;
+    sales_amount: number;
+  };
 }
 
 /**
@@ -207,6 +215,8 @@ interface DayCloseModeScannerBaseProps {
   activatedPacks?: ActivatedPackDay[];
   /** Open business period metadata for context display */
   openBusinessPeriod?: OpenBusinessPeriod;
+  /** DRAFT-001: Initial manual ending values for restoration from draft */
+  initialManualEndingValues?: Record<string, string>;
 }
 
 /**
@@ -269,6 +279,7 @@ export function DayCloseModeScanner({
   depletedPacks,
   activatedPacks,
   openBusinessPeriod,
+  initialManualEndingValues,
 }: DayCloseModeScannerProps) {
   const { toast } = useToast();
   const { playSuccess, playError, isMuted, toggleMute } = useNotificationSound();
@@ -287,6 +298,10 @@ export function DayCloseModeScanner({
   const [internalScannedBins, setInternalScannedBins] = useState<ScannedBin[]>([]);
   const isControlled = externalScannedBins !== undefined;
   const scannedBins = isControlled ? externalScannedBins : internalScannedBins;
+
+  // Track sold-out status of removed bins so we can restore it when re-adding
+  // Key: bin_id, Value: is_sold_out flag
+  const removedBinSoldOutRef = useRef<Record<string, boolean>>({});
 
   // Keep refs to avoid stale closures
   const externalScannedBinsRef = useRef(externalScannedBins);
@@ -328,7 +343,31 @@ export function DayCloseModeScanner({
   });
 
   // Manual entry values - keyed by bin_id (3-digit ending serials)
-  const [manualEndingValues, setManualEndingValues] = useState<Record<string, string>>({});
+  // DRAFT-001: Initialize from prop for draft restoration
+  const [manualEndingValues, setManualEndingValues] = useState<Record<string, string>>(
+    initialManualEndingValues ?? {}
+  );
+
+  // DRAFT-001: Sync manualEndingValues when initialManualEndingValues prop changes after mount
+  // This fixes the bug where navigating back to Step 1 shows empty values even though draft has data.
+  // The issue occurs because useState only uses initial value on first mount, ignoring prop changes.
+  // When user clicks "Complete Day Close" → Cancel → Back to Step 1, async draft updates may cause
+  // initialManualEndingValues to change AFTER component mounts, leaving manualEndingValues empty.
+  useEffect(() => {
+    if (initialManualEndingValues && Object.keys(initialManualEndingValues).length > 0) {
+      setManualEndingValues((prev) => {
+        // Only restore if local state is empty (component just mounted without values)
+        // This prevents overwriting user edits that haven't been saved yet
+        if (Object.keys(prev).length === 0) {
+          console.debug('[DayCloseModeScanner] Restoring manualEndingValues from draft', {
+            initialCount: Object.keys(initialManualEndingValues).length,
+          });
+          return initialManualEndingValues;
+        }
+        return prev;
+      });
+    }
+  }, [initialManualEndingValues]);
 
   // Validation errors for manual entry - keyed by bin_id
   const [validationErrors, setValidationErrors] = useState<Record<string, BinValidationError>>({});
@@ -797,13 +836,19 @@ export function DayCloseModeScanner({
 
   /**
    * Remove scanned bin (undo)
+   * Stores the sold-out status so it can be restored if user re-enters the serial
    */
   const handleRemoveBin = useCallback(
     (binId: string) => {
+      // Store the sold-out status before removing so we can restore it later
+      const binToRemove = scannedBins.find((b) => b.bin_id === binId);
+      if (binToRemove?.is_sold_out) {
+        removedBinSoldOutRef.current[binId] = true;
+      }
       setScannedBins((prev) => prev.filter((bin) => bin.bin_id !== binId));
       inlineInputRef.current?.focus();
     },
-    [setScannedBins]
+    [setScannedBins, scannedBins]
   );
 
   // ============ MANUAL ENTRY HANDLERS ============
@@ -926,6 +971,30 @@ export function DayCloseModeScanner({
                 const { [binId]: _, ...rest } = prev;
                 return rest;
               });
+
+              // Add bin to scannedBins so it shows green checkmark
+              // This handles the case where user clicks a scanned bin to edit
+              // and re-enters a valid serial - it should show as scanned again
+              const alreadyScanned = scannedBins.find((s) => s.bin_id === binId);
+              if (!alreadyScanned && bin.pack) {
+                // Check if this bin was previously marked as sold out
+                // If so, preserve that status when re-adding
+                const wasSoldOut = removedBinSoldOutRef.current[binId] === true;
+
+                const newScannedBin: ScannedBin = {
+                  bin_id: binId,
+                  bin_number: bin.bin_number,
+                  pack_id: bin.pack.pack_id,
+                  pack_number: bin.pack.pack_number,
+                  game_name: bin.pack.game_name,
+                  closing_serial: truncatedValue,
+                  is_sold_out: wasSoldOut, // Restore previous sold-out status
+                };
+                setScannedBins((prev) => [...prev, newScannedBin]);
+
+                // Clear the stored state after using it
+                delete removedBinSoldOutRef.current[binId];
+              }
             } else {
               // Set error state and show modal
               const errorMessage = result.error || 'Invalid ending number';
@@ -967,7 +1036,7 @@ export function DayCloseModeScanner({
         });
       }
     },
-    [sortedActiveBinIds, scannedBins, activeBins]
+    [sortedActiveBinIds, scannedBins, activeBins, setScannedBins]
   );
 
   /**
@@ -1042,7 +1111,9 @@ export function DayCloseModeScanner({
       // SEC-014: Include is_sold_out flag for correct backend calculation
       // Sold-out packs use depletion formula: (serial_end + 1) - starting
       // Normal scans use standard formula: ending - starting
+      // DRAFT-001: Include bin_id for draft persistence
       const closings = scannedBins.map((bin) => ({
+        bin_id: bin.bin_id,
         pack_id: bin.pack_id,
         closing_serial: bin.closing_serial,
         is_sold_out: bin.is_sold_out === true,
@@ -1053,10 +1124,35 @@ export function DayCloseModeScanner({
       // Used by Day Close wizard for non-LOTTERY POS types
       // ========================================================================
       if (deferCommit) {
+        // Calculate totals for draft persistence
+        const calcTicketsScan = (ending: string, starting: string, isSoldOut: boolean): number => {
+          const endNum = parseInt(ending, 10);
+          const startNum = parseInt(starting, 10);
+          if (Number.isNaN(endNum) || Number.isNaN(startNum)) return 0;
+          return isSoldOut ? Math.max(0, endNum + 1 - startNum) : Math.max(0, endNum - startNum);
+        };
+
+        let totalTicketsScan = 0;
+        let totalSalesScan = 0;
+        scannedBins.forEach((scanned) => {
+          const bin = activeBins.find((b) => b.bin_id === scanned.bin_id);
+          const ticketsSold = calcTicketsScan(
+            scanned.closing_serial,
+            bin?.pack?.starting_serial || '000',
+            scanned.is_sold_out === true
+          );
+          totalTicketsScan += ticketsSold;
+          totalSalesScan += ticketsSold * (bin?.pack?.game_price || 0);
+        });
+
         // Call onPendingClosings to save data for later commit
         onPendingClosings?.({
           closings,
           entry_method: 'SCAN',
+          totals: {
+            tickets_sold: totalTicketsScan,
+            sales_amount: totalSalesScan,
+          },
         });
 
         // Inline calculation functions to avoid dependency ordering issues
@@ -1201,11 +1297,14 @@ export function DayCloseModeScanner({
     try {
       // Build closings array: combine scanned bins + manually entered values
       // SEC-014: Include is_sold_out flag for correct backend calculation
+      // DRAFT-001: Include bin_id directly to avoid lookup failures in handlePendingClosings
+      // Manual entries are NOT in scannedBins, so we must include bin_id from activeBins
       const closings = activeBins.map((bin) => {
         // Check if this bin was scanned
         const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
         if (scannedBin) {
           return {
+            bin_id: bin.bin_id, // Always include bin_id from activeBins
             pack_id: scannedBin.pack_id,
             closing_serial: scannedBin.closing_serial,
             is_sold_out: scannedBin.is_sold_out === true,
@@ -1213,6 +1312,7 @@ export function DayCloseModeScanner({
         }
         // Otherwise use manual entry value (manual entries are never sold-out)
         return {
+          bin_id: bin.bin_id, // Always include bin_id from activeBins
           pack_id: bin.pack!.pack_id,
           closing_serial: manualEndingValues[bin.bin_id],
           is_sold_out: false,
@@ -1224,13 +1324,6 @@ export function DayCloseModeScanner({
       // Used by Day Close wizard for non-LOTTERY POS types
       // ========================================================================
       if (deferCommit) {
-        // Call onPendingClosings to save data for later commit
-        onPendingClosings?.({
-          closings,
-          entry_method: 'MANUAL',
-          authorized_by_user_id: manualEntryState.authorizedBy?.userId,
-        });
-
         // Inline calculation function to avoid dependency ordering issues
         const calcTickets = (ending: string, starting: string, isSoldOut: boolean): number => {
           const endNum = parseInt(ending, 10);
@@ -1240,8 +1333,9 @@ export function DayCloseModeScanner({
           return isSoldOut ? Math.max(0, endNum + 1 - startNum) : Math.max(0, endNum - startNum);
         };
 
-        // Build local bins preview for UI display
+        // Build local bins preview for UI display - calculate BEFORE saving
         let totalSales = 0;
+        let totalTickets = 0;
         const binsPreview = activeBins.map((bin) => {
           const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
           const closingSerial = scannedBin?.closing_serial || manualEndingValues[bin.bin_id];
@@ -1253,6 +1347,7 @@ export function DayCloseModeScanner({
           );
           const salesAmount = ticketsSold * (bin.pack?.game_price || 0);
           totalSales += salesAmount;
+          totalTickets += ticketsSold;
 
           return {
             bin_number: bin.bin_number,
@@ -1264,6 +1359,17 @@ export function DayCloseModeScanner({
             tickets_sold: ticketsSold,
             sales_amount: salesAmount,
           };
+        });
+
+        // Call onPendingClosings with totals included
+        onPendingClosings?.({
+          closings,
+          entry_method: 'MANUAL',
+          authorized_by_user_id: manualEntryState.authorizedBy?.userId,
+          totals: {
+            tickets_sold: totalTickets,
+            sales_amount: totalSales,
+          },
         });
 
         playSuccess();
@@ -1878,17 +1984,23 @@ export function DayCloseModeScanner({
 
                   const hasValidEntry = !!closingSerial;
 
+                  // Check if this bin is a sold-out pack for distinct styling
+                  const isSoldOutPack = scannedBin?.is_sold_out === true;
+
                   return (
                     <tr
                       key={bin.bin_id}
                       id={`bin-row-${bin.bin_id}`}
                       className={cn(
                         'transition-colors h-14',
-                        isScanned && !manualEntryState.isActive
-                          ? 'bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/30'
-                          : manualEntryState.isActive && hasValidEntry
-                            ? 'bg-green-50 dark:bg-green-950/20'
-                            : 'hover:bg-muted/50',
+                        // Sold out packs get purple styling
+                        isScanned && isSoldOutPack && !manualEntryState.isActive
+                          ? 'bg-purple-50 dark:bg-purple-950/20 cursor-pointer hover:bg-purple-100 dark:hover:bg-purple-950/30'
+                          : isScanned && !manualEntryState.isActive
+                            ? 'bg-green-50 dark:bg-green-950/20 cursor-pointer hover:bg-green-100 dark:hover:bg-green-950/30'
+                            : manualEntryState.isActive && hasValidEntry
+                              ? 'bg-green-50 dark:bg-green-950/20'
+                              : 'hover:bg-muted/50',
                         isJustScanned && 'animate-pulse',
                         manualEntryState.isActive &&
                           !isScanned &&
@@ -1898,7 +2010,11 @@ export function DayCloseModeScanner({
                         !manualEntryState.isActive && isScanned && handleRemoveBin(bin.bin_id)
                       }
                       title={
-                        !manualEntryState.isActive && isScanned ? 'Click to undo scan' : undefined
+                        !manualEntryState.isActive && isScanned
+                          ? isSoldOutPack
+                            ? 'Click to undo sold out'
+                            : 'Click to undo scan'
+                          : undefined
                       }
                       data-testid={`bin-row-${bin.bin_id}`}
                     >
@@ -1941,6 +2057,15 @@ export function DayCloseModeScanner({
                               aria-invalid={hasError}
                             />
                           </div>
+                        ) : isScanned && scannedBin?.is_sold_out ? (
+                          // Sold out pack - show distinct purple badge
+                          <span
+                            className="inline-flex items-center gap-1.5 px-2 py-0.5 rounded-full bg-purple-100 dark:bg-purple-900/40 text-purple-700 dark:text-purple-300 font-semibold text-xs min-w-[4rem]"
+                            title={`Pack sold out at ticket ${scannedBin.closing_serial}`}
+                          >
+                            <PackageX className="w-3.5 h-3.5 flex-shrink-0" />
+                            SOLD OUT
+                          </span>
                         ) : isScanned || (manualEntryState.isActive && manualValue.length === 3) ? (
                           <span className="inline-flex items-center gap-1 text-green-600 dark:text-green-400 font-bold min-w-[4rem]">
                             <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
@@ -1964,7 +2089,9 @@ export function DayCloseModeScanner({
                         className={cn(
                           'px-4 py-3 text-right font-semibold',
                           hasValidEntry
-                            ? 'text-green-600 dark:text-green-400'
+                            ? isSoldOutPack
+                              ? 'text-purple-600 dark:text-purple-400'
+                              : 'text-green-600 dark:text-green-400'
                             : 'text-muted-foreground'
                         )}
                       >

@@ -308,6 +308,7 @@ export async function initializeIPC(): Promise<void> {
   await import('./day-close.handlers');
   await import('./observability.handlers'); // Phase 6 (D6.4): Observability endpoints
   await import('./images.handlers'); // Phase 3 (Task 3.4): Receipt image storage
+  await import('./close-drafts.handlers'); // DRAFT-001: Draft-backed wizard architecture
 
   log.info('IPC handlers initialized', {
     totalHandlers: handlerRegistry.size,

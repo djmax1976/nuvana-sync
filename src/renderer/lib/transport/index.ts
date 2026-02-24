@@ -631,6 +631,179 @@ export const ipc = {
         image_id: imageId,
       }),
   },
+
+  // Close Drafts (DRAFT-001: Draft-Backed Wizard Architecture)
+  /**
+   * Draft management operations for Day Close and Shift Close wizards
+   *
+   * Drafts store working copies of wizard data until finalization.
+   * Supports crash recovery, optimistic locking, and atomic commits.
+   *
+   * @feature DRAFT-001: Draft-Backed Wizard Architecture
+   * @security SEC-010: All operations require authentication
+   * @security DB-006: All operations are store-scoped for tenant isolation
+   * @security SEC-006: All queries use parameterized statements via DAL
+   * @security API-001: All inputs validated via Zod schemas
+   */
+  drafts: {
+    /**
+     * Create a new draft or return existing active draft (idempotent)
+     *
+     * If an IN_PROGRESS or FINALIZING draft already exists for the shift,
+     * returns that draft instead of creating a duplicate.
+     *
+     * @param shiftId - UUID of the shift to create draft for
+     * @param draftType - Type of draft (DAY_CLOSE or SHIFT_CLOSE)
+     * @returns DraftResponse with the created or existing draft
+     *
+     * @security SEC-010: Requires authenticated user (stored in created_by)
+     * @security DB-006: Store-scoped via backend handler
+     * @security API-001: shiftId validated as UUID, draftType as enum
+     */
+    create: (shiftId: string, draftType: DraftType) =>
+      ipcClient.invoke<DraftResponse>('drafts:create', {
+        shift_id: shiftId,
+        draft_type: draftType,
+      }),
+
+    /**
+     * Get a draft by ID with store validation
+     *
+     * @param draftId - UUID of the draft to retrieve
+     * @returns GetDraftResponse with draft or null if not found
+     *
+     * @security DB-006: Validates draft belongs to configured store
+     * @security SEC-014: draftId validated as UUID
+     */
+    get: (draftId: string) =>
+      ipcClient.invoke<GetDraftResponse>('drafts:get', {
+        draft_id: draftId,
+      }),
+
+    /**
+     * Get the active (IN_PROGRESS or FINALIZING) draft for a shift
+     *
+     * Used for crash recovery to resume wizard where user left off.
+     *
+     * @param shiftId - UUID of the shift to find active draft for
+     * @returns GetDraftResponse with active draft or null if none exists
+     *
+     * @security DB-006: Store-scoped via backend handler
+     * @security SEC-014: shiftId validated as UUID
+     */
+    getActive: (shiftId: string) =>
+      ipcClient.invoke<GetDraftResponse>('drafts:get', {
+        shift_id: shiftId,
+      }),
+
+    /**
+     * Update draft payload with optimistic locking
+     *
+     * Performs deep merge of partial payload into existing payload.
+     * Returns VERSION_CONFLICT error if version doesn't match.
+     *
+     * @param draftId - UUID of the draft to update
+     * @param payload - Partial payload to merge into existing
+     * @param version - Expected version for optimistic locking
+     * @returns DraftResponse with updated draft, or VersionConflictResponse
+     *
+     * @security SEC-010: Requires authenticated user
+     * @security DB-006: Validates draft belongs to configured store
+     * @security API-001: payload validated as JSON-serializable object
+     */
+    update: (draftId: string, payload: Partial<DraftPayload>, version: number) =>
+      ipcClient.invoke<DraftResponse | VersionConflictResponse>('drafts:update', {
+        draft_id: draftId,
+        payload,
+        version,
+      }),
+
+    /**
+     * Update lottery step data specifically (Step 1)
+     *
+     * Specialized handler with comprehensive lottery payload validation.
+     * Used by Day Close wizard Step 1 (lottery scanning).
+     *
+     * @param draftId - UUID of the draft to update
+     * @param lotteryData - Complete lottery payload with bins_scans and totals
+     * @param version - Expected version for optimistic locking
+     * @returns DraftResponse with updated draft, or VersionConflictResponse
+     *
+     * @security SEC-010: Requires authenticated user
+     * @security DB-006: Validates draft belongs to configured store
+     * @security API-001: Comprehensive lottery payload validation
+     * @security SEC-014: All UUIDs and serials strictly validated
+     */
+    updateLottery: (draftId: string, lotteryData: LotteryPayload, version: number) =>
+      ipcClient.invoke<DraftResponse | VersionConflictResponse>('drafts:updateLottery', {
+        draft_id: draftId,
+        lottery_data: lotteryData,
+        version,
+      }),
+
+    /**
+     * Update step state for crash recovery navigation
+     *
+     * Tracks which step the user has completed so wizard can
+     * resume at the correct step after crash/refresh.
+     *
+     * @param draftId - UUID of the draft to update
+     * @param stepState - Step to mark as completed (LOTTERY, REPORTS, REVIEW, or null)
+     * @returns DraftResponse with updated draft
+     *
+     * @security SEC-010: Requires authenticated user
+     * @security DB-006: Validates draft belongs to configured store
+     * @security API-001: stepState validated as enum value
+     */
+    updateStepState: (draftId: string, stepState: StepState) =>
+      ipcClient.invoke<DraftResponse>('drafts:updateStepState', {
+        draft_id: draftId,
+        step_state: stepState,
+      }),
+
+    /**
+     * Finalize draft and commit to final tables
+     *
+     * Orchestrates atomic finalization:
+     * 1. Lock draft (status → FINALIZING)
+     * 2. For DAY_CLOSE: Execute lottery close (prepareDayClose + commitDayClose)
+     * 3. Execute shift close with closing_cash
+     * 4. Mark draft FINALIZED
+     *
+     * Full transaction rollback on any failure.
+     *
+     * @param draftId - UUID of the draft to finalize
+     * @param closingCash - Cash amount in drawer at close (non-negative)
+     * @returns FinalizeResponse with success status and results
+     *
+     * @security SEC-010: Requires authenticated user with at least cashier role
+     * @security DB-006: Validates draft and shift belong to configured store
+     * @security API-001: closingCash validated as non-negative number
+     * @security SEC-017: Audit logging for finalization
+     */
+    finalize: (draftId: string, closingCash: number) =>
+      ipcClient.invoke<FinalizeResponse>('drafts:finalize', {
+        draft_id: draftId,
+        closing_cash: closingCash,
+      }),
+
+    /**
+     * Expire a draft (discard)
+     *
+     * Marks draft as EXPIRED, making it inactive.
+     * Used for discarding drafts or starting fresh.
+     *
+     * @param draftId - UUID of the draft to expire
+     * @returns DraftResponse with expired draft
+     *
+     * @security SEC-010: Requires authenticated user
+     * @security DB-006: Validates draft belongs to configured store
+     */
+    expire: (draftId: string) =>
+      ipcClient.invoke<DraftResponse>('drafts:expire', {
+        draft_id: draftId,
+      }),
+  },
 };
 
 // ============================================================================
@@ -1670,6 +1843,218 @@ export interface CompleteOnboardingResponse {
   day_id: string;
   /** Human-readable result message */
   message?: string;
+}
+
+// ============================================================================
+// Close Draft Types (DRAFT-001)
+// ============================================================================
+
+/**
+ * Draft type determines wizard flow
+ * - DAY_CLOSE: 3-step wizard (Lottery → Reports → Review)
+ * - SHIFT_CLOSE: 2-step wizard (Reports → Close Shift)
+ */
+export type DraftType = 'DAY_CLOSE' | 'SHIFT_CLOSE';
+
+/**
+ * Draft status for lifecycle management
+ * - IN_PROGRESS: User actively working on wizard
+ * - FINALIZING: Commit transaction in progress (lock state)
+ * - FINALIZED: Successfully committed to final tables
+ * - EXPIRED: Abandoned draft, can be cleaned up
+ */
+export type DraftStatus = 'IN_PROGRESS' | 'FINALIZING' | 'FINALIZED' | 'EXPIRED';
+
+/**
+ * Step state for crash recovery navigation
+ * - LOTTERY: Step 1 completed (Day Close only)
+ * - REPORTS: Step 2 completed (both wizards)
+ * - REVIEW: Final review step reached (Day Close only)
+ */
+export type StepState = 'LOTTERY' | 'REPORTS' | 'REVIEW' | null;
+
+/**
+ * Bin scan data for lottery closing
+ * SEC-014: All fields strictly validated by backend
+ */
+export interface BinScanData {
+  /** Pack ID (UUID format) */
+  pack_id: string;
+  /** Bin ID (UUID format) */
+  bin_id: string;
+  /** Closing serial number (3 digits) */
+  closing_serial: string;
+  /** Whether pack was sold out */
+  is_sold_out: boolean;
+  /** ISO timestamp when scanned */
+  scanned_at: string;
+}
+
+/**
+ * Lottery totals calculated from bin scans
+ */
+export interface LotteryTotals {
+  /** Total tickets sold across all bins */
+  tickets_sold: number;
+  /** Instant sales total that flows to Step 2 */
+  sales_amount: number;
+}
+
+/**
+ * Lottery payload for Step 1 (Day Close only)
+ */
+export interface LotteryPayload {
+  /** Array of bin scan data */
+  bins_scans: BinScanData[];
+  /** Calculated totals */
+  totals: LotteryTotals;
+  /** How data was entered */
+  entry_method: 'SCAN' | 'MANUAL';
+  /** User who authorized manual entry (optional) */
+  authorized_by?: string;
+}
+
+/**
+ * Lottery reports for Step 2
+ */
+export interface LotteryReportsPayload {
+  /** READ-ONLY: Populated from lottery.totals.sales_amount */
+  instantSales: number;
+  instantCashes: number;
+  onlineSales: number;
+  onlineCashes: number;
+}
+
+/**
+ * Gaming reports for Step 2
+ */
+export interface GamingReportsPayload {
+  netTerminalIncome: number;
+  plays: number;
+  payouts: number;
+}
+
+/**
+ * Cash payouts for Step 2
+ */
+export interface CashPayoutsPayload {
+  lotteryWinners: number;
+  moneyOrders: number;
+  checkCashing: number;
+}
+
+/**
+ * Reports payload for Step 2 (both wizards)
+ * NOTE: Out of scope for initial implementation - stays in React state
+ */
+export interface ReportsPayload {
+  lottery_reports?: LotteryReportsPayload;
+  gaming_reports?: GamingReportsPayload;
+  vendor_invoices: Array<{ vendor_name: string; amount: number }>;
+  cash_payouts?: CashPayoutsPayload;
+}
+
+/**
+ * Complete draft payload structure
+ * Contains all wizard data across all steps
+ */
+export interface DraftPayload {
+  /** Step 1 (Day Close only) - Lottery scanning */
+  lottery?: LotteryPayload;
+  /** Step 2 (both wizards) - Report scanning (future work) */
+  reports?: ReportsPayload;
+  /** Final step - Closing cash amount */
+  closing_cash?: number;
+}
+
+/**
+ * Close draft entity returned by backend
+ *
+ * @security DB-006: Always store-scoped via backend handlers
+ * @security SEC-006: All data stored via parameterized queries
+ */
+export interface CloseDraft {
+  /** Draft ID (UUID) */
+  draft_id: string;
+  /** Store ID for tenant isolation (UUID) */
+  store_id: string;
+  /** Shift ID this draft is associated with (UUID) */
+  shift_id: string;
+  /** Business date (YYYY-MM-DD) */
+  business_date: string;
+  /** Type of draft (DAY_CLOSE or SHIFT_CLOSE) */
+  draft_type: DraftType;
+  /** Current status */
+  status: DraftStatus;
+  /** Last completed step (for crash recovery) */
+  step_state: StepState;
+  /** All wizard data */
+  payload: DraftPayload;
+  /** Version for optimistic locking */
+  version: number;
+  /** ISO timestamp when created */
+  created_at: string;
+  /** ISO timestamp when last updated */
+  updated_at: string;
+  /** User ID who created the draft */
+  created_by: string;
+}
+
+/**
+ * Response for draft creation and update operations
+ */
+export interface DraftResponse {
+  /** The created or updated draft */
+  draft: CloseDraft;
+}
+
+/**
+ * Response for get operations (may not exist)
+ */
+export interface GetDraftResponse {
+  /** The draft or null if not found */
+  draft: CloseDraft | null;
+}
+
+/**
+ * Version conflict error response from optimistic locking
+ * Returned when update fails due to concurrent modification
+ */
+export interface VersionConflictResponse {
+  error: 'VERSION_CONFLICT';
+  message: string;
+  /** Current version in database */
+  current_version: number;
+  /** Version client expected */
+  expected_version: number;
+}
+
+/**
+ * Response for finalize operation
+ * Contains results from lottery close and shift close
+ */
+export interface FinalizeResponse {
+  /** Whether finalization succeeded */
+  success: boolean;
+  /** ISO timestamp when closed */
+  closed_at: string;
+  /** Lottery close results (DAY_CLOSE only) */
+  lottery_result?: {
+    closings_created: number;
+    lottery_total: number;
+    next_day: {
+      day_id: string;
+      business_date: string;
+      status: string;
+    };
+  };
+  /** Shift close results */
+  shift_result?: {
+    shift_id: string;
+    shift_number: number;
+    business_date: string;
+    closing_cash: number;
+  };
 }
 
 // ============================================================================

@@ -94,6 +94,17 @@ scripts/revert-*.ts
 scripts/verify-*.ts
 scripts/cleanup-*.ts
 
+# Root-level debug/diagnostic scripts
+analyze_*.js
+analyze_*.cjs
+check_*.js
+fix_*.js
+temp_*.js
+query_*.js
+
+# MCP config (local to developer)
+.mcp.json
+
 # Package lock files (optional - uncomment if you prefer not to commit)
 # package-lock.json
 # yarn.lock

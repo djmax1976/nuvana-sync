@@ -1911,34 +1911,6 @@ registerHandler(
 );
 
 /**
- * Close stale open shifts
- * Fixes data where shifts from previous days weren't properly closed
- */
-registerHandler(
-  'sync:closeStaleShifts',
-  async () => {
-    const store = storesDAL.getConfiguredStore();
-    if (!store) {
-      return createErrorResponse(IPCErrorCodes.NOT_CONFIGURED, 'Store not configured');
-    }
-
-    // Get current date in YYYY-MM-DD format (local timezone, not UTC)
-    const now = new Date();
-    const today = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`;
-
-    const closedCount = shiftsDAL.closeStaleOpenShifts(store.store_id, today);
-
-    log.info('Closed stale shifts', { closedCount, storeId: store.store_id, today });
-
-    return createSuccessResponse({
-      closedCount,
-      message: `Closed ${closedCount} stale open shift(s) from previous days`,
-    });
-  },
-  { description: 'Close stale open shifts from previous days' }
-);
-
-/**
  * Reset fuel data and reprocess FGM files
  * Clears accumulated/corrupted fuel summaries and triggers reprocessing
  * Use this to fix incorrect fuel totals caused by duplicate data accumulation
