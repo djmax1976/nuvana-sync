@@ -661,7 +661,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
    * Must be called after prepareClose
    *
    * Sync Integration (v047):
-   * - Queues depleted packs for sync with entity_type 'pack' and depletion_reason 'MANUAL_SOLD_OUT'
+   * - Queues depleted packs for sync with entity_type 'pack' and depletion_reason 'DAY_CLOSE'
    * - Queues day close operation for sync with entity_type 'day_close'
    * - Sync failures do NOT block local commit (offline-first pattern)
    *
@@ -759,13 +759,13 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
             closing_serial: closing.closing_serial,
             tickets_sold_count: ticketsSold,
             sales_amount: salesAmount,
-            depleted_by: userId, // SEC-010: Track who manually marked pack as sold out
-            depletion_reason: 'MANUAL_SOLD_OUT', // User manually marked pack as sold out
+            depleted_by: userId, // SEC-010: Track who closed the pack
+            depletion_reason: 'DAY_CLOSE', // Pack marked as sold out during day close operation
           });
           log.info('Pack settled (sold out)', {
             packId: closing.pack_id,
             closingSerial: closing.closing_serial,
-            depletionReason: 'MANUAL_SOLD_OUT',
+            depletionReason: 'DAY_CLOSE',
             depletedBy: userId,
           });
 
@@ -808,8 +808,8 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
               activated_by: pack.activated_by,
               depleted_at: now,
               returned_at: null,
-              // Depletion context (v019 + v047 alignment) - user manually marked as sold out
-              depletion_reason: 'MANUAL_SOLD_OUT',
+              // Depletion context (v019 + v047 alignment) - day close operation
+              depletion_reason: 'DAY_CLOSE',
               depleted_by: userId,
               depleted_shift_id: null, // Day close is not shift-specific
               // Shift tracking (not applicable for day close)

@@ -213,8 +213,9 @@ vi.mock('@/lib/api/lottery', () => ({
 }));
 
 // Mock components
+// DRAFT-001: Scanner now calls onPendingClosings BEFORE onSuccess to save lottery data to draft
 vi.mock('@/components/lottery/DayCloseModeScanner', () => ({
-  DayCloseModeScanner: vi.fn(({ onSuccess, onScannedBinsChange }) => (
+  DayCloseModeScanner: vi.fn(({ onSuccess, onScannedBinsChange, onPendingClosings }) => (
     <div data-testid="day-close-mode-scanner">
       <button
         data-testid="mock-scan-complete"
@@ -229,6 +230,20 @@ vi.mock('@/components/lottery/DayCloseModeScanner', () => ({
               closing_serial: '030',
             },
           ]);
+          // DRAFT-001: Call onPendingClosings first to save lottery data
+          onPendingClosings?.({
+            closings: [
+              {
+                bin_id: 'bin-001',
+                pack_id: 'pack-001',
+                closing_serial: '030',
+                is_sold_out: false,
+              },
+            ],
+            entry_method: 'SCAN',
+            totals: { tickets_sold: 30, sales_amount: 150 },
+          });
+          // Then call onSuccess to advance the step
           onSuccess({
             closings_created: 1,
             business_date: '2026-02-21',
@@ -1021,10 +1036,19 @@ describe('T6.4: DayClosePage Finalize Flow', () => {
         closed_at: '2026-02-21T18:00:00Z',
       });
 
+      // DRAFT-001: bins_scans must be non-empty for guard to pass
       const draftWithLottery = createMockDraft({
         payload: {
           lottery: {
-            bins_scans: [],
+            bins_scans: [
+              {
+                pack_id: 'pack-001',
+                bin_id: 'bin-001',
+                closing_serial: '030',
+                is_sold_out: false,
+                scanned_at: '2026-02-21T10:00:00Z',
+              },
+            ],
             totals: { tickets_sold: 30, sales_amount: 150 },
             entry_method: 'SCAN',
           },
@@ -1090,10 +1114,19 @@ describe('Security: DayClosePage Draft Operations', () => {
   it('should sanitize closing cash input (SEC-014)', async () => {
     mockFinalizeDraft.mockResolvedValue({ success: true, closed_at: '2026-02-21T18:00:00Z' });
 
+    // DRAFT-001: bins_scans must be non-empty for guard to pass
     const draftWithLottery = createMockDraft({
       payload: {
         lottery: {
-          bins_scans: [],
+          bins_scans: [
+            {
+              pack_id: 'pack-001',
+              bin_id: 'bin-001',
+              closing_serial: '030',
+              is_sold_out: false,
+              scanned_at: '2026-02-21T10:00:00Z',
+            },
+          ],
           totals: { tickets_sold: 30, sales_amount: 150 },
           entry_method: 'SCAN',
         },
