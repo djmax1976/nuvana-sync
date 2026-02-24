@@ -182,59 +182,116 @@ jobs:
             }
           done
 
-      - name: NPM Audit (High/Critical)
+      # ================================================================
+      # PRODUCTION DEPENDENCIES AUDIT (BLOCKING)
+      # These are dependencies that ship with the Electron app
+      # Per GOV-003: Fail on high/critical vulnerabilities in production code
+      # ================================================================
+      - name: NPM Audit - Production Dependencies (Blocking)
+        id: prod-audit
         run: |
-          npm audit --audit-level=high --json > npm-audit.json || true
-          cat npm-audit.json | jq '.metadata.vulnerabilities'
+          echo "=== Auditing PRODUCTION dependencies (--omit=dev) ==="
+          echo "These dependencies ship with the application and affect end users."
+          echo ""
 
-          # Get vulnerability counts
-          HIGH=$(cat npm-audit.json | jq '.metadata.vulnerabilities.high // 0')
-          CRITICAL=$(cat npm-audit.json | jq '.metadata.vulnerabilities.critical // 0')
+          # Audit production dependencies only
+          npm audit --omit=dev --json > npm-audit-prod.json 2>&1 || true
 
-          echo "High vulnerabilities: $HIGH"
-          echo "Critical vulnerabilities: $CRITICAL"
+          # Extract vulnerability counts
+          PROD_HIGH=$(cat npm-audit-prod.json | jq '.metadata.vulnerabilities.high // 0')
+          PROD_CRITICAL=$(cat npm-audit-prod.json | jq '.metadata.vulnerabilities.critical // 0')
+          PROD_MODERATE=$(cat npm-audit-prod.json | jq '.metadata.vulnerabilities.moderate // 0')
+          PROD_LOW=$(cat npm-audit-prod.json | jq '.metadata.vulnerabilities.low // 0')
 
-          # Always fail on critical vulnerabilities
-          if [ "$CRITICAL" -gt 0 ]; then
-            echo "::error::Found $CRITICAL critical vulnerabilities"
-            cat npm-audit.json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "critical")'
+          echo "Production dependency vulnerabilities:"
+          echo "  Critical: $PROD_CRITICAL"
+          echo "  High: $PROD_HIGH"
+          echo "  Moderate: $PROD_MODERATE"
+          echo "  Low: $PROD_LOW"
+
+          # Output for summary
+          echo "prod_critical=$PROD_CRITICAL" >> $GITHUB_OUTPUT
+          echo "prod_high=$PROD_HIGH" >> $GITHUB_OUTPUT
+
+          # BLOCKING: Fail on critical vulnerabilities in production
+          if [ "$PROD_CRITICAL" -gt 0 ]; then
+            echo ""
+            echo "::error::CRITICAL vulnerabilities found in PRODUCTION dependencies!"
+            echo "These vulnerabilities ship to end users and MUST be fixed."
+            cat npm-audit-prod.json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "critical") | {package: .key, severity: .value.severity, via: .value.via, fixAvailable: .value.fixAvailable}'
             exit 1
           fi
 
-          # Check for high vulnerabilities, excluding known build-tool issues
-          # These are acceptable as they only affect build-time, not runtime
-          KNOWN_BUILD_TOOL_VULNS="electron-builder|@electron/rebuild|app-builder-lib|dmg-builder|tar|node-gyp"
-
-          # Filter out known build-tool vulnerabilities from high severity list
-          RUNTIME_HIGH=$(cat npm-audit.json | jq --arg pattern "$KNOWN_BUILD_TOOL_VULNS" '
-            .vulnerabilities | to_entries[] |
-            select(.value.severity == "high") |
-            select(.key | test($pattern) | not) |
-            .key
-          ' | wc -l)
-
-          echo "Runtime high vulnerabilities (excluding build tools): $RUNTIME_HIGH"
-
-          if [ "$RUNTIME_HIGH" -gt 0 ]; then
-            echo "::error::Found runtime high severity vulnerabilities"
-            cat npm-audit.json | jq --arg pattern "$KNOWN_BUILD_TOOL_VULNS" '
-              .vulnerabilities | to_entries[] |
-              select(.value.severity == "high") |
-              select(.key | test($pattern) | not)
-            '
+          # BLOCKING: Fail on high vulnerabilities in production
+          if [ "$PROD_HIGH" -gt 0 ]; then
+            echo ""
+            echo "::error::HIGH severity vulnerabilities found in PRODUCTION dependencies!"
+            echo "These vulnerabilities ship to end users and MUST be fixed."
+            cat npm-audit-prod.json | jq '.vulnerabilities | to_entries[] | select(.value.severity == "high") | {package: .key, severity: .value.severity, via: .value.via, fixAvailable: .value.fixAvailable}'
             exit 1
           fi
 
-          if [ "$HIGH" -gt 0 ]; then
-            echo "::warning::Found $HIGH high severity vulnerabilities in build tools (acceptable for dev dependencies)"
+          echo ""
+          echo "✅ No high/critical vulnerabilities in production dependencies."
+
+      # ================================================================
+      # DEVELOPMENT DEPENDENCIES AUDIT (NON-BLOCKING, INFORMATIONAL)
+      # These are build tools, linters, test frameworks that don't ship
+      # Per GOV-003: Track for compliance, but don't block pipeline
+      # ================================================================
+      - name: NPM Audit - Development Dependencies (Informational)
+        id: dev-audit
+        run: |
+          echo "=== Auditing ALL dependencies (including devDependencies) ==="
+          echo "Development dependencies are used only during build/test."
+          echo "They do NOT ship with the application."
+          echo ""
+
+          # Full audit for tracking/compliance
+          npm audit --json > npm-audit-full.json 2>&1 || true
+
+          # Extract counts
+          FULL_HIGH=$(cat npm-audit-full.json | jq '.metadata.vulnerabilities.high // 0')
+          FULL_CRITICAL=$(cat npm-audit-full.json | jq '.metadata.vulnerabilities.critical // 0')
+          DEV_HIGH=$((FULL_HIGH - ${{ steps.prod-audit.outputs.prod_high || 0 }}))
+          DEV_CRITICAL=$((FULL_CRITICAL - ${{ steps.prod-audit.outputs.prod_critical || 0 }}))
+
+          echo "Development-only dependency vulnerabilities:"
+          echo "  Critical: $DEV_CRITICAL"
+          echo "  High: $DEV_HIGH"
+
+          # Output for summary
+          echo "dev_critical=$DEV_CRITICAL" >> $GITHUB_OUTPUT
+          echo "dev_high=$DEV_HIGH" >> $GITHUB_OUTPUT
+
+          # Non-blocking warning for dev dependency vulnerabilities
+          if [ "$DEV_CRITICAL" -gt 0 ]; then
+            echo ""
+            echo "::warning::Found $DEV_CRITICAL critical vulnerabilities in DEVELOPMENT dependencies."
+            echo "These affect build/test environments only, not production."
+            echo "Consider updating when feasible (major version upgrades may be required)."
           fi
 
-      - name: Upload audit report
+          if [ "$DEV_HIGH" -gt 0 ]; then
+            echo ""
+            echo "::warning::Found $DEV_HIGH high vulnerabilities in DEVELOPMENT dependencies."
+            echo "These affect build/test environments only, not production."
+            echo "Affected packages (for tracking):"
+            cat npm-audit-full.json | jq -r '.vulnerabilities | to_entries[] | select(.value.severity == "high") | "  - \(.key): \(.value.via[0] | if type == "object" then .title else . end)"' | head -20
+          fi
+
+          echo ""
+          echo "ℹ️ Development dependency vulnerabilities tracked but not blocking."
+          echo "   Run 'npm audit' locally to see full details."
+
+      - name: Upload audit reports
         uses: actions/upload-artifact@v4
         if: always()
         with:
-          name: npm-audit-report
-          path: npm-audit.json
+          name: npm-audit-reports
+          path: |
+            npm-audit-prod.json
+            npm-audit-full.json
           retention-days: 30
 
   # ============================================================================
