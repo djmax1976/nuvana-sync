@@ -453,7 +453,15 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
   // ========================================================================
 
   describe('Rollback on Failure', () => {
+    // Helper: Mock getDraft to return FINALIZING on second call (for rollback check)
+    const setupDraftMockForRollback = () => {
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery) // First call: initial fetch
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZING' }); // Second call: in catch block
+    };
+
     it('rolls back to IN_PROGRESS on lottery prepareClose failure', async () => {
+      setupDraftMockForRollback();
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -489,6 +497,7 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('rolls back to IN_PROGRESS on lottery commitClose failure', async () => {
+      setupDraftMockForRollback();
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -518,6 +527,7 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('rolls back to IN_PROGRESS on shift close failure', async () => {
+      setupDraftMockForRollback();
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -548,6 +558,7 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('rolls back to IN_PROGRESS on shift close throwing error', async () => {
+      setupDraftMockForRollback();
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -580,6 +591,10 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('handles rollback failure gracefully', async () => {
+      // Setup getDraft to return FINALIZING on second call (so rollback is attempted)
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZING' });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -614,7 +629,7 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
         throw new Error('Failure');
       });
 
-      // getDraft returns IN_PROGRESS (already rolled back elsewhere)
+      // getDraft returns IN_PROGRESS on second call (simulating already rolled back elsewhere)
       mockCloseDraftsDAL.getDraft
         .mockReturnValueOnce(mockDraftWithLottery)
         .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'IN_PROGRESS' });
@@ -626,10 +641,9 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
         closing_cash: 250.0,
       });
 
-      // rollbackFinalize should NOT be called if status is not FINALIZING
-      // (This tests the status check before rollback)
-      // Note: Current implementation checks status, but mock setup may differ
-      expect(mockCloseDraftsDAL.rollbackFinalize).toHaveBeenCalled();
+      // rollbackFinalize should NOT be called when status is IN_PROGRESS (not FINALIZING)
+      // The implementation checks status before calling rollback
+      expect(mockCloseDraftsDAL.rollbackFinalize).not.toHaveBeenCalled();
     });
   });
 
@@ -639,11 +653,16 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
 
   describe('Status Transitions During Finalization', () => {
     it('transitions IN_PROGRESS → FINALIZING at start', async () => {
+      // Mock getDraft: first call returns initial, second call returns finalized version
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZED', version: 4 });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
       });
       mockLotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockDay);
+      mockLotteryBusinessDaysDAL.prepareClose.mockReturnValue(undefined);
       mockLotteryBusinessDaysDAL.commitClose.mockReturnValue({
         closings_created: 1,
         lottery_total: 125.0,
@@ -664,11 +683,16 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('transitions FINALIZING → FINALIZED on success', async () => {
+      // Mock getDraft: first call returns initial, second call returns finalized version
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZED', version: 4 });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
       });
       mockLotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockDay);
+      mockLotteryBusinessDaysDAL.prepareClose.mockReturnValue(undefined);
       mockLotteryBusinessDaysDAL.commitClose.mockReturnValue({
         closings_created: 1,
         lottery_total: 125.0,
@@ -689,6 +713,10 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('transitions FINALIZING → IN_PROGRESS on rollback', async () => {
+      // Mock getDraft: first call returns initial, second call returns FINALIZING for rollback check
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZING' });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
@@ -782,11 +810,16 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('handles closing_cash of 0', async () => {
+      // Mock getDraft: first call returns initial, second call returns finalized version
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZED', version: 4 });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
       });
       mockLotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockDay);
+      mockLotteryBusinessDaysDAL.prepareClose.mockReturnValue(undefined);
       mockLotteryBusinessDaysDAL.commitClose.mockReturnValue({
         closings_created: 1,
         lottery_total: 125.0,
@@ -812,11 +845,16 @@ describe('T3.5: Close Drafts Finalize Atomicity Tests', () => {
     });
 
     it('handles maximum closing_cash value', async () => {
+      // Mock getDraft: first call returns initial, second call returns finalized version
+      mockCloseDraftsDAL.getDraft
+        .mockReturnValueOnce(mockDraftWithLottery)
+        .mockReturnValueOnce({ ...mockDraftWithLottery, status: 'FINALIZED', version: 4 });
       mockCloseDraftsDAL.beginFinalize.mockReturnValue({
         ...mockDraftWithLottery,
         status: 'FINALIZING',
       });
       mockLotteryBusinessDaysDAL.getOrCreateForDate.mockReturnValue(mockDay);
+      mockLotteryBusinessDaysDAL.prepareClose.mockReturnValue(undefined);
       mockLotteryBusinessDaysDAL.commitClose.mockReturnValue({
         closings_created: 1,
         lottery_total: 125.0,
