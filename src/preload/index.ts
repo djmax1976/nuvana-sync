@@ -64,7 +64,6 @@ const ALLOWED_INVOKE_CHANNELS = [
   'sync:reprocessXmlFiles',
   'sync:getProcessedFilesStats',
   'sync:debugDump',
-  'sync:closeStaleShifts',
   'sync:resetFuelData',
   'sync:debugQueueState',
   'sync:debugGetSyncedItems',
@@ -221,6 +220,14 @@ const ALLOWED_INVOKE_CHANNELS = [
   'terminals:getDayStatus',
   // Day Close Access
   'dayClose:checkAccess', // Centralized day close access validation
+  // Close Drafts (DRAFT-001: Draft-backed wizard architecture)
+  'drafts:create', // Create or get active draft for shift
+  'drafts:get', // Get draft by ID or active draft for shift
+  'drafts:update', // Update draft payload with optimistic locking
+  'drafts:updateLottery', // Update lottery step data specifically
+  'drafts:updateStepState', // Update step state for crash recovery
+  'drafts:finalize', // Finalize draft and commit to final tables
+  'drafts:expire', // Expire/discard a draft
   // App Lifecycle
   'app:restart', // Full app restart (used after FULL_RESET)
 ] as const;

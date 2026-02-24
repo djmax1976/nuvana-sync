@@ -219,7 +219,7 @@ function getStoreWithState(): { store_id: string; state_id: string | null } {
  * Get current business date (YYYY-MM-DD) in local timezone
  * Uses local date, not UTC, to match user's business day
  */
-function getCurrentBusinessDate(): string {
+export function getCurrentBusinessDate(): string {
   const now = new Date();
   const year = now.getFullYear();
   const month = String(now.getMonth() + 1).padStart(2, '0');

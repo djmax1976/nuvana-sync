@@ -78,6 +78,7 @@ vi.mock('../../../src/main/ipc/index', () => ({
     message,
   })),
   createSuccessResponse: vi.fn((data: unknown) => ({ success: true, data })),
+  setCurrentUser: vi.fn(), // Required for successful access flow
   IPCErrorCodes: {
     NOT_AUTHENTICATED: 'NOT_AUTHENTICATED',
     FORBIDDEN: 'FORBIDDEN',

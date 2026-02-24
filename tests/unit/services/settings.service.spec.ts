@@ -104,6 +104,7 @@ vi.mock('../../../src/main/dal/pos-id-mappings.dal', () => ({
     findByExternalId: vi.fn(),
     getOrCreate: vi.fn(),
     update: vi.fn(),
+    updatePOSConfig: vi.fn(),
     findById: vi.fn(),
     findRegisters: vi.fn(() => []),
     findAllActive: vi.fn(() => []),
@@ -1641,6 +1642,10 @@ describe('SettingsService', () => {
       active: 1,
       created_at: '2026-01-01T00:00:00.000Z',
       updated_at: '2026-01-01T00:00:00.000Z',
+      // POS-001: Required POS configuration fields
+      pos_type: null,
+      connection_type: null,
+      connection_config: null,
     };
 
     // 6.4.1 - Calls syncRegistersFromCloud when result contains registers
@@ -2051,6 +2056,757 @@ describe('SettingsService', () => {
         'store-manual-sync-001',
         new Set(['LOTTERY-T1'])
       );
+    });
+  });
+
+  // ==========================================================================
+  // POS Config Sync to Terminals - POS-001 (2026-02-18)
+  // Enterprise-grade tests for applying store-level POS config to terminals
+  // @security SEC-006: Parameterized queries via DAL
+  // @security DB-006: Store-scoped operations
+  // ==========================================================================
+  describe('syncRegistersFromCloud - POS Config Application', () => {
+    const mockStoreId = 'store-pos-config-001';
+
+    const mockTerminalMapping = {
+      id: 'terminal-uuid-001',
+      store_id: mockStoreId,
+      external_register_id: 'REG-001',
+      terminal_type: 'REGISTER' as const,
+      description: 'Test Terminal',
+      pos_system_type: 'generic' as const,
+      pos_type: null,
+      connection_type: null,
+      connection_config: null,
+      active: 1,
+      created_at: '2026-01-01T00:00:00.000Z',
+      updated_at: '2026-01-01T00:00:00.000Z',
+    };
+
+    const mockPOSConnectionConfig = {
+      pos_type: 'GILBARCO_NAXML' as const,
+      pos_connection_type: 'FILE' as const,
+      pos_connection_config: {
+        import_path: 'C:\\NAXML\\Export',
+        export_path: 'C:\\NAXML\\Archive',
+        poll_interval_seconds: 5,
+      },
+    };
+
+    const mockValidationWithPOSConfig = {
+      valid: true,
+      storeId: mockStoreId,
+      storeName: 'POS Config Store',
+      storePublicId: 'POS001',
+      companyId: 'company-pos-001',
+      companyName: 'POS Company',
+      timezone: 'America/New_York',
+      stateCode: 'NY',
+      features: [],
+      offlinePermissions: [],
+      offlineToken: 'mock-offline-token',
+      offlineTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+      lottery: { enabled: false, binCount: 0 },
+      posConnectionConfig: mockPOSConnectionConfig,
+      registers: [
+        {
+          external_register_id: 'REG-001',
+          terminal_type: 'REGISTER' as const,
+          description: 'Front Counter',
+          active: true,
+        },
+      ],
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    // =========================================================================
+    // POS-CONFIG-001: New terminals receive POS config via getOrCreate
+    // =========================================================================
+    it('POS-CONFIG-001: should pass POS config to getOrCreate for new terminals', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationWithPOSConfig);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(undefined);
+      vi.mocked(posTerminalMappingsDAL.getOrCreate).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.getOrCreate).toHaveBeenCalledWith(
+        mockStoreId,
+        'REG-001',
+        expect.objectContaining({
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+          connection_config: JSON.stringify(mockPOSConnectionConfig.pos_connection_config),
+        })
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-002: Existing terminals receive POS config via updatePOSConfig
+    // =========================================================================
+    it('POS-CONFIG-002: should call updatePOSConfig for existing terminals', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationWithPOSConfig);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        mockTerminalMapping.id,
+        {
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+          connection_config: JSON.stringify(mockPOSConnectionConfig.pos_connection_config),
+        }
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-003: DB-006 compliance - store_id passed to updatePOSConfig
+    // =========================================================================
+    it('POS-CONFIG-003: should pass storeId to updatePOSConfig (DB-006 tenant isolation)', async () => {
+      const multiRegisterResponse = {
+        ...mockValidationWithPOSConfig,
+        registers: [
+          {
+            external_register_id: 'T1',
+            terminal_type: 'REGISTER' as const,
+            description: 'Terminal 1',
+            active: true,
+          },
+          {
+            external_register_id: 'T2',
+            terminal_type: 'REGISTER' as const,
+            description: 'Terminal 2',
+            active: true,
+          },
+        ],
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(multiRegisterResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId)
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 'term-1', external_register_id: 'T1' })
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 'term-2', external_register_id: 'T2' });
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // Verify all updatePOSConfig calls include storeId as first parameter
+      const calls = vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mock.calls;
+      expect(calls).toHaveLength(2);
+      for (const call of calls) {
+        expect(call[0]).toBe(mockStoreId); // DB-006: storeId always first
+      }
+    });
+
+    // =========================================================================
+    // POS-CONFIG-004: SEC-006 - connection_config is JSON-stringified
+    // =========================================================================
+    it('POS-CONFIG-004: should JSON-stringify connection_config (SEC-006)', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationWithPOSConfig);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      const calls = vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mock.calls;
+      const connectionConfig = calls[0][2].connection_config;
+
+      // Should be a valid JSON string
+      expect(typeof connectionConfig).toBe('string');
+      expect(() => JSON.parse(connectionConfig!)).not.toThrow();
+
+      // Should match original object
+      const parsed = JSON.parse(connectionConfig!);
+      expect(parsed.import_path).toBe('C:\\NAXML\\Export');
+      expect(parsed.export_path).toBe('C:\\NAXML\\Archive');
+      expect(parsed.poll_interval_seconds).toBe(5);
+    });
+
+    // =========================================================================
+    // POS-CONFIG-005: Null posConnectionConfig skips POS config application
+    // =========================================================================
+    it('POS-CONFIG-005: should not call updatePOSConfig when posConnectionConfig is null', async () => {
+      const noPOSConfigResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: null,
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(noPOSConfigResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // POS-CONFIG-006: Undefined posConnectionConfig skips POS config application
+    // =========================================================================
+    it('POS-CONFIG-006: should not call updatePOSConfig when posConnectionConfig is undefined', async () => {
+      const undefinedPOSConfigResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: undefined,
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(undefinedPOSConfigResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // POS-CONFIG-007: Partial POS config (missing connection_type) skips application
+    // =========================================================================
+    it('POS-CONFIG-007: should skip POS config when pos_type is present but connection_type is null', async () => {
+      const partialPOSConfig = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: {
+          pos_type: 'GILBARCO_NAXML' as const,
+          pos_connection_type: null as unknown as 'FILE',
+          pos_connection_config: null,
+        },
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(partialPOSConfig);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // hasPosConfig check requires both pos_type AND connection_type to be non-null
+      expect(posTerminalMappingsDAL.updatePOSConfig).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // POS-CONFIG-008: Null connection_config passed as null (not "null" string)
+    // =========================================================================
+    it('POS-CONFIG-008: should pass null connection_config correctly (not "null" string)', async () => {
+      const noConnectionConfigResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: {
+          pos_type: 'MANUAL_ENTRY' as const,
+          pos_connection_type: 'MANUAL' as const,
+          pos_connection_config: null,
+        },
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(noConnectionConfigResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        mockTerminalMapping.id,
+        {
+          pos_type: 'MANUAL_ENTRY',
+          connection_type: 'MANUAL',
+          connection_config: null, // Should be null, not "null"
+        }
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-009: updatePOSConfig failure is resilient - sync continues
+    // =========================================================================
+    it('POS-CONFIG-009: should continue sync when updatePOSConfig throws', async () => {
+      const multiRegisterResponse = {
+        ...mockValidationWithPOSConfig,
+        registers: [
+          {
+            external_register_id: 'T1',
+            terminal_type: 'REGISTER' as const,
+            description: 'Terminal 1',
+            active: true,
+          },
+          {
+            external_register_id: 'T2',
+            terminal_type: 'REGISTER' as const,
+            description: 'Terminal 2',
+            active: true,
+          },
+        ],
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(multiRegisterResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId)
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 'term-1' })
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 'term-2' });
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig)
+        .mockImplementationOnce(() => {
+          throw new Error('Database constraint violation');
+        })
+        .mockReturnValueOnce(mockTerminalMapping);
+
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
+
+      // Setup should still succeed despite first updatePOSConfig failure
+      expect(result.valid).toBe(true);
+      // Both terminals should have been processed
+      expect(posTerminalMappingsDAL.update).toHaveBeenCalledTimes(2);
+      // Second updatePOSConfig should still have been called
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledTimes(2);
+    });
+
+    // =========================================================================
+    // POS-CONFIG-010: Mixed new/existing terminals both receive POS config
+    // =========================================================================
+    it('POS-CONFIG-010: should apply POS config to both new and existing terminals', async () => {
+      const mixedResponse = {
+        ...mockValidationWithPOSConfig,
+        registers: [
+          {
+            external_register_id: 'EXISTING-REG',
+            terminal_type: 'REGISTER' as const,
+            description: 'Existing Terminal',
+            active: true,
+          },
+          {
+            external_register_id: 'NEW-REG',
+            terminal_type: 'KIOSK' as const,
+            description: 'New Kiosk',
+            active: true,
+          },
+        ],
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mixedResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId)
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 'existing-term' })
+        .mockReturnValueOnce(undefined);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.getOrCreate).mockReturnValue({
+        ...mockTerminalMapping,
+        id: 'new-term',
+      });
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // Existing terminal: updatePOSConfig called
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        'existing-term',
+        expect.objectContaining({
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+        })
+      );
+
+      // New terminal: POS config passed to getOrCreate
+      expect(posTerminalMappingsDAL.getOrCreate).toHaveBeenCalledWith(
+        mockStoreId,
+        'NEW-REG',
+        expect.objectContaining({
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+          connection_config: expect.any(String),
+        })
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-011: LOTTERY POS type with MANUAL connection
+    // =========================================================================
+    it('POS-CONFIG-011: should apply LOTTERY + MANUAL POS config correctly', async () => {
+      const lotteryResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: {
+          pos_type: 'LOTTERY' as const,
+          pos_connection_type: 'MANUAL' as const,
+          pos_connection_config: null,
+        },
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(lotteryResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        mockTerminalMapping.id,
+        {
+          pos_type: 'LOTTERY',
+          connection_type: 'MANUAL',
+          connection_config: null,
+        }
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-012: API-based POS config (SQUARE_REST)
+    // =========================================================================
+    it('POS-CONFIG-012: should apply API-based POS config (SQUARE_REST)', async () => {
+      const squareResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: {
+          pos_type: 'SQUARE_REST' as const,
+          pos_connection_type: 'API' as const,
+          pos_connection_config: {
+            base_url: 'https://api.squareup.com/v2',
+            merchant_id: 'MERCHANT123',
+          },
+        },
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(squareResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(undefined);
+      vi.mocked(posTerminalMappingsDAL.getOrCreate).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.getOrCreate).toHaveBeenCalledWith(
+        mockStoreId,
+        'REG-001',
+        expect.objectContaining({
+          pos_type: 'SQUARE_REST',
+          connection_type: 'API',
+          connection_config: JSON.stringify({
+            base_url: 'https://api.squareup.com/v2',
+            merchant_id: 'MERCHANT123',
+          }),
+        })
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-013: Network-based POS config (VERIFONE_RUBY2)
+    // =========================================================================
+    it('POS-CONFIG-013: should apply Network-based POS config (VERIFONE_RUBY2)', async () => {
+      const verifoneResponse = {
+        ...mockValidationWithPOSConfig,
+        posConnectionConfig: {
+          pos_type: 'VERIFONE_RUBY2' as const,
+          pos_connection_type: 'NETWORK' as const,
+          pos_connection_config: {
+            host: '192.168.1.100',
+            port: 5000,
+          },
+        },
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(verifoneResponse);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        mockTerminalMapping.id,
+        {
+          pos_type: 'VERIFONE_RUBY2',
+          connection_type: 'NETWORK',
+          connection_config: JSON.stringify({ host: '192.168.1.100', port: 5000 }),
+        }
+      );
+    });
+
+    // =========================================================================
+    // POS-CONFIG-014: Multiple terminals all get same store-level POS config
+    // =========================================================================
+    it('POS-CONFIG-014: should apply same POS config to all terminals', async () => {
+      const threeTerminals = {
+        ...mockValidationWithPOSConfig,
+        registers: [
+          {
+            external_register_id: 'T1',
+            terminal_type: 'REGISTER' as const,
+            description: 'Terminal 1',
+            active: true,
+          },
+          {
+            external_register_id: 'T2',
+            terminal_type: 'KIOSK' as const,
+            description: 'Terminal 2',
+            active: true,
+          },
+          {
+            external_register_id: 'T3',
+            terminal_type: 'MOBILE' as const,
+            description: 'Terminal 3',
+            active: true,
+          },
+        ],
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(threeTerminals);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(undefined);
+      vi.mocked(posTerminalMappingsDAL.getOrCreate)
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 't1' })
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 't2' })
+        .mockReturnValueOnce({ ...mockTerminalMapping, id: 't3' });
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // All 3 terminals should receive the same POS config
+      const calls = vi.mocked(posTerminalMappingsDAL.getOrCreate).mock.calls;
+      expect(calls).toHaveLength(3);
+
+      for (const call of calls) {
+        const options = call[2];
+        expect(options).toBeDefined();
+        expect(options?.pos_type).toBe('GILBARCO_NAXML');
+        expect(options?.connection_type).toBe('FILE');
+        expect(options?.connection_config).toBe(
+          JSON.stringify(mockPOSConnectionConfig.pos_connection_config)
+        );
+      }
+    });
+
+    // =========================================================================
+    // POS-CONFIG-015: Resync updates POS config on all terminals
+    // =========================================================================
+    it('POS-CONFIG-015: should update POS config on resync (isInitialSetup: false)', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockValidationWithPOSConfig);
+      vi.mocked(posTerminalMappingsDAL.findByExternalId).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.update).mockReturnValue(mockTerminalMapping);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockTerminalMapping);
+
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars',
+        { isInitialSetup: false }
+      );
+
+      expect(result.valid).toBe(true);
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalled();
+    });
+  });
+
+  // ==========================================================================
+  // FILE/API Mode: Apply POS Config to Existing Terminals (No Cloud Registers)
+  // This handles GILBARCO_NAXML, VERIFONE, etc. where terminals are discovered
+  // from POS data files, not from cloud-provided registers.
+  // ==========================================================================
+  describe('applyPOSConfigToExistingTerminals (FILE/API mode)', () => {
+    const mockStoreId = 'store-file-mode-001';
+
+    const mockExistingTerminals = [
+      {
+        id: 'term-1',
+        store_id: mockStoreId,
+        external_register_id: '1',
+        terminal_type: 'REGISTER' as const,
+        description: 'Register 1',
+        pos_system_type: 'gilbarco' as const,
+        pos_type: null,
+        connection_type: null,
+        connection_config: null,
+        active: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      },
+      {
+        id: 'term-2',
+        store_id: mockStoreId,
+        external_register_id: '2',
+        terminal_type: 'REGISTER' as const,
+        description: 'Register 2',
+        pos_system_type: 'gilbarco' as const,
+        pos_type: null,
+        connection_type: null,
+        connection_config: null,
+        active: 1,
+        created_at: '2026-01-01T00:00:00.000Z',
+        updated_at: '2026-01-01T00:00:00.000Z',
+      },
+    ];
+
+    const mockFileModeValidationResponse = {
+      valid: true,
+      storeId: mockStoreId,
+      storeName: 'File Mode Store',
+      storePublicId: 'FILE001',
+      companyId: 'company-file-001',
+      companyName: 'File Company',
+      timezone: 'America/New_York',
+      stateCode: 'NY',
+      features: [],
+      offlinePermissions: [],
+      offlineToken: 'mock-offline-token',
+      offlineTokenExpiresAt: new Date(Date.now() + 86400000).toISOString(),
+      lottery: { enabled: false, binCount: 0 },
+      posConnectionConfig: {
+        pos_type: 'GILBARCO_NAXML' as const,
+        pos_connection_type: 'FILE' as const,
+        pos_connection_config: {
+          import_path: 'C:\\NAXML\\Export',
+          export_path: 'C:\\NAXML\\Archive',
+          poll_interval_seconds: 5,
+        },
+      },
+      // NO registers - this is FILE mode, not MANUAL mode
+      registers: undefined,
+    };
+
+    beforeEach(() => {
+      vi.clearAllMocks();
+    });
+
+    // =========================================================================
+    // FILE-MODE-001: Apply POS config when no cloud registers
+    // =========================================================================
+    it('FILE-MODE-001: should apply POS config to existing terminals when no cloud registers', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockFileModeValidationResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue(mockExistingTerminals);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockExistingTerminals[0]);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // Should call findAllActive to get existing terminals
+      expect(posTerminalMappingsDAL.findAllActive).toHaveBeenCalledWith(mockStoreId);
+
+      // Should call updatePOSConfig for each existing terminal
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledTimes(2);
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        'term-1',
+        expect.objectContaining({
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+        })
+      );
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledWith(
+        mockStoreId,
+        'term-2',
+        expect.objectContaining({
+          pos_type: 'GILBARCO_NAXML',
+          connection_type: 'FILE',
+        })
+      );
+    });
+
+    // =========================================================================
+    // FILE-MODE-002: connection_config is properly JSON-stringified
+    // =========================================================================
+    it('FILE-MODE-002: should JSON-stringify connection_config for FILE mode', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockFileModeValidationResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue([mockExistingTerminals[0]]);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockExistingTerminals[0]);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      const calls = vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mock.calls;
+      const connectionConfig = calls[0][2].connection_config;
+
+      expect(typeof connectionConfig).toBe('string');
+      const parsed = JSON.parse(connectionConfig!);
+      expect(parsed.import_path).toBe('C:\\NAXML\\Export');
+      expect(parsed.poll_interval_seconds).toBe(5);
+    });
+
+    // =========================================================================
+    // FILE-MODE-003: No terminals - nothing to update
+    // =========================================================================
+    it('FILE-MODE-003: should handle no existing terminals gracefully', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockFileModeValidationResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue([]);
+
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
+
+      expect(result.valid).toBe(true);
+      expect(posTerminalMappingsDAL.findAllActive).toHaveBeenCalledWith(mockStoreId);
+      expect(posTerminalMappingsDAL.updatePOSConfig).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // FILE-MODE-004: Resilient - failure on one terminal doesn't block others
+    // =========================================================================
+    it('FILE-MODE-004: should continue updating when one terminal fails', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockFileModeValidationResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue(mockExistingTerminals);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig)
+        .mockImplementationOnce(() => {
+          throw new Error('Database locked');
+        })
+        .mockReturnValueOnce(mockExistingTerminals[1]);
+
+      const result = await settingsService.validateAndSaveApiKey(
+        'nsk_live_validkeywith20ormorechars'
+      );
+
+      expect(result.valid).toBe(true);
+      // Both terminals should have been attempted
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalledTimes(2);
+    });
+
+    // =========================================================================
+    // FILE-MODE-005: DB-006 - storeId passed to all DAL calls
+    // =========================================================================
+    it('FILE-MODE-005: should pass storeId to all DAL calls (DB-006)', async () => {
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(mockFileModeValidationResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue(mockExistingTerminals);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockExistingTerminals[0]);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // findAllActive should receive storeId
+      expect(posTerminalMappingsDAL.findAllActive).toHaveBeenCalledWith(mockStoreId);
+
+      // Every updatePOSConfig call should have storeId as first param
+      const calls = vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mock.calls;
+      for (const call of calls) {
+        expect(call[0]).toBe(mockStoreId);
+      }
+    });
+
+    // =========================================================================
+    // FILE-MODE-006: No posConnectionConfig - no update
+    // =========================================================================
+    it('FILE-MODE-006: should not update terminals when posConnectionConfig is null', async () => {
+      const noPOSConfigResponse = {
+        ...mockFileModeValidationResponse,
+        posConnectionConfig: null,
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(noPOSConfigResponse);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      expect(posTerminalMappingsDAL.findAllActive).not.toHaveBeenCalled();
+      expect(posTerminalMappingsDAL.updatePOSConfig).not.toHaveBeenCalled();
+    });
+
+    // =========================================================================
+    // FILE-MODE-007: Empty registers array triggers FILE mode logic
+    // =========================================================================
+    it('FILE-MODE-007: should use FILE mode logic when registers is empty array', async () => {
+      const emptyRegistersResponse = {
+        ...mockFileModeValidationResponse,
+        registers: [],
+      };
+
+      vi.mocked(cloudApiService.validateApiKey).mockResolvedValue(emptyRegistersResponse);
+      vi.mocked(posTerminalMappingsDAL.findAllActive).mockReturnValue(mockExistingTerminals);
+      vi.mocked(posTerminalMappingsDAL.updatePOSConfig).mockReturnValue(mockExistingTerminals[0]);
+
+      await settingsService.validateAndSaveApiKey('nsk_live_validkeywith20ormorechars');
+
+      // Should use FILE mode logic (findAllActive + updatePOSConfig)
+      expect(posTerminalMappingsDAL.findAllActive).toHaveBeenCalled();
+      expect(posTerminalMappingsDAL.updatePOSConfig).toHaveBeenCalled();
     });
   });
 });

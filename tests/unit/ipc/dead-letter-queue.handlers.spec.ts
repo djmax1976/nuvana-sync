@@ -127,7 +127,6 @@ vi.mock('../../../src/main/dal/processed-files.dal', () => ({
 vi.mock('../../../src/main/dal/shifts.dal', () => ({
   shiftsDAL: {
     findByStore: vi.fn(() => ({ data: [], total: 0 })),
-    closeStaleOpenShifts: vi.fn(() => 0),
   },
 }));
 

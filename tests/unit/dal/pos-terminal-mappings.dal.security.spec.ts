@@ -345,6 +345,127 @@ describe('POSTerminalMappingsDAL Security Tests', () => {
   });
 
   // ==========================================================================
+  // findByExternalIdAnyType Security Tests (SEC-006, DB-006)
+  // Added for duplicate terminal bug fix
+  // ==========================================================================
+
+  describe('findByExternalIdAnyType Security (SEC-006, DB-006)', () => {
+    // T-SEC-007: SQL injection in findByExternalIdAnyType
+    describe('T-SEC-007: SQL injection in findByExternalIdAnyType', () => {
+      const sqlInjectionPayloads = [
+        "'; DROP TABLE pos_terminal_mappings;--",
+        "' OR '1'='1",
+        '1 UNION SELECT * FROM stores--',
+        "'; UPDATE pos_terminal_mappings SET active=0;--",
+        '1/**/OR/**/1=1',
+        "' AND (SELECT COUNT(*) FROM users) > 0--",
+        "1'; ATTACH DATABASE '/tmp/pwned.db' AS pwned;--",
+        '1%27%20OR%201=1--', // URL encoded
+      ];
+
+      it.each(sqlInjectionPayloads)(
+        'should safely handle SQL injection in externalRegisterId: %s',
+        (payload) => {
+          const mockGet = vi.fn().mockReturnValue(undefined);
+          mockPrepare.mockReturnValue({ get: mockGet });
+
+          // Act
+          dal.findByExternalIdAnyType('store-id', payload);
+
+          // Assert: payload is NOT in query string
+          const query = mockPrepare.mock.calls[0][0] as string;
+          expect(query).not.toContain('DROP');
+          expect(query).not.toContain('UNION');
+          expect(query).not.toContain('UPDATE');
+          expect(query).not.toContain('ATTACH');
+
+          // Assert: payload is passed as bound parameter
+          expect(mockGet).toHaveBeenCalledWith('store-id', payload);
+        }
+      );
+
+      it.each(sqlInjectionPayloads)(
+        'should safely handle SQL injection in storeId: %s',
+        (payload) => {
+          const mockGet = vi.fn().mockReturnValue(undefined);
+          mockPrepare.mockReturnValue({ get: mockGet });
+
+          // Act
+          dal.findByExternalIdAnyType(payload, 'valid-register-id');
+
+          // Assert: payload is NOT in query string
+          const query = mockPrepare.mock.calls[0][0] as string;
+          expect(query).not.toContain('DROP');
+          expect(query).not.toContain('UNION');
+
+          // Assert: payload is passed as bound parameter
+          expect(mockGet).toHaveBeenCalledWith(payload, 'valid-register-id');
+        }
+      );
+    });
+
+    // T-SEC-008: Tenant isolation in findByExternalIdAnyType
+    describe('T-SEC-008: Tenant isolation in findByExternalIdAnyType', () => {
+      it('should always include store_id in WHERE clause', () => {
+        const mockGet = vi.fn().mockReturnValue(undefined);
+        mockPrepare.mockReturnValue({ get: mockGet });
+
+        dal.findByExternalIdAnyType('tenant-store', 'register-id');
+
+        const query = mockPrepare.mock.calls[0][0] as string;
+        expect(query).toMatch(/WHERE\s+.*store_id\s*=\s*\?/i);
+      });
+
+      it('should prevent cross-tenant data access', () => {
+        // Simulate mapping exists for store-A but query with store-B
+        const mockGet = vi.fn().mockImplementation((storeId: string) => {
+          // Only return result for store-A
+          if (storeId === 'store-A') {
+            return { id: 'mapping-1', store_id: 'store-A', external_register_id: 'REG-001' };
+          }
+          return undefined;
+        });
+        mockPrepare.mockReturnValue({ get: mockGet });
+
+        // Query with store-B should not find store-A's mapping
+        const result = dal.findByExternalIdAnyType('store-B', 'REG-001');
+
+        expect(result).toBeUndefined();
+      });
+    });
+
+    // T-SEC-009: Query structure validation
+    describe('T-SEC-009: Query structure validation', () => {
+      it('should use only placeholder tokens in query', () => {
+        const mockGet = vi.fn().mockReturnValue(undefined);
+        mockPrepare.mockReturnValue({ get: mockGet });
+
+        dal.findByExternalIdAnyType('store-123', 'register-456');
+
+        const query = mockPrepare.mock.calls[0][0] as string;
+
+        // Count placeholder usage
+        const placeholderCount = (query.match(/\?/g) || []).length;
+        expect(placeholderCount).toBe(2); // store_id, external_register_id
+
+        // Ensure no direct value interpolation
+        expect(query).not.toContain('store-123');
+        expect(query).not.toContain('register-456');
+      });
+
+      it('should NOT filter by pos_system_type (type-agnostic)', () => {
+        const mockGet = vi.fn().mockReturnValue(undefined);
+        mockPrepare.mockReturnValue({ get: mockGet });
+
+        dal.findByExternalIdAnyType('store-id', 'register-id');
+
+        const query = mockPrepare.mock.calls[0][0] as string;
+        expect(query).not.toContain('pos_system_type');
+      });
+    });
+  });
+
+  // ==========================================================================
   // Schema Validation Tests (for IPC layer Zod schemas)
   // ==========================================================================
 

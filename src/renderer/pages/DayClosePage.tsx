@@ -10,15 +10,33 @@
  *
  * This is a SINGLE PAGE with internal step state (not separate routes).
  * Data flows through the wizard steps - lottery totals are imported into Step 3.
+ *
+ * @feature DRAFT-001: Draft-Backed Wizard Architecture
+ * - All wizard data persists in SQLite via useCloseDraft hook
+ * - Crash-proof: Resume from where you left off after app restart
+ * - Autosave: Data saves automatically as you work (debounced 500ms)
+ * - Atomic finalize: Lottery close + shift close committed together
+ *
+ * @security SEC-010: Authentication required for all operations
+ * @security DB-006: All draft operations store-scoped via backend
  */
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../components/ui/card';
 import { formatDateTime } from '../utils/date-format.utils';
 import { useStoreTimezone } from '../contexts/StoreContext';
 import { Button } from '../components/ui/button';
-import { CalendarCheck, Loader2, AlertCircle, Check, ArrowLeft } from 'lucide-react';
+import { Input } from '../components/ui/input';
+import { CalendarCheck, Loader2, AlertCircle, Check, ArrowLeft, RotateCcw, X } from 'lucide-react';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../components/ui/dialog';
 
 // Day Close Access Context - provides validated shift/user from guard
 // SEC-010: Authorization already enforced by DayCloseAccessGuard before rendering
@@ -29,12 +47,12 @@ import { useLocalStore } from '../hooks/useLocalStore';
 import { useLotteryDayBins } from '../hooks/useLottery';
 import { useIsLotteryMode } from '../hooks/usePOSConnectionType';
 import { ShiftClosingForm } from '../components/shifts/ShiftClosingForm';
-import {
-  prepareLotteryDayClose,
-  commitLotteryDayClose,
-  cancelLotteryDayClose,
-} from '../lib/api/lottery';
+import { cancelLotteryDayClose } from '../lib/api/lottery';
 import { useToast } from '../hooks/use-toast';
+
+// DRAFT-001: Draft-backed wizard architecture
+import { useCloseDraft, type CrashRecoveryInfo } from '../hooks/useCloseDraft';
+import type { LotteryPayload, BinScanData, StepState } from '../lib/transport';
 import {
   DayCloseModeScanner,
   type LotteryCloseResult,
@@ -72,6 +90,39 @@ import { ActivatedPacksSection } from '../components/lottery/ActivatedPacksSecti
 
 type WizardStep = 1 | 2 | 3;
 
+/**
+ * Map WizardStep to StepState for draft persistence
+ * @security DRAFT-001: Step state stored in draft for crash recovery
+ */
+function _wizardStepToStepState(step: WizardStep): StepState {
+  switch (step) {
+    case 1:
+      return 'LOTTERY';
+    case 2:
+      return 'REPORTS';
+    case 3:
+      return 'REVIEW';
+    default:
+      return 'LOTTERY';
+  }
+}
+
+/**
+ * Map StepState to WizardStep for crash recovery navigation
+ */
+function stepStateToWizardStep(stepState: StepState | null): WizardStep {
+  switch (stepState) {
+    case 'LOTTERY':
+      return 1;
+    case 'REPORTS':
+      return 2;
+    case 'REVIEW':
+      return 3;
+    default:
+      return 1;
+  }
+}
+
 interface WizardState {
   currentStep: WizardStep;
   // Step 1: Lottery data
@@ -81,7 +132,7 @@ interface WizardState {
   // Step 2: Report scanning data
   reportScanningData: ReportScanningState | null;
   // Step 3 uses shared state from shift-closing components
-  // Two-phase commit tracking
+  // Legacy two-phase commit tracking (kept for non-draft fallback)
   pendingLotteryDayId: string | null;
   pendingLotteryCloseExpiresAt: string | null;
   /**
@@ -161,6 +212,122 @@ function StepIndicator({
   );
 }
 
+// ============ CRASH RECOVERY DIALOG ============
+
+/**
+ * CrashRecoveryDialog Component
+ *
+ * Shown when an existing IN_PROGRESS draft is found on page load.
+ * Allows user to resume from where they left off or start fresh.
+ *
+ * @feature DRAFT-001: Crash recovery for wizard state
+ * @security SEC-010: Authorization context preserved in draft
+ */
+interface CrashRecoveryDialogProps {
+  open: boolean;
+  recoveryInfo: CrashRecoveryInfo | null;
+  onResume: () => void;
+  onDiscard: () => void;
+  isDiscarding: boolean;
+}
+
+function CrashRecoveryDialog({
+  open,
+  recoveryInfo,
+  onResume,
+  onDiscard,
+  isDiscarding,
+}: CrashRecoveryDialogProps) {
+  if (!recoveryInfo?.hasDraft || !recoveryInfo.draft) {
+    return null;
+  }
+
+  const lastUpdated = recoveryInfo.lastUpdated
+    ? new Date(recoveryInfo.lastUpdated).toLocaleString()
+    : 'Unknown';
+
+  const stepName =
+    recoveryInfo.stepState === 'LOTTERY'
+      ? 'Lottery Close (Step 1)'
+      : recoveryInfo.stepState === 'REPORTS'
+        ? 'Report Scanning (Step 2)'
+        : recoveryInfo.stepState === 'REVIEW'
+          ? 'Day Close (Step 3)'
+          : 'Step 1';
+
+  return (
+    <Dialog open={open} onOpenChange={() => {}}>
+      <DialogContent className="sm:max-w-md" onInteractOutside={(e) => e.preventDefault()}>
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <RotateCcw className="h-5 w-5 text-primary" />
+            Resume Previous Session?
+          </DialogTitle>
+          <DialogDescription>
+            You have an unfinished day close session from a previous visit.
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          <Card className="bg-muted/50">
+            <CardContent className="pt-4">
+              <dl className="space-y-2 text-sm">
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Last saved:</dt>
+                  <dd className="font-medium">{lastUpdated}</dd>
+                </div>
+                <div className="flex justify-between">
+                  <dt className="text-muted-foreground">Progress:</dt>
+                  <dd className="font-medium">{stepName}</dd>
+                </div>
+                {recoveryInfo.draft.payload.lottery && (
+                  <div className="flex justify-between">
+                    <dt className="text-muted-foreground">Bins scanned:</dt>
+                    <dd className="font-medium">
+                      {recoveryInfo.draft.payload.lottery.bins_scans.length} bin(s)
+                    </dd>
+                  </div>
+                )}
+              </dl>
+            </CardContent>
+          </Card>
+        </div>
+
+        <DialogFooter className="flex-col sm:flex-row gap-2">
+          <Button
+            variant="outline"
+            onClick={onDiscard}
+            disabled={isDiscarding}
+            className="w-full sm:w-auto"
+            data-testid="crash-recovery-discard-btn"
+          >
+            {isDiscarding ? (
+              <>
+                <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                Discarding...
+              </>
+            ) : (
+              <>
+                <X className="mr-2 h-4 w-4" />
+                Start Fresh
+              </>
+            )}
+          </Button>
+          <Button
+            onClick={onResume}
+            disabled={isDiscarding}
+            className="w-full sm:w-auto"
+            data-testid="crash-recovery-resume-btn"
+          >
+            <RotateCcw className="mr-2 h-4 w-4" />
+            Resume Session
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 // ============ MAIN COMPONENT ============
 
 export default function DayCloseWizardPage() {
@@ -185,7 +352,46 @@ export default function DayCloseWizardPage() {
   // Check if this is a LOTTERY-only POS type
   // Non-lottery POS types must use deferCommit mode for lottery close
   // (API blocks independent lottery close for non-LOTTERY POS types)
-  const isLotteryMode = useIsLotteryMode();
+  const _isLotteryMode = useIsLotteryMode();
+
+  // ========================================================================
+  // DRAFT-001: Draft-backed wizard hook
+  // SEC-010: All draft operations require authentication (backend enforced)
+  // DB-006: All draft operations store-scoped (backend enforced)
+  // ========================================================================
+  const {
+    draft,
+    payload: draftPayload,
+    isLoading: isDraftLoading,
+    isSaving: _isDraftSaving,
+    isFinalizing,
+    isDirty: hasDraftChanges,
+    error: draftError,
+    updateLottery,
+    updateStepState,
+    finalize: finalizeDraft,
+    save: saveDraft,
+    discard: discardDraft,
+    recoveryInfo,
+  } = useCloseDraft(shiftId, 'DAY_CLOSE');
+
+  // DEBUG: Log draft state changes
+  useEffect(() => {
+    console.debug('[DayClosePage] Draft state:', {
+      shiftId,
+      hasDraft: !!draft,
+      draftId: draft?.draft_id,
+      isDraftLoading,
+      draftError: draftError?.message,
+      payloadKeys: Object.keys(draftPayload),
+      hasLottery: !!draftPayload.lottery,
+    });
+  }, [shiftId, draft, isDraftLoading, draftError, draftPayload]);
+
+  // Crash recovery dialog state
+  const [showRecoveryDialog, setShowRecoveryDialog] = useState(false);
+  const [isDiscardingDraft, setIsDiscardingDraft] = useState(false);
+  const hasShownRecoveryDialog = useRef(false);
 
   // ============ LOCAL IPC DATA HOOKS ============
   // DB-006: All queries are store-scoped via backend handlers
@@ -335,6 +541,122 @@ export default function DayCloseWizardPage() {
     pendingClosings,
   } = wizardState;
 
+  // ============ DRAFT-001: CRASH RECOVERY ============
+  // Show recovery dialog when existing draft found on mount
+  useEffect(() => {
+    if (
+      recoveryInfo?.hasDraft &&
+      !hasShownRecoveryDialog.current &&
+      !isDraftLoading &&
+      !isLotteryAlreadyClosed
+    ) {
+      hasShownRecoveryDialog.current = true;
+      setShowRecoveryDialog(true);
+    }
+  }, [recoveryInfo, isDraftLoading, isLotteryAlreadyClosed]);
+
+  /**
+   * Handle crash recovery resume
+   * Restores wizard state from draft payload
+   */
+  const handleRecoveryResume = useCallback(() => {
+    if (!recoveryInfo?.draft) return;
+
+    const savedDraft = recoveryInfo.draft;
+    const savedStep = stepStateToWizardStep(savedDraft.step_state);
+
+    // Restore lottery data from draft payload
+    if (savedDraft.payload.lottery) {
+      const lotteryPayload = savedDraft.payload.lottery;
+
+      // Calculate lottery total from bins_scans
+      const lotteryTotal = lotteryPayload.totals.sales_amount;
+
+      // Convert bins_scans back to scannedBins format
+      const restoredScannedBins: ScannedBin[] = lotteryPayload.bins_scans.map((scan) => ({
+        bin_id: scan.bin_id,
+        bin_number: 0, // Will be resolved from dayBinsData
+        pack_id: scan.pack_id,
+        pack_number: '', // Will be resolved from dayBinsData
+        game_name: '', // Will be resolved from dayBinsData
+        closing_serial: scan.closing_serial,
+        is_sold_out: scan.is_sold_out,
+      }));
+
+      // Resolve bin details from current dayBinsData
+      if (dayBinsData?.bins) {
+        restoredScannedBins.forEach((scanned) => {
+          const bin = dayBinsData.bins.find((b) => b.bin_id === scanned.bin_id);
+          if (bin) {
+            scanned.bin_number = bin.bin_number;
+            if (bin.pack) {
+              scanned.pack_number = bin.pack.pack_number;
+              scanned.game_name = bin.pack.game_name;
+            }
+          }
+        });
+      }
+
+      setWizardState((prev) => ({
+        ...prev,
+        currentStep: savedStep,
+        lotteryCompleted: savedStep > 1,
+        lotteryData: {
+          closings_created: lotteryPayload.bins_scans.length,
+          business_date: savedDraft.business_date,
+          lottery_total: lotteryTotal,
+          bins_closed: [], // Will be populated if needed
+        },
+        scannedBins: restoredScannedBins,
+      }));
+
+      // Update sales breakdown with lottery total
+      setSalesBreakdownState((prev) => ({
+        ...prev,
+        reports: {
+          ...prev.reports,
+          scratchOff: lotteryTotal,
+        },
+      }));
+    } else {
+      // No lottery data - just navigate to saved step
+      setWizardState((prev) => ({
+        ...prev,
+        currentStep: savedStep,
+      }));
+    }
+
+    setShowRecoveryDialog(false);
+    toast({
+      title: 'Session Resumed',
+      description: 'Your previous day close session has been restored.',
+    });
+  }, [recoveryInfo, dayBinsData, toast]);
+
+  /**
+   * Handle crash recovery discard
+   * Expires the draft and starts fresh
+   */
+  const handleRecoveryDiscard = useCallback(async () => {
+    setIsDiscardingDraft(true);
+    try {
+      await discardDraft();
+      setShowRecoveryDialog(false);
+      toast({
+        title: 'Session Discarded',
+        description: 'Starting a fresh day close session.',
+      });
+    } catch {
+      toast({
+        title: 'Error',
+        description: 'Failed to discard previous session. Please try again.',
+        variant: 'destructive',
+      });
+    } finally {
+      setIsDiscardingDraft(false);
+    }
+  }, [discardDraft, toast]);
+
   // If lottery was already closed before wizard started, skip to step 2
   // and populate lotteryData from calculated values
   useEffect(() => {
@@ -365,25 +687,88 @@ export default function DayCloseWizardPage() {
   const reportScanningCompleted = reportScanningData !== null;
 
   // ============ STEP 1 HANDLERS ============
-  const handleLotterySuccess = useCallback((data: LotteryCloseResult) => {
-    setWizardState((prev) => ({
-      ...prev,
-      lotteryCompleted: true,
-      lotteryData: data,
-      currentStep: 2,
-      pendingLotteryDayId: data.day_id || null,
-      pendingLotteryCloseExpiresAt: data.pending_close_expires_at || null,
-    }));
 
-    setSalesBreakdownState((prev) => ({
-      ...prev,
-      reports: {
-        ...prev.reports,
-        scratchOff: data.lottery_total,
-      },
-    }));
-  }, []);
+  /**
+   * Convert scanned bins to LotteryPayload for draft storage
+   * @security SEC-006: Data sanitized before storage
+   */
+  const _convertScannedBinsToLotteryPayload = useCallback(
+    (
+      bins: ScannedBin[],
+      lotteryResult: LotteryCloseResult,
+      entryMethod: 'SCAN' | 'MANUAL',
+      authorizedBy?: string
+    ): LotteryPayload => {
+      const binScans: BinScanData[] = bins.map((bin) => ({
+        pack_id: bin.pack_id,
+        bin_id: bin.bin_id,
+        closing_serial: bin.closing_serial,
+        is_sold_out: bin.is_sold_out ?? false,
+        scanned_at: new Date().toISOString(),
+      }));
 
+      return {
+        bins_scans: binScans,
+        totals: {
+          tickets_sold: lotteryResult.bins_closed.reduce((sum, b) => sum + b.tickets_sold, 0),
+          sales_amount: lotteryResult.lottery_total,
+        },
+        entry_method: entryMethod,
+        authorized_by: authorizedBy,
+      };
+    },
+    []
+  );
+
+  /**
+   * Handle successful lottery close from Step 1
+   * DRAFT-001: Saves lottery data to draft for persistence
+   *
+   * In deferred mode (non-LOTTERY POS types), handlePendingClosings already
+   * saved the bin data with correct bin_id enrichment. We only need to update
+   * the totals here to avoid overwriting with stale data.
+   */
+  const handleLotterySuccess = useCallback(
+    (data: LotteryCloseResult) => {
+      // Update wizard state
+      setWizardState((prev) => ({
+        ...prev,
+        lotteryCompleted: true,
+        lotteryData: data,
+        currentStep: 2,
+        pendingLotteryDayId: data.day_id || null,
+        pendingLotteryCloseExpiresAt: data.pending_close_expires_at || null,
+      }));
+
+      setSalesBreakdownState((prev) => ({
+        ...prev,
+        reports: {
+          ...prev.reports,
+          scratchOff: data.lottery_total,
+        },
+      }));
+
+      // DRAFT-001: Lottery data is saved by handlePendingClosings (called before onSuccess)
+      // Now that deferCommit=true for ALL modes, handlePendingClosings handles saving
+      // We only update wizard state here, not draft data
+      console.debug(
+        '[DayClosePage] handleLotterySuccess: lottery data already saved by handlePendingClosings'
+      );
+
+      // Update step state in draft for crash recovery (only if draft exists)
+      if (draft) {
+        updateStepState('REPORTS').catch((err) => {
+          console.warn('[DayClosePage] Failed to update step state:', err);
+        });
+      }
+    },
+    [draft, updateStepState]
+  );
+
+  /**
+   * Handle scanned bins change from DayCloseModeScanner
+   * Updates local state (bins are saved to draft on lottery success)
+   */
   const handleScannedBinsChange = useCallback((bins: ScannedBin[]) => {
     setWizardState((prev) => ({
       ...prev,
@@ -395,13 +780,55 @@ export default function DayCloseWizardPage() {
    * Handle pending closings data from DayCloseModeScanner in deferred commit mode.
    * SEC-010: This data will be committed with fromWizard=true in Step 3.
    * Called when deferCommit=true (non-LOTTERY POS types).
+   * DRAFT-001: Also saves to draft for persistence
    */
-  const handlePendingClosings = useCallback((data: PendingClosingsData) => {
-    setWizardState((prev) => ({
-      ...prev,
-      pendingClosings: data,
-    }));
-  }, []);
+  const handlePendingClosings = useCallback(
+    (data: PendingClosingsData) => {
+      setWizardState((prev) => ({
+        ...prev,
+        pendingClosings: data,
+      }));
+
+      // DRAFT-001: Save pending closings lottery data to draft
+      // bin_id is now included directly in closings data (no lookup needed)
+      const binScans: BinScanData[] = data.closings.map((closing) => ({
+        pack_id: closing.pack_id,
+        bin_id: closing.bin_id || '', // Use bin_id directly from closing data
+        closing_serial: closing.closing_serial,
+        is_sold_out: closing.is_sold_out ?? false,
+        scanned_at: new Date().toISOString(),
+      }));
+
+      // Defensive logging: Warn if bin_id was not provided (should not happen after fix)
+      const missingBinIds = binScans.filter((s) => !s.bin_id);
+      if (missingBinIds.length > 0) {
+        console.warn('[DayClosePage] handlePendingClosings: bin_id missing from closings', {
+          totalScans: binScans.length,
+          missingCount: missingBinIds.length,
+          missingPackIds: missingBinIds.map((s) => s.pack_id),
+        });
+      }
+
+      // Use totals from data if provided, otherwise default to 0
+      const lotteryPayload: LotteryPayload = {
+        bins_scans: binScans,
+        totals: data.totals ?? {
+          tickets_sold: 0,
+          sales_amount: 0,
+        },
+        entry_method: data.entry_method,
+        authorized_by: data.authorized_by_user_id,
+      };
+
+      updateLottery(lotteryPayload);
+      console.debug('[DayClosePage] handlePendingClosings: saved lottery data', {
+        binsCount: binScans.length,
+        withBinIds: binScans.length - missingBinIds.length,
+        totals: lotteryPayload.totals,
+      });
+    },
+    [updateLottery]
+  );
 
   const handleLotteryCancel = useCallback(async () => {
     if (pendingLotteryDayId && storeId) {
@@ -415,43 +842,140 @@ export default function DayCloseWizardPage() {
   }, [pendingLotteryDayId, storeId, navigate]);
 
   // ============ STEP 2 HANDLERS ============
-  const handleReportScanningComplete = useCallback((data: ReportScanningState) => {
-    setWizardState((prev) => ({
-      ...prev,
-      reportScanningData: data,
-      currentStep: 3,
+
+  /**
+   * Handle report scanning complete
+   * DRAFT-001: Updates step state for crash recovery
+   */
+  const handleReportScanningComplete = useCallback(
+    (data: ReportScanningState) => {
+      setWizardState((prev) => ({
+        ...prev,
+        reportScanningData: data,
+        currentStep: 3,
+      }));
+
+      const totalLotteryCashes =
+        (data.lotteryReports?.instantCashes ?? 0) + (data.lotteryReports?.onlineCashes ?? 0);
+
+      setMoneyReceivedState((prev) => ({
+        ...prev,
+        reports: {
+          ...prev.reports,
+          lotteryPayouts: totalLotteryCashes,
+        },
+      }));
+
+      setSalesBreakdownState((prev) => ({
+        ...prev,
+        reports: {
+          ...prev.reports,
+          instantCashes: data.lotteryReports?.instantCashes ?? 0,
+          onlineLottery: data.lotteryReports?.onlineSales ?? 0,
+          onlineCashes: data.lotteryReports?.onlineCashes ?? 0,
+        },
+      }));
+
+      // DRAFT-001: Update step state for crash recovery (only if draft exists)
+      if (draft) {
+        updateStepState('REVIEW').catch((err) => {
+          console.warn('[DayClosePage] Failed to update step state:', err);
+        });
+      }
+    },
+    [draft, updateStepState]
+  );
+
+  /**
+   * Restore scannedBins from draft payload
+   * Used when navigating back to Step 1 or during crash recovery
+   * @returns Restored scannedBins array or empty array if no lottery data
+   */
+  const restoreScannedBinsFromDraft = useCallback((): ScannedBin[] => {
+    const lotteryPayload = draftPayload.lottery;
+    if (!lotteryPayload?.bins_scans?.length) {
+      return [];
+    }
+
+    // Convert bins_scans back to scannedBins format
+    const restoredBins: ScannedBin[] = lotteryPayload.bins_scans.map((scan) => ({
+      bin_id: scan.bin_id,
+      bin_number: 0, // Will be resolved from dayBinsData
+      pack_id: scan.pack_id,
+      pack_number: '', // Will be resolved from dayBinsData
+      game_name: '', // Will be resolved from dayBinsData
+      closing_serial: scan.closing_serial,
+      is_sold_out: scan.is_sold_out,
     }));
 
-    const totalLotteryCashes =
-      (data.lotteryReports?.instantCashes ?? 0) + (data.lotteryReports?.onlineCashes ?? 0);
+    // Resolve bin details from current dayBinsData
+    if (dayBinsData?.bins) {
+      restoredBins.forEach((scanned) => {
+        const bin = dayBinsData.bins.find((b) => b.bin_id === scanned.bin_id);
+        if (bin) {
+          scanned.bin_number = bin.bin_number;
+          if (bin.pack) {
+            scanned.pack_number = bin.pack.pack_number;
+            scanned.game_name = bin.pack.game_name;
+          }
+        }
+      });
+    }
 
-    setMoneyReceivedState((prev) => ({
-      ...prev,
-      reports: {
-        ...prev.reports,
-        lotteryPayouts: totalLotteryCashes,
-      },
-    }));
+    return restoredBins;
+  }, [draftPayload.lottery, dayBinsData]);
 
-    setSalesBreakdownState((prev) => ({
-      ...prev,
-      reports: {
-        ...prev.reports,
-        instantCashes: data.lotteryReports?.instantCashes ?? 0,
-        onlineLottery: data.lotteryReports?.onlineSales ?? 0,
-        onlineCashes: data.lotteryReports?.onlineCashes ?? 0,
-      },
-    }));
-  }, []);
+  /**
+   * Compute initial manual ending values from draft payload
+   * DRAFT-001: Used to restore manual entry values when navigating back to Step 1
+   * This is separate from scannedBins - manual entries are stored by bin_id
+   */
+  const initialManualEndingValues = useMemo((): Record<string, string> => {
+    const lotteryPayload = draftPayload.lottery;
+    if (!lotteryPayload?.bins_scans?.length) {
+      return {};
+    }
 
+    const values: Record<string, string> = {};
+    lotteryPayload.bins_scans.forEach((scan) => {
+      if (scan.bin_id && scan.closing_serial) {
+        values[scan.bin_id] = scan.closing_serial;
+      }
+    });
+
+    console.debug('[DayClosePage] initialManualEndingValues computed', {
+      binCount: Object.keys(values).length,
+      values,
+      hasDraftLottery: !!lotteryPayload,
+      binsScansCount: lotteryPayload?.bins_scans?.length ?? 0,
+    });
+
+    return values;
+  }, [draftPayload.lottery]);
+
+  /**
+   * Handle back navigation from Step 2
+   * DRAFT-001: Restores scannedBins from draft and updates step state
+   */
   const handleReportScanningBack = useCallback(() => {
     if (!isLotteryAlreadyClosed) {
+      // Restore scannedBins from draft before showing Step 1
+      const restoredBins = restoreScannedBinsFromDraft();
+
       setWizardState((prev) => ({
         ...prev,
         currentStep: 1,
+        scannedBins: restoredBins,
       }));
+
+      // DRAFT-001: Update step state for crash recovery (only if draft exists)
+      if (draft) {
+        updateStepState('LOTTERY').catch((err) => {
+          console.warn('[DayClosePage] Failed to update step state:', err);
+        });
+      }
     }
-  }, [isLotteryAlreadyClosed]);
+  }, [isLotteryAlreadyClosed, restoreScannedBinsFromDraft, draft, updateStepState]);
 
   // ============ STEP 3 HANDLERS ============
   const handleMoneyReportsChange = useCallback((changes: Partial<MoneyReceivedReportsState>) => {
@@ -483,7 +1007,86 @@ export default function DayCloseWizardPage() {
     }));
   }, []);
 
-  const handleOpenShiftClosingForm = useCallback(async () => {
+  // ========================================================================
+  // DRAFT-001: Closing Cash Dialog State
+  // For draft-based finalization, we collect closing_cash then call draft.finalize()
+  // ========================================================================
+  const [showClosingCashDialog, setShowClosingCashDialog] = useState(false);
+  const [closingCashInput, setClosingCashInput] = useState('');
+  const closingCashInputRef = useRef<HTMLInputElement>(null);
+
+  /**
+   * Parse and validate closing cash input
+   * @security SEC-014: Input validation with sanitization
+   */
+  const parseClosingCash = useCallback((value: string): number => {
+    const cleaned = value.replace(/[^0-9.]/g, '');
+    const parsed = parseFloat(cleaned);
+    return isNaN(parsed) || parsed < 0 ? 0 : parsed;
+  }, []);
+
+  /**
+   * Open the closing cash dialog for draft-based finalization
+   * DRAFT-001: Draft.finalize() handles lottery + shift close atomically
+   */
+  const handleOpenClosingCashDialog = useCallback(async () => {
+    // Save any pending changes to draft before showing dialog
+    try {
+      await saveDraft();
+    } catch (err) {
+      console.warn('[DayClosePage] Failed to save draft before finalize:', err);
+    }
+
+    setClosingCashInput('');
+    setShowClosingCashDialog(true);
+
+    // Focus input after dialog opens
+    setTimeout(() => {
+      closingCashInputRef.current?.focus();
+    }, 100);
+  }, [saveDraft]);
+
+  /**
+   * Handle draft finalization with closing cash
+   * DRAFT-001: Atomically closes lottery day and shift via draft.finalize()
+   * @security SEC-010: Backend validates authorization
+   * @security DB-006: Backend validates store ownership
+   */
+  const handleDraftFinalize = useCallback(async () => {
+    const closingCash = parseClosingCash(closingCashInput);
+
+    setIsCommittingLottery(true);
+    try {
+      const result = await finalizeDraft(closingCash);
+
+      if (result.success) {
+        toast({
+          title: 'Day Closed Successfully',
+          description: `Lottery and shift closed. ${result.lottery_result?.closings_created ?? 0} pack(s) recorded.`,
+        });
+
+        setShowClosingCashDialog(false);
+        navigate('/mystore');
+      } else {
+        throw new Error('Failed to finalize day close');
+      }
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : 'Failed to finalize day close';
+      toast({
+        title: 'Error',
+        description: errorMessage,
+        variant: 'destructive',
+      });
+    } finally {
+      setIsCommittingLottery(false);
+    }
+  }, [closingCashInput, parseClosingCash, finalizeDraft, toast, navigate]);
+
+  /**
+   * Legacy handler for non-draft mode (backward compatibility)
+   * Opens ShiftClosingForm after committing lottery separately
+   */
+  const _handleOpenShiftClosingFormLegacy = useCallback(async () => {
     // ========================================================================
     // Case 1: LOTTERY POS type - immediate commit (pendingLotteryDayId exists)
     // The scanner already called prepareDayClose, we just need to commit
@@ -491,7 +1094,8 @@ export default function DayCloseWizardPage() {
     if (pendingLotteryDayId && storeId) {
       setIsCommittingLottery(true);
       try {
-        // Pass day_id from prepare response to commit
+        // Import needed for legacy mode
+        const { commitLotteryDayClose } = await import('../lib/api/lottery');
         const result = await commitLotteryDayClose({ day_id: pendingLotteryDayId });
 
         if (result.success) {
@@ -530,8 +1134,9 @@ export default function DayCloseWizardPage() {
     if (pendingClosings && !pendingLotteryDayId && storeId) {
       setIsCommittingLottery(true);
       try {
-        // Phase 1: Prepare - validates and stores pending data
-        // SEC-010: fromWizard=true allows non-LOTTERY POS types
+        const { prepareLotteryDayClose, commitLotteryDayClose } =
+          await import('../lib/api/lottery');
+
         const prepareResult = await prepareLotteryDayClose({
           closings: pendingClosings.closings,
           fromWizard: true,
@@ -543,9 +1148,6 @@ export default function DayCloseWizardPage() {
 
         const dayId = prepareResult.data.day_id;
 
-        // Phase 2: Commit - applies settlements, sets CLOSED status
-        // SEC-010: fromWizard=true allows non-LOTTERY POS types
-        // BIZ-007: Backend auto-opens next day after successful commit
         const commitResult = await commitLotteryDayClose({
           day_id: dayId,
           fromWizard: true,
@@ -580,6 +1182,48 @@ export default function DayCloseWizardPage() {
 
     setShiftClosingFormOpen(true);
   }, [pendingLotteryDayId, pendingClosings, storeId, toast]);
+
+  /**
+   * DRAFT-001: Always use draft-based finalization.
+   * Legacy flow has been removed - draft is the only path.
+   */
+  const handleOpenShiftClosingForm = useCallback(async () => {
+    console.debug('[DayClosePage] handleOpenShiftClosingForm', {
+      hasDraft: !!draft,
+      draftId: draft?.draft_id,
+      hasLotteryPayload: !!draftPayload.lottery,
+      binsCount: draftPayload.lottery?.bins_scans?.length ?? 0,
+    });
+
+    // Draft must exist
+    if (!draft) {
+      console.error('[DayClosePage] Draft not loaded');
+      toast({
+        title: 'Unable to Close',
+        description: 'Draft not ready. Please wait a moment and try again.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // Lottery data must exist in draft
+    if (!draftPayload.lottery || !draftPayload.lottery.bins_scans?.length) {
+      console.error('[DayClosePage] Lottery data missing from draft', {
+        hasLotteryPayload: !!draftPayload.lottery,
+        binsCount: draftPayload.lottery?.bins_scans?.length ?? 0,
+      });
+      toast({
+        title: 'Unable to Close',
+        description:
+          'Lottery data not found. Please go back to Step 1 and complete the lottery scan.',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    // All good - show cash dialog (finalization happens when user confirms)
+    await handleOpenClosingCashDialog();
+  }, [draft, draftPayload.lottery, handleOpenClosingCashDialog, toast]);
 
   const handleShiftClosingSuccess = useCallback(() => {
     setShiftClosingFormOpen(false);
@@ -616,7 +1260,8 @@ export default function DayCloseWizardPage() {
   // ============ CLEANUP ON PAGE UNLOAD ============
   useEffect(() => {
     const handleBeforeUnload = (e: BeforeUnloadEvent) => {
-      if (pendingLotteryDayId && storeId) {
+      // DRAFT-001: Check if draft has unsaved changes
+      if (hasDraftChanges || pendingLotteryDayId) {
         e.preventDefault();
         e.returnValue = 'You have unsaved changes. Are you sure you want to leave?';
         return e.returnValue;
@@ -627,13 +1272,13 @@ export default function DayCloseWizardPage() {
     return () => {
       window.removeEventListener('beforeunload', handleBeforeUnload);
     };
-  }, [pendingLotteryDayId, storeId]);
+  }, [hasDraftChanges, pendingLotteryDayId]);
 
   // ============ LOADING STATE ============
   // Local IPC hooks - no cloud auth/dashboard loading
   // Note: Shift/terminal/cashier data comes from context (DayCloseAccessGuard)
-  // Only store config and lottery bins need loading checks
-  if (storeLoading || dayBinsLoading) {
+  // DRAFT-001: Also wait for draft to load before rendering
+  if (storeLoading || dayBinsLoading || isDraftLoading) {
     return (
       <div
         className="flex items-center justify-center min-h-[400px]"
@@ -770,8 +1415,9 @@ export default function DayCloseWizardPage() {
               depletedPacks={dayBinsData?.depleted_packs}
               activatedPacks={dayBinsData?.activated_packs}
               openBusinessPeriod={dayBinsData?.open_business_period}
-              deferCommit={!isLotteryMode}
+              deferCommit={true}
               onPendingClosings={handlePendingClosings}
+              initialManualEndingValues={initialManualEndingValues}
             />
           </div>
         )}
@@ -785,6 +1431,7 @@ export default function DayCloseWizardPage() {
               onBack={handleReportScanningBack}
               canGoBack={!isLotteryAlreadyClosed}
               initialData={reportScanningData}
+              instantSalesFromDraft={draftPayload.lottery?.totals.sales_amount}
             />
           </div>
         )}
@@ -920,7 +1567,7 @@ export default function DayCloseWizardPage() {
               </CardContent>
             </Card>
 
-            {/* Shift Closing Form Modal */}
+            {/* Shift Closing Form Modal (Legacy Mode) */}
             {/* SEC-010: Pass preAuthorizedOverride when user came from guard with manager role */}
             {shiftId && (
               <ShiftClosingForm
@@ -932,9 +1579,92 @@ export default function DayCloseWizardPage() {
                 preAuthorizedOverride={accessType === 'OVERRIDE'}
               />
             )}
+
+            {/* DRAFT-001: Closing Cash Dialog for Draft-Based Finalization */}
+            <Dialog open={showClosingCashDialog} onOpenChange={setShowClosingCashDialog}>
+              <DialogContent className="sm:max-w-md">
+                <DialogHeader>
+                  <DialogTitle className="flex items-center gap-2">
+                    <CalendarCheck className="h-5 w-5 text-green-600" />
+                    Complete Day Close
+                  </DialogTitle>
+                  <DialogDescription>
+                    Enter the closing cash amount to finalize the day close. This will close both
+                    the lottery day and the shift atomically.
+                  </DialogDescription>
+                </DialogHeader>
+
+                <div className="py-4">
+                  <label htmlFor="closing-cash-input" className="block text-sm font-medium mb-2">
+                    Closing Cash Amount
+                  </label>
+                  <div className="relative">
+                    <span className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground">
+                      $
+                    </span>
+                    <Input
+                      ref={closingCashInputRef}
+                      id="closing-cash-input"
+                      type="text"
+                      inputMode="decimal"
+                      value={closingCashInput}
+                      onChange={(e) => setClosingCashInput(e.target.value)}
+                      placeholder="0.00"
+                      className="pl-8 font-mono text-lg"
+                      data-testid="closing-cash-input"
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && !isFinalizing) {
+                          handleDraftFinalize();
+                        }
+                      }}
+                    />
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-2">
+                    Count all cash in the drawer and enter the total amount.
+                  </p>
+                </div>
+
+                <DialogFooter>
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowClosingCashDialog(false)}
+                    disabled={isFinalizing}
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    onClick={handleDraftFinalize}
+                    disabled={isFinalizing}
+                    className="bg-green-600 hover:bg-green-700 text-white"
+                    data-testid="finalize-day-close-btn"
+                  >
+                    {isFinalizing ? (
+                      <>
+                        <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                        Finalizing...
+                      </>
+                    ) : (
+                      <>
+                        <Check className="mr-2 h-4 w-4" />
+                        Finalize Day Close
+                      </>
+                    )}
+                  </Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         )}
       </main>
+
+      {/* DRAFT-001: Crash Recovery Dialog */}
+      <CrashRecoveryDialog
+        open={showRecoveryDialog}
+        recoveryInfo={recoveryInfo}
+        onResume={handleRecoveryResume}
+        onDiscard={handleRecoveryDiscard}
+        isDiscarding={isDiscardingDraft}
+      />
     </div>
   );
 }

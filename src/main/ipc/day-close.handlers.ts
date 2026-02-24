@@ -13,7 +13,7 @@
  */
 
 import { z } from 'zod';
-import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
+import { registerHandler, createErrorResponse, IPCErrorCodes, setCurrentUser } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import {
   checkAccess,
@@ -101,6 +101,21 @@ registerHandler<DayCloseAccessResult | ReturnType<typeof createErrorResponse>>(
       // SEC-006 & DB-006: Service uses DAL with parameterized, store-scoped queries
       // SEC-017: Service logs all access attempts
       const result = await checkAccess(store.store_id, input);
+
+      // Establish session on successful access
+      // This enables subsequent draft IPC calls that require authentication
+      if (result.allowed && result.user) {
+        setCurrentUser({
+          user_id: result.user.userId,
+          username: result.user.name,
+          role: result.user.role,
+          store_id: store.store_id,
+        });
+        log.info('Session established via day close access', {
+          userId: result.user.userId,
+          role: result.user.role,
+        });
+      }
 
       // Return full result - service already handles all business logic
       return result;

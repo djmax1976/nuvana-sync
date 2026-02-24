@@ -878,23 +878,33 @@ export class SettingsService {
       }
 
       // =========================================================================
-      // MANUAL Mode: Sync pre-configured registers from cloud
+      // Register Sync and POS Config Application
       // DB-006: Store-scoped register operations
       // SEC-014: Registers already validated via CloudRegisterSchema in cloud-api.service
       //
-      // Register sync is non-blocking: failures are logged but do not
-      // prevent API key setup or resync from completing successfully.
+      // Two scenarios:
+      // 1. MANUAL mode: Cloud provides registers - sync them with POS config
+      // 2. FILE/API mode: No cloud registers - apply POS config to existing terminals
+      //
+      // Non-blocking: failures are logged but do not prevent setup/resync.
       // =========================================================================
+      const storeId = this.configStore.get('storeId') as string | undefined;
+
       if (validation.registers && validation.registers.length > 0) {
+        // MANUAL mode: Sync registers from cloud with POS config
         try {
-          const storeId = this.configStore.get('storeId') as string | undefined;
           if (storeId) {
-            const syncResult = this.syncRegistersFromCloud(storeId, validation.registers);
+            const syncResult = this.syncRegistersFromCloud(
+              storeId,
+              validation.registers,
+              validation.posConnectionConfig ?? null
+            );
             log.info('Cloud register sync completed', {
               storeId,
               registerCount: validation.registers.length,
               created: syncResult.created,
               updated: syncResult.updated,
+              posConfigApplied: syncResult.posConfigApplied,
             });
           } else {
             log.warn('Cannot sync registers from cloud: storeId not available in config store');
@@ -903,7 +913,24 @@ export class SettingsService {
           log.error('Failed to sync registers from cloud', {
             error: registerError instanceof Error ? registerError.message : String(registerError),
           });
-          // Non-blocking: do not fail API key setup/resync on register sync failure
+        }
+      } else if (validation.posConnectionConfig && storeId) {
+        // FILE/API mode: No cloud registers, but apply POS config to existing terminals
+        try {
+          const appliedCount = this.applyPOSConfigToExistingTerminals(
+            storeId,
+            validation.posConnectionConfig
+          );
+          log.info('Applied POS config to existing terminals', {
+            storeId,
+            posType: validation.posConnectionConfig.pos_type,
+            connectionType: validation.posConnectionConfig.pos_connection_type,
+            terminalsUpdated: appliedCount,
+          });
+        } catch (configError) {
+          log.error('Failed to apply POS config to existing terminals', {
+            error: configError instanceof Error ? configError.message : String(configError),
+          });
         }
       }
 
@@ -939,23 +966,43 @@ export class SettingsService {
    * For each register from the cloud:
    * - If it already exists locally (matched by store_id + external_register_id): update it
    * - If it does not exist locally: create it via getOrCreate
+   * - Apply store-level POS config to each terminal (pos_type, connection_type, connection_config)
    *
    * @security DB-006: Store-scoped operations — storeId passed to all DAL calls
    * @security SEC-006: All DAL methods use parameterized queries
    *
    * @param storeId - Store ID for tenant isolation
    * @param registers - Register definitions from cloud response
-   * @returns Counts of created and updated registers
+   * @param posConnectionConfig - Store-level POS config to apply to terminals (optional)
+   * @returns Counts of created, updated, and POS-configured registers
    */
   private syncRegistersFromCloud(
     storeId: string,
-    registers: CloudRegister[]
-  ): { created: number; updated: number; deactivated: number; total: number } {
+    registers: CloudRegister[],
+    posConnectionConfig: POSConnectionConfig | null
+  ): {
+    created: number;
+    updated: number;
+    deactivated: number;
+    total: number;
+    posConfigApplied: number;
+  } {
     let created = 0;
     let updated = 0;
+    let posConfigApplied = 0;
 
     // Track which external IDs are in the current cloud response
     const activeExternalIds = new Set<string>();
+
+    // Extract POS config fields if available
+    // SEC-006: These values will be bound as parameters in DAL methods
+    const posType = posConnectionConfig?.pos_type ?? null;
+    const connectionType = posConnectionConfig?.pos_connection_type ?? null;
+    const connectionConfig = posConnectionConfig?.pos_connection_config
+      ? JSON.stringify(posConnectionConfig.pos_connection_config)
+      : null;
+
+    const hasPosConfig = posType !== null && connectionType !== null;
 
     for (const register of registers) {
       activeExternalIds.add(register.external_register_id);
@@ -975,14 +1022,47 @@ export class SettingsService {
           active: register.active ? 1 : 0,
         });
         updated++;
+
+        // Apply POS config to existing terminal if available
+        // DB-006: updatePOSConfig enforces store_id in WHERE clause
+        if (hasPosConfig) {
+          try {
+            posTerminalMappingsDAL.updatePOSConfig(storeId, existing.id, {
+              pos_type: posType!,
+              connection_type: connectionType!,
+              connection_config: connectionConfig,
+            });
+            posConfigApplied++;
+          } catch (error) {
+            log.warn('Failed to apply POS config to existing terminal', {
+              storeId,
+              terminalId: existing.id,
+              externalRegisterId: register.external_register_id,
+              error: error instanceof Error ? error.message : String(error),
+            });
+          }
+        }
       } else {
-        // Create new mapping
-        posTerminalMappingsDAL.getOrCreate(storeId, register.external_register_id, {
-          terminalType: register.terminal_type,
-          description: register.description ?? undefined,
-          posSystemType: 'generic',
-        });
+        // Create new mapping with POS config if available
+        const newTerminal = posTerminalMappingsDAL.getOrCreate(
+          storeId,
+          register.external_register_id,
+          {
+            terminalType: register.terminal_type,
+            description: register.description ?? undefined,
+            posSystemType: 'generic',
+            // Pass POS config fields to getOrCreate
+            pos_type: posType ?? undefined,
+            connection_type: connectionType ?? undefined,
+            connection_config: connectionConfig ?? undefined,
+          }
+        );
         created++;
+
+        // Count as POS config applied if we passed valid config
+        if (hasPosConfig && newTerminal) {
+          posConfigApplied++;
+        }
       }
     }
 
@@ -999,10 +1079,63 @@ export class SettingsService {
       created,
       updated,
       deactivated,
+      posConfigApplied,
       total: registers.length,
+      hasPosConfig,
     });
 
-    return { created, updated, deactivated, total: registers.length };
+    return { created, updated, deactivated, total: registers.length, posConfigApplied };
+  }
+
+  /**
+   * Apply POS configuration to all existing terminals for a store.
+   * Used for FILE/API mode stores where terminals are discovered from POS data,
+   * not from cloud-provided registers.
+   *
+   * @security DB-006: Store-scoped operations via storeId
+   * @security SEC-006: All DAL methods use parameterized queries
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param posConnectionConfig - Store-level POS config to apply
+   * @returns Number of terminals updated
+   */
+  private applyPOSConfigToExistingTerminals(
+    storeId: string,
+    posConnectionConfig: POSConnectionConfig
+  ): number {
+    // Extract POS config fields
+    const posType = posConnectionConfig.pos_type;
+    const connectionType = posConnectionConfig.pos_connection_type;
+    const connectionConfig = posConnectionConfig.pos_connection_config
+      ? JSON.stringify(posConnectionConfig.pos_connection_config)
+      : null;
+
+    // Get all active terminals for this store
+    // DB-006: findAllActive is store-scoped
+    const terminals = posTerminalMappingsDAL.findAllActive(storeId);
+
+    let updatedCount = 0;
+
+    for (const terminal of terminals) {
+      try {
+        // DB-006: updatePOSConfig enforces store_id in WHERE clause
+        posTerminalMappingsDAL.updatePOSConfig(storeId, terminal.id, {
+          pos_type: posType,
+          connection_type: connectionType,
+          connection_config: connectionConfig,
+        });
+        updatedCount++;
+      } catch (error) {
+        log.warn('Failed to apply POS config to terminal', {
+          storeId,
+          terminalId: terminal.id,
+          externalRegisterId: terminal.external_register_id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    }
+
+    return updatedCount;
   }
 
   /**

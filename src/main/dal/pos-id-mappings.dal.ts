@@ -11,15 +11,27 @@
 
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
+import type {
+  POSSystemType as EnterprisePOSSystemType,
+  POSConnectionType,
+} from '../../shared/types/config.types';
 
 // ============================================================================
 // Types
 // ============================================================================
 
 /**
- * Supported POS system types
+ * Parser-level POS system types (used during XML/data parsing)
+ * These are the vendor identifiers used when processing POS data files.
+ * Different from EnterprisePOSSystemType which is the cloud schema enum.
  */
-export type POSSystemType = 'gilbarco' | 'verifone' | 'wayne' | 'generic';
+export type POSParserSystemType = 'gilbarco' | 'verifone' | 'wayne' | 'generic';
+
+/**
+ * Re-export for backward compatibility
+ * @deprecated Use POSParserSystemType for parser code, EnterprisePOSSystemType for cloud sync
+ */
+export type POSSystemType = POSParserSystemType;
 
 /**
  * Terminal types for register mapping
@@ -85,12 +97,81 @@ export interface POSCashierMapping extends BaseMappingEntity {
 
 /**
  * Terminal/Register ID mapping
+ *
+ * Includes POS connection configuration fields that match the cloud POSTerminal model.
+ * Each terminal can have its own connection configuration (e.g., different API keys,
+ * different file paths, etc.)
+ *
+ * @security DB-006: Store-scoped via store_id
  */
 export interface POSTerminalMapping extends BaseMappingEntity {
   external_register_id: string;
   terminal_type: TerminalType;
   description: string | null;
   active: number;
+  /**
+   * Enterprise POS system type - matches cloud POSTerminal.pos_type
+   * NULL indicates not yet configured (defaults to legacy pos_system_type behavior)
+   */
+  pos_type: EnterprisePOSSystemType | null;
+  /**
+   * Connection type - how the desktop app connects to this terminal
+   * NULL indicates not yet configured (defaults to MANUAL behavior)
+   */
+  connection_type: POSConnectionType | null;
+  /**
+   * Connection configuration - JSON string with connection-specific settings
+   * Structure depends on connection_type. NULL is valid for MANUAL connection type.
+   */
+  connection_config: string | null;
+}
+
+/**
+ * POS configuration data for terminal updates
+ *
+ * @security SEC-014: Validated via Zod schemas before persistence
+ * @security SEC-006: Stored via parameterized queries
+ */
+export interface TerminalPOSConfigData {
+  /**
+   * Enterprise POS system type - MANDATORY
+   * Must be a valid EnterprisePOSSystemType enum value
+   */
+  pos_type: EnterprisePOSSystemType;
+  /**
+   * Connection type - MANDATORY
+   * Must be a valid POSConnectionType enum value
+   */
+  connection_type: POSConnectionType;
+  /**
+   * Connection configuration - JSON string or null
+   * NULL is valid for MANUAL connection type
+   * Must be valid JSON when provided
+   */
+  connection_config: string | null;
+}
+
+/**
+ * POS configuration result returned by getTerminalPOSConfig
+ */
+export interface TerminalPOSConfigResult {
+  pos_type: EnterprisePOSSystemType;
+  connection_type: POSConnectionType;
+  connection_config: string | null;
+}
+
+/**
+ * Configuration error for missing or invalid POS configuration
+ * Used for fail-fast behavior when POS config is incomplete
+ */
+export class TerminalPOSConfigurationError extends Error {
+  constructor(
+    message: string,
+    public readonly code: 'NOT_CONFIGURED' | 'INCOMPLETE' | 'INVALID_JSON' | 'TERMINAL_NOT_FOUND'
+  ) {
+    super(message);
+    this.name = 'TerminalPOSConfigurationError';
+  }
 }
 
 /**
@@ -341,7 +422,7 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
    *
    * @param storeId - Internal store UUID
    * @param externalRegisterId - External POS register ID
-   * @param options - Optional additional data
+   * @param options - Optional additional data including POS configuration
    * @returns Mapping with internal ID
    */
   getOrCreate(
@@ -350,10 +431,19 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
     options?: {
       terminalType?: TerminalType;
       description?: string;
-      posSystemType?: POSSystemType;
+      posSystemType?: POSParserSystemType;
+      /** Source context for logging - helps trace where terminals come from */
+      source?: string;
+      /** Enterprise POS type (cloud schema) */
+      pos_type?: EnterprisePOSSystemType;
+      /** Connection type (cloud schema) */
+      connection_type?: POSConnectionType;
+      /** Connection config JSON string (cloud schema) */
+      connection_config?: string | null;
     }
   ): POSTerminalMapping {
     const posSystemType = options?.posSystemType || 'gilbarco';
+    const source = options?.source || 'unknown';
 
     // SEC-006: Parameterized lookup
     const existing = this.findByExternalId(storeId, externalRegisterId, posSystemType);
@@ -372,12 +462,13 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
     const id = this.generateId();
     const now = this.now();
 
-    // SEC-006: Parameterized INSERT
+    // SEC-006: Parameterized INSERT with all columns including POS config (v055)
     const stmt = this.db.prepare(`
       INSERT INTO pos_terminal_mappings (
         id, store_id, external_register_id, terminal_type,
-        description, pos_system_type, active, created_at, updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?)
+        description, pos_system_type, active, created_at, updated_at,
+        pos_type, connection_type, connection_config
+      ) VALUES (?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)
     `);
 
     stmt.run(
@@ -388,7 +479,10 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
       options?.description || null,
       posSystemType,
       now,
-      now
+      now,
+      options?.pos_type || null,
+      options?.connection_type || null,
+      options?.connection_config ?? null
     );
 
     log.info('Created terminal mapping', {
@@ -397,6 +491,7 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
       externalRegisterId,
       terminalType,
       posSystemType,
+      source,
     });
 
     const created = this.findById(id);
@@ -424,11 +519,39 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
   }
 
   /**
+   * Find mapping by external register ID across ALL pos_system_type values.
+   *
+   * Use this for idempotent operations (backfill migrations) where the terminal
+   * may already exist with ANY pos_system_type (e.g., 'generic' from cloud sync
+   * or 'gilbarco' from file parsing).
+   *
+   * @security SEC-006: Parameterized query with bound parameters
+   * @security DB-006: Store-scoped for tenant isolation
+   * @idempotency CRON-001: Prevents duplicate creation regardless of pos_system_type
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param externalRegisterId - External register ID to look up
+   * @returns First matching terminal mapping or undefined
+   */
+  findByExternalIdAnyType(
+    storeId: string,
+    externalRegisterId: string
+  ): POSTerminalMapping | undefined {
+    // SEC-006: Parameterized query - no string interpolation
+    const stmt = this.db.prepare(`
+      SELECT * FROM pos_terminal_mappings
+      WHERE store_id = ? AND external_register_id = ?
+      ORDER BY created_at ASC
+      LIMIT 1
+    `);
+    return stmt.get(storeId, externalRegisterId) as POSTerminalMapping | undefined;
+  }
+
+  /**
    * Update an existing terminal mapping.
    *
    * Builds a dynamic SET clause from non-undefined fields only.
-   * Column names are from a compile-time fixed allowlist (TerminalType, description, active),
-   * not from user input — no SQL injection risk in the SET clause.
+   * Column names are from a compile-time fixed allowlist, not from user input — no SQL injection risk.
    *
    * @security DB-006: Store-scoped via existing record lookup (callers use findByExternalId first)
    * @security SEC-006: Prepared statement with parameter binding for all values
@@ -443,6 +566,9 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
       terminal_type: TerminalType;
       description: string | null;
       active: number;
+      pos_type: EnterprisePOSSystemType | null;
+      connection_type: POSConnectionType | null;
+      connection_config: string | null;
     }>
   ): POSTerminalMapping | undefined {
     // SEC-006: Build parameterized SET clause from fixed allowlist of column names
@@ -450,6 +576,12 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
     if (updates.terminal_type !== undefined) fields.push(['terminal_type', updates.terminal_type]);
     if (updates.description !== undefined) fields.push(['description', updates.description]);
     if (updates.active !== undefined) fields.push(['active', updates.active]);
+    // POS Configuration fields (v055)
+    if (updates.pos_type !== undefined) fields.push(['pos_type', updates.pos_type]);
+    if (updates.connection_type !== undefined)
+      fields.push(['connection_type', updates.connection_type]);
+    if (updates.connection_config !== undefined)
+      fields.push(['connection_config', updates.connection_config]);
 
     // No fields to update — return existing record unchanged
     if (fields.length === 0) {
@@ -816,13 +948,19 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
       const externalRegisterId = row.reg_id;
       if (!externalRegisterId) continue;
 
-      // Check if mapping already exists
-      const existingMapping = this.findByExternalId(storeId, externalRegisterId);
+      // CRON-001: Use type-agnostic lookup to prevent duplicates.
+      // Terminals may exist with ANY pos_system_type:
+      // - 'generic' from cloud sync (MANUAL_ENTRY stores)
+      // - 'gilbarco' from file parsing (FILE-based stores)
+      const existingMapping = this.findByExternalIdAnyType(storeId, externalRegisterId);
       if (existingMapping) {
         existing++;
       } else {
-        // Create new mapping
-        this.getOrCreate(storeId, externalRegisterId);
+        // Create new mapping for FILE-based stores only
+        // Note: For MANUAL stores, terminals come from cloud sync, not backfill
+        this.getOrCreate(storeId, externalRegisterId, {
+          source: 'startup:backfillFromShifts',
+        });
         created++;
       }
     }
@@ -835,6 +973,291 @@ export class POSTerminalMappingsDAL extends StoreBasedDAL<POSTerminalMapping> {
     });
 
     return { created, existing, total: rows.length };
+  }
+
+  // ============================================================================
+  // POS Configuration Methods (v055)
+  // ============================================================================
+
+  /**
+   * Update POS configuration for a terminal
+   *
+   * @security SEC-006: Uses parameterized UPDATE statement
+   * @security DB-006: Validates terminal belongs to store before update
+   * @security API-001: Input should be pre-validated via Zod schemas
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param terminalId - Terminal mapping ID to update
+   * @param posConfig - POS configuration data
+   * @returns Updated terminal record
+   * @throws TerminalPOSConfigurationError if terminal not found or wrong store
+   */
+  updatePOSConfig(
+    storeId: string,
+    terminalId: string,
+    posConfig: TerminalPOSConfigData
+  ): POSTerminalMapping {
+    // DB-006: Verify terminal exists and belongs to this store
+    const existing = this.findByIdForStore(storeId, terminalId);
+    if (!existing) {
+      throw new TerminalPOSConfigurationError(
+        `Terminal not found or does not belong to store: ${terminalId}`,
+        'TERMINAL_NOT_FOUND'
+      );
+    }
+
+    const now = this.now();
+
+    // SEC-006: Parameterized UPDATE statement
+    // All three POS config fields updated atomically
+    const stmt = this.db.prepare(`
+      UPDATE pos_terminal_mappings
+      SET pos_type = ?,
+          connection_type = ?,
+          connection_config = ?,
+          updated_at = ?
+      WHERE id = ? AND store_id = ?
+    `);
+
+    const result = stmt.run(
+      posConfig.pos_type,
+      posConfig.connection_type,
+      posConfig.connection_config,
+      now,
+      terminalId,
+      storeId
+    );
+
+    if (result.changes === 0) {
+      // This shouldn't happen since we verified terminal exists above
+      throw new Error(`Failed to update POS config for terminal: ${terminalId}`);
+    }
+
+    log.info('Terminal POS config updated', {
+      storeId,
+      terminalId,
+      posType: posConfig.pos_type,
+      connectionType: posConfig.connection_type,
+      hasConnectionConfig: posConfig.connection_config !== null,
+    });
+
+    // Return the updated record
+    const updated = this.findById(terminalId);
+    if (!updated) {
+      throw new Error(`Failed to retrieve updated terminal: ${terminalId}`);
+    }
+    return updated;
+  }
+
+  /**
+   * Get POS configuration for a terminal
+   *
+   * FAIL-FAST: Throws if terminal exists but POS config is incomplete.
+   *
+   * @security SEC-006: Uses parameterized SELECT statement
+   * @security DB-006: Query is store-scoped via WHERE clause
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param terminalId - Terminal mapping ID to query
+   * @returns POS configuration object
+   * @throws TerminalPOSConfigurationError if terminal not found or config incomplete
+   */
+  getPOSConfig(storeId: string, terminalId: string): TerminalPOSConfigResult {
+    // SEC-006: Parameterized SELECT
+    // DB-006: WHERE includes store_id for tenant isolation
+    const stmt = this.db.prepare(`
+      SELECT pos_type, connection_type, connection_config
+      FROM pos_terminal_mappings
+      WHERE id = ? AND store_id = ?
+    `);
+
+    const row = stmt.get(terminalId, storeId) as
+      | {
+          pos_type: string | null;
+          connection_type: string | null;
+          connection_config: string | null;
+        }
+      | undefined;
+
+    // Terminal not found
+    if (!row) {
+      throw new TerminalPOSConfigurationError(
+        `Terminal not found: ${terminalId}`,
+        'TERMINAL_NOT_FOUND'
+      );
+    }
+
+    // FAIL-FAST: Check for incomplete configuration
+    if (row.pos_type === null && row.connection_type === null) {
+      throw new TerminalPOSConfigurationError(
+        'POS configuration not set for terminal. Please sync with cloud.',
+        'NOT_CONFIGURED'
+      );
+    }
+
+    if (row.pos_type === null || row.connection_type === null) {
+      throw new TerminalPOSConfigurationError(
+        `POS configuration incomplete. pos_type: ${row.pos_type ?? 'missing'}, connection_type: ${row.connection_type ?? 'missing'}`,
+        'INCOMPLETE'
+      );
+    }
+
+    // Validate JSON if provided (defensive check)
+    if (row.connection_config !== null) {
+      try {
+        JSON.parse(row.connection_config);
+      } catch {
+        throw new TerminalPOSConfigurationError(
+          'Connection config contains invalid JSON. Please re-sync with cloud.',
+          'INVALID_JSON'
+        );
+      }
+    }
+
+    return {
+      pos_type: row.pos_type as EnterprisePOSSystemType,
+      connection_type: row.connection_type as POSConnectionType,
+      connection_config: row.connection_config,
+    };
+  }
+
+  /**
+   * Check if POS configuration is complete for a terminal
+   *
+   * Non-throwing alternative to getPOSConfig for checking config status.
+   *
+   * @security SEC-006: Uses parameterized SELECT statement
+   * @security DB-006: Query is store-scoped via WHERE clause
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param terminalId - Terminal mapping ID to check
+   * @returns true if POS config is complete, false otherwise
+   */
+  hasPOSConfig(storeId: string, terminalId: string): boolean {
+    // SEC-006: Parameterized SELECT
+    const stmt = this.db.prepare(`
+      SELECT pos_type, connection_type
+      FROM pos_terminal_mappings
+      WHERE id = ? AND store_id = ?
+    `);
+
+    const row = stmt.get(terminalId, storeId) as
+      | {
+          pos_type: string | null;
+          connection_type: string | null;
+        }
+      | undefined;
+
+    if (!row) {
+      return false;
+    }
+
+    return row.pos_type !== null && row.connection_type !== null;
+  }
+
+  /**
+   * Find terminals by connection type
+   *
+   * Useful for operations like "find all FILE-based terminals" to start file watchers.
+   *
+   * @security SEC-006: Uses parameterized SELECT statement
+   * @security DB-006: Query is store-scoped via WHERE clause
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param connectionType - Connection type to filter by
+   * @returns Array of matching terminal mappings
+   */
+  findByConnectionType(storeId: string, connectionType: POSConnectionType): POSTerminalMapping[] {
+    // SEC-006: Parameterized SELECT
+    // Performance: Uses idx_pos_terminal_connection_type index
+    const stmt = this.db.prepare(`
+      SELECT * FROM pos_terminal_mappings
+      WHERE store_id = ? AND connection_type = ? AND active = 1
+      ORDER BY external_register_id ASC
+    `);
+    return stmt.all(storeId, connectionType) as POSTerminalMapping[];
+  }
+
+  /**
+   * Find terminals with configured POS settings
+   *
+   * Returns only terminals that have complete POS configuration.
+   *
+   * @security SEC-006: Uses parameterized SELECT statement
+   * @security DB-006: Query is store-scoped via WHERE clause
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @returns Array of configured terminal mappings
+   */
+  findConfigured(storeId: string): POSTerminalMapping[] {
+    // SEC-006: Parameterized SELECT
+    const stmt = this.db.prepare(`
+      SELECT * FROM pos_terminal_mappings
+      WHERE store_id = ?
+        AND pos_type IS NOT NULL
+        AND connection_type IS NOT NULL
+        AND active = 1
+      ORDER BY external_register_id ASC
+    `);
+    return stmt.all(storeId) as POSTerminalMapping[];
+  }
+
+  /**
+   * Bulk update POS configuration for multiple terminals
+   *
+   * Used when syncing terminal configs from cloud. Atomic operation using transaction.
+   *
+   * @security SEC-006: Uses parameterized UPDATE statements in transaction
+   * @security DB-006: All updates include store_id for tenant isolation
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param configs - Array of terminal ID and config pairs
+   * @returns Number of terminals updated
+   */
+  bulkUpdatePOSConfig(
+    storeId: string,
+    configs: Array<{ terminalId: string; config: TerminalPOSConfigData }>
+  ): number {
+    const now = this.now();
+    let updated = 0;
+
+    // Use transaction for atomic bulk update
+    const updateStmt = this.db.prepare(`
+      UPDATE pos_terminal_mappings
+      SET pos_type = ?,
+          connection_type = ?,
+          connection_config = ?,
+          updated_at = ?
+      WHERE id = ? AND store_id = ? AND active = 1
+    `);
+
+    const runUpdates = this.db.transaction(() => {
+      for (const { terminalId, config } of configs) {
+        // SEC-006: All values bound via prepared statement
+        // DB-006: WHERE includes store_id
+        const result = updateStmt.run(
+          config.pos_type,
+          config.connection_type,
+          config.connection_config,
+          now,
+          terminalId,
+          storeId
+        );
+        if (result.changes > 0) {
+          updated++;
+        }
+      }
+    });
+
+    runUpdates();
+
+    log.info('Bulk POS config update completed', {
+      storeId,
+      requested: configs.length,
+      updated,
+    });
+
+    return updated;
   }
 }
 

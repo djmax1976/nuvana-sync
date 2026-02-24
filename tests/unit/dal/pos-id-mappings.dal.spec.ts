@@ -65,6 +65,10 @@ describe('POSTerminalMappingsDAL', () => {
     active: 1,
     created_at: '2026-01-15T10:00:00.000Z',
     updated_at: '2026-01-15T10:00:00.000Z',
+    // POS-001: Required POS configuration fields
+    pos_type: 'GILBARCO_NAXML',
+    connection_type: 'FILE',
+    connection_config: null,
   };
 
   beforeEach(() => {
@@ -712,6 +716,7 @@ describe('POSTerminalMappingsDAL', () => {
       // Assert: the payload is NOT in the query string
       expect(insertQuery).not.toContain('DROP TABLE');
       // Assert: the payload is passed as a bound parameter
+      // INSERT includes new v055 columns: pos_type, connection_type, connection_config
       expect(mockRun).toHaveBeenCalledWith(
         expect.any(String), // id
         'store-sec-001', // store_id
@@ -720,7 +725,10 @@ describe('POSTerminalMappingsDAL', () => {
         null, // description
         'generic', // pos_system_type
         expect.any(String), // created_at
-        expect.any(String) // updated_at
+        expect.any(String), // updated_at
+        null, // pos_type (v055)
+        null, // connection_type (v055)
+        null // connection_config (v055)
       );
     });
 

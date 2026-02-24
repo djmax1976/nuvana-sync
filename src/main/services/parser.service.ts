@@ -375,7 +375,9 @@ export class ParserService {
 
       // Create/get terminal/register mapping (for reference tracking)
       if (externalRegisterId) {
-        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId, {
+          source: 'xml:FuelGradeMovement',
+        });
       }
 
       // Create/get till mapping
@@ -985,7 +987,9 @@ export class ParserService {
 
       // Create/get terminal/register mapping (for reference tracking)
       if (externalRegisterId) {
-        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId, {
+          source: 'xml:MiscellaneousSummary',
+        });
       }
 
       // Create/get till mapping
@@ -1115,7 +1119,9 @@ export class ParserService {
       for (const detail of msmDetails) {
         // Create mappings for IDs in the detail
         if (detail.registerId) {
-          posTerminalMappingsDAL.getOrCreate(this.storeId, detail.registerId);
+          posTerminalMappingsDAL.getOrCreate(this.storeId, detail.registerId, {
+            source: 'xml:MiscellaneousSummary:detail',
+          });
         }
         if (detail.cashierId) {
           posCashierMappingsDAL.getOrCreate(this.storeId, detail.cashierId);
@@ -1394,7 +1400,9 @@ export class ParserService {
 
       // Create/get terminal/register mapping (for reference tracking)
       if (externalRegisterId) {
-        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId, {
+          source: 'xml:MerchandiseMovement',
+        });
       }
     }
 
@@ -1604,7 +1612,9 @@ export class ParserService {
 
       // Create/get terminal/register mapping (for reference tracking)
       if (externalRegisterId) {
-        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId, {
+          source: 'xml:TaxLevelMovement',
+        });
       }
     }
 
@@ -1805,7 +1815,9 @@ export class ParserService {
 
       // Create/get terminal/register mapping (for reference tracking)
       if (externalRegisterId) {
-        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId);
+        posTerminalMappingsDAL.getOrCreate(this.storeId, externalRegisterId, {
+          source: 'xml:ItemSalesMovement',
+        });
       }
     }
 
@@ -2020,7 +2032,9 @@ export class ParserService {
         }
 
         if (saleEvent.registerId) {
-          posTerminalMappingsDAL.getOrCreate(this.storeId, saleEvent.registerId);
+          posTerminalMappingsDAL.getOrCreate(this.storeId, saleEvent.registerId, {
+            source: 'xml:POSJournal',
+          });
         }
 
         if (saleEvent.tillId) {

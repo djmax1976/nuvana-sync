@@ -759,12 +759,14 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
             closing_serial: closing.closing_serial,
             tickets_sold_count: ticketsSold,
             sales_amount: salesAmount,
-            depletion_reason: 'DAY_CLOSE',
+            depleted_by: userId, // SEC-010: Track who closed the pack
+            depletion_reason: 'DAY_CLOSE', // Pack marked as sold out during day close operation
           });
           log.info('Pack settled (sold out)', {
             packId: closing.pack_id,
             closingSerial: closing.closing_serial,
             depletionReason: 'DAY_CLOSE',
+            depletedBy: userId,
           });
 
           // Collect pack sync data for queuing after transaction
@@ -806,7 +808,7 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
               activated_by: pack.activated_by,
               depleted_at: now,
               returned_at: null,
-              // Depletion context (v019 + v047 alignment)
+              // Depletion context (v019 + v047 alignment) - day close operation
               depletion_reason: 'DAY_CLOSE',
               depleted_by: userId,
               depleted_shift_id: null, // Day close is not shift-specific

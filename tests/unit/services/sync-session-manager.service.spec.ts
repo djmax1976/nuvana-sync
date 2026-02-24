@@ -145,18 +145,22 @@ describe('SyncSessionManager', () => {
     });
 
     it('should include duration in milliseconds', async () => {
-      // Arrange
+      // Arrange - TEST-004: Use fake timers for deterministic timing tests
+      vi.useFakeTimers();
       const storeId = 'store-uuid-123';
       const operations = vi.fn().mockImplementation(async () => {
-        // Simulate some work
-        await new Promise((resolve) => setTimeout(resolve, 10));
+        // Simulate some work with controlled time advancement
+        await vi.advanceTimersByTimeAsync(50);
       });
 
       // Act
       const result = await manager.runSyncCycle(storeId, operations);
 
-      // Assert
-      expect(result.durationMs).toBeGreaterThanOrEqual(10);
+      // Cleanup
+      vi.useRealTimers();
+
+      // Assert - duration should be exactly 50ms with fake timers
+      expect(result.durationMs).toBe(50);
     });
 
     it('should mark session as completed after successful cycle', async () => {

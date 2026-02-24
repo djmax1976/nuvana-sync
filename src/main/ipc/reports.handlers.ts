@@ -611,7 +611,10 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
 
       // Group by business date — days appear even if they have no shifts
       // BIZ-003: First row per date has the most recent closed_at due to ORDER BY
+      // BIZ-002: A date can have multiple lottery_business_days, so we must
+      // deduplicate shifts to avoid duplicate keys in the UI
       const dayMap = new Map<string, DayWithShifts>();
+      const seenShiftIds = new Set<string>();
 
       for (const row of rows) {
         let dayData = dayMap.get(row.business_date);
@@ -631,7 +634,10 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
         }
 
         // Only add shift if the JOIN actually matched a shift row
-        if (row.shift_id) {
+        // BIZ-002: Skip if already added (multiple lottery_business_days can
+        // cause duplicate shift rows in the JOIN result)
+        if (row.shift_id && !seenShiftIds.has(row.shift_id)) {
+          seenShiftIds.add(row.shift_id);
           dayData.shifts.push({
             shiftId: row.shift_id,
             shiftNumber: row.shift_number!,

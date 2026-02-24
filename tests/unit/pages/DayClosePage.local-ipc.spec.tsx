@@ -149,6 +149,85 @@ vi.mock('../../../src/renderer/utils/date-format.utils', () => ({
     dateStr ? new Date(dateStr).toLocaleString() : '',
 }));
 
+// DRAFT-001: Mock useCloseDraft - required for draft lifecycle management
+const {
+  mockUpdateLottery,
+  mockUpdateReports,
+  mockUpdateStepState,
+  mockFinalize,
+  mockSave,
+  mockDiscard,
+  mockRetryAfterConflict,
+} = vi.hoisted(() => ({
+  mockUpdateLottery: vi.fn(),
+  mockUpdateReports: vi.fn(),
+  mockUpdateStepState: vi.fn(() => Promise.resolve()),
+  mockFinalize: vi.fn(() =>
+    Promise.resolve({
+      success: true,
+      lottery_result: { closings_created: 2, day_id: 'day-uuid-finalized' },
+      shift_result: { shift_id: 'shift-uuid-001' },
+    })
+  ),
+  mockSave: vi.fn(() => Promise.resolve()),
+  mockDiscard: vi.fn(() => Promise.resolve()),
+  mockRetryAfterConflict: vi.fn(() => Promise.resolve()),
+}));
+
+// DRAFT-001: Lottery data in draft payload - required for handleOpenShiftClosingForm guard
+const mockLotteryPayload = {
+  bins_scans: [
+    {
+      bin_id: 'bin-uuid-001',
+      pack_id: 'pack-uuid-001',
+      closing_serial: '015',
+      is_sold_out: false,
+      scanned_at: '2026-02-12T10:00:00.000Z',
+    },
+  ],
+  totals: { tickets_sold: 15, sales_amount: 75 },
+  entry_method: 'SCAN' as const,
+};
+
+vi.mock('../../../src/renderer/hooks/useCloseDraft', () => ({
+  useCloseDraft: () => ({
+    draft: {
+      draft_id: 'draft-uuid-001',
+      shift_id: 'shift-uuid-001',
+      draft_type: 'DAY_CLOSE',
+      status: 'IN_PROGRESS',
+      payload: { lottery: mockLotteryPayload },
+      version: 1,
+      created_at: '2026-02-12T06:00:00.000Z',
+      updated_at: '2026-02-12T06:00:00.000Z',
+    },
+    payload: { lottery: mockLotteryPayload },
+    isLoading: false,
+    isSaving: false,
+    isFinalizing: false,
+    version: 1,
+    isDirty: false,
+    error: null,
+    hasVersionConflict: false,
+    updateLottery: mockUpdateLottery,
+    updateReports: mockUpdateReports,
+    updateStepState: mockUpdateStepState,
+    finalize: mockFinalize,
+    save: mockSave,
+    discard: mockDiscard,
+    retryAfterConflict: mockRetryAfterConflict,
+    recoveryInfo: null,
+  }),
+}));
+
+// Mock useIsLotteryMode - critical for testing deferred commit path
+const { mockUseIsLotteryMode } = vi.hoisted(() => ({
+  mockUseIsLotteryMode: vi.fn(() => false),
+}));
+vi.mock('../../../src/renderer/hooks/usePOSConnectionType', () => ({
+  useIsLotteryMode: () => mockUseIsLotteryMode(),
+}));
+
 // Mock Card components
 vi.mock('../../../src/renderer/components/ui/card', () => ({
   Card: ({ children, className, ...props }: React.PropsWithChildren<{ className?: string }>) => (

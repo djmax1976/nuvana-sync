@@ -21,7 +21,7 @@ const electronVite = path.join(__dirname, '..', 'node_modules', '.bin', 'electro
 const child = spawn(electronVite, ['dev'], {
   env,
   stdio: 'inherit',
-  shell: true
+  shell: true,
 });
 
 child.on('error', (err) => {

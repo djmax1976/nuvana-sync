@@ -834,58 +834,6 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
 
     return this.closeShift(openShift.shift_id, endTime);
   }
-  /**
-   * Close all stale open shifts (shifts with end_time IS NULL that are older than today)
-   * This fixes data corruption from previous bugs where shifts weren't properly closed.
-   * SEC-006: Parameterized query
-   * DB-006: Store-scoped
-   *
-   * @param storeId - Store identifier
-   * @param currentDate - Current business date (YYYY-MM-DD) - shifts before this are considered stale
-   * @returns Number of shifts closed
-   */
-  closeStaleOpenShifts(storeId: string, currentDate: string): number {
-    // Find all open shifts older than currentDate
-    const findStmt = this.db.prepare(`
-      SELECT shift_id, business_date FROM shifts
-      WHERE store_id = ? AND end_time IS NULL AND business_date < ?
-    `);
-    const staleShifts = findStmt.all(storeId, currentDate) as Array<{
-      shift_id: string;
-      business_date: string;
-    }>;
-
-    if (staleShifts.length === 0) {
-      return 0;
-    }
-
-    log.info('Closing stale open shifts', {
-      storeId,
-      currentDate,
-      staleCount: staleShifts.length,
-      staleDates: staleShifts.map((s) => s.business_date),
-    });
-
-    // Close each stale shift - set end_time to end of business day
-    const updateStmt = this.db.prepare(`
-      UPDATE shifts
-      SET end_time = business_date || 'T23:59:59', status = 'CLOSED', updated_at = ?
-      WHERE shift_id = ? AND end_time IS NULL
-    `);
-
-    const now = this.now();
-    let closedCount = 0;
-
-    for (const shift of staleShifts) {
-      const result = updateStmt.run(now, shift.shift_id);
-      if (result.changes > 0) {
-        closedCount++;
-      }
-    }
-
-    log.info('Stale shifts closed', { closedCount, storeId });
-    return closedCount;
-  }
 
   /**
    * Get all open shifts for a store for day close access validation

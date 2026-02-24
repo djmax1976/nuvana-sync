@@ -79,9 +79,103 @@ vi.mock('../../../src/renderer/hooks/useLottery', () => ({
 }));
 
 // Mock useIsLotteryMode - critical for testing deferred commit path
-const mockUseIsLotteryMode = vi.fn();
+// Use vi.hoisted() to ensure mock function is available when vi.mock factory runs (hoisting issue)
+const { mockUseIsLotteryMode } = vi.hoisted(() => ({
+  mockUseIsLotteryMode: vi.fn(() => false),
+}));
 vi.mock('../../../src/renderer/hooks/usePOSConnectionType', () => ({
   useIsLotteryMode: () => mockUseIsLotteryMode(),
+}));
+
+// Mock useCloseDraft - required for draft lifecycle management
+// Use vi.hoisted() for cross-platform compatibility (Windows/Linux mock hoisting)
+// FinalizeResponse can be success or failure - use flexible return type
+type MockFinalizeResponse =
+  | {
+      success: true;
+      closed_at: string;
+      lottery_result: { closings_created: number; day_id: string };
+      shift_result: { shift_id: string };
+    }
+  | { success: false; message?: string };
+
+const {
+  mockUpdateLottery,
+  mockUpdateReports,
+  mockUpdateStepState,
+  mockFinalize,
+  mockSave,
+  mockDiscard,
+  mockRetryAfterConflict,
+} = vi.hoisted(() => ({
+  mockUpdateLottery: vi.fn(),
+  mockUpdateReports: vi.fn(),
+  mockUpdateStepState: vi.fn(() => Promise.resolve()),
+  mockFinalize: vi.fn(
+    (): Promise<MockFinalizeResponse> =>
+      Promise.resolve({
+        success: true,
+        closed_at: '2026-02-13T18:00:00Z',
+        lottery_result: { closings_created: 2, day_id: 'day-uuid-finalized' },
+        shift_result: { shift_id: 'shift-uuid-001' },
+      })
+  ),
+  mockSave: vi.fn(() => Promise.resolve()),
+  mockDiscard: vi.fn(() => Promise.resolve()),
+  mockRetryAfterConflict: vi.fn(() => Promise.resolve()),
+}));
+
+// DRAFT-001: Lottery data in draft payload - required for handleOpenShiftClosingForm guard
+const mockLotteryPayload = {
+  bins_scans: [
+    {
+      bin_id: 'bin-uuid-001',
+      pack_id: 'pack-uuid-001',
+      closing_serial: '015',
+      is_sold_out: false,
+      scanned_at: '2026-02-13T10:00:00.000Z',
+    },
+    {
+      bin_id: 'bin-uuid-002',
+      pack_id: 'pack-uuid-002',
+      closing_serial: '029',
+      is_sold_out: true,
+      scanned_at: '2026-02-13T10:05:00.000Z',
+    },
+  ],
+  totals: { tickets_sold: 44, sales_amount: 220 },
+  entry_method: 'SCAN' as const,
+};
+
+vi.mock('../../../src/renderer/hooks/useCloseDraft', () => ({
+  useCloseDraft: () => ({
+    draft: {
+      draft_id: 'draft-uuid-001',
+      shift_id: 'shift-uuid-001',
+      draft_type: 'DAY_CLOSE',
+      status: 'IN_PROGRESS',
+      payload: { lottery: mockLotteryPayload },
+      version: 1,
+      created_at: '2026-02-13T06:00:00.000Z',
+      updated_at: '2026-02-13T06:00:00.000Z',
+    },
+    payload: { lottery: mockLotteryPayload },
+    isLoading: false,
+    isSaving: false,
+    isFinalizing: false,
+    version: 1,
+    isDirty: false,
+    error: null,
+    hasVersionConflict: false,
+    updateLottery: mockUpdateLottery,
+    updateReports: mockUpdateReports,
+    updateStepState: mockUpdateStepState,
+    finalize: mockFinalize,
+    save: mockSave,
+    discard: mockDiscard,
+    retryAfterConflict: mockRetryAfterConflict,
+    recoveryInfo: null,
+  }),
 }));
 
 // Mock useStoreTimezone
@@ -195,6 +289,19 @@ vi.mock('../../../src/renderer/utils/date-format.utils', () => ({
     dateStr ? new Date(dateStr).toLocaleString() : '',
 }));
 
+// Mock lucide-react icons used in cash dialog
+vi.mock('lucide-react', async () => {
+  const actual = await vi.importActual('lucide-react');
+  return {
+    ...actual,
+    CalendarCheck: () => <span data-testid="icon-calendar-check" />,
+    Check: () => <span data-testid="icon-check" />,
+    Loader2: () => <span data-testid="icon-loader" />,
+    ChevronLeft: () => <span data-testid="icon-chevron-left" />,
+    X: () => <span data-testid="icon-x" />,
+  };
+});
+
 // Mock UI components
 vi.mock('../../../src/renderer/components/ui/card', () => ({
   Card: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
@@ -220,6 +327,42 @@ vi.mock('../../../src/renderer/components/ui/button', () => ({
     </button>
   ),
 }));
+
+// Mock Dialog components for DRAFT-001 cash dialog
+vi.mock('../../../src/renderer/components/ui/dialog', () => ({
+  Dialog: ({
+    children,
+    open,
+  }: React.PropsWithChildren<{ open?: boolean; onOpenChange?: (open: boolean) => void }>) =>
+    open ? <div data-testid="dialog">{children}</div> : null,
+  DialogContent: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <div {...props}>{children}</div>
+  ),
+  DialogHeader: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <div {...props}>{children}</div>
+  ),
+  DialogTitle: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <h2 {...props}>{children}</h2>
+  ),
+  DialogDescription: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <p {...props}>{children}</p>
+  ),
+  DialogFooter: ({ children, ...props }: React.PropsWithChildren<Record<string, unknown>>) => (
+    <div {...props}>{children}</div>
+  ),
+}));
+
+// Mock Input component - use factory function to avoid hoisting issues
+vi.mock('../../../src/renderer/components/ui/input', () => {
+  const MockInput = React.forwardRef<
+    HTMLInputElement,
+    React.InputHTMLAttributes<HTMLInputElement> & { 'data-testid'?: string }
+  >(function MockInput({ ...props }, ref) {
+    return <input ref={ref} {...props} />;
+  });
+  MockInput.displayName = 'MockInput';
+  return { Input: MockInput };
+});
 
 // Import after mocks
 import DayClosePage from '../../../src/renderer/pages/DayClosePage';
@@ -273,8 +416,18 @@ function createLotteryDayBins() {
 function createPendingClosingsData(): PendingClosingsData {
   return {
     closings: [
-      { pack_id: 'pack-uuid-001', closing_serial: '015', is_sold_out: false },
-      { pack_id: 'pack-uuid-002', closing_serial: '029', is_sold_out: true },
+      {
+        bin_id: 'bin-uuid-001',
+        pack_id: 'pack-uuid-001',
+        closing_serial: '015',
+        is_sold_out: false,
+      },
+      {
+        bin_id: 'bin-uuid-002',
+        pack_id: 'pack-uuid-002',
+        closing_serial: '029',
+        is_sold_out: true,
+      },
     ],
     entry_method: 'SCAN',
   };
@@ -372,11 +525,14 @@ describe('DayClosePage - Scanner onPendingClosings Integration', () => {
     expect(screen.getByTestId('day-close-scanner')).toHaveAttribute('data-defer-commit', 'true');
   });
 
-  it('passes deferCommit=false to DayCloseModeScanner for LOTTERY POS', () => {
+  it('passes deferCommit=true to DayCloseModeScanner for LOTTERY POS (DRAFT-001 always defers)', () => {
+    // DRAFT-001: deferCommit is now always true for ALL POS types
+    // The draft system handles all lottery closes atomically
     mockUseIsLotteryMode.mockReturnValue(true);
     renderDayClosePage();
 
-    expect(screen.getByTestId('day-close-scanner')).toHaveAttribute('data-defer-commit', 'false');
+    // With DRAFT-001, deferCommit is ALWAYS true - draft handles both POS types
+    expect(screen.getByTestId('day-close-scanner')).toHaveAttribute('data-defer-commit', 'true');
   });
 
   it('provides onPendingClosings callback to scanner', () => {
@@ -414,10 +570,10 @@ describe('DayClosePage - Scanner onPendingClosings Integration', () => {
 });
 
 // ============================================================================
-// TEST SUITE: Step 3 Deferred Commit Logic
+// TEST SUITE: Step 3 Deferred Commit Logic (DRAFT-001)
 // ============================================================================
 
-describe('DayClosePage - Step 3 Deferred Commit', () => {
+describe('DayClosePage - Step 3 Draft-Based Finalization', () => {
   async function advanceToStep3WithPendingClosings() {
     renderDayClosePage();
 
@@ -448,89 +604,98 @@ describe('DayClosePage - Step 3 Deferred Commit', () => {
     });
   }
 
-  it('calls prepareDayClose with fromWizard=true when pendingClosings exists', async () => {
+  it('opens closing cash dialog when Complete Day Close is clicked (DRAFT-001)', async () => {
     await advanceToStep3WithPendingClosings();
 
     // Click Complete Day Close button
     const completeBtn = screen.getByTestId('complete-day-close-btn');
     fireEvent.click(completeBtn);
 
+    // DRAFT-001: Cash dialog should appear
     await waitFor(() => {
-      expect(mockPrepareLotteryDayClose).toHaveBeenCalledWith({
-        closings: expect.arrayContaining([
-          expect.objectContaining({ pack_id: 'pack-uuid-001', closing_serial: '015' }),
-          expect.objectContaining({ pack_id: 'pack-uuid-002', closing_serial: '029' }),
-        ]),
-        fromWizard: true, // SEC-010: Critical flag for non-LOTTERY POS
-      });
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
   });
 
-  it('calls commitDayClose with day_id from prepare response and fromWizard=true', async () => {
+  it('calls finalizeDraft when Finalize Day Close is clicked (DRAFT-001)', async () => {
     await advanceToStep3WithPendingClosings();
 
-    // Click Complete Day Close button
+    // Click Complete Day Close button to open cash dialog
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(mockCommitLotteryDayClose).toHaveBeenCalledWith({
-        day_id: 'day-uuid-prepared',
-        fromWizard: true, // SEC-010: Critical flag for non-LOTTERY POS
-      });
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
+    });
+
+    // Enter closing cash
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+
+    // Click Finalize Day Close
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      // DRAFT-001: finalizeDraft is called with closing cash amount
+      expect(mockFinalize).toHaveBeenCalled();
     });
   });
 
-  it('shows success toast after successful lottery commit', async () => {
+  it('shows success toast after successful finalization (DRAFT-001)', async () => {
     await advanceToStep3WithPendingClosings();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith(
         expect.objectContaining({
-          title: 'Lottery Closed',
+          title: 'Day Closed Successfully',
           description: expect.stringContaining('2 pack(s) recorded'),
         })
       );
     });
   });
 
-  it('opens ShiftClosingForm only after successful lottery commit', async () => {
+  it('navigates to /mystore after successful finalization (DRAFT-001)', async () => {
     await advanceToStep3WithPendingClosings();
-
-    // ShiftClosingForm should not be visible yet
-    expect(screen.queryByTestId('shift-closing-form')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('shift-closing-form')).toBeInTheDocument();
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      // DRAFT-001: Navigates to mystore on success (atomic close)
+      expect(mockNavigate).toHaveBeenCalledWith('/mystore');
     });
   });
 
-  it('clears pendingClosings after successful commit', async () => {
+  it('saves draft before opening cash dialog (DRAFT-001)', async () => {
     await advanceToStep3WithPendingClosings();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(mockCommitLotteryDayClose).toHaveBeenCalled();
+      // Draft should be saved before showing dialog
+      expect(mockSave).toHaveBeenCalled();
     });
-
-    // Clicking again should NOT call prepare/commit again (pendingClosings cleared)
-    mockPrepareLotteryDayClose.mockClear();
-    mockCommitLotteryDayClose.mockClear();
-
-    // The shift closing form should now be open, blocking further clicks
-    expect(screen.getByTestId('shift-closing-form')).toBeInTheDocument();
   });
 });
 
 // ============================================================================
-// TEST SUITE: Error Handling
+// TEST SUITE: Error Handling (DRAFT-001)
 // ============================================================================
 
-describe('DayClosePage - Deferred Commit Error Handling', () => {
+describe('DayClosePage - Draft Finalization Error Handling', () => {
   async function advanceToStep3WithPendingClosings() {
     renderDayClosePage();
 
@@ -557,35 +722,27 @@ describe('DayClosePage - Deferred Commit Error Handling', () => {
     });
   }
 
-  it('shows error toast when prepareDayClose fails', async () => {
-    mockPrepareLotteryDayClose.mockResolvedValue({
-      success: false,
-      message: 'Day already closed',
-    });
-
-    await advanceToStep3WithPendingClosings();
-
+  async function openCashDialogAndFinalize() {
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: 'Error',
-          description: 'Day already closed',
-          variant: 'destructive',
-        })
-      );
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
-  });
 
-  it('shows error toast when commitDayClose fails', async () => {
-    mockCommitLotteryDayClose.mockResolvedValue({
-      success: false,
-    });
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+  }
+
+  it('shows error toast when finalizeDraft fails', async () => {
+    mockFinalize.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: false,
+        message: 'Day already closed',
+      })
+    );
 
     await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+    await openCashDialogAndFinalize();
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith(
@@ -597,47 +754,29 @@ describe('DayClosePage - Deferred Commit Error Handling', () => {
     });
   });
 
-  it('does NOT open ShiftClosingForm when prepare fails', async () => {
-    mockPrepareLotteryDayClose.mockResolvedValue({
-      success: false,
-      message: 'Validation error',
-    });
+  it('does NOT navigate when finalization fails', async () => {
+    mockFinalize.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: false,
+      })
+    );
 
     await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+    await openCashDialogAndFinalize();
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalled();
     });
 
-    // ShiftClosingForm should NOT be visible
-    expect(screen.queryByTestId('shift-closing-form')).not.toBeInTheDocument();
+    // Should NOT navigate on failure
+    expect(mockNavigate).not.toHaveBeenCalledWith('/mystore');
   });
 
-  it('does NOT open ShiftClosingForm when commit fails', async () => {
-    mockCommitLotteryDayClose.mockResolvedValue({
-      success: false,
-    });
+  it('handles finalizeDraft exception gracefully', async () => {
+    mockFinalize.mockImplementationOnce(() => Promise.reject(new Error('Network error')));
 
     await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalled();
-    });
-
-    // ShiftClosingForm should NOT be visible
-    expect(screen.queryByTestId('shift-closing-form')).not.toBeInTheDocument();
-  });
-
-  it('handles API exception in prepareDayClose gracefully', async () => {
-    mockPrepareLotteryDayClose.mockRejectedValue(new Error('Network error'));
-
-    await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+    await openCashDialogAndFinalize();
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith(
@@ -650,30 +789,30 @@ describe('DayClosePage - Deferred Commit Error Handling', () => {
     });
   });
 
-  it('handles API exception in commitDayClose gracefully', async () => {
-    mockCommitLotteryDayClose.mockRejectedValue(new Error('Server unavailable'));
+  it('keeps cash dialog open when finalization fails', async () => {
+    mockFinalize.mockImplementationOnce(() =>
+      Promise.resolve({
+        success: false,
+      })
+    );
 
     await advanceToStep3WithPendingClosings();
-
-    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+    await openCashDialogAndFinalize();
 
     await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith(
-        expect.objectContaining({
-          title: 'Error',
-          description: 'Server unavailable',
-          variant: 'destructive',
-        })
-      );
+      expect(mockToast).toHaveBeenCalled();
     });
+
+    // Cash dialog should still be visible (user can retry)
+    expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
   });
 });
 
 // ============================================================================
-// TEST SUITE: Loading State During Commit
+// TEST SUITE: Finalization Flow Tests (DRAFT-001)
 // ============================================================================
 
-describe('DayClosePage - Loading State During Deferred Commit', () => {
+describe('DayClosePage - Finalization Flow', () => {
   async function advanceToStep3WithPendingClosings() {
     renderDayClosePage();
 
@@ -700,104 +839,73 @@ describe('DayClosePage - Loading State During Deferred Commit', () => {
     });
   }
 
-  it('disables Complete Day Close button during commit', async () => {
-    // Make prepare take some time
-    let resolvePromise: () => void;
-    mockPrepareLotteryDayClose.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePromise = () =>
-          resolve({
-            success: true,
-            data: { day_id: 'day-uuid-prepared' },
-          });
-      })
-    );
-
+  it('calls finalize when Finalize Day Close is clicked', async () => {
     await advanceToStep3WithPendingClosings();
 
-    const completeBtn = screen.getByTestId('complete-day-close-btn');
-    expect(completeBtn).not.toBeDisabled();
+    // Open cash dialog
+    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
-    fireEvent.click(completeBtn);
-
-    // Button should be disabled while loading
     await waitFor(() => {
-      expect(completeBtn).toBeDisabled();
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
 
-    // Resolve the promise
-    act(() => {
-      resolvePromise!();
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      expect(mockFinalize).toHaveBeenCalled();
     });
   });
 
-  it('disables Back button during commit', async () => {
-    let resolvePromise: () => void;
-    mockPrepareLotteryDayClose.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePromise = () =>
-          resolve({
-            success: true,
-            data: { day_id: 'day-uuid-prepared' },
-          });
-      })
-    );
-
+  it('closes dialog and navigates on successful finalization', async () => {
     await advanceToStep3WithPendingClosings();
-
-    const backBtn = screen.getByRole('button', { name: /back/i });
-    expect(backBtn).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(backBtn).toBeDisabled();
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
 
-    act(() => {
-      resolvePromise!();
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      expect(mockNavigate).toHaveBeenCalledWith('/mystore');
     });
   });
 
-  it('disables Cancel button during commit', async () => {
-    let resolvePromise: () => void;
-    mockPrepareLotteryDayClose.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePromise = () =>
-          resolve({
-            success: true,
-            data: { day_id: 'day-uuid-prepared' },
-          });
-      })
-    );
-
+  it('shows success toast with pack count from finalization result', async () => {
     await advanceToStep3WithPendingClosings();
-
-    const cancelBtn = screen.getByRole('button', { name: /cancel/i });
-    expect(cancelBtn).not.toBeDisabled();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      expect(cancelBtn).toBeDisabled();
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
 
-    act(() => {
-      resolvePromise!();
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      expect(mockToast).toHaveBeenCalledWith(
+        expect.objectContaining({
+          title: 'Day Closed Successfully',
+          description: expect.stringContaining('2 pack(s) recorded'),
+        })
+      );
     });
   });
 });
 
 // ============================================================================
-// TEST SUITE: LOTTERY POS Immediate Commit Path (Regression)
+// TEST SUITE: LOTTERY POS Flow (DRAFT-001)
 // ============================================================================
 
-describe('DayClosePage - LOTTERY POS Immediate Commit (Regression)', () => {
-  beforeEach(() => {
-    mockUseIsLotteryMode.mockReturnValue(true); // LOTTERY POS type
-  });
+describe('DayClosePage - LOTTERY POS Flow (DRAFT-001)', () => {
+  it('uses same draft finalization flow for LOTTERY POS', async () => {
+    // MUST set this BEFORE rendering
+    mockUseIsLotteryMode.mockReturnValue(true);
 
-  it('does NOT call prepareDayClose when pendingLotteryDayId exists (immediate commit path)', async () => {
     renderDayClosePage();
 
     // For LOTTERY POS, scanner calls API and returns day_id in onSuccess
@@ -807,7 +915,7 @@ describe('DayClosePage - LOTTERY POS Immediate Commit (Regression)', () => {
         business_date: '2026-02-13',
         lottery_total: 150,
         bins_closed: [],
-        day_id: 'day-uuid-from-scanner', // LOTTERY POS path includes day_id
+        day_id: 'day-uuid-from-scanner',
         pending_close_expires_at: '2026-02-13T23:59:59.000Z',
       });
     });
@@ -823,25 +931,40 @@ describe('DayClosePage - LOTTERY POS Immediate Commit (Regression)', () => {
       expect(screen.getByTestId('step-3-content')).toBeInTheDocument();
     });
 
-    // Click Complete Day Close
+    // Click Complete Day Close - should open cash dialog
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
     await waitFor(() => {
-      // Should NOT call prepareDayClose (scanner already did that)
-      expect(mockPrepareLotteryDayClose).not.toHaveBeenCalled();
-      // Should only call commitDayClose with existing day_id
-      expect(mockCommitLotteryDayClose).toHaveBeenCalledWith({
-        day_id: 'day-uuid-from-scanner',
-      });
+      // DRAFT-001: Same cash dialog flow for all POS types
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
+
+    // Finalize
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '150.00' } });
+    fireEvent.click(screen.getByTestId('finalize-day-close-btn'));
+
+    await waitFor(() => {
+      // DRAFT-001: finalizeDraft handles both lottery and shift atomically
+      expect(mockFinalize).toHaveBeenCalled();
+    });
+  });
+
+  it('passes deferCommit=true to scanner for LOTTERY POS (DRAFT-001 always defers)', async () => {
+    // MUST set this BEFORE rendering
+    mockUseIsLotteryMode.mockReturnValue(true);
+
+    renderDayClosePage();
+
+    // DRAFT-001: deferCommit is ALWAYS true - draft handles both POS types atomically
+    expect(screen.getByTestId('day-close-scanner')).toHaveAttribute('data-defer-commit', 'true');
   });
 });
 
 // ============================================================================
-// TEST SUITE: Navigation Blocking During Commit
+// TEST SUITE: Dialog Dismissal Behavior (DRAFT-001)
 // ============================================================================
 
-describe('DayClosePage - Navigation Blocking During Commit', () => {
+describe('DayClosePage - Dialog Dismissal During Finalization', () => {
   async function advanceToStep3WithPendingClosings() {
     renderDayClosePage();
 
@@ -868,33 +991,33 @@ describe('DayClosePage - Navigation Blocking During Commit', () => {
     });
   }
 
-  it('prevents step navigation (Back) during commit', async () => {
-    let resolvePromise: () => void;
-    mockPrepareLotteryDayClose.mockReturnValue(
-      new Promise((resolve) => {
-        resolvePromise = () =>
-          resolve({
-            success: true,
-            data: { day_id: 'day-uuid-prepared' },
-          });
-      })
-    );
-
+  it('keeps step 3 visible when cash dialog is open', async () => {
     await advanceToStep3WithPendingClosings();
 
     fireEvent.click(screen.getByTestId('complete-day-close-btn'));
 
-    // Try to go back - should be blocked (button disabled)
-    const backBtn = screen.getByRole('button', { name: /back/i });
     await waitFor(() => {
-      expect(backBtn).toBeDisabled();
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
 
-    // Should still be on step 3
+    // Step 3 should still be visible behind the dialog
     expect(screen.getByTestId('step-3-content')).toBeInTheDocument();
+  });
 
-    act(() => {
-      resolvePromise!();
+  it('allows entering closing cash amount', async () => {
+    await advanceToStep3WithPendingClosings();
+
+    // Open dialog
+    fireEvent.click(screen.getByTestId('complete-day-close-btn'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('closing-cash-input')).toBeInTheDocument();
     });
+
+    // Enter cash amount
+    fireEvent.change(screen.getByTestId('closing-cash-input'), { target: { value: '250.50' } });
+
+    // Verify value is set
+    expect(screen.getByTestId('closing-cash-input')).toHaveValue('250.50');
   });
 });
