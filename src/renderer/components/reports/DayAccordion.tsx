@@ -224,6 +224,7 @@ export const DayAccordion = React.memo(function DayAccordion({
             isExpanded ? 'rotate-0' : '-rotate-90'
           )}
           aria-hidden="true"
+          data-testid="day-accordion-chevron"
         />
       </div>
 

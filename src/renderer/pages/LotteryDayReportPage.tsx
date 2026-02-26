@@ -841,7 +841,12 @@ function ReturnedPacksSection({
         }
       />
       {/* Smooth CSS Grid animation via useAccordionAnimation hook */}
-      <div className={contentClasses} style={getContentStyles(isOpen)}>
+      <div
+        className={contentClasses}
+        style={getContentStyles(isOpen)}
+        data-testid="returned-packs-content"
+        data-expanded={isOpen}
+      >
         <div className={innerClasses}>
           <div className="overflow-x-auto">
             <table className={TABLE_CLASS} style={TABLE_STYLE}>
