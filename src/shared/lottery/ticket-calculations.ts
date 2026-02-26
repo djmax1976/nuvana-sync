@@ -574,3 +574,78 @@ export function calculateTicketsSoldIndex(
   const result = calculateTicketsSold(startingSerial, closingSerial, CalculationModes.INDEX);
   return result.value;
 }
+
+// ============================================================================
+// Pack Structure Functions
+// ============================================================================
+
+/**
+ * Get the last ticket index for a pack (0-based)
+ *
+ * This is the SINGLE SOURCE OF TRUTH for determining the last ticket index.
+ * Use this function EVERYWHERE you need the last ticket index - DO NOT inline the calculation.
+ *
+ * For a pack with N tickets:
+ * - Tickets are numbered 000 to (N-1)
+ * - Last ticket index = N - 1
+ *
+ * @param ticketsPerPack - Total tickets in the pack (must be positive integer)
+ * @returns CalculationResult with last ticket index
+ *
+ * @example
+ * // 30-ticket pack (000-029)
+ * getLastTicketIndex(30) // { success: true, value: 29 }
+ *
+ * // 60-ticket pack (000-059)
+ * getLastTicketIndex(60) // { success: true, value: 59 }
+ *
+ * @security SEC-014: INPUT_VALIDATION - Validates ticketsPerPack is positive integer
+ */
+export function getLastTicketIndex(
+  ticketsPerPack: number | null | undefined
+): CalculationResult<number> {
+  if (ticketsPerPack === null || ticketsPerPack === undefined) {
+    return { success: false, value: 0, error: 'tickets_per_pack is required' };
+  }
+
+  if (!Number.isInteger(ticketsPerPack)) {
+    return { success: false, value: 0, error: 'tickets_per_pack must be an integer' };
+  }
+
+  if (ticketsPerPack <= 0) {
+    return { success: false, value: 0, error: 'tickets_per_pack must be positive' };
+  }
+
+  if (ticketsPerPack > MAX_SERIAL_NUMBER + 1) {
+    return {
+      success: false,
+      value: 0,
+      error: `tickets_per_pack exceeds maximum (${MAX_SERIAL_NUMBER + 1})`,
+    };
+  }
+
+  // Last ticket index = ticketsPerPack - 1 (0-based indexing)
+  // Example: 30-ticket pack has tickets 000-029, last index is 29
+  return { success: true, value: ticketsPerPack - 1 };
+}
+
+/**
+ * Get the last ticket index for a pack (throws on invalid input)
+ *
+ * Convenience wrapper that throws instead of returning CalculationResult.
+ * Use when you're confident the input is valid.
+ *
+ * @param ticketsPerPack - Total tickets in the pack
+ * @returns Last ticket index (0-based)
+ * @throws Error if ticketsPerPack is invalid
+ *
+ * @example
+ * getLastTicketIndexOrThrow(30) // returns 29
+ */
+export function getLastTicketIndexOrThrow(ticketsPerPack: number): number {
+  const result = getLastTicketIndex(ticketsPerPack);
+  if (!result.success) {
+    throw new Error(result.error || 'Failed to get last ticket index');
+  }
+  return result.value;
+}

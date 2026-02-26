@@ -184,6 +184,12 @@ export interface SeededShift {
   start_time: string | null;
   end_time: string | null;
   status: ShiftStatus;
+  /** External register ID from POS for per-register shift numbering */
+  external_register_id: string | null;
+  /** External cashier ID from POS */
+  external_cashier_id: string | null;
+  /** External till ID from POS */
+  external_till_id: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -200,6 +206,12 @@ export interface SeedShiftOptions {
   start_time?: string;
   end_time?: string;
   status?: ShiftStatus;
+  /** External register ID from POS - REQUIRED for per-register shift numbering tests */
+  external_register_id?: string;
+  /** External cashier ID from POS */
+  external_cashier_id?: string;
+  /** External till ID from POS */
+  external_till_id?: string;
 }
 
 /**
@@ -220,12 +232,14 @@ export function seedShift(
   const businessDate = options.business_date ?? new Date().toISOString().split('T')[0];
 
   // SEC-006: Parameterized query
+  // Includes external_register_id for per-register shift numbering support
   const stmt = db.prepare(`
     INSERT INTO shifts (
       shift_id, store_id, shift_number, business_date,
       cashier_id, register_id, start_time, end_time, status,
+      external_register_id, external_cashier_id, external_till_id,
       created_at, updated_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   stmt.run(
@@ -238,6 +252,9 @@ export function seedShift(
     options.start_time ?? now,
     options.end_time ?? null,
     options.status ?? 'OPEN',
+    options.external_register_id ?? null,
+    options.external_cashier_id ?? null,
+    options.external_till_id ?? null,
     now,
     now
   );
@@ -252,6 +269,9 @@ export function seedShift(
     start_time: options.start_time ?? now,
     end_time: options.end_time ?? null,
     status: options.status ?? 'OPEN',
+    external_register_id: options.external_register_id ?? null,
+    external_cashier_id: options.external_cashier_id ?? null,
+    external_till_id: options.external_till_id ?? null,
     created_at: now,
     updated_at: now,
   };

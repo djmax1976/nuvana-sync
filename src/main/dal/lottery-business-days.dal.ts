@@ -604,19 +604,31 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       }
 
       // Calculate sales
+      // BIZ-006: Pass is_sold_out for proper mode detection (INDEX vs POSITION)
       const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(
         closing.pack_id,
-        closing.closing_serial
+        closing.closing_serial,
+        closing.is_sold_out
       );
 
       totalSales += salesAmount;
+
+      // SEC-014: No silent fallback to '000' - throw on missing serial data
+      const startingSerial = pack.prev_ending_serial || pack.opening_serial;
+      if (!startingSerial) {
+        throw new Error(
+          `Pack ${pack.pack_number} (${closing.pack_id}) missing starting serial data. ` +
+            `prev_ending_serial=${pack.prev_ending_serial}, opening_serial=${pack.opening_serial}. ` +
+            `This indicates a data integrity issue.`
+        );
+      }
 
       binsPreview.push({
         bin_display_order: pack.bin_display_order || 0,
         pack_number: pack.pack_number,
         game_name: pack.game_name || 'Unknown',
         // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
-        starting_serial: pack.prev_ending_serial || pack.opening_serial || '000',
+        starting_serial: startingSerial,
         closing_serial: closing.closing_serial,
         game_price: pack.game_price || 0,
         tickets_sold: ticketsSold,
@@ -732,9 +744,11 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         }
 
         // Calculate sales
+        // BIZ-006: Pass is_sold_out for proper mode detection (INDEX vs POSITION)
         const { ticketsSold, salesAmount } = lotteryPacksDAL.calculateSales(
           closing.pack_id,
-          closing.closing_serial
+          closing.closing_serial,
+          closing.is_sold_out
         );
 
         // Build closings entry for day close sync per API contract
@@ -760,12 +774,12 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
             tickets_sold_count: ticketsSold,
             sales_amount: salesAmount,
             depleted_by: userId, // SEC-010: Track who closed the pack
-            depletion_reason: 'DAY_CLOSE', // Pack marked as sold out during day close operation
+            depletion_reason: 'MANUAL_SOLD_OUT', // User manually marked pack as sold out during day close
           });
           log.info('Pack settled (sold out)', {
             packId: closing.pack_id,
             closingSerial: closing.closing_serial,
-            depletionReason: 'DAY_CLOSE',
+            depletionReason: 'MANUAL_SOLD_OUT',
             depletedBy: userId,
           });
 
@@ -779,7 +793,6 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
           // Calculate serial_start and serial_end for API compliance
           const serialStart = '000';
           const serialEnd = String(ticketsPerPack - 1).padStart(3, '0');
-          const _effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
 
           syncPackData.push({
             pack_id: closing.pack_id,
@@ -808,8 +821,8 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
               activated_by: pack.activated_by,
               depleted_at: now,
               returned_at: null,
-              // Depletion context (v019 + v047 alignment) - day close operation
-              depletion_reason: 'DAY_CLOSE',
+              // Depletion context (v019 + v047 alignment) - user manually marked sold out
+              depletion_reason: 'MANUAL_SOLD_OUT',
               depleted_by: userId,
               depleted_shift_id: null, // Day close is not shift-specific
               // Shift tracking (not applicable for day close)
@@ -832,8 +845,18 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
         // FK-SAFETY: Only pass bin_id if the bin exists locally (bin_name is set by LEFT JOIN)
         // This handles cases where pack was synced with bin_id but bin hasn't been synced yet
         const validBinId = pack.bin_name ? pack.current_bin_id : null;
+
         // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
-        const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial || '000';
+        // SEC-014: No silent fallback to '000' - throw on missing serial data
+        const effectiveStartingSerial = pack.prev_ending_serial || pack.opening_serial;
+        if (!effectiveStartingSerial) {
+          throw new Error(
+            `Pack ${pack.pack_number} (${closing.pack_id}) missing starting serial data. ` +
+              `prev_ending_serial=${pack.prev_ending_serial}, opening_serial=${pack.opening_serial}. ` +
+              `This indicates a data integrity issue.`
+          );
+        }
+
         this.createDayPack(day.store_id, dayId, closing.pack_id, validBinId, {
           starting_serial: effectiveStartingSerial,
           ending_serial: closing.closing_serial,
@@ -1354,6 +1377,59 @@ export class LotteryBusinessDaysDAL extends StoreBasedDAL<LotteryBusinessDay> {
       throw new Error(`Failed to create day pack record: ${dayPackId}`);
     }
     return created;
+  }
+
+  /**
+   * Record mid-day pack depletion (AUTO_REPLACED or MANUAL_SOLD_OUT before day close)
+   *
+   * Creates a lottery_day_packs record for packs depleted mid-day so that:
+   * 1. Reports have accurate starting_serial data
+   * 2. The record exists before day close (which only processes ACTIVE packs)
+   *
+   * SEC-006: Parameterized INSERT via createDayPack
+   * DB-006: TENANT_ISOLATION - store_id required
+   * SEC-014: INPUT_VALIDATION - Validates open day exists
+   *
+   * @param storeId - Store ID for tenant isolation
+   * @param packId - Pack ID being depleted
+   * @param binId - Bin ID where pack was located (nullable)
+   * @param data - Depletion data including starting_serial calculated at depletion time
+   * @returns Created day pack record
+   * @throws Error if no open day exists for the store
+   */
+  recordMidDayDepletion(
+    storeId: string,
+    packId: string,
+    binId: string | null,
+    data: {
+      starting_serial: string;
+      ending_serial: string;
+      tickets_sold: number;
+      sales_amount: number;
+    }
+  ): LotteryDayPack {
+    // Find the current open day for this store
+    const openDay = this.findOpenDay(storeId);
+    if (!openDay) {
+      log.error('Cannot record mid-day depletion: no open lottery day', {
+        storeId,
+        packId,
+      });
+      throw new Error('Cannot record mid-day depletion: no open lottery day exists for this store');
+    }
+
+    log.info('Recording mid-day pack depletion', {
+      storeId,
+      dayId: openDay.day_id,
+      packId,
+      binId,
+      startingSerial: data.starting_serial,
+      endingSerial: data.ending_serial,
+      ticketsSold: data.tickets_sold,
+      salesAmount: data.sales_amount,
+    });
+
+    return this.createDayPack(storeId, openDay.day_id, packId, binId, data);
   }
 
   /**

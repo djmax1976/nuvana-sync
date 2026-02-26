@@ -152,6 +152,12 @@ export default function EmployeesPage() {
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showPinDialog, setShowPinDialog] = useState(false);
   const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+
+  // Dialog-scoped error states (ERR-006: structured per-context errors)
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
+  const [pinError, setPinError] = useState<string | null>(null);
+  // Page-level error for non-dialog actions (toggle status)
   const [actionError, setActionError] = useState<string | null>(null);
 
   // Forms
@@ -180,20 +186,24 @@ export default function EmployeesPage() {
 
   // Handlers
   const handleCreate = async (data: CreateEmployeeForm) => {
-    setActionError(null);
+    setCreateError(null);
     try {
       await createMutation.mutateAsync(data);
       setShowAddDialog(false);
       createForm.reset();
       refetch();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to create employee');
+      // ERR-006: Set dialog-scoped error for in-context display
+      // Handle empty or missing error messages with fallback
+      const message =
+        err instanceof Error && err.message ? err.message : 'Failed to create employee';
+      setCreateError(message);
     }
   };
 
   const handleEdit = async (data: UpdateEmployeeForm) => {
     if (!selectedEmployee) return;
-    setActionError(null);
+    setEditError(null);
     try {
       await updateMutation.mutateAsync({
         userId: selectedEmployee.user_id,
@@ -203,13 +213,17 @@ export default function EmployeesPage() {
       setSelectedEmployee(null);
       refetch();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to update employee');
+      // ERR-006: Set dialog-scoped error for in-context display
+      // Handle empty or missing error messages with fallback
+      const message =
+        err instanceof Error && err.message ? err.message : 'Failed to update employee';
+      setEditError(message);
     }
   };
 
   const handleUpdatePin = async (data: UpdatePinForm) => {
     if (!selectedEmployee) return;
-    setActionError(null);
+    setPinError(null);
     try {
       await updatePinMutation.mutateAsync({
         userId: selectedEmployee.user_id,
@@ -220,7 +234,10 @@ export default function EmployeesPage() {
       pinForm.reset();
       refetch();
     } catch (err) {
-      setActionError(err instanceof Error ? err.message : 'Failed to update PIN');
+      // ERR-006: Set dialog-scoped error for in-context display
+      // Handle empty or missing error messages with fallback
+      const message = err instanceof Error && err.message ? err.message : 'Failed to update PIN';
+      setPinError(message);
     }
   };
 
@@ -254,6 +271,26 @@ export default function EmployeesPage() {
     setSelectedEmployee(employee);
     pinForm.reset();
     setShowPinDialog(true);
+  };
+
+  // Dialog close handlers (STATE-003: ensure cleanup on all close paths)
+  const closeAddDialog = () => {
+    setShowAddDialog(false);
+    setCreateError(null);
+    createForm.reset();
+  };
+
+  const closeEditDialog = () => {
+    setShowEditDialog(false);
+    setEditError(null);
+    setSelectedEmployee(null);
+  };
+
+  const closePinDialog = () => {
+    setShowPinDialog(false);
+    setPinError(null);
+    pinForm.reset();
+    setSelectedEmployee(null);
   };
 
   // Render error state
@@ -378,7 +415,16 @@ export default function EmployeesPage() {
       </div>
 
       {/* Add Employee Dialog */}
-      <Dialog open={showAddDialog} onOpenChange={setShowAddDialog}>
+      <Dialog
+        open={showAddDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeAddDialog();
+          } else {
+            setShowAddDialog(true);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Add New Employee</DialogTitle>
@@ -388,6 +434,13 @@ export default function EmployeesPage() {
           </DialogHeader>
           <Form {...createForm}>
             <form onSubmit={createForm.handleSubmit(handleCreate)} className="space-y-4">
+              {/* A11Y-010: In-dialog error with role="alert" for screen reader announcement */}
+              {createError && (
+                <Alert variant="destructive" role="alert" aria-live="assertive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{createError}</AlertDescription>
+                </Alert>
+              )}
               <FormField
                 control={createForm.control}
                 name="name"
@@ -461,7 +514,7 @@ export default function EmployeesPage() {
                 )}
               />
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setShowAddDialog(false)}>
+                <Button type="button" variant="outline" onClick={closeAddDialog}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={createMutation.isPending}>
@@ -474,7 +527,16 @@ export default function EmployeesPage() {
       </Dialog>
 
       {/* Edit Employee Dialog */}
-      <Dialog open={showEditDialog} onOpenChange={setShowEditDialog}>
+      <Dialog
+        open={showEditDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            closeEditDialog();
+          } else {
+            setShowEditDialog(true);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Edit Employee</DialogTitle>
@@ -482,6 +544,13 @@ export default function EmployeesPage() {
           </DialogHeader>
           <Form {...editForm}>
             <form onSubmit={editForm.handleSubmit(handleEdit)} className="space-y-4">
+              {/* A11Y-010: In-dialog error with role="alert" for screen reader announcement */}
+              {editError && (
+                <Alert variant="destructive" role="alert" aria-live="assertive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{editError}</AlertDescription>
+                </Alert>
+              )}
               <FormField
                 control={editForm.control}
                 name="name"
@@ -517,7 +586,7 @@ export default function EmployeesPage() {
                 )}
               />
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setShowEditDialog(false)}>
+                <Button type="button" variant="outline" onClick={closeEditDialog}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updateMutation.isPending}>
@@ -530,7 +599,16 @@ export default function EmployeesPage() {
       </Dialog>
 
       {/* Change PIN Dialog */}
-      <Dialog open={showPinDialog} onOpenChange={setShowPinDialog}>
+      <Dialog
+        open={showPinDialog}
+        onOpenChange={(open) => {
+          if (!open) {
+            closePinDialog();
+          } else {
+            setShowPinDialog(true);
+          }
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Change PIN</DialogTitle>
@@ -540,6 +618,13 @@ export default function EmployeesPage() {
           </DialogHeader>
           <Form {...pinForm}>
             <form onSubmit={pinForm.handleSubmit(handleUpdatePin)} className="space-y-4">
+              {/* A11Y-010: In-dialog error with role="alert" for screen reader announcement */}
+              {pinError && (
+                <Alert variant="destructive" role="alert" aria-live="assertive">
+                  <AlertCircle className="h-4 w-4" />
+                  <AlertDescription>{pinError}</AlertDescription>
+                </Alert>
+              )}
               <FormField
                 control={pinForm.control}
                 name="currentPin"
@@ -598,7 +683,7 @@ export default function EmployeesPage() {
                 )}
               />
               <DialogFooter>
-                <Button type="button" variant="outline" onClick={() => setShowPinDialog(false)}>
+                <Button type="button" variant="outline" onClick={closePinDialog}>
                   Cancel
                 </Button>
                 <Button type="submit" disabled={updatePinMutation.isPending}>

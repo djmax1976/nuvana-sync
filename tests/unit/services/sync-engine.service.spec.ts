@@ -4120,7 +4120,7 @@ describe('SyncEngineService', () => {
 
   // ==========================================================================
   // T3.2.2: Pack DEPLETED Status Sync via pushPackBatch (v047 - Phase 3)
-  // Tests for pack depletion sync with DAY_CLOSE reason
+  // Tests for pack depletion sync with MANUAL_SOLD_OUT reason
   // ==========================================================================
   describe('T3.2.2: Pack DEPLETED status sync via pushPackBatch', () => {
     it('should call pushPackDeplete for pack with status DEPLETED', async () => {
@@ -4150,7 +4150,7 @@ describe('SyncEngineService', () => {
           activated_by: 'user-activator',
           depleted_at: '2024-01-15T20:00:00Z',
           depleted_by: 'user-closer',
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
           returned_at: null,
         }),
         priority: 0,
@@ -4179,7 +4179,7 @@ describe('SyncEngineService', () => {
           tickets_sold: 150,
           sales_amount: 150.0,
           depleted_at: '2024-01-15T20:00:00Z',
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
           depleted_by: 'user-closer',
         })
       );
@@ -4205,7 +4205,7 @@ describe('SyncEngineService', () => {
           tickets_sold: 100,
           sales_amount: 100.0,
           depleted_at: '2024-01-15T20:00:00Z',
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
         }),
         priority: 0,
         synced: 0,
@@ -4252,7 +4252,7 @@ describe('SyncEngineService', () => {
           tickets_sold: 150,
           sales_amount: 150.0,
           depleted_at: null, // Missing!
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
         }),
         priority: 0,
         synced: 0,
@@ -4343,7 +4343,7 @@ describe('SyncEngineService', () => {
           sales_amount: 299.0,
           depleted_at: '2024-01-15T23:59:00Z',
           depleted_by: 'user-success',
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
         }),
         priority: 0,
         synced: 0,
@@ -4515,7 +4515,7 @@ describe('SyncEngineService', () => {
           sales_amount: 200.0,
           depleted_at: '2024-01-15T20:00:00Z',
           depleted_by: 'user-123',
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
         }),
         priority: 0,
         synced: 0,

@@ -202,26 +202,40 @@ describe('ActivatedPacksSection', () => {
 
   // --------------------------------------------------------------------------
   // Collapse / Expand
+  // Note: CSS Grid animation keeps content in DOM; collapsed state uses grid-rows-[0fr]
   // --------------------------------------------------------------------------
   describe('Collapse / Expand', () => {
-    it('should be collapsed by default', () => {
+    it('should be collapsed by default (grid-rows-[0fr])', () => {
       render(<ActivatedPacksSection activatedPacks={[createPack()]} />);
-      expect(screen.queryByTestId('activated-packs-content')).not.toBeInTheDocument();
+      // Content is always in DOM with CSS Grid animation
+      const content = screen.getByTestId('activated-packs-content');
+      expect(content).toBeInTheDocument();
+      // Parent grid wrapper has collapsed state
+      const section = screen.getByTestId('activated-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
-    it('should expand when header is clicked', () => {
+    it('should expand when header is clicked (grid-rows-[1fr])', () => {
       render(<ActivatedPacksSection activatedPacks={[createPack()]} />);
       const button = screen.getByRole('button');
       fireEvent.click(button);
       expect(screen.getByTestId('activated-packs-content')).toBeInTheDocument();
+      const section = screen.getByTestId('activated-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
-    it('should collapse when header is clicked twice', () => {
+    it('should collapse when header is clicked twice (grid-rows-[0fr])', () => {
       render(<ActivatedPacksSection activatedPacks={[createPack()]} />);
       const button = screen.getByRole('button');
       fireEvent.click(button);
       fireEvent.click(button);
-      expect(screen.queryByTestId('activated-packs-content')).not.toBeInTheDocument();
+      // Content still in DOM but collapsed
+      expect(screen.getByTestId('activated-packs-content')).toBeInTheDocument();
+      const section = screen.getByTestId('activated-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
     it('should start expanded when defaultOpen=true', () => {
@@ -491,6 +505,56 @@ describe('ActivatedPacksSection', () => {
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // CSS Grid Animation (350ms smooth transition)
+  // Traceability: PERF-002, ensures smooth UX via CSS Grid technique
+  // --------------------------------------------------------------------------
+  describe('CSS Grid Animation', () => {
+    it('should have CSS Grid animation wrapper with grid class', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
+      // Find the animation wrapper (parent of overflow-hidden div)
+      const section = screen.getByTestId('activated-packs-section');
+      const animationWrapper = section.querySelector('.grid.transition-\\[grid-template-rows\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have 350ms duration class on animation wrapper', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('activated-packs-section');
+      const animationWrapper = section.querySelector('.duration-\\[350ms\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have ease-out timing function on animation wrapper', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('activated-packs-section');
+      const animationWrapper = section.querySelector('.ease-out');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[1fr] when open', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('activated-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[0fr] when closed', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={false} />);
+      const section = screen.getByTestId('activated-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have overflow-hidden inner wrapper for animation', () => {
+      render(<ActivatedPacksSection activatedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('activated-packs-section');
+      const gridWrapper = section.querySelector('.grid');
+      const overflowWrapper = gridWrapper?.querySelector('.overflow-hidden');
+      expect(overflowWrapper).not.toBeNull();
     });
   });
 });

@@ -182,16 +182,6 @@ export const DayAccordion = React.memo(function DayAccordion({
         )}
         data-testid="day-accordion-header"
       >
-        {/* Collapse/Expand Chevron */}
-        <ChevronDown
-          className={cn(
-            'mr-3 h-5 w-5 shrink-0 text-muted-foreground',
-            'transition-transform duration-300 ease-out',
-            !isExpanded && '-rotate-90'
-          )}
-          aria-hidden="true"
-        />
-
         {/* Day Icon */}
         <div
           className={cn(
@@ -225,6 +215,16 @@ export const DayAccordion = React.memo(function DayAccordion({
         >
           View Day
         </button>
+
+        {/* Collapse/Expand Chevron - Positioned on extreme right */}
+        <ChevronDown
+          className={cn(
+            'ml-4 h-5 w-5 shrink-0 text-muted-foreground',
+            'transition-transform duration-[350ms] ease-out',
+            isExpanded ? 'rotate-0' : '-rotate-90'
+          )}
+          aria-hidden="true"
+        />
       </div>
 
       {/* Collapsible Content - CSS Grid Animation */}

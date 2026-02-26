@@ -28,6 +28,7 @@
 
 import { useState, useCallback } from 'react';
 import { RotateCcw, AlertTriangle } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -155,120 +156,128 @@ export function ReturnedPacksSection({
             ) : undefined
           }
         />
-        {isOpen && (
-          <div
-            className="overflow-x-auto"
-            data-testid="returned-packs-content"
-            role="region"
-            aria-label="Returned packs table"
-          >
-            <Table size="compact" style={{ tableLayout: 'fixed' }}>
-              <colgroup>
-                <col className="w-[60px] md:w-[70px]" />
-                <col />
-                <col className="w-[80px] md:w-[95px]" />
-                <col className="w-[100px] md:w-[140px]" />
-                <col className="w-[60px] md:w-[80px]" />
-                <col className="w-[65px] md:w-[90px]" />
-                <col className="w-[90px] md:w-[120px]" />
-                <col className="w-[110px] md:w-[160px]" />
-              </colgroup>
-              <TableHeader>
-                <TableRow>
-                  <TableHead scope="col" className="text-center whitespace-nowrap">
-                    Bin
-                  </TableHead>
-                  <TableHead scope="col">Game</TableHead>
-                  <TableHead scope="col" className="text-right whitespace-nowrap">
-                    Price
-                  </TableHead>
-                  <TableHead scope="col" className="whitespace-nowrap">
-                    Pack #
-                  </TableHead>
-                  <TableHead scope="col" className="text-center whitespace-nowrap">
-                    Start
-                  </TableHead>
-                  <TableHead scope="col" className="text-center whitespace-nowrap">
-                    End
-                  </TableHead>
-                  <TableHead scope="col" className="text-center whitespace-nowrap">
-                    Sold
-                  </TableHead>
-                  <TableHead scope="col" className="text-right whitespace-nowrap">
-                    Amount
-                  </TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {returnedPacks.map((pack) => {
-                  // SEC-014: Validate pack object structure
-                  if (!pack || typeof pack.pack_id !== 'string') {
-                    return null;
-                  }
-                  return (
-                    <TableRow
-                      key={pack.pack_id}
-                      data-testid={`returned-pack-row-${pack.pack_id}`}
-                      className="group hover:bg-orange-50 dark:hover:bg-orange-950/30"
-                    >
-                      <TableCell className="text-center border-b border-border/50">
-                        <div className="flex justify-center">
-                          <BinBadge
-                            number={typeof pack.bin_number === 'number' ? pack.bin_number : 0}
-                          />
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs sm:text-sm font-semibold text-foreground border-b border-border/50 truncate max-w-[200px]">
-                        {typeof pack.game_name === 'string' ? pack.game_name : '--'}
-                      </TableCell>
-                      <TableCell className="text-right text-xs sm:text-sm font-mono border-b border-border/50 whitespace-nowrap">
-                        {typeof pack.game_price === 'number'
-                          ? formatCurrency(pack.game_price)
-                          : '--'}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs sm:text-sm text-muted-foreground border-b border-border/50 truncate">
-                        {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
-                      </TableCell>
-                      <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
-                        000
-                      </TableCell>
-                      <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
-                        {typeof pack.last_sold_serial === 'string' && pack.last_sold_serial
-                          ? pack.last_sold_serial
-                          : '000'}
-                      </TableCell>
-                      <TableCell className="text-center text-xs sm:text-sm border-b border-border/50 whitespace-nowrap">
-                        {typeof pack.tickets_sold_on_return === 'number'
-                          ? pack.tickets_sold_on_return
-                          : '--'}
-                      </TableCell>
-                      <TableCell className="text-right text-xs sm:text-sm font-bold border-b border-border/50 whitespace-nowrap">
-                        <div className="whitespace-nowrap">
-                          {typeof pack.return_sales_amount === 'number'
-                            ? formatCurrency(pack.return_sales_amount)
+        {/* Collapsible Content - CSS Grid Animation (350ms ease-out) */}
+        <div
+          className={cn(
+            'grid transition-[grid-template-rows] duration-[350ms] ease-out',
+            isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+          )}
+        >
+          <div className="overflow-hidden">
+            <div
+              className="overflow-x-auto"
+              data-testid="returned-packs-content"
+              role="region"
+              aria-label="Returned packs table"
+            >
+              <Table size="compact" style={{ tableLayout: 'fixed' }}>
+                <colgroup>
+                  <col className="w-[60px] md:w-[70px]" />
+                  <col />
+                  <col className="w-[80px] md:w-[95px]" />
+                  <col className="w-[100px] md:w-[140px]" />
+                  <col className="w-[60px] md:w-[80px]" />
+                  <col className="w-[65px] md:w-[90px]" />
+                  <col className="w-[90px] md:w-[120px]" />
+                  <col className="w-[110px] md:w-[160px]" />
+                </colgroup>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead scope="col" className="text-center whitespace-nowrap">
+                      Bin
+                    </TableHead>
+                    <TableHead scope="col">Game</TableHead>
+                    <TableHead scope="col" className="text-right whitespace-nowrap">
+                      Price
+                    </TableHead>
+                    <TableHead scope="col" className="whitespace-nowrap">
+                      Pack #
+                    </TableHead>
+                    <TableHead scope="col" className="text-center whitespace-nowrap">
+                      Start
+                    </TableHead>
+                    <TableHead scope="col" className="text-center whitespace-nowrap">
+                      End
+                    </TableHead>
+                    <TableHead scope="col" className="text-center whitespace-nowrap">
+                      Sold
+                    </TableHead>
+                    <TableHead scope="col" className="text-right whitespace-nowrap">
+                      Amount
+                    </TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {returnedPacks.map((pack) => {
+                    // SEC-014: Validate pack object structure
+                    if (!pack || typeof pack.pack_id !== 'string') {
+                      return null;
+                    }
+                    return (
+                      <TableRow
+                        key={pack.pack_id}
+                        data-testid={`returned-pack-row-${pack.pack_id}`}
+                        className="group hover:bg-orange-50 dark:hover:bg-orange-950/30"
+                      >
+                        <TableCell className="text-center border-b border-border/50">
+                          <div className="flex justify-center">
+                            <BinBadge
+                              number={typeof pack.bin_number === 'number' ? pack.bin_number : 0}
+                            />
+                          </div>
+                        </TableCell>
+                        <TableCell className="text-xs sm:text-sm font-semibold text-foreground border-b border-border/50 truncate max-w-[200px]">
+                          {typeof pack.game_name === 'string' ? pack.game_name : '--'}
+                        </TableCell>
+                        <TableCell className="text-right text-xs sm:text-sm font-mono border-b border-border/50 whitespace-nowrap">
+                          {typeof pack.game_price === 'number'
+                            ? formatCurrency(pack.game_price)
                             : '--'}
-                        </div>
-                        <div className="flex flex-col leading-tight">
-                          <span className="text-[10px] sm:text-[11px] text-muted-foreground font-normal whitespace-nowrap">
-                            {(() => {
-                              try {
-                                return pack.returned_at
-                                  ? formatCustom(pack.returned_at, 'MMM d, h:mm a')
-                                  : '--';
-                              } catch {
-                                return '--';
-                              }
-                            })()}
-                          </span>
-                        </div>
-                      </TableCell>
-                    </TableRow>
-                  );
-                })}
-              </TableBody>
-            </Table>
+                        </TableCell>
+                        <TableCell className="font-mono text-xs sm:text-sm text-muted-foreground border-b border-border/50 truncate">
+                          {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
+                        </TableCell>
+                        <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
+                          000
+                        </TableCell>
+                        <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
+                          {typeof pack.last_sold_serial === 'string' && pack.last_sold_serial
+                            ? pack.last_sold_serial
+                            : '000'}
+                        </TableCell>
+                        <TableCell className="text-center text-xs sm:text-sm border-b border-border/50 whitespace-nowrap">
+                          {typeof pack.tickets_sold_on_return === 'number'
+                            ? pack.tickets_sold_on_return
+                            : '--'}
+                        </TableCell>
+                        <TableCell className="text-right text-xs sm:text-sm font-bold border-b border-border/50 whitespace-nowrap">
+                          <div className="whitespace-nowrap">
+                            {typeof pack.return_sales_amount === 'number'
+                              ? formatCurrency(pack.return_sales_amount)
+                              : '--'}
+                          </div>
+                          <div className="flex flex-col leading-tight">
+                            <span className="text-[10px] sm:text-[11px] text-muted-foreground font-normal whitespace-nowrap">
+                              {(() => {
+                                try {
+                                  return pack.returned_at
+                                    ? formatCustom(pack.returned_at, 'MMM d, h:mm a')
+                                    : '--';
+                                } catch {
+                                  return '--';
+                                }
+                              })()}
+                            </span>
+                          </div>
+                        </TableCell>
+                      </TableRow>
+                    );
+                  })}
+                </TableBody>
+              </Table>
+            </div>
           </div>
-        )}
+        </div>
       </div>
     </div>
   );

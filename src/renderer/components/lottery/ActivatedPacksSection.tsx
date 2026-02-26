@@ -28,6 +28,7 @@
 
 import { useState, useCallback, useMemo } from 'react';
 import { Zap } from 'lucide-react';
+import { cn } from '@/lib/utils';
 import {
   Table,
   TableBody,
@@ -234,119 +235,127 @@ export function ActivatedPacksSection({
         onToggle={toggle}
         subtitle={subtitle}
       />
-      {isOpen && (
-        <div
-          className="overflow-x-auto"
-          data-testid="activated-packs-content"
-          role="region"
-          aria-label="Activated packs table"
-        >
-          <Table size="compact" style={{ tableLayout: 'fixed' }}>
-            <colgroup>
-              <col className="w-[60px] md:w-[70px]" />
-              <col />
-              <col className="w-[80px] md:w-[95px]" />
-              <col className="w-[100px] md:w-[140px]" />
-              <col className="w-[60px] md:w-[80px]" />
-              <col className="w-[65px] md:w-[90px]" />
-              <col className="w-[90px] md:w-[120px]" />
-              <col className="w-[110px] md:w-[160px]" />
-            </colgroup>
-            <TableHeader>
-              <TableRow>
-                <TableHead scope="col" className="text-center whitespace-nowrap">
-                  Bin
-                </TableHead>
-                <TableHead scope="col">Game</TableHead>
-                <TableHead scope="col" className="text-right whitespace-nowrap">
-                  Price
-                </TableHead>
-                <TableHead scope="col" className="whitespace-nowrap">
-                  Pack #
-                </TableHead>
-                <TableHead scope="col" className="text-center whitespace-nowrap">
-                  Start
-                </TableHead>
-                <TableHead scope="col" className="text-center whitespace-nowrap">
-                  End
-                </TableHead>
-                <TableHead scope="col" className="text-center whitespace-nowrap">
-                  Status
-                </TableHead>
-                <TableHead scope="col" className="text-right whitespace-nowrap">
-                  Activated
-                </TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {activatedPacks.map((pack) => {
-                // SEC-014: Validate pack object structure
-                if (!pack || typeof pack.pack_id !== 'string') {
-                  return null;
-                }
-                const statusConfig = getStatusDisplay(pack.status);
-                const parsedDateTime = parseDateTime(pack.activated_at);
-                const isDimmed = pack.status !== 'ACTIVE';
+      {/* Collapsible Content - CSS Grid Animation (350ms ease-out) */}
+      <div
+        className={cn(
+          'grid transition-[grid-template-rows] duration-[350ms] ease-out',
+          isOpen ? 'grid-rows-[1fr]' : 'grid-rows-[0fr]'
+        )}
+      >
+        <div className="overflow-hidden">
+          <div
+            className="overflow-x-auto"
+            data-testid="activated-packs-content"
+            role="region"
+            aria-label="Activated packs table"
+          >
+            <Table size="compact" style={{ tableLayout: 'fixed' }}>
+              <colgroup>
+                <col className="w-[60px] md:w-[70px]" />
+                <col />
+                <col className="w-[80px] md:w-[95px]" />
+                <col className="w-[100px] md:w-[140px]" />
+                <col className="w-[60px] md:w-[80px]" />
+                <col className="w-[65px] md:w-[90px]" />
+                <col className="w-[90px] md:w-[120px]" />
+                <col className="w-[110px] md:w-[160px]" />
+              </colgroup>
+              <TableHeader>
+                <TableRow>
+                  <TableHead scope="col" className="text-center whitespace-nowrap">
+                    Bin
+                  </TableHead>
+                  <TableHead scope="col">Game</TableHead>
+                  <TableHead scope="col" className="text-right whitespace-nowrap">
+                    Price
+                  </TableHead>
+                  <TableHead scope="col" className="whitespace-nowrap">
+                    Pack #
+                  </TableHead>
+                  <TableHead scope="col" className="text-center whitespace-nowrap">
+                    Start
+                  </TableHead>
+                  <TableHead scope="col" className="text-center whitespace-nowrap">
+                    End
+                  </TableHead>
+                  <TableHead scope="col" className="text-center whitespace-nowrap">
+                    Status
+                  </TableHead>
+                  <TableHead scope="col" className="text-right whitespace-nowrap">
+                    Activated
+                  </TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {activatedPacks.map((pack) => {
+                  // SEC-014: Validate pack object structure
+                  if (!pack || typeof pack.pack_id !== 'string') {
+                    return null;
+                  }
+                  const statusConfig = getStatusDisplay(pack.status);
+                  const parsedDateTime = parseDateTime(pack.activated_at);
+                  const isDimmed = pack.status !== 'ACTIVE';
 
-                return (
-                  <TableRow
-                    key={pack.pack_id}
-                    data-testid={`activated-pack-row-${pack.pack_id}`}
-                    className={`group hover:bg-blue-50 dark:hover:bg-blue-950/30 ${isDimmed ? 'opacity-70' : ''}`}
-                  >
-                    <TableCell className="text-center border-b border-border/50">
-                      <div className="flex justify-center">
-                        <BinBadge
-                          number={typeof pack.bin_number === 'number' ? pack.bin_number : 0}
-                        />
-                      </div>
-                    </TableCell>
-                    <TableCell className="text-xs sm:text-sm font-semibold text-foreground border-b border-border/50 truncate max-w-[200px]">
-                      {typeof pack.game_name === 'string' ? pack.game_name : '--'}
-                    </TableCell>
-                    <TableCell className="text-right text-xs sm:text-sm font-mono border-b border-border/50 whitespace-nowrap">
-                      {typeof pack.game_price === 'number'
-                        ? new Intl.NumberFormat('en-US', {
-                            style: 'currency',
-                            currency: 'USD',
-                            minimumFractionDigits: 2,
-                            maximumFractionDigits: 2,
-                          }).format(pack.game_price)
-                        : '--'}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs sm:text-sm text-muted-foreground border-b border-border/50 truncate">
-                      {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
-                    </TableCell>
-                    <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
-                      000
-                    </TableCell>
-                    <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
-                      - - -
-                    </TableCell>
-                    <TableCell className="text-center border-b border-border/50">
-                      <span
-                        className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide ${statusConfig.className}`}
-                      >
-                        {statusConfig.label}
-                      </span>
-                    </TableCell>
-                    <TableCell className="text-sm text-right border-b border-border/50 whitespace-nowrap">
-                      <div className="flex flex-col leading-tight items-end">
-                        <span className="text-xs text-foreground font-medium">
-                          {parsedDateTime.date}
+                  return (
+                    <TableRow
+                      key={pack.pack_id}
+                      data-testid={`activated-pack-row-${pack.pack_id}`}
+                      className={`group hover:bg-blue-50 dark:hover:bg-blue-950/30 ${isDimmed ? 'opacity-70' : ''}`}
+                    >
+                      <TableCell className="text-center border-b border-border/50">
+                        <div className="flex justify-center">
+                          <BinBadge
+                            number={typeof pack.bin_number === 'number' ? pack.bin_number : 0}
+                          />
+                        </div>
+                      </TableCell>
+                      <TableCell className="text-xs sm:text-sm font-semibold text-foreground border-b border-border/50 truncate max-w-[200px]">
+                        {typeof pack.game_name === 'string' ? pack.game_name : '--'}
+                      </TableCell>
+                      <TableCell className="text-right text-xs sm:text-sm font-mono border-b border-border/50 whitespace-nowrap">
+                        {typeof pack.game_price === 'number'
+                          ? new Intl.NumberFormat('en-US', {
+                              style: 'currency',
+                              currency: 'USD',
+                              minimumFractionDigits: 2,
+                              maximumFractionDigits: 2,
+                            }).format(pack.game_price)
+                          : '--'}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs sm:text-sm text-muted-foreground border-b border-border/50 truncate">
+                        {typeof pack.pack_number === 'string' ? pack.pack_number : '--'}
+                      </TableCell>
+                      <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
+                        000
+                      </TableCell>
+                      <TableCell className="font-mono text-xs sm:text-sm text-center border-b border-border/50 whitespace-nowrap">
+                        - - -
+                      </TableCell>
+                      <TableCell className="text-center border-b border-border/50">
+                        <span
+                          className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide ${statusConfig.className}`}
+                        >
+                          {statusConfig.label}
                         </span>
-                        <span className="text-[11px] text-muted-foreground">
-                          {parsedDateTime.time}
-                        </span>
-                      </div>
-                    </TableCell>
-                  </TableRow>
-                );
-              })}
-            </TableBody>
-          </Table>
+                      </TableCell>
+                      <TableCell className="text-sm text-right border-b border-border/50 whitespace-nowrap">
+                        <div className="flex flex-col leading-tight items-end">
+                          <span className="text-xs text-foreground font-medium">
+                            {parsedDateTime.date}
+                          </span>
+                          <span className="text-[11px] text-muted-foreground">
+                            {parsedDateTime.time}
+                          </span>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }

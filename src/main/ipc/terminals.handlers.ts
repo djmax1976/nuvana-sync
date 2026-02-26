@@ -15,11 +15,35 @@ import { registerHandler, createErrorResponse, IPCErrorCodes } from './index';
 import { storesDAL } from '../dal/stores.dal';
 import { posTerminalMappingsDAL, type POSTerminalMapping } from '../dal/pos-id-mappings.dal';
 import { shiftsDAL, type Shift } from '../dal/shifts.dal';
+import { usersDAL } from '../dal/users.dal';
 import { createLogger } from '../utils/logger';
 
 // ============================================================================
 // Types
 // ============================================================================
+
+/**
+ * Compute display-friendly cashier name
+ * Follows ShiftResponse pattern: real name, or fallback strings
+ *
+ * @param cashierId - Cashier UUID (may be null)
+ * @param userName - Resolved user name (may be undefined)
+ * @returns Display-friendly cashier name
+ */
+function computeCashierDisplayName(cashierId: string | null, userName: string | undefined): string {
+  if (!cashierId) return 'No Cashier Assigned';
+  if (userName) return userName;
+  return 'Unknown Cashier';
+}
+
+/**
+ * Shift with resolved cashier name
+ * Extends base Shift with display-friendly cashier information
+ */
+interface ShiftWithCashierName extends Shift {
+  /** Resolved cashier name from users table */
+  cashier_name: string;
+}
 
 /**
  * Register with associated shift information
@@ -36,8 +60,8 @@ interface RegisterWithShiftStatus {
   description: string | null;
   /** Whether the register is active */
   active: boolean;
-  /** Currently open shift on this register, if any */
-  activeShift: Shift | null;
+  /** Currently open shift on this register, if any (with resolved cashier name) */
+  activeShift: ShiftWithCashierName | null;
   /** Count of open shifts for this register */
   openShiftCount: number;
   /** When this register was first identified */
@@ -139,13 +163,24 @@ registerHandler<RegisterListResponse | ReturnType<typeof createErrorResponse>>(
       // Use end_time IS NULL as primary indicator (more reliable than status field)
       const openShifts = openShiftsResult.data.filter((s) => s.end_time === null);
 
+      // Batch lookup cashier names to avoid N+1 queries
+      // SEC-006: Uses parameterized query via DAL
+      const cashierIds = openShifts
+        .map((s) => s.cashier_id)
+        .filter((id): id is string => id !== null);
+      const uniqueCashierIds = [...new Set(cashierIds)];
+      const cashierMap = usersDAL.findByUserIds(uniqueCashierIds);
+
       // Build a map of register_id -> open shifts for O(1) lookup
       // This avoids N+1 queries by doing a single pass
-      const shiftsByRegister = new Map<string, Shift[]>();
+      const shiftsByRegister = new Map<string, ShiftWithCashierName[]>();
       for (const shift of openShifts) {
         const registerId = shift.external_register_id || shift.register_id || 'default';
         const existing = shiftsByRegister.get(registerId) || [];
-        existing.push(shift);
+        // Enhance shift with cashier_name using display helper
+        const userName = shift.cashier_id ? cashierMap.get(shift.cashier_id)?.name : undefined;
+        const cashierName = computeCashierDisplayName(shift.cashier_id, userName);
+        existing.push({ ...shift, cashier_name: cashierName });
         shiftsByRegister.set(registerId, existing);
       }
 
@@ -236,7 +271,19 @@ registerHandler<RegisterWithShiftStatus | ReturnType<typeof createErrorResponse>
             s.register_id === terminal.external_register_id)
       );
 
-      const activeShift = shiftsForRegister.length > 0 ? shiftsForRegister[0] : null;
+      // Lookup cashier name if there's an active shift
+      // SEC-006: Uses parameterized query via DAL
+      let activeShift: ShiftWithCashierName | null = null;
+      if (shiftsForRegister.length > 0) {
+        const shift = shiftsForRegister[0];
+        let userName: string | undefined;
+        if (shift.cashier_id) {
+          const cashierMap = usersDAL.findByUserIds([shift.cashier_id]);
+          userName = cashierMap.get(shift.cashier_id)?.name;
+        }
+        const cashierName = computeCashierDisplayName(shift.cashier_id, userName);
+        activeShift = { ...shift, cashier_name: cashierName };
+      }
 
       return {
         id: terminal.id,

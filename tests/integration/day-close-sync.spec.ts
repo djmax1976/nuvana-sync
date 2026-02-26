@@ -395,7 +395,7 @@ describe('Day Close Sync Integration (v047 - Phase 3)', () => {
 
       const payload = packItem.payload as Record<string, unknown>;
       expect(payload.status).toBe('DEPLETED');
-      expect(payload.depletion_reason).toBe('DAY_CLOSE');
+      expect(payload.depletion_reason).toBe('MANUAL_SOLD_OUT');
     });
   });
 

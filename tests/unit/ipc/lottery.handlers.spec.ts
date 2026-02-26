@@ -1790,7 +1790,7 @@ describe('Lottery IPC Handlers', () => {
           total: number;
           received: number;
           active: number;
-          settled: number;
+          depleted: number;
           returned: number;
         };
       }
@@ -1811,7 +1811,7 @@ describe('Lottery IPC Handlers', () => {
             total: game.total_packs,
             received: game.received_packs,
             active: game.active_packs,
-            settled: game.settled_packs,
+            depleted: game.settled_packs,
             returned: game.returned_packs,
           },
         };
@@ -1926,7 +1926,7 @@ describe('Lottery IPC Handlers', () => {
         expect(response.pack_counts.total).toBe(15);
         expect(response.pack_counts.received).toBe(3);
         expect(response.pack_counts.active).toBe(7);
-        expect(response.pack_counts.settled).toBe(4);
+        expect(response.pack_counts.depleted).toBe(4);
         expect(response.pack_counts.returned).toBe(1);
 
         // Flat pack count fields should not be present
@@ -2028,7 +2028,7 @@ describe('Lottery IPC Handlers', () => {
         expect(response.pack_counts.total).toBe(0);
         expect(response.pack_counts.received).toBe(0);
         expect(response.pack_counts.active).toBe(0);
-        expect(response.pack_counts.settled).toBe(0);
+        expect(response.pack_counts.depleted).toBe(0);
         expect(response.pack_counts.returned).toBe(0);
       });
     });

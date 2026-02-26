@@ -107,8 +107,11 @@ export interface DayBinPackDetails {
   pack_number: string;
   game_name: string;
   game_price: number;
-  /** Actual opening serial from pack record (not hardcoded) */
-  starting_serial: string;
+  /**
+   * Actual opening serial from pack record (not hardcoded)
+   * SEC-014: null indicates missing data (data integrity issue) - UI must handle
+   */
+  starting_serial: string | null;
   /** Current ending serial if set during day close */
   ending_serial: string | null;
   /** Pack's last ticket serial (tickets_per_pack - 1), padded to 3 digits */
@@ -947,7 +950,7 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
         pack_number: r.pack_number,
         opening_serial: r.opening_serial,
         prev_ending_serial: r.prev_ending_serial,
-        effective_starting: r.prev_ending_serial || r.opening_serial || '000',
+        effective_starting: r.prev_ending_serial || r.opening_serial || null,
       }));
     if (packsWithSerials.length > 0) {
       log.info('[DAYBINS DEBUG] Serial carryforward lookup results', {
@@ -957,6 +960,16 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
 
     // Transform to structured response
     return rows.map((row) => {
+      // SEC-014: Log warning if ACTIVE pack has no serial data (data integrity issue)
+      if (row.pack_id && !row.prev_ending_serial && !row.opening_serial) {
+        log.warn('ACTIVE pack missing serial data - data integrity issue', {
+          pack_id: row.pack_id,
+          pack_number: row.pack_number,
+          bin_id: row.bin_id,
+          storeId,
+        });
+      }
+
       // Calculate serial_end: (tickets_per_pack - 1) padded to 3 digits
       // e.g., 300 tickets → serial_end = "299"
       const serialEnd = row.pack_id ? String(row.tickets_per_pack - 1).padStart(3, '0') : '000';
@@ -974,8 +987,9 @@ export class LotteryBinsDAL extends StoreBasedDAL<LotteryBin> {
               game_name: row.game_name || 'Unknown Game',
               game_price: row.game_price,
               // SERIAL CARRYFORWARD: Use previous day's ending_serial as today's starting
-              // Priority: prev_ending_serial (from last closed day) > opening_serial > '000'
-              starting_serial: row.prev_ending_serial || row.opening_serial || '000',
+              // Priority: prev_ending_serial (from last closed day) > opening_serial
+              // SEC-014: No silent fallback to '000' - return null for missing data (UI must handle)
+              starting_serial: row.prev_ending_serial || row.opening_serial || null,
               // ending_serial should be null for ACTIVE packs during open day
               // Users enter the ending serial during day close - don't pre-populate
               // lottery_packs.closing_serial is only set when pack is depleted

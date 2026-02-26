@@ -162,14 +162,21 @@ describe('ReturnedPacksSection', () => {
 
     it('should have foreground styling on the currency badge', () => {
       render(<ReturnedPacksSection returnedPacks={[createPack()]} />);
-      const badge = screen.getByText('$100.00');
-      expect(badge.className).toContain('text-foreground');
+      // Multiple elements may contain $100.00 (header badge + table cell)
+      // Get all and verify first one (header badge) has correct styling
+      const badges = screen.getAllByText('$100.00');
+      const headerBadge = badges[0];
+      expect(headerBadge.className).toContain('text-foreground');
     });
 
     it('should NOT show currency badge when total return sales is 0', () => {
       render(<ReturnedPacksSection returnedPacks={[createPack({ return_sales_amount: 0 })]} />);
-      // No currency badge when total is 0 — rightBadge is undefined
-      expect(screen.queryByText('$0.00')).not.toBeInTheDocument();
+      // With CSS Grid animation, table is in DOM but collapsed
+      // The $0.00 in Amount column exists, but header badge should not
+      // Verify by checking the button does NOT contain a badge element
+      const button = screen.getByRole('button');
+      const badgeInHeader = button.querySelector('.text-foreground.font-semibold');
+      expect(badgeInHeader).toBeNull();
     });
   });
 
@@ -231,17 +238,27 @@ describe('ReturnedPacksSection', () => {
 
   // --------------------------------------------------------------------------
   // Collapse / Expand
+  // Note: CSS Grid animation keeps content in DOM; collapsed state uses grid-rows-[0fr]
   // --------------------------------------------------------------------------
   describe('Collapse / Expand', () => {
-    it('should be collapsed by default', () => {
+    it('should be collapsed by default (grid-rows-[0fr])', () => {
       render(<ReturnedPacksSection returnedPacks={[createPack()]} />);
-      expect(screen.queryByTestId('returned-packs-content')).not.toBeInTheDocument();
+      // Content is always in DOM with CSS Grid animation
+      const content = screen.getByTestId('returned-packs-content');
+      expect(content).toBeInTheDocument();
+      // Parent grid wrapper has collapsed state
+      const section = screen.getByTestId('returned-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
-    it('should expand on click', () => {
+    it('should expand on click (grid-rows-[1fr])', () => {
       render(<ReturnedPacksSection returnedPacks={[createPack()]} />);
       fireEvent.click(screen.getByRole('button'));
       expect(screen.getByTestId('returned-packs-content')).toBeInTheDocument();
+      const section = screen.getByTestId('returned-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
     it('should start expanded when defaultOpen=true', () => {
@@ -417,6 +434,55 @@ describe('ReturnedPacksSection', () => {
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // CSS Grid Animation (350ms smooth transition)
+  // Traceability: PERF-002, ensures smooth UX via CSS Grid technique
+  // --------------------------------------------------------------------------
+  describe('CSS Grid Animation', () => {
+    it('should have CSS Grid animation wrapper with grid class', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const animationWrapper = section.querySelector('.grid.transition-\\[grid-template-rows\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have 350ms duration class on animation wrapper', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const animationWrapper = section.querySelector('.duration-\\[350ms\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have ease-out timing function on animation wrapper', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const animationWrapper = section.querySelector('.ease-out');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[1fr] when open', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[0fr] when closed', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={false} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have overflow-hidden inner wrapper for animation', () => {
+      render(<ReturnedPacksSection returnedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('returned-packs-section');
+      const gridWrapper = section.querySelector('.grid');
+      const overflowWrapper = gridWrapper?.querySelector('.overflow-hidden');
+      expect(overflowWrapper).not.toBeNull();
     });
   });
 });

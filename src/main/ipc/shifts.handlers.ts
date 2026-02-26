@@ -1190,20 +1190,6 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         return createErrorResponse(IPCErrorCodes.NOT_AUTHENTICATED, 'Invalid PIN');
       }
 
-      // Check for existing open shift on this register for today
-      const existingOpenShift = shiftsDAL.findOpenShiftByRegister(
-        store.store_id,
-        today,
-        externalRegisterId
-      );
-
-      if (existingOpenShift) {
-        return createErrorResponse(
-          IPCErrorCodes.ALREADY_EXISTS,
-          `A shift is already open on register ${externalRegisterId} for ${today}`
-        );
-      }
-
       // ========================================================================
       // BIZ-007: Verify open lottery day exists before allowing shift start
       // Shifts cannot exist without an open day - this is a business invariant.
@@ -1225,17 +1211,42 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
         );
       }
 
+      // ========================================================================
+      // BIZ-013: Shift inherits lottery day's business_date
+      // When a lottery day spans midnight (opened Feb 23, closed Feb 24),
+      // shifts started on Feb 24 must use business_date='2026-02-23' to match
+      // the lottery day. This ensures reports JOIN correctly on business_date.
+      // Without this, shifts would have a different business_date than their
+      // lottery day and would not appear in day close reports.
+      // ========================================================================
+      const shiftBusinessDate = openLotteryDay.business_date;
+
+      // Check for existing open shift on this register for the lottery day's business date
+      const existingOpenShift = shiftsDAL.findOpenShiftByRegister(
+        store.store_id,
+        shiftBusinessDate,
+        externalRegisterId
+      );
+
+      if (existingOpenShift) {
+        return createErrorResponse(
+          IPCErrorCodes.ALREADY_EXISTS,
+          `A shift is already open on register ${externalRegisterId} for ${shiftBusinessDate}`
+        );
+      }
+
       // Ensure day_summary exists for this business date (local tracking)
-      const daySummary = daySummariesDAL.getOrCreateForDate(store.store_id, today);
+      const daySummary = daySummariesDAL.getOrCreateForDate(store.store_id, shiftBusinessDate);
       log.debug('Day summary ensured for manual shift', {
         daySummaryId: daySummary.day_summary_id,
-        businessDate: today,
+        businessDate: shiftBusinessDate,
         status: daySummary.status,
         linkedLotteryDayId: openLotteryDay.day_id,
       });
 
       // Create the shift using existing DAL method with internal user ID
-      const shift = shiftsDAL.getOrCreateForDate(store.store_id, today, {
+      // BIZ-013: Use lottery day's business_date, not current calendar date
+      const shift = shiftsDAL.getOrCreateForDate(store.store_id, shiftBusinessDate, {
         externalRegisterId,
         internalUserId: cashier.user_id, // Link cashier to shift via FK-safe internal ID
         startTime: shiftStartTime,
@@ -1245,7 +1256,7 @@ registerHandler<Shift | ReturnType<typeof createErrorResponse>>(
       shiftSummariesDAL.create({
         shift_id: shift.shift_id,
         store_id: store.store_id,
-        business_date: today,
+        business_date: shiftBusinessDate,
         shift_opened_at: shiftStartTime,
       });
 

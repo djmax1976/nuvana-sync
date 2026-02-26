@@ -1028,13 +1028,24 @@ export default function DayCloseWizardPage() {
   /**
    * Open the closing cash dialog for draft-based finalization
    * DRAFT-001: Draft.finalize() handles lottery + shift close atomically
+   *
+   * BUG-FIX: If save fails, show error and do NOT proceed with dialog.
+   * Previously, swallowing save errors caused lottery data loss.
    */
   const handleOpenClosingCashDialog = useCallback(async () => {
     // Save any pending changes to draft before showing dialog
     try {
       await saveDraft();
     } catch (err) {
-      console.warn('[DayClosePage] Failed to save draft before finalize:', err);
+      console.error('[DayClosePage] Failed to save draft before finalize:', err);
+      toast({
+        title: 'Unable to Save',
+        description:
+          'Failed to save lottery data. Please try again. If the problem persists, go back to Step 1 and re-scan the bins.',
+        variant: 'destructive',
+      });
+      // BUG-FIX: Do NOT proceed if save failed - lottery data would be lost!
+      return;
     }
 
     setClosingCashInput('');
@@ -1044,7 +1055,7 @@ export default function DayCloseWizardPage() {
     setTimeout(() => {
       closingCashInputRef.current?.focus();
     }, 100);
-  }, [saveDraft]);
+  }, [saveDraft, toast]);
 
   /**
    * Handle draft finalization with closing cash

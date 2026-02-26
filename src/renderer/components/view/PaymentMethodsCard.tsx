@@ -110,7 +110,7 @@ const ReceiptRow = React.memo(function ReceiptRow({
 }: ReceiptRowProps) {
   return (
     <div
-      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg hover:bg-white/5 transition-colors items-center"
+      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors items-center"
       data-testid={testId}
     >
       <div className="flex items-center gap-3">
@@ -123,12 +123,14 @@ const ReceiptRow = React.memo(function ReceiptRow({
         >
           {icon}
         </span>
-        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-medium text-card-foreground">{label}</span>
       </div>
       <div className="text-right text-sm text-muted-foreground">
         {reports != null ? formatCurrency(reports) : '—'}
       </div>
-      <div className="text-right font-mono text-sm font-medium">{formatCurrency(pos)}</div>
+      <div className="text-right font-mono text-sm font-medium text-card-foreground">
+        {formatCurrency(pos)}
+      </div>
     </div>
   );
 });
@@ -166,30 +168,30 @@ const PayoutRow = React.memo(function PayoutRow({
     <button
       type="button"
       onClick={onClick}
-      className="w-full grid grid-cols-[1fr_90px_90px_24px] gap-2 py-2.5 px-3 rounded-lg bg-red-950/20 border border-red-900/30 items-center cursor-pointer hover:bg-red-950/40 hover:border-red-800/50 transition-all group"
+      className="w-full grid grid-cols-[1fr_90px_90px_24px] gap-2 py-2.5 px-3 rounded-lg bg-destructive-light border border-destructive/30 items-center cursor-pointer hover:bg-destructive/20 hover:border-destructive/50 transition-all group"
       data-testid={testId}
       aria-label={`View ${label} details`}
     >
       <div className="flex items-center gap-3">
-        <span className="w-8 h-8 rounded-lg bg-red-950/50 text-red-400 flex items-center justify-center group-hover:bg-red-900/50 transition-colors">
+        <span className="w-8 h-8 rounded-lg bg-destructive/20 text-destructive flex items-center justify-center group-hover:bg-destructive/30 transition-colors">
           {icon}
         </span>
         <div className="flex items-center gap-2">
-          <span className="text-sm font-medium text-left">{label}</span>
+          <span className="text-sm font-medium text-left text-card-foreground">{label}</span>
           {hasImages && (
             <span
-              className="w-5 h-5 rounded bg-slate-800/50 flex items-center justify-center"
+              className="w-5 h-5 rounded bg-muted flex items-center justify-center"
               title="Images attached"
               data-testid={`${testId}-image-indicator`}
             >
-              <ImageIcon className="w-3 h-3 text-slate-400" />
+              <ImageIcon className="w-3 h-3 text-muted-foreground" />
             </span>
           )}
         </div>
       </div>
-      <div className="text-right font-mono text-sm text-red-400">{formatPayout(reports)}</div>
-      <div className="text-right font-mono text-sm text-red-400">{formatPayout(pos)}</div>
-      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-red-400 transition-colors" />
+      <div className="text-right font-mono text-sm text-destructive">{formatPayout(reports)}</div>
+      <div className="text-right font-mono text-sm text-destructive">{formatPayout(pos)}</div>
+      <ChevronRight className="w-4 h-4 text-muted-foreground group-hover:text-destructive transition-colors" />
     </button>
   );
 });
@@ -207,19 +209,17 @@ interface NetCashRowProps {
 const NetCashRow = React.memo(function NetCashRow({ reports, pos, testId }: NetCashRowProps) {
   return (
     <div
-      className="grid grid-cols-[1fr_90px_90px] gap-2 py-4 px-4 rounded-xl bg-gradient-to-r from-emerald-950/40 to-cyan-950/40 border border-emerald-800/30 items-center"
+      className="grid grid-cols-[1fr_90px_90px] gap-2 py-4 px-4 rounded-xl bg-success-light border border-success/30 items-center"
       data-testid={testId}
     >
       <div className="flex items-center gap-3">
-        <span className="w-10 h-10 rounded-xl bg-emerald-900/50 text-emerald-400 flex items-center justify-center">
+        <span className="w-10 h-10 rounded-xl bg-success/20 text-success flex items-center justify-center">
           <CheckCircle className="w-5 h-5" />
         </span>
-        <span className="text-base font-bold">Net Cash</span>
+        <span className="text-base font-bold text-card-foreground">Net Cash</span>
       </div>
-      <div className="text-right font-bold font-mono text-emerald-400">
-        {formatCurrency(reports)}
-      </div>
-      <div className="text-right font-bold font-mono text-emerald-400">{formatCurrency(pos)}</div>
+      <div className="text-right font-bold font-mono text-success">{formatCurrency(reports)}</div>
+      <div className="text-right font-bold font-mono text-success">{formatCurrency(pos)}</div>
     </div>
   );
 });
@@ -250,24 +250,21 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
 
   return (
     <div
-      className={cn(
-        'relative overflow-hidden rounded-xl border border-border bg-gradient-to-b from-slate-900/50 to-slate-950/80',
-        className
-      )}
+      className={cn('relative overflow-hidden rounded-xl border border-border bg-card', className)}
       data-testid={testId}
       data-readonly={readOnly}
     >
       {/* Top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-cyan-500 via-blue-500 to-cyan-500" />
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-info to-primary" />
 
       {/* Header */}
       <div className="p-4 border-b border-border/50">
         <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-cyan-950 text-cyan-400">
+          <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-info-light text-info">
             <Wallet className="w-5 h-5" />
           </span>
           <div>
-            <h3 className="font-semibold text-lg">Payment Methods</h3>
+            <h3 className="font-semibold text-lg text-card-foreground">Payment Methods</h3>
             <p className="text-xs text-muted-foreground">Cash & card transactions</p>
           </div>
         </div>
@@ -292,8 +289,8 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
           <ReceiptRow
             label="Cash"
             icon={<Banknote className="w-4 h-4" />}
-            iconBgClass="bg-green-950/50"
-            iconTextClass="text-green-400"
+            iconBgClass="bg-success-light"
+            iconTextClass="text-success"
             reports={data.receipts.cash.reports}
             pos={data.receipts.cash.pos}
             testId={`${testId}-cash`}
@@ -301,8 +298,8 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
           <ReceiptRow
             label="Credit Card"
             icon={<CreditCard className="w-4 h-4" />}
-            iconBgClass="bg-blue-950/50"
-            iconTextClass="text-blue-400"
+            iconBgClass="bg-primary-light"
+            iconTextClass="text-primary"
             reports={data.receipts.creditCard.reports}
             pos={data.receipts.creditCard.pos}
             testId={`${testId}-credit`}
@@ -310,8 +307,8 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
           <ReceiptRow
             label="Debit Card"
             icon={<CreditCard className="w-4 h-4" />}
-            iconBgClass="bg-violet-950/50"
-            iconTextClass="text-violet-400"
+            iconBgClass="bg-accent-light"
+            iconTextClass="text-accent"
             reports={data.receipts.debitCard.reports}
             pos={data.receipts.debitCard.pos}
             testId={`${testId}-debit`}
@@ -319,8 +316,8 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
           <ReceiptRow
             label="EBT"
             icon={<Ticket className="w-4 h-4" />}
-            iconBgClass="bg-amber-950/50"
-            iconTextClass="text-amber-400"
+            iconBgClass="bg-warning-light"
+            iconTextClass="text-warning"
             reports={data.receipts.ebt.reports}
             pos={data.receipts.ebt.pos}
             testId={`${testId}-ebt`}
@@ -330,7 +327,7 @@ export const PaymentMethodsCard = React.memo(function PaymentMethodsCard({
         {/* Payouts Section */}
         <div className="mt-4 pt-4 border-t border-border/30">
           <div className="flex items-center gap-2 mb-3 px-3">
-            <span className="w-2 h-2 rounded-full bg-red-500" />
+            <span className="w-2 h-2 rounded-full bg-destructive" />
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Payouts
             </span>

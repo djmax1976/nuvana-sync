@@ -102,6 +102,18 @@ export interface ScannedBin {
    * - Normal scan: ending - starting (ending is next position)
    */
   is_sold_out?: boolean;
+  /**
+   * Game price per ticket for sales amount calculation.
+   * BUG-FIX: Store directly to avoid activeBins lookup failures.
+   * SEC-014: Must be validated as positive number before use.
+   */
+  game_price?: number;
+  /**
+   * Pack's starting serial for ticket calculation.
+   * BUG-FIX: Store directly to avoid activeBins lookup failures.
+   * SEC-014: Must be 3-digit zero-padded string (e.g., '000', '045').
+   */
+  starting_serial?: string;
 }
 
 /**
@@ -404,6 +416,31 @@ export function DayCloseModeScanner({
   // Get bins with active packs (need scanning)
   const activeBins = useMemo(() => bins.filter((bin) => bin.is_active && bin.pack), [bins]);
 
+  /**
+   * Calculate total sales from depleted packs (already sold out in this period)
+   *
+   * These packs were depleted BEFORE the current day close session (e.g., via
+   * auto-replacement or manual depletion during the day). Their sales_amount
+   * must be included in the total lottery sales for accurate reporting.
+   *
+   * MCP Guidance Applied:
+   * - SEC-014: INPUT_VALIDATION - Validates sales_amount is a valid number
+   * - FE-020: REACT_OPTIMIZATION - useMemo prevents recalculation on unrelated renders
+   */
+  const depletedPacksTotal = useMemo(() => {
+    if (!depletedPacks || depletedPacks.length === 0) return 0;
+    return depletedPacks.reduce((total, pack) => {
+      // SEC-014: Validate sales_amount is a valid positive number
+      const salesAmount =
+        typeof pack.sales_amount === 'number' &&
+        Number.isFinite(pack.sales_amount) &&
+        pack.sales_amount >= 0
+          ? pack.sales_amount
+          : 0;
+      return total + salesAmount;
+    }, 0);
+  }, [depletedPacks]);
+
   // Get pending bins (not yet scanned) - used for progress calculation
   const _pendingBins = useMemo(
     () => activeBins.filter((bin) => !scannedBins.find((scanned) => scanned.bin_id === bin.bin_id)),
@@ -603,6 +640,62 @@ export function DayCloseModeScanner({
   );
 
   /**
+   * Check if a pack number matches a depleted (sold out) pack
+   *
+   * SEC-014: INPUT_VALIDATION - Strict type validation before comparison
+   * FE-001: STATE_MANAGEMENT - Pure function with no side effects
+   *
+   * @param packNumber - The pack number to check (validated 11-digit string)
+   * @returns The matching DepletedPackDay or undefined if not found
+   */
+  const findDepletedPack = useCallback(
+    (packNumber: string): DepletedPackDay | undefined => {
+      // SEC-014: Validate input type before processing
+      if (typeof packNumber !== 'string' || packNumber.length === 0) {
+        return undefined;
+      }
+
+      // SEC-014: Validate depletedPacks array exists and is an array
+      if (!Array.isArray(depletedPacks) || depletedPacks.length === 0) {
+        return undefined;
+      }
+
+      // Find matching depleted pack with strict equality check
+      return depletedPacks.find(
+        (pack) => typeof pack.pack_number === 'string' && pack.pack_number === packNumber
+      );
+    },
+    [depletedPacks]
+  );
+
+  /**
+   * Format depleted pack date for user display
+   *
+   * SEC-014: INPUT_VALIDATION - Validate date string before parsing
+   * FE-005: UI_SECURITY - Safe date formatting without exposing internal data
+   *
+   * @param isoDateString - ISO date string from depleted_at field
+   * @returns Formatted date string or fallback text
+   */
+  const formatDepletedDate = useCallback(
+    (isoDateString: string): string => {
+      // SEC-014: Validate input is a non-empty string
+      if (typeof isoDateString !== 'string' || isoDateString.length === 0) {
+        return 'earlier today';
+      }
+
+      try {
+        // Use centralized timezone-aware formatting utility
+        return formatDateTimeShort(isoDateString, storeTimezone);
+      } catch {
+        // SEC-014: Fail safely with fallback value
+        return 'earlier today';
+      }
+    },
+    [storeTimezone]
+  );
+
+  /**
    * Format returned pack date for user display
    *
    * SEC-014: INPUT_VALIDATION - Validate date string before parsing
@@ -671,7 +764,24 @@ export function DayCloseModeScanner({
             return;
           }
 
-          // Truly not found - pack doesn't exist in active bins or returned packs
+          // SEC-014: Check if pack was already sold out (depleted) in this period
+          const depletedPack = findDepletedPack(packNumber);
+
+          if (depletedPack) {
+            // Pack exists but was already sold out - show specific error with context
+            // FE-005: UI_SECURITY - Only display necessary info (game name, date)
+            const depletedDate = formatDepletedDate(depletedPack.depleted_at);
+            playError();
+            toast({
+              title: 'Pack already sold out',
+              description: `${depletedPack.game_name} (Pack ${packNumber}) was sold out on ${depletedDate}. See Sold Out Packs section above.`,
+              variant: 'destructive',
+            });
+            clearInputAndFocus(inputRef);
+            return;
+          }
+
+          // Truly not found - pack doesn't exist in active bins, returned packs, or depleted packs
           playError();
           toast({
             title: 'Pack not found',
@@ -723,6 +833,9 @@ export function DayCloseModeScanner({
         }
 
         // Success! Add to scanned list
+        // BUG-FIX: Include game_price and starting_serial directly in ScannedBin
+        // to avoid activeBins lookup failures during calculation.
+        // SEC-014: Validate game_price is positive number before storing.
         const newScannedBin: ScannedBin = {
           bin_id: matchingBin.bin_id,
           bin_number: matchingBin.bin_number,
@@ -730,6 +843,9 @@ export function DayCloseModeScanner({
           pack_number: matchingBin.pack.pack_number,
           game_name: matchingBin.pack.game_name,
           closing_serial: closingSerial,
+          is_sold_out: removedBinSoldOutRef.current[matchingBin.bin_id] ?? false,
+          game_price: matchingBin.pack.game_price,
+          starting_serial: matchingBin.pack.starting_serial,
         };
 
         setScannedBins((prev) =>
@@ -977,10 +1093,11 @@ export function DayCloseModeScanner({
               // and re-enters a valid serial - it should show as scanned again
               const alreadyScanned = scannedBins.find((s) => s.bin_id === binId);
               if (!alreadyScanned && bin.pack) {
-                // Check if this bin was previously marked as sold out
-                // If so, preserve that status when re-adding
-                const wasSoldOut = removedBinSoldOutRef.current[binId] === true;
-
+                // Manual entry means user is providing a specific ending serial,
+                // NOT marking as sold out. is_sold_out should always be false here.
+                // If user wants to mark as sold out, they use the "Mark Sold Out" button.
+                // BUG-FIX: Include game_price and starting_serial directly in ScannedBin
+                // to avoid activeBins lookup failures during calculation.
                 const newScannedBin: ScannedBin = {
                   bin_id: binId,
                   bin_number: bin.bin_number,
@@ -988,11 +1105,13 @@ export function DayCloseModeScanner({
                   pack_number: bin.pack.pack_number,
                   game_name: bin.pack.game_name,
                   closing_serial: truncatedValue,
-                  is_sold_out: wasSoldOut, // Restore previous sold-out status
+                  is_sold_out: false, // Manual entry = explicit serial, not sold out
+                  game_price: bin.pack.game_price,
+                  starting_serial: bin.pack.starting_serial,
                 };
                 setScannedBins((prev) => [...prev, newScannedBin]);
 
-                // Clear the stored state after using it
+                // Clear any stored sold-out state since user chose manual entry
                 delete removedBinSoldOutRef.current[binId];
               }
             } else {
@@ -1125,6 +1244,7 @@ export function DayCloseModeScanner({
       // ========================================================================
       if (deferCommit) {
         // Calculate totals for draft persistence
+        // BUG-FIX: Use ScannedBin data directly when available to avoid lookup failures
         const calcTicketsScan = (ending: string, starting: string, isSoldOut: boolean): number => {
           const endNum = parseInt(ending, 10);
           const startNum = parseInt(starting, 10);
@@ -1135,23 +1255,32 @@ export function DayCloseModeScanner({
         let totalTicketsScan = 0;
         let totalSalesScan = 0;
         scannedBins.forEach((scanned) => {
+          // BUG-FIX: Use ScannedBin data directly, fallback to activeBins lookup
+          // This ensures sold packs are included even if bin lookup fails
           const bin = activeBins.find((b) => b.bin_id === scanned.bin_id);
+          const startingSerial = scanned.starting_serial ?? bin?.pack?.starting_serial ?? '000';
+          const gamePrice = scanned.game_price ?? bin?.pack?.game_price ?? 0;
+
           const ticketsSold = calcTicketsScan(
             scanned.closing_serial,
-            bin?.pack?.starting_serial || '000',
+            startingSerial,
             scanned.is_sold_out === true
           );
           totalTicketsScan += ticketsSold;
-          totalSalesScan += ticketsSold * (bin?.pack?.game_price || 0);
+          // SEC-014: Validate game_price is a valid number
+          const validGamePrice =
+            typeof gamePrice === 'number' && Number.isFinite(gamePrice) ? gamePrice : 0;
+          totalSalesScan += ticketsSold * validGamePrice;
         });
 
         // Call onPendingClosings to save data for later commit
+        // BUG-FIX: Include depletedPacksTotal in sales_amount for accurate total
         onPendingClosings?.({
           closings,
           entry_method: 'SCAN',
           totals: {
             tickets_sold: totalTicketsScan,
-            sales_amount: totalSalesScan,
+            sales_amount: totalSalesScan + depletedPacksTotal,
           },
         });
 
@@ -1165,24 +1294,29 @@ export function DayCloseModeScanner({
         };
 
         // Build local bins preview for UI display
+        // BUG-FIX: Use ScannedBin data directly when available
         let totalSales = 0;
         const binsPreview = scannedBins.map((scanned) => {
           const bin = activeBins.find((b) => b.bin_id === scanned.bin_id);
           const isSoldOut = scanned.is_sold_out === true;
-          const ticketsSold = calcTickets(
-            scanned.closing_serial,
-            bin?.pack?.starting_serial || '000',
-            isSoldOut
-          );
-          const salesAmount = ticketsSold * (bin?.pack?.game_price || 0);
+
+          // BUG-FIX: Use ScannedBin data directly, fallback to activeBins
+          const startingSerial = scanned.starting_serial ?? bin?.pack?.starting_serial ?? '000';
+          const gamePrice = scanned.game_price ?? bin?.pack?.game_price ?? 0;
+          // SEC-014: Validate game_price
+          const validGamePrice =
+            typeof gamePrice === 'number' && Number.isFinite(gamePrice) ? gamePrice : 0;
+
+          const ticketsSold = calcTickets(scanned.closing_serial, startingSerial, isSoldOut);
+          const salesAmount = ticketsSold * validGamePrice;
           totalSales += salesAmount;
 
           return {
             bin_number: scanned.bin_number,
             game_name: scanned.game_name,
-            game_price: bin?.pack?.game_price || 0,
+            game_price: validGamePrice,
             pack_number: scanned.pack_number,
-            starting_serial: bin?.pack?.starting_serial || '000',
+            starting_serial: startingSerial,
             closing_serial: scanned.closing_serial,
             tickets_sold: ticketsSold,
             sales_amount: salesAmount,
@@ -1192,10 +1326,11 @@ export function DayCloseModeScanner({
         playSuccess();
         setScannedBins([]);
         setInputValue('');
+        // BUG-FIX: Include depletedPacksTotal in lottery_total for accurate total
         onSuccess({
           closings_created: closings.length,
           business_date: new Date().toISOString().split('T')[0],
-          lottery_total: totalSales,
+          lottery_total: totalSales + depletedPacksTotal,
           bins_closed: binsPreview,
         });
         return;
@@ -1268,6 +1403,7 @@ export function DayCloseModeScanner({
     deferCommit,
     onPendingClosings,
     activeBins,
+    depletedPacksTotal,
   ]);
 
   /**
@@ -1322,6 +1458,7 @@ export function DayCloseModeScanner({
       // ========================================================================
       // deferCommit mode: Skip API call, calculate locally
       // Used by Day Close wizard for non-LOTTERY POS types
+      // BUG-FIX: Use ScannedBin data directly when available to ensure sold packs are included
       // ========================================================================
       if (deferCommit) {
         // Inline calculation function to avoid dependency ordering issues
@@ -1334,27 +1471,32 @@ export function DayCloseModeScanner({
         };
 
         // Build local bins preview for UI display - calculate BEFORE saving
+        // BUG-FIX: Use ScannedBin data directly when available to ensure sold packs are included
         let totalSales = 0;
         let totalTickets = 0;
         const binsPreview = activeBins.map((bin) => {
           const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
           const closingSerial = scannedBin?.closing_serial || manualEndingValues[bin.bin_id];
           const isSoldOut = scannedBin?.is_sold_out === true;
-          const ticketsSold = calcTickets(
-            closingSerial,
-            bin.pack?.starting_serial || '000',
-            isSoldOut
-          );
-          const salesAmount = ticketsSold * (bin.pack?.game_price || 0);
+
+          // BUG-FIX: Use ScannedBin data directly when available, fallback to bin.pack
+          const startingSerial = scannedBin?.starting_serial ?? bin.pack?.starting_serial ?? '000';
+          const gamePrice = scannedBin?.game_price ?? bin.pack?.game_price ?? 0;
+          // SEC-014: Validate game_price
+          const validGamePrice =
+            typeof gamePrice === 'number' && Number.isFinite(gamePrice) ? gamePrice : 0;
+
+          const ticketsSold = calcTickets(closingSerial, startingSerial, isSoldOut);
+          const salesAmount = ticketsSold * validGamePrice;
           totalSales += salesAmount;
           totalTickets += ticketsSold;
 
           return {
             bin_number: bin.bin_number,
-            game_name: bin.pack?.game_name || '',
-            game_price: bin.pack?.game_price || 0,
-            pack_number: bin.pack?.pack_number || '',
-            starting_serial: bin.pack?.starting_serial || '000',
+            game_name: scannedBin?.game_name ?? bin.pack?.game_name ?? '',
+            game_price: validGamePrice,
+            pack_number: scannedBin?.pack_number ?? bin.pack?.pack_number ?? '',
+            starting_serial: startingSerial,
             closing_serial: closingSerial,
             tickets_sold: ticketsSold,
             sales_amount: salesAmount,
@@ -1362,13 +1504,14 @@ export function DayCloseModeScanner({
         });
 
         // Call onPendingClosings with totals included
+        // BUG-FIX: Include depletedPacksTotal in sales_amount for accurate total
         onPendingClosings?.({
           closings,
           entry_method: 'MANUAL',
           authorized_by_user_id: manualEntryState.authorizedBy?.userId,
           totals: {
             tickets_sold: totalTickets,
-            sales_amount: totalSales,
+            sales_amount: totalSales + depletedPacksTotal,
           },
         });
 
@@ -1384,10 +1527,11 @@ export function DayCloseModeScanner({
         setValidationErrors({});
         setPendingValidations(new Set());
 
+        // BUG-FIX: Include depletedPacksTotal in lottery_total for accurate total
         onSuccess({
           closings_created: closings.length,
           business_date: new Date().toISOString().split('T')[0],
-          lottery_total: totalSales,
+          lottery_total: totalSales + depletedPacksTotal,
           bins_closed: binsPreview,
         });
         return;
@@ -1466,6 +1610,7 @@ export function DayCloseModeScanner({
     playError,
     deferCommit,
     onPendingClosings,
+    depletedPacksTotal,
   ]);
 
   /**
@@ -1482,14 +1627,23 @@ export function DayCloseModeScanner({
       if (result.decisions && result.decisions.length > 0) {
         // Add sold out bins to scannedBins so they show green on main page
         // Mark as is_sold_out so calculateTotalSales uses depletion formula
+        // BUG-FIX: Include game_price and starting_serial directly in ScannedBin
+        // to avoid activeBins lookup failures during calculation.
+        // SEC-014: Pad closing_serial to 3 digits to pass length validation.
         const newScannedBins: ScannedBin[] = result.decisions.map((decision) => ({
           bin_id: decision.bin_id,
           bin_number: decision.bin_number,
           pack_id: decision.pack_id,
           pack_number: decision.pack_number,
           game_name: decision.game_name,
-          closing_serial: decision.ending_serial,
+          // BUG-FIX: Ensure closing_serial is always 3 digits (zero-padded)
+          // to pass the length !== 3 check in calculateTotalSales
+          closing_serial: decision.ending_serial.padStart(3, '0'),
           is_sold_out: true, // Use depletion formula: (serial_end + 1) - starting
+          // BUG-FIX: Store game_price directly to avoid lookup failures
+          game_price: decision.game_price,
+          // BUG-FIX: Store starting_serial directly for accurate calculation
+          starting_serial: decision.starting_serial,
         }));
 
         setScannedBins((prev) =>
@@ -1650,14 +1804,38 @@ export function DayCloseModeScanner({
   );
 
   /**
+   * Calculate total sales from depleted packs (already sold out in this period)
+   *
+   * These packs were depleted BEFORE the current day close session (e.g., via
+   * auto-replacement or manual depletion during the day). Their sales_amount
+   * must be included in the total lottery sales for accurate reporting.
+   *
+   * MCP Guidance Applied:
+   * - SEC-014: INPUT_VALIDATION - Validates sales_amount is a valid number
+   * - FE-020: REACT_OPTIMIZATION - useMemo prevents recalculation on unrelated renders
+   */
+
+  /**
    * Calculate total lottery sales from scanned bins + manual entry values
    *
    * Uses different formulas based on bin type:
    * - Normal scan/manual entry: ending - starting
    * - Sold out (depletion): (serial_end + 1) - starting
+   *
+   * BUG-FIX: Now uses ScannedBin.game_price and ScannedBin.starting_serial
+   * directly when available, with fallback to activeBins lookup for backwards
+   * compatibility. This fixes the issue where sold packs were excluded from
+   * totals when activeBins lookup failed.
+   *
+   * BUG-FIX: Now includes depletedPacksTotal for packs already sold out in
+   * this business period (before current day close session).
+   *
+   * MCP Guidance Applied:
+   * - SEC-014: INPUT_VALIDATION - Validates all numeric values before use
+   * - FE-020: REACT_OPTIMIZATION - useMemo prevents recalculation on unrelated renders
    */
   const calculateTotalSales = useMemo(() => {
-    return activeBins.reduce((total, bin) => {
+    const scannedTotal = activeBins.reduce((total, bin) => {
       if (!bin.pack) return total;
 
       // First check scanned bins
@@ -1674,15 +1852,29 @@ export function DayCloseModeScanner({
 
       if (!closingSerial || closingSerial.length !== 3) return total;
 
+      // BUG-FIX: Use ScannedBin data directly when available, fallback to bin.pack
+      // This ensures sold packs (marked via modal) are included even if activeBins
+      // lookup would otherwise fail due to stale data or ID mismatches.
+      const startingSerial = scannedBin?.starting_serial ?? bin.pack.starting_serial;
+      const gamePrice = scannedBin?.game_price ?? bin.pack.game_price;
+
+      // SEC-014: Validate game_price is a valid positive number
+      const validGamePrice =
+        typeof gamePrice === 'number' && Number.isFinite(gamePrice) && gamePrice >= 0
+          ? gamePrice
+          : 0;
+
       // Use correct formula based on whether bin was marked sold out
       // Sold out: (serial_end + 1) - starting (closing_serial IS serial_end)
       // Normal: ending - starting (closing_serial is next position)
       const ticketsSold = isSoldOut
-        ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
-        : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
+        ? calculateTicketsSoldForDepletion(closingSerial, startingSerial)
+        : calculateTicketsSold(closingSerial, startingSerial);
 
-      return total + ticketsSold * bin.pack.game_price;
+      return total + ticketsSold * validGamePrice;
     }, 0);
+    // BUG-FIX: Include depleted packs total in grand total
+    return scannedTotal + depletedPacksTotal;
   }, [
     activeBins,
     scannedBins,
@@ -1690,6 +1882,7 @@ export function DayCloseModeScanner({
     manualEndingValues,
     calculateTicketsSold,
     calculateTicketsSoldForDepletion,
+    depletedPacksTotal,
   ]);
 
   // ============ RENDER ============
@@ -1963,6 +2156,7 @@ export function DayCloseModeScanner({
                   const hasError = !!validationError;
 
                   // Calculate sold and amount from either scanned or manual entry
+                  // BUG-FIX: Use ScannedBin data directly when available to ensure correct calculations
                   let ticketsSold = 0;
                   let salesAmount = 0;
                   let closingSerial: string | undefined;
@@ -1976,10 +2170,17 @@ export function DayCloseModeScanner({
                   if (closingSerial && bin.pack) {
                     // Use correct formula based on whether bin was marked sold out
                     const isSoldOut = scannedBin?.is_sold_out === true;
+                    // BUG-FIX: Use ScannedBin data directly when available
+                    const startingSerial = scannedBin?.starting_serial ?? bin.pack.starting_serial;
+                    const gamePrice = scannedBin?.game_price ?? bin.pack.game_price;
+                    // SEC-014: Validate game_price
+                    const validGamePrice =
+                      typeof gamePrice === 'number' && Number.isFinite(gamePrice) ? gamePrice : 0;
+
                     ticketsSold = isSoldOut
-                      ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
-                      : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
-                    salesAmount = ticketsSold * bin.pack.game_price;
+                      ? calculateTicketsSoldForDepletion(closingSerial, startingSerial)
+                      : calculateTicketsSold(closingSerial, startingSerial);
+                    salesAmount = ticketsSold * validGamePrice;
                   }
 
                   const hasValidEntry = !!closingSerial;
@@ -2115,6 +2316,7 @@ export function DayCloseModeScanner({
                   </td>
                   <td className="px-4 py-3 text-right">
                     {/* Calculate total tickets sold from all sources */}
+                    {/* BUG-FIX: Use ScannedBin data directly when available */}
                     {activeBins.reduce((total, bin) => {
                       if (!bin.pack) return total;
                       const scannedBin = scannedBins.find((s) => s.bin_id === bin.bin_id);
@@ -2130,11 +2332,14 @@ export function DayCloseModeScanner({
                       if (!closingSerial) return total;
                       // Check if bin was marked sold out - use depletion formula
                       const isSoldOut = scannedBin?.is_sold_out === true;
+                      // BUG-FIX: Use ScannedBin starting_serial when available
+                      const startingSerial =
+                        scannedBin?.starting_serial ?? bin.pack.starting_serial;
                       // Serial difference: tickets_sold = ending - starting (normal)
                       // Depletion: tickets_sold = (serial_end + 1) - starting
                       const ticketsSold = isSoldOut
-                        ? calculateTicketsSoldForDepletion(closingSerial, bin.pack.starting_serial)
-                        : calculateTicketsSold(closingSerial, bin.pack.starting_serial);
+                        ? calculateTicketsSoldForDepletion(closingSerial, startingSerial)
+                        : calculateTicketsSold(closingSerial, startingSerial);
                       return total + ticketsSold;
                     }, 0)}
                   </td>

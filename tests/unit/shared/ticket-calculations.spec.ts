@@ -24,6 +24,8 @@ import {
   getTicketsRemaining,
   calculateTicketsSoldPosition,
   calculateTicketsSoldIndex,
+  getLastTicketIndex,
+  getLastTicketIndexOrThrow,
   CalculationModes,
   MAX_SERIAL_NUMBER,
   MIN_SERIAL_NUMBER,
@@ -547,6 +549,101 @@ describe('ticket-calculations', () => {
       expect(parseSerial(undefined)).toBeNull();
       expect(calculateTicketsSold(null, 15, CalculationModes.POSITION).success).toBe(false);
       expect(calculateTicketsSold(0, undefined, CalculationModes.POSITION).success).toBe(false);
+    });
+  });
+
+  // ============================================================================
+  // getLastTicketIndex Tests - SINGLE SOURCE OF TRUTH for pack's last ticket
+  // ============================================================================
+
+  describe('getLastTicketIndex', () => {
+    it('should return correct last ticket index for standard pack sizes', () => {
+      // 30-ticket pack (000-029) -> last index is 29
+      const result30 = getLastTicketIndex(30);
+      expect(result30.success).toBe(true);
+      expect(result30.value).toBe(29);
+
+      // 60-ticket pack (000-059) -> last index is 59
+      const result60 = getLastTicketIndex(60);
+      expect(result60.success).toBe(true);
+      expect(result60.value).toBe(59);
+
+      // 150-ticket pack (000-149) -> last index is 149
+      const result150 = getLastTicketIndex(150);
+      expect(result150.success).toBe(true);
+      expect(result150.value).toBe(149);
+
+      // 300-ticket pack (000-299) -> last index is 299
+      const result300 = getLastTicketIndex(300);
+      expect(result300.success).toBe(true);
+      expect(result300.value).toBe(299);
+    });
+
+    it('should handle edge cases correctly', () => {
+      // Minimum valid pack (1 ticket, serial 000 only)
+      const result1 = getLastTicketIndex(1);
+      expect(result1.success).toBe(true);
+      expect(result1.value).toBe(0);
+
+      // Maximum valid pack (1000 tickets, serials 000-999)
+      const result1000 = getLastTicketIndex(1000);
+      expect(result1000.success).toBe(true);
+      expect(result1000.value).toBe(999);
+    });
+
+    it('should reject invalid inputs', () => {
+      // Null
+      const resultNull = getLastTicketIndex(null);
+      expect(resultNull.success).toBe(false);
+      expect(resultNull.error).toContain('required');
+
+      // Undefined
+      const resultUndefined = getLastTicketIndex(undefined);
+      expect(resultUndefined.success).toBe(false);
+      expect(resultUndefined.error).toContain('required');
+
+      // Zero tickets
+      const result0 = getLastTicketIndex(0);
+      expect(result0.success).toBe(false);
+      expect(result0.error).toContain('positive');
+
+      // Negative tickets
+      const resultNeg = getLastTicketIndex(-30);
+      expect(resultNeg.success).toBe(false);
+      expect(resultNeg.error).toContain('positive');
+
+      // Non-integer
+      const resultFloat = getLastTicketIndex(30.5);
+      expect(resultFloat.success).toBe(false);
+      expect(resultFloat.error).toContain('integer');
+
+      // Exceeds maximum (more than 1000 tickets)
+      const resultOverMax = getLastTicketIndex(1001);
+      expect(resultOverMax.success).toBe(false);
+      expect(resultOverMax.error).toContain('maximum');
+    });
+
+    it('should NOT depend on opening_serial (this was the bug)', () => {
+      // The bug was: lastTicketIndex = openingSerial + ticketsPerPack - 1
+      // Correct:    lastTicketIndex = ticketsPerPack - 1
+      // A 30-ticket pack ALWAYS has last index 29, regardless of where sales started
+      const result = getLastTicketIndex(30);
+      expect(result.success).toBe(true);
+      expect(result.value).toBe(29); // NOT 29 + some_opening_serial
+    });
+  });
+
+  describe('getLastTicketIndexOrThrow', () => {
+    it('should return last ticket index for valid inputs', () => {
+      expect(getLastTicketIndexOrThrow(30)).toBe(29);
+      expect(getLastTicketIndexOrThrow(60)).toBe(59);
+      expect(getLastTicketIndexOrThrow(300)).toBe(299);
+    });
+
+    it('should throw for invalid inputs', () => {
+      expect(() => getLastTicketIndexOrThrow(0)).toThrow();
+      expect(() => getLastTicketIndexOrThrow(-1)).toThrow();
+      expect(() => getLastTicketIndexOrThrow(30.5)).toThrow();
     });
   });
 });

@@ -187,7 +187,8 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
   ): Shift {
     const shiftId = this.generateId();
     const now = this.now();
-    const shiftNumber = this.getNextShiftNumber(storeId, businessDate);
+    // Per-register shift numbering: each register has independent sequence
+    const shiftNumber = this.getNextShiftNumber(storeId, businessDate, options.externalRegisterId);
 
     const stmt = this.db.prepare(`
       INSERT INTO shifts (
@@ -446,17 +447,45 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
   }
 
   /**
-   * Get the next shift number for a business date
-   * DB-006: Store-scoped query
+   * Get the next shift number for a business date and register
    *
-   * @param storeId - Store identifier
-   * @param businessDate - Business date
-   * @returns Next shift number (1 if no shifts exist)
+   * Shift numbers are scoped per-register:
+   * - Register 1: Shift 1, Shift 2, Shift 3
+   * - Register 2: Shift 1, Shift 2, Shift 3
+   *
+   * @security SEC-006: Parameterized query with bound parameters
+   * @security DB-006: Store-scoped query for tenant isolation
+   * @performance Uses idx_shifts_store_date_register index
+   *
+   * @param storeId - Store identifier for tenant isolation
+   * @param businessDate - Business date (YYYY-MM-DD)
+   * @param externalRegisterId - External register ID (optional, NULL treated as separate register)
+   * @returns Next shift number for this register (1 if no shifts exist)
    */
-  getNextShiftNumber(storeId: string, businessDate: string): number {
+  getNextShiftNumber(
+    storeId: string,
+    businessDate: string,
+    externalRegisterId?: string | null
+  ): number {
+    // SEC-006: Two separate prepared statements to avoid dynamic SQL
+    // DB-006: Store-scoped via storeId parameter
+    // Performance: Uses idx_shifts_store_date_register covering index
+    if (externalRegisterId != null) {
+      // Query with register ID filter
+      const stmt = this.db.prepare(`
+        SELECT MAX(shift_number) as max_num FROM shifts
+        WHERE store_id = ? AND business_date = ? AND external_register_id = ?
+      `);
+      const result = stmt.get(storeId, businessDate, externalRegisterId) as
+        | { max_num: number | null }
+        | undefined;
+      return (result?.max_num || 0) + 1;
+    }
+
+    // Query for NULL register (treats NULL as a distinct register group)
     const stmt = this.db.prepare(`
       SELECT MAX(shift_number) as max_num FROM shifts
-      WHERE store_id = ? AND business_date = ?
+      WHERE store_id = ? AND business_date = ? AND external_register_id IS NULL
     `);
     const result = stmt.get(storeId, businessDate) as { max_num: number | null } | undefined;
     return (result?.max_num || 0) + 1;
@@ -594,7 +623,8 @@ export class ShiftsDAL extends StoreBasedDAL<Shift> {
     }
 
     // Create new shift with external IDs from POS
-    const shiftNumber = this.getNextShiftNumber(storeId, businessDate);
+    // Per-register shift numbering: each register has independent sequence
+    const shiftNumber = this.getNextShiftNumber(storeId, businessDate, options?.externalRegisterId);
     return this.create({
       store_id: storeId,
       shift_number: shiftNumber,

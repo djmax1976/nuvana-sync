@@ -478,10 +478,31 @@ export function useCloseDraft(
       }
 
       if (pendingPayloadRef.current && isDirty) {
-        // Save pending changes synchronously before finalize
+        // BUG-FIX: Save pending changes with retry on version conflict
+        // Previously, clearing pendingPayloadRef before await caused data loss
         const payload = pendingPayloadRef.current;
-        pendingPayloadRef.current = null;
-        await saveMutation.mutateAsync({ payload, version: queryDraft.version });
+        try {
+          await saveMutation.mutateAsync({ payload, version: queryDraft.version });
+          pendingPayloadRef.current = null;
+        } catch (error) {
+          // On version conflict, refetch and retry once
+          if (
+            error instanceof Error &&
+            'isVersionConflict' in error &&
+            (error as Error & { isVersionConflict: boolean }).isVersionConflict
+          ) {
+            const latestDraft = await refetch();
+            if (latestDraft.data) {
+              await saveMutation.mutateAsync({
+                payload,
+                version: latestDraft.data.version,
+              });
+              pendingPayloadRef.current = null;
+            }
+          } else {
+            throw error;
+          }
+        }
       }
 
       // Now finalize
@@ -652,6 +673,9 @@ export function useCloseDraft(
 
   /**
    * Force immediate save of pending changes
+   *
+   * BUG-FIX: Only clear pendingPayloadRef AFTER successful save.
+   * Previously, clearing before await caused data loss on version conflicts.
    */
   const save = useCallback(async (): Promise<void> => {
     // Clear debounce timer
@@ -663,10 +687,35 @@ export function useCloseDraft(
     // Save pending changes
     if (pendingPayloadRef.current && queryDraft) {
       const payload = pendingPayloadRef.current;
-      pendingPayloadRef.current = null;
-      await saveMutation.mutateAsync({ payload, version: queryDraft.version });
+      // BUG-FIX: Don't clear yet - wait for success
+      try {
+        await saveMutation.mutateAsync({ payload, version: queryDraft.version });
+        // Only clear after successful save
+        pendingPayloadRef.current = null;
+      } catch (error) {
+        // On version conflict, refetch and retry once
+        if (
+          error instanceof Error &&
+          'isVersionConflict' in error &&
+          (error as Error & { isVersionConflict: boolean }).isVersionConflict
+        ) {
+          // Refetch to get latest version
+          const latestDraft = await refetch();
+          if (latestDraft.data) {
+            // Retry with latest version
+            await saveMutation.mutateAsync({
+              payload,
+              version: latestDraft.data.version,
+            });
+            pendingPayloadRef.current = null;
+          }
+        } else {
+          // Re-throw non-conflict errors
+          throw error;
+        }
+      }
     }
-  }, [queryDraft, saveMutation]);
+  }, [queryDraft, saveMutation, refetch]);
 
   /**
    * Discard draft and reset

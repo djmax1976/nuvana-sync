@@ -79,6 +79,7 @@ function createPack(overrides: Partial<DepletedPackDay> = {}): DepletedPackDay {
     bin_number: 2,
     activated_at: '2026-02-02T08:00:00Z',
     depleted_at: '2026-02-02T18:00:00Z',
+    starting_serial: '000',
     closing_serial: '029',
     tickets_sold_count: 30,
     sales_amount: 300,
@@ -159,8 +160,11 @@ describe('DepletedPacksSection', () => {
 
     it('should have foreground styling on the currency badge', () => {
       render(<DepletedPacksSection depletedPacks={[createPack()]} />);
-      const badge = screen.getByText('$300.00');
-      expect(badge.className).toContain('text-foreground');
+      // Multiple elements may contain $300.00 (header badge + table cell)
+      // Get the badge from the header (first occurrence, which is in the button area)
+      const badges = screen.getAllByText('$300.00');
+      const headerBadge = badges[0];
+      expect(headerBadge.className).toContain('text-foreground');
     });
   });
 
@@ -227,17 +231,27 @@ describe('DepletedPacksSection', () => {
 
   // --------------------------------------------------------------------------
   // Collapse / Expand
+  // Note: CSS Grid animation keeps content in DOM; collapsed state uses grid-rows-[0fr]
   // --------------------------------------------------------------------------
   describe('Collapse / Expand', () => {
-    it('should be collapsed by default', () => {
+    it('should be collapsed by default (grid-rows-[0fr])', () => {
       render(<DepletedPacksSection depletedPacks={[createPack()]} />);
-      expect(screen.queryByTestId('depleted-packs-content')).not.toBeInTheDocument();
+      // Content is always in DOM with CSS Grid animation
+      const content = screen.getByTestId('depleted-packs-content');
+      expect(content).toBeInTheDocument();
+      // Parent grid wrapper has collapsed state
+      const section = screen.getByTestId('depleted-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
-    it('should expand on click', () => {
+    it('should expand on click (grid-rows-[1fr])', () => {
       render(<DepletedPacksSection depletedPacks={[createPack()]} />);
       fireEvent.click(screen.getByRole('button'));
       expect(screen.getByTestId('depleted-packs-content')).toBeInTheDocument();
+      const section = screen.getByTestId('depleted-packs-section');
+      const gridWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(gridWrapper).not.toBeNull();
     });
 
     it('should start expanded when defaultOpen=true', () => {
@@ -306,12 +320,37 @@ describe('DepletedPacksSection', () => {
       expect(cells[7].textContent).toMatch(/Feb/);
     });
 
-    it('should display Start column with 000', () => {
+    it('should display Start column with starting_serial from data', () => {
       render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       const cells = row.querySelectorAll('td');
       // Start column is the 5th cell (index 4)
       expect(cells[4].textContent).toBe('000');
+    });
+
+    it('should display custom starting_serial (e.g., onboarding pack)', () => {
+      render(
+        <DepletedPacksSection
+          depletedPacks={[createPack({ starting_serial: '023' })]}
+          defaultOpen={true}
+        />
+      );
+      const row = screen.getByTestId('depleted-pack-row-dep-001');
+      const cells = row.querySelectorAll('td');
+      // Start column should show the actual starting_serial, not hardcoded 000
+      expect(cells[4].textContent).toBe('023');
+    });
+
+    it('should display -- when starting_serial is null', () => {
+      render(
+        <DepletedPacksSection
+          depletedPacks={[createPack({ starting_serial: null })]}
+          defaultOpen={true}
+        />
+      );
+      const row = screen.getByTestId('depleted-pack-row-dep-001');
+      const cells = row.querySelectorAll('td');
+      expect(cells[4].textContent).toBe('--');
     });
 
     it('should display End column with closing_serial', () => {
@@ -349,7 +388,7 @@ describe('DepletedPacksSection', () => {
       expect(screen.getByText('End')).toBeInTheDocument();
     });
 
-    it('should show "000" for End when closing_serial is null', () => {
+    it('should show "--" for End when closing_serial is null (SEC-014: no silent fallbacks)', () => {
       render(
         <DepletedPacksSection
           depletedPacks={[createPack({ closing_serial: null as unknown as string })]}
@@ -359,10 +398,11 @@ describe('DepletedPacksSection', () => {
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       const cells = row.querySelectorAll('td');
       // End column is the 6th cell (index 5)
-      expect(cells[5].textContent).toBe('000');
+      // SEC-014: Missing data displays '--' indicator, not fake '000' value
+      expect(cells[5].textContent).toBe('--');
     });
 
-    it('should show "000" for End when closing_serial is empty string', () => {
+    it('should show "--" for End when closing_serial is empty string (SEC-014: no silent fallbacks)', () => {
       render(
         <DepletedPacksSection
           depletedPacks={[createPack({ closing_serial: '' })]}
@@ -371,7 +411,8 @@ describe('DepletedPacksSection', () => {
       );
       const row = screen.getByTestId('depleted-pack-row-dep-001');
       const cells = row.querySelectorAll('td');
-      expect(cells[5].textContent).toBe('000');
+      // SEC-014: Empty string displays '--' indicator, not fake '000' value
+      expect(cells[5].textContent).toBe('--');
     });
   });
 
@@ -434,6 +475,55 @@ describe('DepletedPacksSection', () => {
       headers.forEach((header) => {
         expect(header).toHaveAttribute('scope', 'col');
       });
+    });
+  });
+
+  // --------------------------------------------------------------------------
+  // CSS Grid Animation (350ms smooth transition)
+  // Traceability: PERF-002, ensures smooth UX via CSS Grid technique
+  // --------------------------------------------------------------------------
+  describe('CSS Grid Animation', () => {
+    it('should have CSS Grid animation wrapper with grid class', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const animationWrapper = section.querySelector('.grid.transition-\\[grid-template-rows\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have 350ms duration class on animation wrapper', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const animationWrapper = section.querySelector('.duration-\\[350ms\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have ease-out timing function on animation wrapper', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const animationWrapper = section.querySelector('.ease-out');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[1fr] when open', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[1fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have grid-rows-[0fr] when closed', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={false} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const animationWrapper = section.querySelector('.grid-rows-\\[0fr\\]');
+      expect(animationWrapper).not.toBeNull();
+    });
+
+    it('should have overflow-hidden inner wrapper for animation', () => {
+      render(<DepletedPacksSection depletedPacks={[createPack()]} defaultOpen={true} />);
+      const section = screen.getByTestId('depleted-packs-section');
+      const gridWrapper = section.querySelector('.grid');
+      const overflowWrapper = gridWrapper?.querySelector('.overflow-hidden');
+      expect(overflowWrapper).not.toBeNull();
     });
   });
 });

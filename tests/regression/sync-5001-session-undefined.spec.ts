@@ -366,7 +366,7 @@ describe('SYNC-5001: "API key status: undefined" Regression Tests', () => {
         tickets_sold: 60,
         sales_amount: 600,
         depleted_at: new Date().toISOString(),
-        depletion_reason: 'DAY_CLOSE',
+        depletion_reason: 'MANUAL_SOLD_OUT',
       });
 
       // Assert
@@ -383,12 +383,12 @@ describe('SYNC-5001: "API key status: undefined" Regression Tests', () => {
       const validSession = createValidSessionContext({ revocationStatus: 'VALID' });
       mockGetActiveSession.mockReturnValue(validSession);
 
-      // Valid depletion reasons per DepletionReasonSchema
+      // Valid depletion reasons per database CHECK constraint (v029)
       const depletionReasons = [
         'SHIFT_CLOSE',
-        'DAY_CLOSE',
         'AUTO_REPLACED',
         'MANUAL_SOLD_OUT',
+        'POS_LAST_TICKET',
       ] as const;
 
       for (const reason of depletionReasons) {
@@ -842,7 +842,7 @@ describe('SYNC-5001: "API key status: undefined" Regression Tests', () => {
           tickets_sold: 100,
           sales_amount: 1000,
           depleted_at: new Date().toISOString(),
-          depletion_reason: 'DAY_CLOSE',
+          depletion_reason: 'MANUAL_SOLD_OUT',
         }),
       ];
 

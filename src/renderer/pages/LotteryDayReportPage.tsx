@@ -40,6 +40,7 @@ import {
 } from 'lucide-react';
 import { useLotteryDayReport } from '../lib/hooks/useLotteryDayReport';
 import { useDateFormat } from '../hooks/useDateFormat';
+import { useAccordionAnimation, ACCORDION_DURATION_CLASS } from '../components/ui/accordion';
 import type {
   LotteryDayReportBin,
   LotteryDayReportActivatedPack,
@@ -299,18 +300,19 @@ const TABLE_STYLE: React.CSSProperties = { tableLayout: 'fixed' };
 function TableColGroup() {
   // Fixed column widths — shared across all 4 tables for vertical alignment
   // Game column takes remaining space; all others have explicit widths
+  // Columns: Bin | Game | Price | Pack# | Start | End | Sold/Status | Amount/Activated
   // Col 7 must fit "RETURNED"/"SOLD OUT" badges (Activated) and numbers (Bins/Returned/Depleted)
   // Col 8 must fit stacked date/time (Activated) and currency amounts (Bins/Returned/Depleted)
   return (
     <colgroup>
-      <col className="w-[60px] md:w-[70px]" /> {/* Bin */}
-      <col /> {/* Game — remaining space */}
-      <col className="w-[80px] md:w-[95px]" /> {/* Price */}
-      <col className="w-[100px] md:w-[140px]" /> {/* Pack # */}
-      <col className="w-[60px] md:w-[80px]" /> {/* Start */}
-      <col className="w-[65px] md:w-[90px]" /> {/* End */}
-      <col className="w-[90px] md:w-[120px]" /> {/* Sold / Status */}
-      <col className="w-[110px] md:w-[160px]" /> {/* Amount / Activated */}
+      <col className="w-[60px] md:w-[70px]" />
+      <col />
+      <col className="w-[80px] md:w-[95px]" />
+      <col className="w-[100px] md:w-[140px]" />
+      <col className="w-[60px] md:w-[80px]" />
+      <col className="w-[65px] md:w-[90px]" />
+      <col className="w-[90px] md:w-[120px]" />
+      <col className="w-[110px] md:w-[160px]" />
     </colgroup>
   );
 }
@@ -792,7 +794,7 @@ function PackSectionHeader({
       <div className="flex items-center gap-3">
         {rightBadge}
         <ChevronRight
-          className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+          className={`h-4 w-4 text-muted-foreground transition-transform ${ACCORDION_DURATION_CLASS} ease-out ${isOpen ? 'rotate-90' : ''}`}
         />
       </div>
     </button>
@@ -811,6 +813,7 @@ function ReturnedPacksSection({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const toggle = useCallback(() => setIsOpen((v) => !v), []);
+  const { contentClasses, getContentStyles, innerClasses } = useAccordionAnimation();
 
   const totalSales = useMemo(() => packs.reduce((sum, p) => sum + p.sales_amount, 0), [packs]);
 
@@ -837,57 +840,60 @@ function ReturnedPacksSection({
           </span>
         }
       />
-      {isOpen && (
-        <div className="overflow-x-auto">
-          <table className={TABLE_CLASS} style={TABLE_STYLE}>
-            <TableColGroup />
-            <StandardTableHeader />
-            <tbody>
-              {packs.map((pack) => (
-                <tr key={pack.pack_id} className="group">
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
-                    <div className="flex justify-center">
-                      <BinBadge number={pack.bin_number} />
-                    </div>
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
-                    {pack.game_name}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {formatCurrency(pack.game_price)}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
-                    {pack.pack_number}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.starting_serial}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.ending_serial}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.tickets_sold}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm font-bold border-b border-border">
-                    <div className="whitespace-nowrap">{formatCurrency(pack.sales_amount)}</div>
-                    <div className="flex flex-col leading-tight">
-                      <span className="text-[10px] sm:text-[11px] text-muted-foreground whitespace-nowrap">
-                        {(() => {
-                          try {
-                            return formatCustom(pack.returned_at, 'MMM d, h:mm a');
-                          } catch {
-                            return '--';
-                          }
-                        })()}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Smooth CSS Grid animation via useAccordionAnimation hook */}
+      <div className={contentClasses} style={getContentStyles(isOpen)}>
+        <div className={innerClasses}>
+          <div className="overflow-x-auto">
+            <table className={TABLE_CLASS} style={TABLE_STYLE}>
+              <TableColGroup />
+              <StandardTableHeader />
+              <tbody>
+                {packs.map((pack) => (
+                  <tr key={pack.pack_id} className="group">
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
+                      <div className="flex justify-center">
+                        <BinBadge number={pack.bin_number} />
+                      </div>
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
+                      {pack.game_name}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {formatCurrency(pack.game_price)}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
+                      {pack.pack_number}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.starting_serial}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.ending_serial}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.tickets_sold}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm font-bold border-b border-border">
+                      <div className="whitespace-nowrap">{formatCurrency(pack.sales_amount)}</div>
+                      <div className="flex flex-col leading-tight">
+                        <span className="text-[10px] sm:text-[11px] text-muted-foreground whitespace-nowrap">
+                          {(() => {
+                            try {
+                              return formatCustom(pack.returned_at, 'MMM d, h:mm a');
+                            } catch {
+                              return '--';
+                            }
+                          })()}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -904,6 +910,7 @@ function DepletedPacksSection({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const toggle = useCallback(() => setIsOpen((v) => !v), []);
+  const { contentClasses, getContentStyles, innerClasses } = useAccordionAnimation();
 
   const totalSales = useMemo(() => packs.reduce((sum, p) => sum + p.sales_amount, 0), [packs]);
 
@@ -930,57 +937,60 @@ function DepletedPacksSection({
           </span>
         }
       />
-      {isOpen && (
-        <div className="overflow-x-auto">
-          <table className={TABLE_CLASS} style={TABLE_STYLE}>
-            <TableColGroup />
-            <StandardTableHeader />
-            <tbody>
-              {packs.map((pack) => (
-                <tr key={pack.pack_id} className="group">
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
-                    <div className="flex justify-center">
-                      <BinBadge number={pack.bin_number} />
-                    </div>
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
-                    {pack.game_name}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {formatCurrency(pack.game_price)}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
-                    {pack.pack_number}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.starting_serial}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.ending_serial}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                    {pack.tickets_sold}
-                  </td>
-                  <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm font-bold border-b border-border">
-                    <div className="whitespace-nowrap">{formatCurrency(pack.sales_amount)}</div>
-                    <div className="flex flex-col leading-tight">
-                      <span className="text-[10px] sm:text-[11px] text-muted-foreground whitespace-nowrap">
-                        {(() => {
-                          try {
-                            return formatCustom(pack.depleted_at, 'MMM d, h:mm a');
-                          } catch {
-                            return '--';
-                          }
-                        })()}
-                      </span>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      {/* Smooth CSS Grid animation via useAccordionAnimation hook */}
+      <div className={contentClasses} style={getContentStyles(isOpen)}>
+        <div className={innerClasses}>
+          <div className="overflow-x-auto">
+            <table className={TABLE_CLASS} style={TABLE_STYLE}>
+              <TableColGroup />
+              <StandardTableHeader />
+              <tbody>
+                {packs.map((pack) => (
+                  <tr key={pack.pack_id} className="group">
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
+                      <div className="flex justify-center">
+                        <BinBadge number={pack.bin_number} />
+                      </div>
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
+                      {pack.game_name}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {formatCurrency(pack.game_price)}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
+                      {pack.pack_number}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.starting_serial}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.ending_serial}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                      {pack.tickets_sold}
+                    </td>
+                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm font-bold border-b border-border">
+                      <div className="whitespace-nowrap">{formatCurrency(pack.sales_amount)}</div>
+                      <div className="flex flex-col leading-tight">
+                        <span className="text-[10px] sm:text-[11px] text-muted-foreground whitespace-nowrap">
+                          {(() => {
+                            try {
+                              return formatCustom(pack.depleted_at, 'MMM d, h:mm a');
+                            } catch {
+                              return '--';
+                            }
+                          })()}
+                        </span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -998,6 +1008,7 @@ function ActivatedPacksSection({
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const toggle = useCallback(() => setIsOpen((v) => !v), []);
+  const { contentClasses, getContentStyles, innerClasses } = useAccordionAnimation();
 
   if (packs.length === 0) return null;
 
@@ -1017,55 +1028,61 @@ function ActivatedPacksSection({
         isOpen={isOpen}
         onToggle={toggle}
       />
-      {isOpen && (
-        <div className="overflow-x-auto">
-          <table className={TABLE_CLASS} style={TABLE_STYLE}>
-            <TableColGroup />
-            <ActivatedTableHeader />
-            <tbody>
-              {packs.map((pack) => {
-                const isDimmed = pack.status !== 'ACTIVE';
-                const config = STATUS_CONFIG[pack.status] || STATUS_CONFIG.ACTIVE;
+      {/* Smooth CSS Grid animation via useAccordionAnimation hook */}
+      <div className={contentClasses} style={getContentStyles(isOpen)}>
+        <div className={innerClasses}>
+          <div className="overflow-x-auto">
+            <table className={TABLE_CLASS} style={TABLE_STYLE}>
+              <TableColGroup />
+              <ActivatedTableHeader />
+              <tbody>
+                {packs.map((pack) => {
+                  const isDimmed = pack.status !== 'ACTIVE';
+                  const config = STATUS_CONFIG[pack.status] || STATUS_CONFIG.ACTIVE;
 
-                return (
-                  <tr key={pack.pack_id} className={`group ${isDimmed ? 'opacity-70' : ''}`}>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
-                      <div className="flex justify-center">
-                        <BinBadge number={pack.bin_number} />
-                      </div>
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
-                      {pack.game_name}
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                      {formatCurrency(pack.game_price)}
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
-                      {pack.pack_number}
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                      000
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
-                      ---
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center border-b border-border">
-                      <span
-                        className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide ${config.className}`}
-                      >
-                        {config.label}
-                      </span>
-                    </td>
-                    <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right border-b border-border">
-                      <StackedDateTime isoString={pack.activated_at} formatCustom={formatCustom} />
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+                  return (
+                    <tr key={pack.pack_id} className={`group ${isDimmed ? 'opacity-70' : ''}`}>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 border-b border-border">
+                        <div className="flex justify-center">
+                          <BinBadge number={pack.bin_number} />
+                        </div>
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-xs sm:text-sm border-b border-border truncate max-w-[80px] sm:max-w-[120px] lg:max-w-none">
+                        {pack.game_name}
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                        {formatCurrency(pack.game_price)}
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-[10px] sm:text-xs border-b border-border truncate">
+                        {pack.pack_number}
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                        000
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 font-mono text-xs sm:text-sm border-b border-border whitespace-nowrap">
+                        ---
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-center border-b border-border">
+                        <span
+                          className={`inline-block px-1.5 sm:px-2 py-0.5 rounded-xl text-[10px] sm:text-[11px] font-semibold uppercase tracking-wide ${config.className}`}
+                        >
+                          {config.label}
+                        </span>
+                      </td>
+                      <td className="px-2 sm:px-3 lg:px-4 py-2 sm:py-3 text-right border-b border-border">
+                        <StackedDateTime
+                          isoString={pack.activated_at}
+                          formatCustom={formatCustom}
+                        />
+                      </td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
