@@ -35,7 +35,7 @@
     "test:run": "vitest run",
     "test:coverage": "vitest run --coverage",
     "test:unit": "vitest run tests/unit",
-    "test:security": "vitest run tests/security",
+    "test:security": "vitest run --config vitest.integration.config.ts tests/security",
     "test:performance": "vitest run tests/performance",
     "test:integration": "vitest run --config vitest.integration.config.ts tests/integration",
     "test:regression": "vitest run tests/regression",
