@@ -27,6 +27,24 @@ import {
 } from '../../helpers/test-context';
 
 // ============================================================================
+// Native Module Check
+// ============================================================================
+
+let nativeModuleAvailable = true;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Db = require('better-sqlite3-multiple-ciphers');
+  const testDb = new Db(':memory:');
+  testDb.close();
+} catch {
+  nativeModuleAvailable = false;
+}
+
+const SKIP_NATIVE_MODULE_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+
+const describeSuite = SKIP_NATIVE_MODULE_TESTS ? describe.skip : describe;
+
+// ============================================================================
 // Test Fixtures
 // ============================================================================
 
@@ -37,7 +55,7 @@ const REGISTER_1 = 'REG-001';
 // SEC-006: SQL Injection Prevention
 // ============================================================================
 
-describe('SEC-006: SQL Injection Prevention', () => {
+describeSuite('SEC-006: SQL Injection Prevention', () => {
   let ctx: ServiceTestContext;
 
   beforeEach(async () => {
@@ -158,7 +176,7 @@ describe('SEC-006: SQL Injection Prevention', () => {
 // DB-006: Tenant Isolation (Penetration Tests)
 // ============================================================================
 
-describe('DB-006: Tenant Isolation Security', () => {
+describeSuite('DB-006: Tenant Isolation Security', () => {
   let multiCtx: MultiStoreTestContext;
 
   beforeEach(async () => {
@@ -306,7 +324,7 @@ describe('DB-006: Tenant Isolation Security', () => {
 // Unique Constraint Bypass Prevention
 // ============================================================================
 
-describe('Unique Constraint Security', () => {
+describeSuite('Unique Constraint Security', () => {
   let ctx: ServiceTestContext;
 
   beforeEach(async () => {
@@ -392,7 +410,7 @@ describe('Unique Constraint Security', () => {
 // Audit Trail Verification
 // ============================================================================
 
-describe('Security Audit Trail', () => {
+describeSuite('Security Audit Trail', () => {
   let ctx: ServiceTestContext;
 
   beforeEach(async () => {
