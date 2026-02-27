@@ -20,8 +20,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Skip tests that require complex dynamic mocking in CI
-const SKIP_COMPLEX_MOCK_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true';
+const SKIP_COMPLEX_MOCK_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 const itComplex = SKIP_COMPLEX_MOCK_TESTS ? it.skip : it;
 
 // ============================================================================

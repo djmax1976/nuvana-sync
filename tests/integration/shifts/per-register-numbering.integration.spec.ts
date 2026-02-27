@@ -26,6 +26,24 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { createServiceTestContext, type ServiceTestContext } from '../../helpers/test-context';
 
 // ============================================================================
+// Native Module Check
+// ============================================================================
+
+let nativeModuleAvailable = true;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Db = require('better-sqlite3-multiple-ciphers');
+  const testDb = new Db(':memory:');
+  testDb.close();
+} catch {
+  nativeModuleAvailable = false;
+}
+
+const SKIP_NATIVE_MODULE_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+
+const describeSuite = SKIP_NATIVE_MODULE_TESTS ? describe.skip : describe;
+
+// ============================================================================
 // Test Fixtures
 // ============================================================================
 
@@ -38,7 +56,7 @@ const REGISTER_3 = 'REG-003';
 // Test Suite
 // ============================================================================
 
-describe('Per-Register Shift Numbering Integration', () => {
+describeSuite('Per-Register Shift Numbering Integration', () => {
   let ctx: ServiceTestContext;
 
   beforeEach(async () => {
