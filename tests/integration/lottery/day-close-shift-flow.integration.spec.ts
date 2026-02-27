@@ -44,8 +44,7 @@ try {
   nativeModuleAvailable = false;
 }
 
-const SKIP_NATIVE_MODULE_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+const SKIP_NATIVE_MODULE_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 
 // ============================================================================
 // Database Holder (vi.hoisted for cross-platform mock compatibility)
@@ -1043,6 +1042,82 @@ describeSuite('Day Close → Auto-Open → Shift Start Integration (Phase 3)', (
         )
         .get(shiftResult.data?.shift_id) as { business_date: string };
       expect(shift.business_date).toBe(ctx.utils.today());
+    });
+
+    /**
+     * BIZ-013: Shift inherits lottery day's business_date
+     *
+     * When a lottery day spans midnight (opened Feb 23, closed Feb 24),
+     * shifts started on Feb 24 must use business_date='2026-02-23' to match
+     * the lottery day. This ensures reports JOIN correctly on business_date.
+     *
+     * Without this fix, shifts would have a different business_date than their
+     * lottery day and would not appear in day close reports.
+     *
+     * @regression REG-BIZ-013-001: Cross-date shift business_date inheritance
+     */
+    it('BIZ-013: shift started on different calendar date should inherit lottery day business_date', async () => {
+      // Arrange: Lottery day opened yesterday (business_date = yesterday)
+      // but we're starting a shift "today" (simulating crossing midnight)
+      const user = createTestUser('shift_manager', {
+        user_id: 'cross-date-user',
+        username: 'Cross Date Tester',
+      });
+      setCurrentUser(user);
+
+      const yesterdayDate = ctx.utils.businessDate(-1); // Yesterday's date
+
+      // Create an OPEN lottery day with yesterday's business_date
+      // This simulates a day that was opened yesterday and is still open today
+      const openDay = seedLotteryDay({
+        status: 'OPEN',
+        businessDate: yesterdayDate, // Day was opened yesterday
+        openedBy: user.user_id,
+      });
+
+      // Act: Start a shift "today" while the lottery day's business_date is "yesterday"
+      const shiftResult = await simulateShiftStart({
+        registerId: 'register-crossdate',
+        cashierUserId: user.user_id,
+        // Note: No businessDate override - handler should use lottery day's date
+      });
+
+      // Assert: Shift was created successfully
+      expect(shiftResult.success).toBe(true);
+      expect(shiftResult.data).toBeDefined();
+
+      // Assert: Shift inherits lottery day's business_date, NOT today's date
+      const shift = db
+        .prepare(
+          `
+        SELECT business_date FROM shifts WHERE shift_id = ?
+      `
+        )
+        .get(shiftResult.data?.shift_id) as { business_date: string };
+
+      // Critical assertion: Shift's business_date should match lottery day's business_date
+      // This ensures the shift will appear in reports for the lottery day
+      expect(shift.business_date).toBe(yesterdayDate);
+      expect(shift.business_date).toBe(openDay.business_date);
+
+      // Verify the lottery day and shift can be JOINed on business_date
+      // This is the actual query pattern used in reports:getShiftsByDays
+      const joinResult = db
+        .prepare(
+          `
+        SELECT s.shift_id, lbd.day_id
+        FROM lottery_business_days lbd
+        JOIN shifts s ON lbd.store_id = s.store_id AND lbd.business_date = s.business_date
+        WHERE lbd.day_id = ? AND s.shift_id = ?
+      `
+        )
+        .get(openDay.day_id, shiftResult.data?.shift_id) as
+        | { shift_id: string; day_id: string }
+        | undefined;
+
+      expect(joinResult).toBeDefined();
+      expect(joinResult?.shift_id).toBe(shiftResult.data?.shift_id);
+      expect(joinResult?.day_id).toBe(openDay.day_id);
     });
   });
 });

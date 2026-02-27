@@ -429,7 +429,86 @@ describe('ShiftsDAL', () => {
   // ==========================================================================
 
   describe('getNextShiftNumber', () => {
-    it('should return 1 for first shift of the day', () => {
+    it('should return 1 for first shift of the day on a register', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ max_num: null }),
+      });
+
+      const result = dal.getNextShiftNumber('store-456', '2024-01-15', 'REG-001');
+
+      expect(result).toBe(1);
+    });
+
+    it('should return incremented number for existing shifts on same register', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ max_num: 3 }),
+      });
+
+      const result = dal.getNextShiftNumber('store-456', '2024-01-15', 'REG-001');
+
+      expect(result).toBe(4);
+    });
+
+    it('should query max shift number for specific register (SEC-006)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ max_num: 1 }),
+      });
+
+      dal.getNextShiftNumber('store-456', '2024-01-15', 'REG-001');
+
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('MAX(shift_number)'));
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('business_date = ?'));
+      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('external_register_id = ?'));
+    });
+
+    it('should use IS NULL filter for undefined register (per-register numbering)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ max_num: 2 }),
+      });
+
+      dal.getNextShiftNumber('store-456', '2024-01-15', undefined);
+
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('external_register_id IS NULL')
+      );
+    });
+
+    it('should use IS NULL filter for null register (per-register numbering)', () => {
+      mockPrepare.mockReturnValue({
+        get: vi.fn().mockReturnValue({ max_num: 2 }),
+      });
+
+      dal.getNextShiftNumber('store-456', '2024-01-15', null);
+
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('external_register_id IS NULL')
+      );
+    });
+
+    it('should maintain independent numbering per register', () => {
+      // This test validates the business requirement:
+      // Register 1: Shift 1, Shift 2, Shift 3
+      // Register 2: Shift 1, Shift 2, Shift 3
+
+      // Mock for register REG-001 with 2 existing shifts
+      mockPrepare.mockReturnValueOnce({
+        get: vi.fn().mockReturnValue({ max_num: 2 }),
+      });
+      const reg1Result = dal.getNextShiftNumber('store-456', '2024-01-15', 'REG-001');
+
+      // Mock for register REG-002 with 0 existing shifts
+      mockPrepare.mockReturnValueOnce({
+        get: vi.fn().mockReturnValue({ max_num: null }),
+      });
+      const reg2Result = dal.getNextShiftNumber('store-456', '2024-01-15', 'REG-002');
+
+      // REG-001 should get shift 3, REG-002 should get shift 1
+      expect(reg1Result).toBe(3);
+      expect(reg2Result).toBe(1);
+    });
+
+    // Backwards compatibility test
+    it('should work without register ID for backwards compatibility', () => {
       mockPrepare.mockReturnValue({
         get: vi.fn().mockReturnValue({ max_num: null }),
       });
@@ -437,27 +516,10 @@ describe('ShiftsDAL', () => {
       const result = dal.getNextShiftNumber('store-456', '2024-01-15');
 
       expect(result).toBe(1);
-    });
-
-    it('should return incremented number for existing shifts', () => {
-      mockPrepare.mockReturnValue({
-        get: vi.fn().mockReturnValue({ max_num: 3 }),
-      });
-
-      const result = dal.getNextShiftNumber('store-456', '2024-01-15');
-
-      expect(result).toBe(4);
-    });
-
-    it('should query max shift number for specific date', () => {
-      mockPrepare.mockReturnValue({
-        get: vi.fn().mockReturnValue({ max_num: 1 }),
-      });
-
-      dal.getNextShiftNumber('store-456', '2024-01-15');
-
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('MAX(shift_number)'));
-      expect(mockPrepare).toHaveBeenCalledWith(expect.stringContaining('business_date = ?'));
+      // Should use IS NULL filter when no register provided
+      expect(mockPrepare).toHaveBeenCalledWith(
+        expect.stringContaining('external_register_id IS NULL')
+      );
     });
   });
 

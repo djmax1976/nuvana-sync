@@ -663,7 +663,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       // Verify payload contains required fields
       const packPayload = packSyncCall[0].payload;
       expect(packPayload.status).toBe('DEPLETED');
-      expect(packPayload.depletion_reason).toBe('DAY_CLOSE');
+      expect(packPayload.depletion_reason).toBe('MANUAL_SOLD_OUT');
       expect(packPayload.closing_serial).toBe('150');
       expect(packPayload.depleted_by).toBe('user-123');
     });
@@ -771,7 +771,7 @@ describe.skipIf(skipTests)('Lottery Business Days DAL', () => {
       expect(payload).toHaveProperty('sales_amount');
       expect(payload).toHaveProperty('depleted_at');
       expect(payload).toHaveProperty('depleted_by', 'user-123');
-      expect(payload).toHaveProperty('depletion_reason', 'DAY_CLOSE');
+      expect(payload).toHaveProperty('depletion_reason', 'MANUAL_SOLD_OUT');
     });
 
     it('should use correct entity_type and operation for pack sync', () => {

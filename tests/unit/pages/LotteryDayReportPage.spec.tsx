@@ -1275,19 +1275,17 @@ describe('LotteryDayReportPage', () => {
 
         render(<LotteryDayReportPage />);
 
-        // Section should be collapsed initially
-        const section = screen.getByTestId('returned-packs-section');
-        let table = section.querySelector('table');
-        expect(table).toBeNull();
+        // Section should be collapsed initially (uses CSS Grid animation, table always in DOM)
+        const content = screen.getByTestId('returned-packs-content');
+        expect(content).toHaveAttribute('data-expanded', 'false');
 
         // Click to expand
         const headerButton = screen.getByText(/Returned Packs/).closest('button');
         expect(headerButton).not.toBeNull();
         fireEvent.click(headerButton!);
 
-        // Table should now be visible
-        table = section.querySelector('table');
-        expect(table).not.toBeNull();
+        // After expand, data-expanded should be true
+        expect(content).toHaveAttribute('data-expanded', 'true');
       });
     });
   });

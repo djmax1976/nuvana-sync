@@ -53,8 +53,7 @@ const isNativeModuleError = (error: unknown): boolean => {
 };
 
 // Skip tests that require native modules in CI or when modules aren't properly compiled
-const SKIP_NATIVE_MODULE_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+const SKIP_NATIVE_MODULE_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 
 // Use describe.skip for entire suite when native module unavailable
 const describeSuite = SKIP_NATIVE_MODULE_TESTS ? describe.skip : describe;

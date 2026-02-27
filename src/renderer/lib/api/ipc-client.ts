@@ -1684,6 +1684,16 @@ export interface SyncDeleteItemResponse {
 }
 
 // Terminal/Register Types
+
+/**
+ * Shift with resolved cashier name
+ * Used by terminals endpoints which resolve cashier names server-side
+ */
+export interface ShiftWithCashierName extends Shift {
+  /** Pre-resolved cashier name from backend */
+  cashier_name: string;
+}
+
 export interface RegisterWithShiftStatus {
   /** Internal terminal mapping ID */
   id: string;
@@ -1695,8 +1705,8 @@ export interface RegisterWithShiftStatus {
   description: string | null;
   /** Whether the register is active */
   active: boolean;
-  /** Currently open shift on this register, if any */
-  activeShift: Shift | null;
+  /** Currently open shift on this register, if any (with resolved cashier name) */
+  activeShift: ShiftWithCashierName | null;
   /** Count of open shifts for this register */
   openShiftCount: number;
   /** When this register was first identified */

@@ -35,7 +35,11 @@ import { createLogger } from '../utils/logger';
 import { ReturnReasonSchema } from '../../shared/types/lottery.types';
 import {
   calculateTicketsRemainingFromSerials,
+  calculateTicketsSold,
+  calculateSalesAmount,
   formatSerial,
+  getLastTicketIndex,
+  CalculationModes,
 } from '../../shared/lottery/ticket-calculations';
 
 // ============================================================================
@@ -351,7 +355,27 @@ function buildPackSyncPayload(
   // Normal packs always start at "000" (first ticket)
   // SEC-014: opening_serial is already validated by Zod schema (3-digit numeric string)
   const serialStart = onboardingMode && pack.opening_serial ? pack.opening_serial : '000';
-  const serialEnd = ticketsPerPack ? String(ticketsPerPack - 1).padStart(3, '0') : '299'; // Default to 299 (300 tickets)
+
+  // Use centralized function for last ticket index - SINGLE SOURCE OF TRUTH
+  // SEC-014: Validate ticketsPerPack before use - no silent fallbacks
+  let serialEnd: string;
+  if (ticketsPerPack === null || ticketsPerPack === undefined) {
+    // This indicates missing game data - log and use safe default for backwards compatibility
+    // TODO: Make this throw once all callers properly pass ticketsPerPack
+    serialEnd = '299';
+  } else {
+    const lastIndexResult = getLastTicketIndex(ticketsPerPack);
+    if (!lastIndexResult.success) {
+      throw new Error(
+        `Invalid ticketsPerPack (${ticketsPerPack}) in buildPackSyncPayload: ${lastIndexResult.error}`
+      );
+    }
+    const formatted = formatSerial(lastIndexResult.value);
+    if (!formatted) {
+      throw new Error(`Failed to format serial_end for ticketsPerPack=${ticketsPerPack}`);
+    }
+    serialEnd = formatted;
+  }
 
   // v029 API Alignment: Map DAL field names to API field names
   return {
@@ -563,7 +587,7 @@ interface GameListItemResponse {
     total: number;
     received: number;
     active: number;
-    settled: number;
+    depleted: number;
     returned: number;
   };
 }
@@ -590,7 +614,7 @@ function transformGameToResponse(
       total: game.total_packs,
       received: game.received_packs,
       active: game.active_packs,
-      settled: game.settled_packs,
+      depleted: game.settled_packs,
       returned: game.returned_packs,
     },
   };
@@ -839,6 +863,8 @@ registerHandler(
         bin_number: (p.bin_display_order ?? 0) + 1,
         activated_at: p.activated_at || '',
         depleted_at: p.depleted_at || '',
+        // Starting serial from when pack was activated (opening_serial)
+        starting_serial: p.opening_serial || null,
         // Sales fields for reconciliation - use ?? to preserve 0 values
         closing_serial: p.closing_serial ?? null,
         tickets_sold_count: p.tickets_sold_count ?? 0,
@@ -1073,12 +1099,12 @@ registerHandler(
       let serialEnd: string | undefined;
       let ticketsRemaining: number | undefined;
 
-      if (pack.opening_serial && pack.game_tickets_per_pack) {
-        const openingNum = parseInt(pack.opening_serial, 10);
-        if (!isNaN(openingNum) && pack.game_tickets_per_pack > 0) {
-          // serial_end = last ticket index in pack (0-based)
-          // Example: 60-ticket pack starting at 0 -> serial_end = 59
-          const lastTicketNum = openingNum + pack.game_tickets_per_pack - 1;
+      if (pack.game_tickets_per_pack && pack.game_tickets_per_pack > 0) {
+        // Use centralized function for last ticket index - SINGLE SOURCE OF TRUTH
+        // The last ticket index is always tickets_per_pack - 1, regardless of opening_serial
+        const lastIndexResult = getLastTicketIndex(pack.game_tickets_per_pack);
+        if (lastIndexResult.success) {
+          const lastTicketNum = lastIndexResult.value;
           serialEnd = formatSerial(lastTicketNum) || undefined;
 
           // Calculate tickets remaining based on current position
@@ -1086,17 +1112,22 @@ registerHandler(
           // For DEPLETED/RETURNED: tickets_remaining = 0
           if (pack.status === 'ACTIVE') {
             // Current position = prev_ending_serial (from last closed day) or opening_serial
-            const currentPosition = pack.prev_ending_serial || pack.opening_serial;
+            // SEC-014: Both should exist for any activated pack
+            const currentPosition = pack.prev_ending_serial ?? pack.opening_serial;
 
-            // Use centralized calculation utility
-            const remainingResult = calculateTicketsRemainingFromSerials(
-              openingNum,
-              lastTicketNum,
-              currentPosition
-            );
+            if (currentPosition) {
+              // Use centralized calculation utility
+              // Note: calculateTicketsRemainingFromSerials takes serialStart (first ticket in pack)
+              // and serialEnd (last ticket in pack), not opening_serial
+              const remainingResult = calculateTicketsRemainingFromSerials(
+                0, // Pack always starts at serial 0
+                lastTicketNum,
+                currentPosition
+              );
 
-            if (remainingResult.success) {
-              ticketsRemaining = remainingResult.value;
+              if (remainingResult.success) {
+                ticketsRemaining = remainingResult.value;
+              }
             }
           } else if (pack.status === 'DEPLETED' || pack.status === 'RETURNED') {
             ticketsRemaining = 0;
@@ -1801,6 +1832,7 @@ registerHandler(
         closingSerial: string;
         ticketsSoldCount: number;
         salesAmount: number;
+        startingSerial: string; // BIZ-014: Store for mid-day depletion record
       } | null = null;
 
       if (deplete_previous) {
@@ -1815,6 +1847,26 @@ registerHandler(
             storeId,
             userId: activated_by,
           });
+
+          // ====================================================================
+          // Get full pack details including prev_ending_serial for accurate depletion
+          // DB-006: TENANT_ISOLATION - Use store-scoped query
+          // ====================================================================
+          const existingPackDetails = lotteryPacksDAL.getPackWithDetailsForStore(
+            storeId,
+            existingPack.pack_id
+          );
+
+          if (!existingPackDetails) {
+            log.error('Pack details not found during collision detection', {
+              existingPackId: existingPack.pack_id,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to process bin collision: pack details missing. Please contact support.'
+            );
+          }
 
           // DB-006: Get existing pack's game info for depletion calculations
           existingPackGame = lotteryGamesDAL.findByIdForStore(storeId, existingPack.game_id);
@@ -1831,18 +1883,142 @@ registerHandler(
             );
           }
 
-          // Calculate depletion values (pack assumed fully sold when replaced)
-          const existingOpeningSerial = existingPack.opening_serial || '000';
-          const ticketsPerPack = existingPackGame.tickets_per_pack || 300;
-          const gamePrice = existingPackGame.price || 0;
-          const openingSerialNum = parseInt(existingOpeningSerial, 10);
-          const finalSerialNum = openingSerialNum + ticketsPerPack - 1;
+          // ====================================================================
+          // ENTERPRISE-GRADE DEPLETION CALCULATION
+          // Uses centralized ticket-calculations.ts - single source of truth
+          // SEC-014: INPUT_VALIDATION - No silent fallbacks, fail if data missing
+          // ====================================================================
+
+          // Determine current position: prev_ending_serial (if closed day exists) or opening_serial
+          // SEC-014: Strict validation - both should exist for any activated pack
+          const currentPosition =
+            existingPackDetails.prev_ending_serial ?? existingPackDetails.opening_serial;
+
+          if (!currentPosition) {
+            log.error('Pack missing required serial data for depletion calculation', {
+              existingPackId: existingPack.pack_id,
+              prevEndingSerial: existingPackDetails.prev_ending_serial,
+              openingSerial: existingPackDetails.opening_serial,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to process bin collision: pack serial data incomplete. Please contact support.'
+            );
+          }
+
+          // SEC-014: Validate game data exists
+          if (!existingPackGame.tickets_per_pack || existingPackGame.tickets_per_pack <= 0) {
+            log.error('Game missing tickets_per_pack for depletion calculation', {
+              gameId: existingPack.game_id,
+              ticketsPerPack: existingPackGame.tickets_per_pack,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to process bin collision: game ticket count invalid. Please contact support.'
+            );
+          }
+
+          if (existingPackGame.price === null || existingPackGame.price === undefined) {
+            log.error('Game missing price for depletion calculation', {
+              gameId: existingPack.game_id,
+              price: existingPackGame.price,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to process bin collision: game price invalid. Please contact support.'
+            );
+          }
+
+          // Use centralized function to get last ticket index - SINGLE SOURCE OF TRUTH
+          const lastTicketIndexResult = getLastTicketIndex(existingPackGame.tickets_per_pack);
+          if (!lastTicketIndexResult.success) {
+            log.error('Failed to get last ticket index during bin collision depletion', {
+              existingPackId: existingPack.pack_id,
+              ticketsPerPack: existingPackGame.tickets_per_pack,
+              error: lastTicketIndexResult.error,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              `Unable to calculate depletion: ${lastTicketIndexResult.error}. Please contact support.`
+            );
+          }
+          const lastTicketIndex = lastTicketIndexResult.value;
+
+          // Use centralized calculation: INDEX mode for depletion (closing_serial is last ticket index)
+          const ticketsSoldResult = calculateTicketsSold(
+            currentPosition,
+            lastTicketIndex,
+            CalculationModes.INDEX
+          );
+
+          if (!ticketsSoldResult.success) {
+            log.error('Ticket calculation failed during bin collision depletion', {
+              existingPackId: existingPack.pack_id,
+              currentPosition,
+              lastTicketIndex,
+              error: ticketsSoldResult.error,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              `Unable to calculate depletion: ${ticketsSoldResult.error}. Please contact support.`
+            );
+          }
+
+          // Use centralized calculation for sales amount
+          const salesAmountResult = calculateSalesAmount(
+            ticketsSoldResult.value,
+            existingPackGame.price
+          );
+
+          if (!salesAmountResult.success) {
+            log.error('Sales amount calculation failed during bin collision depletion', {
+              existingPackId: existingPack.pack_id,
+              ticketsSold: ticketsSoldResult.value,
+              gamePrice: existingPackGame.price,
+              error: salesAmountResult.error,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              `Unable to calculate sales amount: ${salesAmountResult.error}. Please contact support.`
+            );
+          }
+
+          // Format closing serial using centralized function
+          const formattedClosingSerial = formatSerial(lastTicketIndex);
+          if (!formattedClosingSerial) {
+            log.error('Failed to format closing serial during bin collision depletion', {
+              existingPackId: existingPack.pack_id,
+              lastTicketIndex,
+              storeId,
+            });
+            return createErrorResponse(
+              IPCErrorCodes.INTERNAL_ERROR,
+              'Unable to format closing serial. Please contact support.'
+            );
+          }
 
           depletionData = {
-            closingSerial: String(finalSerialNum).padStart(3, '0'),
-            ticketsSoldCount: ticketsPerPack,
-            salesAmount: ticketsPerPack * gamePrice,
+            closingSerial: formattedClosingSerial,
+            ticketsSoldCount: ticketsSoldResult.value,
+            salesAmount: salesAmountResult.value,
+            startingSerial: currentPosition, // BIZ-014: Preserve for mid-day depletion record
           };
+
+          log.info('Depletion values calculated for bin collision', {
+            existingPackId: existingPack.pack_id,
+            currentPosition,
+            lastTicketIndex,
+            closingSerial: formattedClosingSerial,
+            ticketsSold: ticketsSoldResult.value,
+            salesAmount: salesAmountResult.value,
+            storeId,
+          });
         }
       }
 
@@ -1877,6 +2053,21 @@ registerHandler(
                 depleted_shift_id: shift_id,
                 depletion_reason: 'AUTO_REPLACED',
               });
+
+              // BIZ-014: Create lottery_day_packs record for mid-day depletion
+              // This ensures reports have accurate starting_serial data for AUTO_REPLACED packs
+              // The record is created NOW because day close only processes ACTIVE packs
+              lotteryBusinessDaysDAL.recordMidDayDepletion(
+                storeId,
+                existingPack.pack_id,
+                existingPack.current_bin_id,
+                {
+                  starting_serial: depletionData.startingSerial,
+                  ending_serial: depletionData.closingSerial,
+                  tickets_sold: depletionData.ticketsSoldCount,
+                  sales_amount: depletionData.salesAmount,
+                }
+              );
             }
 
             // Activate the new pack
@@ -2081,11 +2272,24 @@ registerHandler(
       //          (17 + 1) - 0 = 18 tickets (correct)
       // This differs from day close where closing_serial is the NEXT position to sell
       // BIZ-013: Cloud-synced packs may have opening_serial=null but serial_start set
+      // SEC-014: No silent fallback to '000' - throw on missing serial data
       const effectiveStartingSerial =
-        packDetails.prev_ending_serial ||
-        packDetails.opening_serial ||
-        packDetails.serial_start ||
-        '000';
+        packDetails.prev_ending_serial || packDetails.opening_serial || packDetails.serial_start;
+
+      if (!effectiveStartingSerial) {
+        log.error('Pack missing starting serial data - data integrity issue', {
+          pack_id,
+          prev_ending_serial: packDetails.prev_ending_serial,
+          opening_serial: packDetails.opening_serial,
+          serial_start: packDetails.serial_start,
+          storeId,
+        });
+        return createErrorResponse(
+          IPCErrorCodes.INTERNAL_ERROR,
+          'Pack is missing starting serial data. This indicates a data integrity issue. Please contact support.'
+        );
+      }
+
       if (!packDetails.game_price) {
         return createErrorResponse(IPCErrorCodes.VALIDATION_ERROR, 'Game has no price');
       }

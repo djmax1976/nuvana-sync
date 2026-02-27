@@ -12,6 +12,11 @@
 import { StoreBasedDAL, type StoreEntity } from './base.dal';
 import { createLogger } from '../utils/logger';
 import type { ReturnReason } from '../../shared/types/lottery.types';
+import {
+  calculateTicketsSold,
+  calculateSalesAmount,
+  CalculationModes,
+} from '../../shared/lottery/ticket-calculations';
 
 // ============================================================================
 // Types
@@ -934,13 +939,21 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
    * Calculate sales for a pack given closing serial
    * Uses effective starting serial (prev day's ending or opening) and game price
    *
+   * BIZ-006: Ticket Calculation Modes
+   * - POSITION mode (default): closing_serial is NEXT position to sell. Formula: end - start
+   * - INDEX mode (isSoldOut=true): closing_serial is LAST ticket INDEX. Formula: (end + 1) - start
+   *
    * @param packId - Pack identifier
    * @param closingSerial - Ending serial number
+   * @param isSoldOut - If true, uses INDEX mode (depletion formula); otherwise POSITION mode
    * @returns Object with tickets sold and sales amount
+   *
+   * @security SEC-014: INPUT_VALIDATION - Uses centralized validation from ticket-calculations.ts
    */
   calculateSales(
     packId: string,
-    closingSerial: string
+    closingSerial: string,
+    isSoldOut?: boolean
   ): { ticketsSold: number; salesAmount: number } {
     const pack = this.getPackWithDetails(packId);
 
@@ -949,40 +962,63 @@ export class LotteryPacksDAL extends StoreBasedDAL<LotteryPack> {
     }
 
     // SERIAL CARRYFORWARD: Use previous day's ending as today's starting
-    // Fallback priority: prev_ending_serial → opening_serial → serial_start → '000'
+    // Fallback priority: prev_ending_serial → opening_serial → serial_start
     // BIZ-013: Cloud-synced packs may have opening_serial=null but serial_start set
+    // SEC-014: No silent fallback to '000' - data integrity error must be thrown
     const effectiveStartingSerial =
-      pack.prev_ending_serial || pack.opening_serial || pack.serial_start || '000';
+      pack.prev_ending_serial || pack.opening_serial || pack.serial_start;
 
-    log.debug('calculateSales effectiveStartingSerial', {
+    if (!effectiveStartingSerial) {
+      throw new Error(
+        `Pack ${packId} missing starting serial data. ` +
+          `prev_ending_serial=${pack.prev_ending_serial}, ` +
+          `opening_serial=${pack.opening_serial}, ` +
+          `serial_start=${pack.serial_start}. ` +
+          `This indicates a data integrity issue.`
+      );
+    }
+
+    // BIZ-006: Determine calculation mode based on depletion status
+    // INDEX mode: For sold-out/depleted packs, closing_serial is the LAST ticket index
+    // POSITION mode: For normal scans, closing_serial is the NEXT position to sell
+    const calculationMode = isSoldOut ? CalculationModes.INDEX : CalculationModes.POSITION;
+
+    log.debug('calculateSales', {
       packId,
       prev_ending_serial: pack.prev_ending_serial,
       opening_serial: pack.opening_serial,
       serial_start: pack.serial_start,
       effectiveStartingSerial,
+      closingSerial,
+      isSoldOut,
+      calculationMode,
     });
 
     if (!pack.game_price) {
       throw new Error(`Game has no price: ${pack.game_id}`);
     }
 
-    // Calculate tickets sold (closing - effective starting)
-    const startingNum = parseInt(effectiveStartingSerial, 10);
-    const closingNum = parseInt(closingSerial, 10);
+    // SEC-014: Use centralized calculation utility with proper validation
+    const ticketsResult = calculateTicketsSold(
+      effectiveStartingSerial,
+      closingSerial,
+      calculationMode
+    );
 
-    if (isNaN(startingNum) || isNaN(closingNum)) {
-      throw new Error('Invalid serial number format');
+    if (!ticketsResult.success) {
+      throw new Error(ticketsResult.error || 'Invalid serial number format');
     }
 
-    const ticketsSold = closingNum - startingNum;
+    const ticketsSold = ticketsResult.value;
 
-    if (ticketsSold < 0) {
-      throw new Error('Closing serial cannot be less than starting serial');
+    // SEC-014: Use centralized sales amount calculation
+    const salesResult = calculateSalesAmount(ticketsSold, pack.game_price);
+
+    if (!salesResult.success) {
+      throw new Error(salesResult.error || 'Failed to calculate sales amount');
     }
 
-    const salesAmount = ticketsSold * pack.game_price;
-
-    return { ticketsSold, salesAmount };
+    return { ticketsSold, salesAmount: salesResult.value };
   }
 
   // ==========================================================================

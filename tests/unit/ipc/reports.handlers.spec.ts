@@ -1613,7 +1613,7 @@ describe('Reports Handlers', () => {
             tickets_sold: 300,
             sales_amount: 6000,
             depleted_at: '2026-02-02T20:00:00Z',
-            prev_ending_serial: '299',
+            day_starting_serial: '299',
           },
         ],
       });
@@ -1676,7 +1676,7 @@ describe('Reports Handlers', () => {
             tickets_sold: 25,
             sales_amount: 125,
             returned_at: '2026-02-02T19:00:00Z',
-            prev_ending_serial: '024',
+            day_starting_serial: '024',
           },
         ],
       });
@@ -1694,9 +1694,9 @@ describe('Reports Handlers', () => {
           game_price: 5,
           starting_serial: '024',
           ending_serial: '050',
-          // tickets_sold calculated from serials: 50 - 24 = 26
-          tickets_sold: 26,
-          sales_amount: 130,
+          // Use database values directly (not recalculated from serials)
+          tickets_sold: 25,
+          sales_amount: 125,
           returned_at: '2026-02-02T19:00:00Z',
         })
       );
@@ -1751,7 +1751,7 @@ describe('Reports Handlers', () => {
             tickets_sold: 100,
             sales_amount: 2000,
             depleted_at: '2026-02-02T20:00:00Z',
-            prev_ending_serial: null,
+            day_starting_serial: null,
           },
         ],
         returned: [
@@ -1766,7 +1766,7 @@ describe('Reports Handlers', () => {
             tickets_sold: 20,
             sales_amount: 100,
             returned_at: '2026-02-02T21:00:00Z',
-            prev_ending_serial: null,
+            day_starting_serial: null,
           },
         ],
       });
@@ -1778,8 +1778,8 @@ describe('Reports Handlers', () => {
       expect(result.activatedPacks).toHaveLength(1);
       expect(result.depletedPacks).toHaveLength(1);
       expect(result.returnedPacks).toHaveLength(1);
-      // lotteryTotal = bins(120) + depleted(2000) + returned(50*5=250) = 2370
-      expect(result.lotteryTotal).toBe(2370);
+      // lotteryTotal = bins(120) + depleted(2000) + returned(100 from DB) = 2220
+      expect(result.lotteryTotal).toBe(2220);
     });
 
     // ------------------------------------------------------------------
@@ -2187,6 +2187,7 @@ describe('Reports Handlers', () => {
     /**
      * Create mock row data for getShiftsByDays query result
      * BIZ-003: Includes opened_at/closed_at for enterprise-grade sorting
+     * Includes register_description from pos_terminal_mappings JOIN
      */
     function createShiftsByDaysRow(overrides: Record<string, unknown> = {}) {
       return {
@@ -2199,6 +2200,7 @@ describe('Reports Handlers', () => {
         end_time: '2026-02-02T16:00:00Z',
         shift_status: 'CLOSED',
         external_register_id: 'REG-001',
+        register_description: null, // From pos_terminal_mappings JOIN
         employee_name: 'John Doe',
         day_status: 'CLOSED',
         ...overrides,
@@ -2688,6 +2690,7 @@ describe('Reports Handlers', () => {
             end_time: null,
             shift_status: null,
             external_register_id: null,
+            register_description: null, // No terminal mapping either
             employee_name: null,
           }),
         ]);
@@ -2708,7 +2711,8 @@ describe('Reports Handlers', () => {
             start_time: '2026-02-02T10:00:00Z',
             end_time: '2026-02-02T18:00:00Z',
             shift_status: 'CLOSED',
-            external_register_id: 'Register-A',
+            external_register_id: 'REG-A',
+            register_description: 'Front Counter', // Custom description from pos_terminal_mappings
             employee_name: 'Jane Smith',
           }),
         ]);
@@ -2718,12 +2722,68 @@ describe('Reports Handlers', () => {
         expect(result.days[0].shifts[0]).toEqual({
           shiftId: 'shift-test-001',
           shiftNumber: 3,
-          registerName: 'Register-A',
+          registerName: 'Front Counter', // Uses description when available
           employeeName: 'Jane Smith',
           startTime: '2026-02-02T10:00:00Z',
           endTime: '2026-02-02T18:00:00Z',
           status: 'CLOSED',
         });
+      });
+
+      it('should use "Main Register" for external_register_id "1" when no description', async () => {
+        setupConfiguredStore();
+        setupShiftsByDaysPrepare([
+          createShiftsByDaysRow({
+            external_register_id: '1',
+            register_description: null,
+          }),
+        ]);
+
+        const result = await callShiftsByDays();
+
+        expect(result.days[0].shifts[0].registerName).toBe('Main Register');
+      });
+
+      it('should format as "Register {id}" when no description and id is not "1"', async () => {
+        setupConfiguredStore();
+        setupShiftsByDaysPrepare([
+          createShiftsByDaysRow({
+            external_register_id: '2',
+            register_description: null,
+          }),
+        ]);
+
+        const result = await callShiftsByDays();
+
+        expect(result.days[0].shifts[0].registerName).toBe('Register 2');
+      });
+
+      it('should use description when available (takes priority over formatting)', async () => {
+        setupConfiguredStore();
+        setupShiftsByDaysPrepare([
+          createShiftsByDaysRow({
+            external_register_id: '1', // Would be "Main Register" without description
+            register_description: 'Custom POS Name',
+          }),
+        ]);
+
+        const result = await callShiftsByDays();
+
+        expect(result.days[0].shifts[0].registerName).toBe('Custom POS Name');
+      });
+
+      it('should fallback to "Register" when both external_register_id and description are null', async () => {
+        setupConfiguredStore();
+        setupShiftsByDaysPrepare([
+          createShiftsByDaysRow({
+            external_register_id: null,
+            register_description: null,
+          }),
+        ]);
+
+        const result = await callShiftsByDays();
+
+        expect(result.days[0].shifts[0].registerName).toBe('Register');
       });
     });
 

@@ -14,6 +14,10 @@ export default defineConfig({
       'tests/integration/**/*.spec.tsx',
       'tests/integration/**/*.test.ts',
       'tests/integration/**/*.test.tsx',
+      'tests/security/**/*.spec.ts',
+      'tests/security/**/*.spec.tsx',
+      'tests/security/**/*.test.ts',
+      'tests/security/**/*.test.tsx',
     ],
     exclude: ['**/node_modules/**', '**/dist/**'],
     // Setup file for React Testing Library

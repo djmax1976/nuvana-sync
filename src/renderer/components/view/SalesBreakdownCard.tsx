@@ -92,7 +92,7 @@ const DepartmentRow = React.memo(function DepartmentRow({
 }: DepartmentRowProps) {
   return (
     <div
-      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg hover:bg-white/5 transition-colors items-center"
+      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg hover:bg-muted/50 transition-colors items-center"
       data-testid={testId}
     >
       <div className="flex items-center gap-3">
@@ -105,12 +105,14 @@ const DepartmentRow = React.memo(function DepartmentRow({
         >
           {icon}
         </span>
-        <span className="text-sm font-medium">{label}</span>
+        <span className="text-sm font-medium text-card-foreground">{label}</span>
       </div>
       <div className="text-right text-sm text-muted-foreground">
         {reports != null ? formatCurrency(reports) : '—'}
       </div>
-      <div className="text-right font-mono text-sm font-medium">{formatCurrency(pos)}</div>
+      <div className="text-right font-mono text-sm font-medium text-card-foreground">
+        {formatCurrency(pos)}
+      </div>
     </div>
   );
 });
@@ -136,16 +138,16 @@ const LotteryRow = React.memo(function LotteryRow({
 }: LotteryRowProps) {
   return (
     <div
-      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg bg-emerald-950/30 border border-emerald-900/30 items-center"
+      className="grid grid-cols-[1fr_90px_90px] gap-2 py-2.5 px-3 rounded-lg bg-success-light border border-success/30 items-center"
       data-testid={testId}
     >
       <div className="flex items-center gap-3">
-        <span className="w-8 h-8 rounded-lg bg-emerald-950/50 text-emerald-400 flex items-center justify-center">
+        <span className="w-8 h-8 rounded-lg bg-success/20 text-success flex items-center justify-center">
           {icon}
         </span>
-        <span className="text-sm font-medium text-emerald-300">{label}</span>
+        <span className="text-sm font-medium text-success">{label}</span>
       </div>
-      <div className="text-right font-mono text-sm">
+      <div className="text-right font-mono text-sm text-card-foreground">
         {reports != null ? formatCurrency(reports) : '—'}
       </div>
       <div className="text-right font-mono text-sm text-muted-foreground">
@@ -168,19 +170,19 @@ interface TotalRowProps {
 const TotalRow = React.memo(function TotalRow({ reports, pos, testId }: TotalRowProps) {
   return (
     <div
-      className="grid grid-cols-[1fr_90px_90px] gap-2 py-4 px-4 rounded-xl bg-gradient-to-r from-violet-950/40 to-purple-950/40 border border-violet-800/30 items-center"
+      className="grid grid-cols-[1fr_90px_90px] gap-2 py-4 px-4 rounded-xl bg-primary-light border border-primary/30 items-center"
       data-testid={testId}
     >
       <div className="flex items-center gap-3">
-        <span className="w-10 h-10 rounded-xl bg-violet-900/50 text-violet-400 flex items-center justify-center">
+        <span className="w-10 h-10 rounded-xl bg-primary/20 text-primary flex items-center justify-center">
           <TrendingUp className="w-5 h-5" />
         </span>
-        <span className="text-base font-bold">Total Sales</span>
+        <span className="text-base font-bold text-card-foreground">Total Sales</span>
       </div>
-      <div className="text-right font-bold font-mono text-violet-400">
+      <div className="text-right font-bold font-mono text-primary">
         {reports != null ? formatCurrency(reports) : '—'}
       </div>
-      <div className="text-right font-bold font-mono text-violet-400">{formatCurrency(pos)}</div>
+      <div className="text-right font-bold font-mono text-primary">{formatCurrency(pos)}</div>
     </div>
   );
 });
@@ -197,24 +199,21 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
 }: SalesBreakdownCardProps) {
   return (
     <div
-      className={cn(
-        'relative overflow-hidden rounded-xl border border-border bg-gradient-to-b from-slate-900/50 to-slate-950/80',
-        className
-      )}
+      className={cn('relative overflow-hidden rounded-xl border border-border bg-card', className)}
       data-testid={testId}
       data-readonly={readOnly}
     >
       {/* Top accent bar */}
-      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-violet-500 via-purple-500 to-violet-500" />
+      <div className="absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-primary via-accent to-primary" />
 
       {/* Header */}
       <div className="p-4 border-b border-border/50">
         <div className="flex items-center gap-3">
-          <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-violet-950 text-violet-400">
+          <span className="w-10 h-10 rounded-[10px] flex items-center justify-center bg-primary-light text-primary">
             <BarChart3 className="w-5 h-5" />
           </span>
           <div>
-            <h3 className="font-semibold text-lg">Department Sales</h3>
+            <h3 className="font-semibold text-lg text-card-foreground">Department Sales</h3>
             <p className="text-xs text-muted-foreground">Sales by category</p>
           </div>
         </div>
@@ -239,8 +238,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Gas Sales"
             icon={<Flame className="w-4 h-4" />}
-            iconBgClass="bg-amber-950/50"
-            iconTextClass="text-amber-400"
+            iconBgClass="bg-warning-light"
+            iconTextClass="text-warning"
             reports={data.gasSales.reports}
             pos={data.gasSales.pos}
             testId={`${testId}-gas`}
@@ -248,8 +247,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Grocery"
             icon={<ShoppingBag className="w-4 h-4" />}
-            iconBgClass="bg-green-950/50"
-            iconTextClass="text-green-400"
+            iconBgClass="bg-success-light"
+            iconTextClass="text-success"
             reports={data.grocery.reports}
             pos={data.grocery.pos}
             testId={`${testId}-grocery`}
@@ -257,8 +256,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Tobacco"
             icon={<Package className="w-4 h-4" />}
-            iconBgClass="bg-orange-950/50"
-            iconTextClass="text-orange-400"
+            iconBgClass="bg-warning-light"
+            iconTextClass="text-warning"
             reports={data.tobacco.reports}
             pos={data.tobacco.pos}
             testId={`${testId}-tobacco`}
@@ -266,8 +265,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Beverages"
             icon={<Droplets className="w-4 h-4" />}
-            iconBgClass="bg-cyan-950/50"
-            iconTextClass="text-cyan-400"
+            iconBgClass="bg-info-light"
+            iconTextClass="text-info"
             reports={data.beverages.reports}
             pos={data.beverages.pos}
             testId={`${testId}-beverages`}
@@ -275,8 +274,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Snacks"
             icon={<Cake className="w-4 h-4" />}
-            iconBgClass="bg-pink-950/50"
-            iconTextClass="text-pink-400"
+            iconBgClass="bg-destructive-light"
+            iconTextClass="text-destructive"
             reports={data.snacks.reports}
             pos={data.snacks.pos}
             testId={`${testId}-snacks`}
@@ -284,8 +283,8 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
           <DepartmentRow
             label="Other"
             icon={<MoreHorizontal className="w-4 h-4" />}
-            iconBgClass="bg-slate-800/50"
-            iconTextClass="text-slate-400"
+            iconBgClass="bg-muted"
+            iconTextClass="text-muted-foreground"
             reports={data.other.reports}
             pos={data.other.pos}
             testId={`${testId}-other`}
@@ -295,7 +294,7 @@ export const SalesBreakdownCard = React.memo(function SalesBreakdownCard({
         {/* Lottery Section */}
         <div className="mt-4 pt-4 border-t border-border/30">
           <div className="flex items-center gap-2 mb-3 px-3">
-            <span className="w-2 h-2 rounded-full bg-emerald-500" />
+            <span className="w-2 h-2 rounded-full bg-success" />
             <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
               Lottery
             </span>

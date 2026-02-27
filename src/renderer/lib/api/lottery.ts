@@ -610,6 +610,8 @@ export interface DepletedPackDay {
   bin_number: number;
   activated_at: string;
   depleted_at: string;
+  /** Starting serial (first ticket position for this period) */
+  starting_serial: string | null;
   /** Closing serial (last ticket sold) */
   closing_serial: string | null;
   /** Total tickets sold for reconciliation */

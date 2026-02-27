@@ -122,7 +122,7 @@ export function PackSectionHeader({
       <div className="flex items-center gap-3">
         {rightBadge}
         <ChevronRight
-          className={`h-4 w-4 text-muted-foreground transition-transform duration-200 ${isOpen ? 'rotate-90' : ''}`}
+          className={`h-4 w-4 text-muted-foreground transition-transform duration-[350ms] ease-out ${isOpen ? 'rotate-90' : ''}`}
         />
       </div>
     </button>

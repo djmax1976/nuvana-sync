@@ -217,6 +217,28 @@ describe('PackSectionHeader', () => {
     expect(chevron!.getAttribute('class')).not.toContain('rotate-90');
   });
 
+  // Traceability: PERF-002 - Smooth 350ms animation matching centralized accordion
+  it('should have 350ms animation duration on chevron', () => {
+    const { container } = render(<PackSectionHeader {...defaultProps} isOpen={false} />);
+    const chevron = container.querySelector('.lucide.lucide-chevron-right');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).toContain('duration-[350ms]');
+  });
+
+  it('should have ease-out timing function on chevron', () => {
+    const { container } = render(<PackSectionHeader {...defaultProps} isOpen={false} />);
+    const chevron = container.querySelector('.lucide.lucide-chevron-right');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).toContain('ease-out');
+  });
+
+  it('should have transition-transform on chevron', () => {
+    const { container } = render(<PackSectionHeader {...defaultProps} isOpen={false} />);
+    const chevron = container.querySelector('.lucide.lucide-chevron-right');
+    expect(chevron).not.toBeNull();
+    expect(chevron!.getAttribute('class')).toContain('transition-transform');
+  });
+
   it('should render rightBadge when provided', () => {
     render(
       <PackSectionHeader {...defaultProps} rightBadge={<span data-testid="badge">$100</span>} />

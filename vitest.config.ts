@@ -22,6 +22,9 @@ export default defineConfig({
       // Integration tests require native modules (better-sqlite3)
       // Run separately with actual database via `npm run test:integration`
       'tests/integration/**',
+      // Security tests require native modules (better-sqlite3) for real DB validation
+      // Run separately via `npm run test:security`
+      'tests/security/**',
     ],
     passWithNoTests: false,
     // Use threads pool for consistent vi.mock hoisting across platforms

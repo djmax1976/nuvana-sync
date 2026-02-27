@@ -103,11 +103,9 @@ describe('DayAccordion', () => {
 
     it('should apply -rotate-90 to chevron when collapsed', () => {
       renderAccordion({ isExpanded: false });
-      const header = screen.getByTestId('day-accordion-header');
-      // The chevron is the first SVG child with aria-hidden
-      const chevron = header.querySelector('svg[aria-hidden="true"]');
+      const chevron = screen.getByTestId('day-accordion-chevron');
       expect(chevron).toBeInTheDocument();
-      expect(chevron!.classList.toString()).toContain('-rotate-90');
+      expect(chevron.classList.toString()).toContain('-rotate-90');
     });
 
     it('should apply grid-rows-[0fr] to content wrapper when collapsed', () => {
@@ -134,10 +132,9 @@ describe('DayAccordion', () => {
 
     it('should not apply -rotate-90 to chevron when expanded', () => {
       renderAccordion({ isExpanded: true });
-      const header = screen.getByTestId('day-accordion-header');
-      const chevron = header.querySelector('svg[aria-hidden="true"]');
+      const chevron = screen.getByTestId('day-accordion-chevron');
       expect(chevron).toBeInTheDocument();
-      expect(chevron!.classList.toString()).not.toContain('-rotate-90');
+      expect(chevron.classList.toString()).not.toContain('-rotate-90');
     });
 
     it('should apply grid-rows-[1fr] to content wrapper when expanded', () => {

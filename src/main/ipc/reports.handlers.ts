@@ -499,8 +499,45 @@ interface ShiftJoinRow {
   end_time: string | null;
   shift_status: 'OPEN' | 'CLOSED' | null;
   external_register_id: string | null;
+  /** Register description from pos_terminal_mappings (may be null if no mapping exists) */
+  register_description: string | null;
   employee_name: string | null;
   day_status: 'OPEN' | 'PENDING_CLOSE' | 'CLOSED';
+}
+
+/**
+ * Compute human-readable register display name from terminal mapping data.
+ *
+ * Priority:
+ * 1. Use description from pos_terminal_mappings if set
+ * 2. If external_register_id is '1', show 'Main Register' (common convention)
+ * 3. Otherwise, format as 'Register {id}'
+ *
+ * @param externalRegisterId - Raw register ID from shifts table
+ * @param description - Optional description from pos_terminal_mappings
+ * @returns Human-readable register name for UI display
+ */
+function computeRegisterDisplayName(
+  externalRegisterId: string | null,
+  description: string | null
+): string {
+  // Priority 1: Use description if available
+  if (description) {
+    return description;
+  }
+
+  // Priority 2: Handle null/undefined gracefully
+  if (!externalRegisterId) {
+    return 'Register';
+  }
+
+  // Priority 3: Special case for '1' (common main register convention)
+  if (externalRegisterId === '1') {
+    return 'Main Register';
+  }
+
+  // Priority 4: Format as 'Register {id}'
+  return `Register ${externalRegisterId}`;
 }
 
 // ============================================================================
@@ -578,11 +615,13 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
 
       // SEC-006: Parameterized query with ? placeholders only
       // DB-006: Store-scoped via WHERE lbd.store_id = ? for tenant isolation
+      // DB-006: pos_terminal_mappings JOIN also scoped by store_id for tenant isolation
       // BIZ-002: A date can have MULTIPLE closings AND an open day simultaneously.
       // Show dates that have at least one CLOSED day. An OPEN day on the same
       // date does NOT exclude the CLOSED days from appearing in reports.
       // BIZ-003: Enterprise-grade sorting — order by closed_at DESC so most
       // recently closed days appear first, regardless of business_date.
+      // PERF: Uses idx_pos_terminal_map_lookup(store_id, external_register_id) for efficient JOIN
       const stmt = db.prepare(`
         SELECT
           s.shift_id,
@@ -594,12 +633,15 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
           s.end_time,
           s.status AS shift_status,
           s.external_register_id,
+          ptm.description AS register_description,
           COALESCE(u.name, 'Unknown') AS employee_name,
           lbd.status AS day_status
         FROM lottery_business_days lbd
         LEFT JOIN shifts s ON lbd.store_id = s.store_id
           AND lbd.business_date = s.business_date
         LEFT JOIN users u ON s.cashier_id = u.user_id
+        LEFT JOIN pos_terminal_mappings ptm ON s.store_id = ptm.store_id
+          AND s.external_register_id = ptm.external_register_id
         WHERE lbd.store_id = ?
           AND lbd.business_date >= ?
           AND lbd.business_date <= ?
@@ -641,7 +683,11 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
           dayData.shifts.push({
             shiftId: row.shift_id,
             shiftNumber: row.shift_number!,
-            registerName: row.external_register_id ?? 'Register',
+            // Use display name logic: description > 'Main Register' (for '1') > 'Register {id}'
+            registerName: computeRegisterDisplayName(
+              row.external_register_id,
+              row.register_description
+            ),
             employeeName: row.employee_name ?? 'Unknown',
             startTime: row.start_time ?? new Date().toISOString(),
             endTime: row.end_time,
@@ -684,14 +730,17 @@ registerHandler<ShiftsByDayResponse | ReturnType<typeof createErrorResponse>>(
 /**
  * Bin closing record from lottery_day_packs joined with packs/games/bins
  * Represents a single bin's lottery close data for a business day.
+ *
+ * SEC-014: Serial fields are nullable - null indicates data integrity issue.
+ * UI must handle null by showing an error indicator, not silently default to '000'.
  */
 interface LotteryDayReportBin {
   bin_number: number;
   game_name: string;
   game_price: number;
   pack_number: string;
-  starting_serial: string;
-  ending_serial: string;
+  starting_serial: string | null;
+  ending_serial: string | null;
   tickets_sold: number;
   sales_amount: number;
 }
@@ -824,7 +873,8 @@ interface DepletedPackRow {
   tickets_sold: number | null;
   sales_amount: number | null;
   depleted_at: string;
-  prev_ending_serial: string | null;
+  /** Starting serial from lottery_day_packs for the day this pack was depleted */
+  day_starting_serial: string | null;
 }
 
 /**
@@ -841,7 +891,8 @@ interface ReturnedPackRow {
   tickets_sold: number | null;
   sales_amount: number | null;
   returned_at: string;
-  prev_ending_serial: string | null;
+  /** Starting serial from lottery_day_packs for the day this pack was returned */
+  day_starting_serial: string | null;
 }
 
 // ============================================================================
@@ -1040,15 +1091,31 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         if (!sessionBinsMap.has(closingNumber)) {
           sessionBinsMap.set(closingNumber, []);
         }
+
+        // SEC-014: No silent fallback to '000' - return null for missing data
+        const startingSerial =
+          row.starting_serial || row.prev_ending_serial || row.pack_opening_serial || null;
+        const endingSerial =
+          row.ending_serial || row.pack_closing_serial || row.starting_serial || null;
+
+        // Log warning if serial data is missing (data integrity issue)
+        if (!startingSerial || !endingSerial) {
+          log.warn('Report bin missing serial data - data integrity issue', {
+            pack_id: row.pack_id,
+            pack_number: row.pack_number,
+            day_id: row.day_id,
+            starting_serial: startingSerial,
+            ending_serial: endingSerial,
+          });
+        }
+
         sessionBinsMap.get(closingNumber)!.push({
           bin_number: (row.bin_display_order ?? 0) + 1,
           game_name: row.game_name || 'Unknown Game',
           game_price: row.game_price ?? 0,
           pack_number: row.pack_number,
-          starting_serial:
-            row.starting_serial || row.prev_ending_serial || row.pack_opening_serial || '000',
-          ending_serial:
-            row.ending_serial || row.pack_closing_serial || row.starting_serial || '000',
+          starting_serial: startingSerial,
+          ending_serial: endingSerial,
           tickets_sold: row.tickets_sold ?? 0,
           sales_amount: row.sales_amount ?? 0,
         });
@@ -1072,18 +1139,20 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
           // rows are ordered by opened_at ASC from SQL — first = earliest session
           const first = rows[0];
           const last = rows[rows.length - 1];
+
+          // SEC-014: No silent fallback to '000' - return null for missing data
+          const startingSerial =
+            first.starting_serial || first.prev_ending_serial || first.pack_opening_serial || null;
+          const endingSerial =
+            last.ending_serial || last.pack_closing_serial || last.starting_serial || null;
+
           return {
             bin_number: (first.bin_display_order ?? 0) + 1,
             game_name: first.game_name || 'Unknown Game',
             game_price: first.game_price ?? 0,
             pack_number: first.pack_number,
-            starting_serial:
-              first.starting_serial ||
-              first.prev_ending_serial ||
-              first.pack_opening_serial ||
-              '000',
-            ending_serial:
-              last.ending_serial || last.pack_closing_serial || last.starting_serial || '000',
+            starting_serial: startingSerial,
+            ending_serial: endingSerial,
             tickets_sold: rows.reduce((sum, r) => sum + (r.tickets_sold ?? 0), 0),
             sales_amount: rows.reduce((sum, r) => sum + (r.sales_amount ?? 0), 0),
           };
@@ -1163,14 +1232,15 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
           lp.tickets_sold_count AS tickets_sold,
           lp.sales_amount,
           lp.depleted_at,
-          -- SERIAL CARRYFORWARD: Get day-specific starting serial
-          (SELECT ldp.ending_serial
+          -- Get day-specific starting serial from lottery_day_packs for accurate reporting
+          -- Uses starting_serial (not ending_serial) to show where pack started during the day
+          (SELECT ldp.starting_serial
            FROM lottery_day_packs ldp
            JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
            WHERE ldp.pack_id = lp.pack_id
              AND lbd.status = 'CLOSED'
            ORDER BY lbd.closed_at DESC
-           LIMIT 1) AS prev_ending_serial
+           LIMIT 1) AS day_starting_serial
         FROM lottery_packs lp
         INNER JOIN lottery_games lg ON lp.game_id = lg.game_id
         LEFT JOIN lottery_bins lb ON lp.current_bin_id = lb.bin_id
@@ -1189,18 +1259,33 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
         periodEndUtc
       ) as DepletedPackRow[];
 
-      const depletedPacks: LotteryDayReportDepletedPack[] = depletedRows.map((row) => ({
-        pack_id: row.pack_id,
-        bin_number: (row.bin_display_order ?? 0) + 1,
-        game_name: row.game_name || 'Unknown Game',
-        game_price: row.game_price ?? 0,
-        pack_number: row.pack_number,
-        starting_serial: row.prev_ending_serial || row.opening_serial || '000',
-        ending_serial: row.ending_serial || '000',
-        tickets_sold: row.tickets_sold ?? 0,
-        sales_amount: row.sales_amount ?? 0,
-        depleted_at: row.depleted_at,
-      }));
+      const depletedPacks: LotteryDayReportDepletedPack[] = depletedRows.map((row) => {
+        // Use day_starting_serial from lottery_day_packs if available (pack went through day close)
+        // Otherwise use opening_serial (pack depleted same day as activated)
+        // SEC-014: Both should exist for any valid depleted pack - log if missing
+        const startingSerial = row.day_starting_serial ?? row.opening_serial;
+        if (!startingSerial) {
+          log.warn('Depleted pack missing serial data for report display', {
+            pack_id: row.pack_id,
+            pack_number: row.pack_number,
+            day_starting_serial: row.day_starting_serial,
+            opening_serial: row.opening_serial,
+          });
+        }
+
+        return {
+          pack_id: row.pack_id,
+          bin_number: (row.bin_display_order ?? 0) + 1,
+          game_name: row.game_name || 'Unknown Game',
+          game_price: row.game_price ?? 0,
+          pack_number: row.pack_number,
+          starting_serial: startingSerial ?? '---',
+          ending_serial: row.ending_serial ?? '---',
+          tickets_sold: row.tickets_sold ?? 0,
+          sales_amount: row.sales_amount ?? 0,
+          depleted_at: row.depleted_at,
+        };
+      });
 
       // ====================================================================
       // Query 4: Returned packs during the business period
@@ -1218,14 +1303,15 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
           lp.tickets_sold_count AS tickets_sold,
           lp.sales_amount,
           lp.returned_at,
-          -- SERIAL CARRYFORWARD: Get day-specific starting serial
-          (SELECT ldp.ending_serial
+          -- Get day-specific starting serial from lottery_day_packs for accurate reporting
+          -- Uses starting_serial (not ending_serial) to show where pack started during the day
+          (SELECT ldp.starting_serial
            FROM lottery_day_packs ldp
            JOIN lottery_business_days lbd ON ldp.day_id = lbd.day_id
            WHERE ldp.pack_id = lp.pack_id
              AND lbd.status = 'CLOSED'
            ORDER BY lbd.closed_at DESC
-           LIMIT 1) AS prev_ending_serial
+           LIMIT 1) AS day_starting_serial
         FROM lottery_packs lp
         INNER JOIN lottery_games lg ON lp.game_id = lg.game_id
         LEFT JOIN lottery_bins lb ON lp.current_bin_id = lb.bin_id
@@ -1245,24 +1331,34 @@ registerHandler<LotteryDayReportResponse | ReturnType<typeof createErrorResponse
       ) as ReturnedPackRow[];
 
       const returnedPacks: LotteryDayReportReturnedPack[] = returnedRows.map((row) => {
-        // Calculate tickets_sold from serials to ensure consistency with displayed values
-        const startSerial = row.prev_ending_serial || row.opening_serial || '000';
-        const endSerial = row.ending_serial || '000';
-        const startNum = parseInt(startSerial, 10);
-        const endNum = parseInt(endSerial, 10);
-        const ticketsSold = !isNaN(startNum) && !isNaN(endNum) ? Math.max(0, endNum - startNum) : 0;
+        // Use day_starting_serial from lottery_day_packs if available (pack went through day close)
+        // Otherwise use opening_serial (pack returned same day as activated)
+        // SEC-014: Both should exist for any valid returned pack - log if missing
+        const startingSerial = row.day_starting_serial ?? row.opening_serial;
+        if (!startingSerial) {
+          log.warn('Returned pack missing serial data for report display', {
+            pack_id: row.pack_id,
+            pack_number: row.pack_number,
+            day_starting_serial: row.day_starting_serial,
+            opening_serial: row.opening_serial,
+          });
+        }
+
+        const endingSerial = row.ending_serial;
         const gamePrice = row.game_price ?? 0;
 
+        // Use database values for tickets_sold and sales_amount
+        // These are the authoritative values recorded at return time
         return {
           pack_id: row.pack_id,
           bin_number: (row.bin_display_order ?? 0) + 1,
           game_name: row.game_name || 'Unknown Game',
           game_price: gamePrice,
           pack_number: row.pack_number,
-          starting_serial: startSerial,
-          ending_serial: endSerial,
-          tickets_sold: ticketsSold,
-          sales_amount: ticketsSold * gamePrice,
+          starting_serial: startingSerial ?? '---',
+          ending_serial: endingSerial ?? '---',
+          tickets_sold: row.tickets_sold ?? 0,
+          sales_amount: row.sales_amount ?? 0,
           returned_at: row.returned_at,
         };
       });

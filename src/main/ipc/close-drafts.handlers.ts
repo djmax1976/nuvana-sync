@@ -900,15 +900,16 @@ registerHandler<FinalizeResponse | ReturnType<typeof createErrorResponse>>(
       // ========================================================================
       // Step 4: Mark draft as FINALIZED
       // ========================================================================
-      closeDraftsDAL.finalizeDraft(storeId, draftId);
-
-      // Update closing_cash in draft payload for audit trail
+      // Update closing_cash in draft payload for audit trail BEFORE finalizing
+      // (updateDraft blocks updates on FINALIZED drafts)
       closeDraftsDAL.updateDraft(
         storeId,
         draftId,
         { closing_cash: closingCash },
         closeDraftsDAL.getDraft(storeId, draftId)!.version
       );
+
+      closeDraftsDAL.finalizeDraft(storeId, draftId);
 
       const closedAt = new Date().toISOString();
 

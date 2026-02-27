@@ -160,12 +160,10 @@ function RegisterCard({
                   : 'N/A'}
               </span>
             </div>
-            {register.activeShift.cashier_id && (
-              <div className="flex items-center gap-2 text-sm text-muted-foreground">
-                <User className="h-4 w-4" />
-                <span>Cashier ID: {register.activeShift.cashier_id}</span>
-              </div>
-            )}
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <User className="h-4 w-4" />
+              <span>Cashier: {register.activeShift.cashier_name}</span>
+            </div>
           </div>
         ) : showClosedHighlight ? (
           <div className="space-y-2 mb-4">
@@ -371,13 +369,9 @@ export default function TerminalsPage() {
         // Guard handles all validation and context - just navigate
         navigate('/day-close');
       } else {
-        // Shift-end wizard still needs shift context
-        navigate('/shift-end', {
-          state: {
-            shiftId: event.shiftId,
-            businessDate: event.businessDate,
-          },
-        });
+        // Shift-end wizard requires shiftId in URL query params (not state)
+        // This matches the pattern used by ShiftsPage, TerminalShiftPage, ViewShiftPage
+        navigate(`/shift-end?shiftId=${event.shiftId}`);
       }
     },
     [navigate]
@@ -435,10 +429,10 @@ export default function TerminalsPage() {
 
       // End Shift always goes to shift-end wizard
       // Day Close is a separate action via the Day Close button
-      navigate('/shift-end', {
+      // shiftId MUST be in URL query params (ShiftEndPage reads from searchParams)
+      // isManualMode can remain in state (UI-only flag, read from location.state)
+      navigate(`/shift-end?shiftId=${activeShift.shift_id}`, {
         state: {
-          shiftId: activeShift.shift_id,
-          businessDate: activeShift.business_date,
           isManualMode: true, // Flag for manual data entry
         },
       });

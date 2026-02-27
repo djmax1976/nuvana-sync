@@ -42,8 +42,7 @@ try {
   nativeModuleAvailable = false;
 }
 
-const SKIP_NATIVE_MODULE_TESTS =
-  process.env.CI === 'true' || process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
+const SKIP_NATIVE_MODULE_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 
 // ============================================================================
 // Mock Setup
