@@ -19,7 +19,21 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
-// Skip tests that require complex dynamic mocking in CI
+// ============================================================================
+// Native Module Check
+// ============================================================================
+
+let nativeModuleAvailable = true;
+try {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const Db = require('better-sqlite3-multiple-ciphers');
+  const testDb = new Db(':memory:');
+  testDb.close();
+} catch {
+  nativeModuleAvailable = false;
+}
+
+// Skip tests that require complex dynamic mocking when native module unavailable
 const SKIP_COMPLEX_MOCK_TESTS = process.env.SKIP_NATIVE_TESTS === 'true' || !nativeModuleAvailable;
 const itComplex = SKIP_COMPLEX_MOCK_TESTS ? it.skip : it;
 
